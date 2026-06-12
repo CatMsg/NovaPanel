@@ -21,6 +21,7 @@ env:
   BOOTLIN_BASE_URL: https://toolchains.bootlin.com/downloads/releases/toolchains
   GOPROXY: https://proxy.golang.org
   GOSUMDB: sum.golang.org
+  GHCR_IMAGE: ghcr.io/catmsg/novapanel-app
 
 jobs:
   build-frontend:
@@ -327,8 +328,8 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: |
-            ghcr.io/catmsg/novapanel:${{ steps.vars.outputs.tag }}
-            ghcr.io/catmsg/novapanel:latest
+            ${{ env.GHCR_IMAGE }}:${{ steps.vars.outputs.tag }}
+            ${{ env.GHCR_IMAGE }}:latest
           labels: |
             org.opencontainers.image.title=NovaPanel
             org.opencontainers.image.description=NovaPanel is a web panel and subscription manager evolved from s-ui

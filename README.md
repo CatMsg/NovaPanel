@@ -86,14 +86,14 @@ go build -o sui main.go
 
 ## Docker
 
-> Docker 镜像名 `ghcr.io/catmsg/novapanel`。
+> Docker 镜像名 `ghcr.io/catmsg/novapanel-app`。
 
 ### docker compose
 
 ```yaml
 services:
   novapanel:
-    image: ghcr.io/catmsg/novapanel
+    image: ghcr.io/catmsg/novapanel-app
     container_name: novapanel
     hostname: "novapanel"
     network_mode: host
@@ -120,7 +120,7 @@ docker run -itd \
   -v $PWD/cert:/app/cert \
   --name novapanel \
   --restart=unless-stopped \
-  ghcr.io/catmsg/novapanel
+  ghcr.io/catmsg/novapanel-app
 ```
 
 ### 自行构建镜像
