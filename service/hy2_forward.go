@@ -1,0 +1,188 @@
+package service
+
+import (
+	"encoding/json"
+	"fmt"
+	"os/exec"
+	"runtime"
+	"strconv"
+	"strings"
+
+	"github.com/CatMsg/NovaPanel/database/model"
+	"github.com/CatMsg/NovaPanel/logger"
+)
+
+const hy2ForwardScript = "scripts/hy2-forward.sh"
+
+func (s *InboundService) syncHy2PortForwarding(oldInbound *model.Inbound, inbound *model.Inbound) error {
+	if inbound == nil {
+		return nil
+	}
+
+	if inbound.Type == "hysteria2" {
+		listenPort, err := getInboundListenPort(inbound)
+		if err != nil {
+			return err
+		}
+
+		ports, err := getHy2ServerPorts(inbound.OutJson)
+		if err != nil {
+			return err
+		}
+
+		if err := runHy2ForwardScript("apply", inbound.Tag, listenPort, ports); err != nil {
+			return err
+		}
+
+		if oldInbound != nil && oldInbound.Type == "hysteria2" && oldInbound.Tag != inbound.Tag {
+			if err := runHy2ForwardScript("remove", oldInbound.Tag, 0, nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if oldInbound != nil && oldInbound.Type == "hysteria2" {
+		return runHy2ForwardScript("remove", oldInbound.Tag, 0, nil)
+	}
+
+	return nil
+}
+
+func runHy2ForwardScript(action string, tag string, listenPort int, ports []int) error {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+
+	if tag == "" {
+		return nil
+	}
+
+	args := []string{action, tag, strconv.Itoa(listenPort), joinPorts(ports)}
+	cmd := exec.Command("bash", append([]string{hy2ForwardScript}, args...)...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		trimmed := strings.TrimSpace(string(output))
+		if trimmed != "" {
+			err = fmt.Errorf("%w: %s", err, trimmed)
+		}
+		logger.Warning("hy2 port forwarding sync failed: ", err)
+		return err
+	}
+
+	return nil
+}
+
+func getInboundListenPort(inbound *model.Inbound) (int, error) {
+	full, err := inbound.MarshalFull()
+	if err != nil {
+		return 0, err
+	}
+
+	rawPort, ok := (*full)["listen_port"]
+	if !ok || rawPort == nil {
+		return 0, fmt.Errorf("missing listen_port for inbound %s", inbound.Tag)
+	}
+
+	switch v := rawPort.(type) {
+	case float64:
+		if v < 1 || v > 65535 {
+			return 0, fmt.Errorf("invalid listen_port for inbound %s", inbound.Tag)
+		}
+		return int(v), nil
+	case json.Number:
+		port, err := v.Int64()
+		if err != nil {
+			return 0, err
+		}
+		return int(port), nil
+	default:
+		port, err := strconv.Atoi(fmt.Sprint(rawPort))
+		if err != nil {
+			return 0, err
+		}
+		return port, nil
+	}
+}
+
+func getHy2ServerPorts(outJson json.RawMessage) ([]int, error) {
+	if len(outJson) == 0 {
+		return nil, nil
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(outJson, &payload); err != nil {
+		return nil, err
+	}
+
+	rawPorts, ok := payload["server_ports"]
+	if !ok || rawPorts == nil {
+		return nil, nil
+	}
+
+	ports := make([]int, 0)
+	seen := map[int]struct{}{}
+	appendPort := func(raw string) error {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return nil
+		}
+		port, err := strconv.Atoi(raw)
+		if err != nil || port < 1 || port > 65535 {
+			return nil
+		}
+		if _, exists := seen[port]; exists {
+			return nil
+		}
+		seen[port] = struct{}{}
+		ports = append(ports, port)
+		return nil
+	}
+
+	switch typed := rawPorts.(type) {
+	case []interface{}:
+		for _, item := range typed {
+			if item == nil {
+				continue
+			}
+			switch v := item.(type) {
+			case string:
+				if err := appendPort(v); err != nil {
+					return nil, err
+				}
+			default:
+				if err := appendPort(fmt.Sprint(v)); err != nil {
+					return nil, err
+				}
+			}
+		}
+	case []string:
+		for _, item := range typed {
+			if err := appendPort(item); err != nil {
+				return nil, err
+			}
+		}
+	case string:
+		for _, item := range strings.Split(typed, ",") {
+			if err := appendPort(item); err != nil {
+				return nil, err
+			}
+		}
+	default:
+		return nil, fmt.Errorf("unsupported server_ports format")
+	}
+
+	return ports, nil
+}
+
+func joinPorts(ports []int) string {
+	if len(ports) == 0 {
+		return ""
+	}
+
+	values := make([]string, 0, len(ports))
+	for _, port := range ports {
+		values = append(values, strconv.Itoa(port))
+	}
+	return strings.Join(values, ",")
+}
