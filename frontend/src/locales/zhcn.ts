@@ -83,6 +83,7 @@ export default {
       cpu: "CPU",
       core: "核心",
       firewall: "规则软件",
+      systemVersion: "系统版本",
       uptime: "运行时间",
       startupTime: "启动时间",
       threads: "线程",

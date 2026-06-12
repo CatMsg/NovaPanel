@@ -8,12 +8,14 @@
 
 <script lang="ts" setup>
 import { computed, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import DefaultBar from './AppBar.vue'
 import Drawer from './Drawer.vue'
 import DefaultView from './View.vue'
 import { useDisplay } from 'vuetify'
 
 const { smAndDown } = useDisplay()
+const route = useRoute()
 const displayDrawer = ref(false)
 
 const toggleDrawer = () => {
@@ -25,4 +27,8 @@ const isMobile = computed((): boolean => smAndDown.value)
 watch(smAndDown, (mobile) => {
   displayDrawer.value = !mobile
 }, { immediate: true })
+
+watch(() => route.fullPath, () => {
+  if (isMobile.value) displayDrawer.value = false
+})
 </script>

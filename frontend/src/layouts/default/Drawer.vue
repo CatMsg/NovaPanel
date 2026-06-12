@@ -3,10 +3,8 @@
     class="app-drawer"
     v-model="showDrawer"
     :temporary="isMobile"
-    :expand-on-hover="!isMobile"
-    :rail="!isMobile"
     :permanent="!isMobile"
-    @click="isMobile ? emit('toggleDrawer') : null"
+    :width="isMobile ? 296 : 280"
   >
     <v-list-item class="app-drawer__brand" :prepend-avatar="logoUrl" title="NovaPanel" :subtitle="$t('main.hero.badge')">
       <template v-slot:append v-if="isMobile">
@@ -41,7 +39,7 @@
 import { computed } from 'vue'
 import router from '@/router'
 import { logout } from '@/plugins/httputil'
-import logoUrl from '@/assets/logo.svg'
+import logoUrl from '@/assets/logo.png'
 
 const props = defineProps(['isMobile','displayDrawer'])
 const emit = defineEmits(['toggleDrawer'])

@@ -6,7 +6,7 @@
       <v-col cols="12" lg="5" class="login-shell__left">
         <div class="login-brand">
           <v-avatar size="72" class="login-brand__avatar">
-            <v-img src="@/assets/logo.svg" alt="NovaPanel logo"></v-img>
+            <v-img :src="logoUrl" alt="NovaPanel logo"></v-img>
           </v-avatar>
           <div>
             <div class="login-brand__eyebrow">NovaPanel</div>
@@ -15,9 +15,9 @@
         </div>
         <p class="login-brand__subtitle">{{ $t('main.hero.subtitle') }}</p>
         <div class="login-brand__tags">
-          <v-chip class="login-brand__tag" color="primary" variant="flat">{{ $t('main.hero.live') }}</v-chip>
-          <v-chip class="login-brand__tag" color="teal" variant="flat">{{ $t('main.info.firewall') }}</v-chip>
-          <v-chip class="login-brand__tag" color="blue" variant="flat">{{ $t('version') }} v{{ version }}</v-chip>
+          <v-chip class="login-brand__tag" color="primary" variant="tonal">{{ $t('main.hero.live') }}</v-chip>
+          <v-chip class="login-brand__tag" color="teal" variant="tonal">{{ $t('main.info.firewall') }}</v-chip>
+          <v-chip class="login-brand__tag" color="blue" variant="tonal">{{ $t('version') }} v{{ version }}</v-chip>
         </div>
       </v-col>
       <v-col cols="12" sm="10" md="8" lg="4" class="login-shell__right">
@@ -73,6 +73,7 @@ import { i18n, languages } from '@/locales'
 import { useRouter } from 'vue-router'
 import HttpUtil from '@/plugins/httputil'
 import pkg from '../../package.json'
+import logoUrl from '@/assets/logo.png'
 
 
 const theme = useTheme()
@@ -150,24 +151,24 @@ const isActiveTheme = (th: string) => {
 .login-shell__glow {
   position: absolute;
   border-radius: 999px;
-  filter: blur(18px);
+  filter: blur(24px);
   pointer-events: none;
 }
 
 .login-shell__glow--one {
-  top: -80px;
-  left: -40px;
-  width: 260px;
-  height: 260px;
-  background: rgba(37, 99, 235, 0.16);
+  top: -90px;
+  left: -50px;
+  width: 280px;
+  height: 280px;
+  background: rgba(37, 99, 235, 0.14);
 }
 
 .login-shell__glow--two {
-  right: -120px;
-  bottom: 10%;
-  width: 320px;
-  height: 320px;
-  background: rgba(14, 165, 233, 0.12);
+  right: -110px;
+  bottom: 6%;
+  width: 300px;
+  height: 300px;
+  background: rgba(14, 165, 233, 0.1);
 }
 
 .login-shell__left {
@@ -184,9 +185,9 @@ const isActiveTheme = (th: string) => {
 }
 
 .login-brand__avatar {
-  border: 1px solid rgba(37, 99, 235, 0.18);
-  background: rgba(255, 255, 255, 0.76);
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.1);
+  border: 1px solid rgba(125, 211, 252, 0.18);
+  background: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
 }
 
 .login-brand__eyebrow {
@@ -194,7 +195,7 @@ const isActiveTheme = (th: string) => {
   font-weight: 800;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgba(37, 99, 235, 0.9);
+  color: var(--np-accent);
 }
 
 .login-brand__title {
@@ -217,8 +218,18 @@ const isActiveTheme = (th: string) => {
   gap: 10px;
 }
 
+.login-brand__tag {
+  letter-spacing: 0.01em;
+  border: 1px solid rgba(125, 211, 252, 0.14);
+}
+
 .login-card {
   padding: 6px;
+  border: 1px solid rgba(125, 211, 252, 0.14);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 30%),
+    var(--np-surface);
+  backdrop-filter: blur(18px) saturate(1.04);
 }
 
 .login-card__title {
@@ -235,6 +246,8 @@ const isActiveTheme = (th: string) => {
   min-height: 48px;
   border-radius: 16px;
   text-transform: none;
+  letter-spacing: 0.02em;
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.18);
 }
 
 .login-actions {
@@ -246,7 +259,18 @@ const isActiveTheme = (th: string) => {
 }
 
 :global(.v-theme--dark) .login-brand__avatar {
-  background: rgba(10, 18, 34, 0.9);
+  background: rgba(10, 18, 34, 0.92);
+}
+
+:global(.v-theme--dark) .login-card {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 28%),
+    rgba(10, 18, 34, 0.78);
+  border-color: rgba(125, 211, 252, 0.12);
+}
+
+:global(.v-theme--dark) .login-brand__tag {
+  border-color: rgba(125, 211, 252, 0.12);
 }
 
 @media (max-width: 960px) {
@@ -256,6 +280,10 @@ const isActiveTheme = (th: string) => {
 
   .login-shell__left {
     padding-inline-end: 0;
+  }
+
+  .login-brand {
+    align-items: flex-start;
   }
 }
 </style>

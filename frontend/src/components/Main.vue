@@ -15,12 +15,11 @@
           <v-row class="main-hero__content" align="center">
             <v-col cols="12" lg="7">
               <div class="main-hero__brand">
-                <v-avatar size="72" class="main-hero__avatar">
-                  <v-img src="@/assets/logo.svg" alt="NovaPanel logo"></v-img>
-                </v-avatar>
-                <div>
+                <div class="main-hero__brand-icon">
+                  <v-img :src="logoUrl" alt="NovaPanel logo" cover />
+                </div>
+                <div class="main-hero__brand-copy">
                   <div class="main-hero__eyebrow">NovaPanel</div>
-                  <h1 class="main-hero__title">{{ $t('main.hero.title') }}</h1>
                 </div>
               </div>
               <p class="main-hero__subtitle">{{ $t('main.hero.subtitle') }}</p>
@@ -42,22 +41,20 @@
             <v-col cols="12" lg="5">
               <v-card class="main-hero__panel" rounded="xl" variant="flat">
                 <div class="main-hero__panel-title">{{ $t('main.hero.live') }}</div>
-                <div class="main-hero__panel-grid">
-                  <div class="main-hero__panel-item">
-                    <span>{{ $t('main.info.firewall') }}</span>
-                    <strong>{{ tilesData.sys?.firewallBackend || $t('none') }}</strong>
-                  </div>
-                  <div class="main-hero__panel-item">
-                    <span>{{ $t('main.info.running') }}</span>
-                    <strong>{{ tilesData.sbd?.running ? $t('yes') : $t('no') }}</strong>
-                  </div>
-                  <div class="main-hero__panel-item">
-                    <span>{{ $t('version') }}</span>
-                    <strong>v{{ tilesData.sys?.appVersion || '--' }}</strong>
-                  </div>
-                  <div class="main-hero__panel-item">
-                    <span>{{ $t('main.info.uptime') }}</span>
-                    <strong>{{ HumanReadable.formatSecond((Date.now()/1000) - tilesData.sys?.bootTime) }}</strong>
+                <div class="main-hero__status-list">
+                  <div
+                    v-for="(item, index) in heroStackItems"
+                    :key="item.label"
+                    class="main-hero__status-row"
+                    :class="{ 'main-hero__status-row--last': index === heroStackItems.length - 1 }"
+                  >
+                    <span class="main-hero__status-row-left">
+                      <span class="main-hero__status-row-icon" :class="`main-hero__status-row-icon--${item.tone}`">
+                        <v-icon :icon="item.icon" size="small" />
+                      </span>
+                      <span class="main-hero__status-row-label">{{ item.label }}</span>
+                    </span>
+                    <strong class="main-hero__status-row-value">{{ item.value }}</strong>
                   </div>
                 </div>
               </v-card>
@@ -268,6 +265,7 @@ import { i18n, locale } from '@/locales'
 import LogVue from '@/layouts/modals/Logs.vue'
 import Backup from '@/layouts/modals/Backup.vue'
 import UsageStats from '@/layouts/modals/UsageStats.vue'
+import logoUrl from '@/assets/logo.png'
 
 const loading = ref(false)
 const menu = ref(false)
@@ -338,6 +336,33 @@ const heroStats = computed(() => [
     value: tilesData.value.sys?.appVersion ? `v${tilesData.value.sys?.appVersion}` : '--',
     color: 'blue',
     icon: 'mdi-tag-outline',
+  },
+])
+
+const heroStackItems = computed(() => [
+  {
+    label: i18n.global.t('main.info.firewall'),
+    value: tilesData.value.sys?.firewallBackend || i18n.global.t('none'),
+    icon: 'mdi-shield-cog-outline',
+    tone: 'blue',
+  },
+  {
+    label: i18n.global.t('main.info.running'),
+    value: tilesData.value.sbd?.running ? i18n.global.t('yes') : i18n.global.t('no'),
+    icon: 'mdi-rocket-launch-outline',
+    tone: tilesData.value.sbd?.running ? 'green' : 'red',
+  },
+  {
+    label: i18n.global.t('main.info.systemVersion'),
+    value: tilesData.value.sys?.appVersion ? `v${tilesData.value.sys?.appVersion}` : '--',
+    icon: 'mdi-tag-outline',
+    tone: 'indigo',
+  },
+  {
+    label: i18n.global.t('main.info.uptime'),
+    value: HumanReadable.formatSecond((Date.now()/1000) - tilesData.value.sys?.bootTime),
+    icon: 'mdi-timer-outline',
+    tone: 'teal',
   },
 ])
 
@@ -419,11 +444,8 @@ const restartSingbox = async () => {
   position: relative;
   overflow: hidden;
   min-height: 100vh;
-  padding: 32px 24px 40px;
-  background:
-    radial-gradient(circle at top left, rgba(33, 150, 243, 0.18), transparent 28%),
-    radial-gradient(circle at top right, rgba(0, 188, 212, 0.14), transparent 26%),
-    linear-gradient(180deg, rgba(244, 247, 252, 0.98) 0%, rgba(235, 241, 248, 0.96) 100%);
+  padding: 24px 20px 36px;
+  background: transparent;
 }
 
 .main-shell__inner {
@@ -436,25 +458,25 @@ const restartSingbox = async () => {
 .main-shell__glow {
   position: absolute;
   border-radius: 999px;
-  filter: blur(18px);
-  opacity: 0.6;
+  filter: blur(72px);
+  opacity: 0.56;
   pointer-events: none;
 }
 
 .main-shell__glow--one {
-  top: -80px;
-  left: -80px;
-  width: 220px;
-  height: 220px;
-  background: rgba(33, 150, 243, 0.18);
+  top: -120px;
+  left: -110px;
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(10, 132, 255, 0.22), transparent 68%);
 }
 
 .main-shell__glow--two {
-  right: -120px;
-  top: 120px;
-  width: 320px;
-  height: 320px;
-  background: rgba(0, 188, 212, 0.14);
+  right: -140px;
+  top: 110px;
+  width: 360px;
+  height: 360px;
+  background: radial-gradient(circle, rgba(90, 200, 250, 0.18), transparent 68%);
 }
 
 .main-hero,
@@ -462,20 +484,46 @@ const restartSingbox = async () => {
 .main-tile,
 .main-menu,
 .main-hero__panel {
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  background: rgba(255, 255, 255, 0.78);
-  backdrop-filter: blur(18px);
-  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.08);
+  border: 1px solid var(--np-border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.2), transparent 28%),
+    var(--np-surface);
+  backdrop-filter: blur(30px) saturate(1.15);
+  box-shadow: var(--np-shadow);
+}
+
+.main-hero,
+.main-toolbar,
+.main-menu,
+.main-hero__panel {
+  position: relative;
+  overflow: hidden;
+}
+
+.main-hero::before,
+.main-toolbar::before,
+.main-menu::before,
+.main-hero__panel::before,
+.main-tile::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.38), transparent 32%),
+    radial-gradient(circle at bottom right, rgba(10, 132, 255, 0.08), transparent 42%);
+  opacity: 0.9;
 }
 
 .main-hero {
-  padding: 24px;
+  padding: 28px;
+  border-radius: 32px;
 }
 
 .main-hero__topline {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 10px;
   margin-bottom: 18px;
 }
 
@@ -485,56 +533,78 @@ const restartSingbox = async () => {
   gap: 8px;
   border-radius: 999px;
   padding: 6px 12px;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  background: linear-gradient(135deg, rgba(37, 99, 235, 0.12), rgba(8, 145, 178, 0.12));
-  color: rgb(var(--v-theme-primary));
+  border: 1px solid rgba(10, 132, 255, 0.14);
+  background: rgba(255, 255, 255, 0.36);
+  color: var(--np-accent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
 }
 
 .main-hero__badge--soft {
-  background: rgba(15, 23, 42, 0.04);
-  color: rgba(15, 23, 42, 0.72);
+  color: var(--np-text-muted);
+  background: rgba(255, 255, 255, 0.26);
 }
 
 .main-hero__content {
-  row-gap: 16px;
+  row-gap: 18px;
 }
 
 .main-hero__brand {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
 }
 
-.main-hero__avatar {
-  border: 1px solid rgba(37, 99, 235, 0.18);
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(224, 242, 254, 0.8));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+.main-hero__brand-icon {
+  flex: 0 0 auto;
+  width: 52px;
+  height: 52px;
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid rgba(125, 211, 252, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.28)),
+    rgba(255, 255, 255, 0.46);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 12px 24px rgba(15, 23, 42, 0.08);
+}
+
+.main-hero__brand-icon :deep(img) {
+  object-fit: cover;
+}
+
+.main-hero__brand-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 0;
 }
 
 .main-hero__eyebrow {
-  font-size: 0.82rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: rgba(37, 99, 235, 0.9);
-}
-
-.main-hero__title {
-  margin: 4px 0 0;
-  font-size: clamp(2rem, 3vw, 3rem);
-  line-height: 1.05;
-  letter-spacing: -0.03em;
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 0;
+  border-radius: 0;
+  border: 0;
+  background: transparent;
+  font-size: clamp(1.6rem, 2.5vw, 2.2rem);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.055em;
+  text-transform: none;
+  color: var(--np-accent);
 }
 
 .main-hero__subtitle {
-  max-width: 58ch;
-  margin: 14px 0 0;
-  color: rgba(15, 23, 42, 0.72);
-  font-size: 1rem;
-  line-height: 1.8;
+  max-width: 54ch;
+  margin: 16px 0 0;
+  color: var(--np-text-muted);
+  font-size: 0.98rem;
+  line-height: 1.9;
 }
 
 .main-hero__chips {
@@ -546,67 +616,116 @@ const restartSingbox = async () => {
 
 .main-hero__chip {
   border-radius: 999px;
-  color: #fff;
+  border: 1px solid rgba(10, 132, 255, 0.12);
+  background: rgba(255, 255, 255, 0.54);
+  color: var(--np-text-main);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
 }
 
 .main-hero__chip-label {
   margin-inline-end: 6px;
-  opacity: 0.8;
+  opacity: 0.75;
 }
 
 .main-hero__panel {
   padding: 18px;
-  background:
-    linear-gradient(180deg, rgba(15, 23, 42, 0.03), rgba(255, 255, 255, 0.86)),
-    rgba(255, 255, 255, 0.76);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .main-hero__panel-title {
-  margin-bottom: 12px;
-  font-size: 0.95rem;
+  margin-bottom: 14px;
+  font-size: 0.92rem;
   font-weight: 700;
-  color: rgba(15, 23, 42, 0.7);
+  color: var(--np-text-muted);
 }
 
-.main-hero__panel-grid {
+.main-hero__status-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 0;
 }
 
-.main-hero__panel-item {
-  border-radius: 18px;
-  padding: 14px;
-  background: rgba(248, 250, 252, 0.92);
-  border: 1px solid rgba(148, 163, 184, 0.15);
+.main-hero__status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 11px 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
 }
 
-.main-hero__panel-item span {
-  display: block;
-  font-size: 0.78rem;
-  color: rgba(71, 85, 105, 0.8);
+.main-hero__status-row--last {
+  border-bottom: 0;
+  padding-bottom: 4px;
 }
 
-.main-hero__panel-item strong {
-  display: block;
-  margin-top: 6px;
-  font-size: 1rem;
-  color: rgba(15, 23, 42, 0.9);
+.main-hero__status-row-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.main-hero__status-row-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.68);
+  color: var(--np-accent);
+  border: 1px solid rgba(10, 132, 255, 0.12);
+}
+
+.main-hero__status-row-icon--green {
+  color: rgb(34, 197, 94);
+}
+
+.main-hero__status-row-icon--red {
+  color: rgb(239, 68, 68);
+}
+
+.main-hero__status-row-icon--indigo {
+  color: rgb(79, 70, 229);
+}
+
+.main-hero__status-row-icon--teal {
+  color: rgb(20, 184, 166);
+}
+
+.main-hero__status-row-label {
+  min-width: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--np-text-muted);
+}
+
+.main-hero__status-row-value {
+  flex: 0 0 auto;
+  font-size: 0.98rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--np-text-main);
 }
 
 .main-toolbar {
-  margin-top: 18px;
-  padding: 16px 18px;
+  margin-top: 16px;
+  padding: 14px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  border-radius: 28px;
 }
 
 .main-toolbar__label {
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   font-weight: 700;
-  color: rgba(15, 23, 42, 0.7);
+  color: var(--np-text-muted);
 }
 
 .main-toolbar__actions {
@@ -617,21 +736,27 @@ const restartSingbox = async () => {
 
 .main-toolbar__button {
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.96);
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  color: rgba(15, 23, 42, 0.82);
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  color: var(--np-text-main);
   text-transform: none;
   letter-spacing: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.main-toolbar__button:hover {
+  transform: translateY(-1px);
 }
 
 .main-grid {
-  margin-top: 18px;
+  margin-top: 16px;
 }
 
 .main-tile {
   position: relative;
   overflow: hidden;
-  min-height: 210px;
+  min-height: 220px;
+  border-radius: 28px;
   transition:
     transform 180ms ease,
     box-shadow 180ms ease,
@@ -639,20 +764,21 @@ const restartSingbox = async () => {
 }
 
 .main-tile:hover {
-  transform: translateY(-4px);
-  border-color: rgba(37, 99, 235, 0.22);
-  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.12);
+  transform: translateY(-3px);
+  border-color: rgba(10, 132, 255, 0.2);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.12);
 }
 
 .main-tile__accent {
   position: absolute;
   inset: 0 0 auto 0;
-  height: 5px;
-  background: linear-gradient(90deg, rgba(37, 99, 235, 1), rgba(6, 182, 212, 1));
+  height: 4px;
+  background: linear-gradient(90deg, rgba(10, 132, 255, 1), rgba(90, 200, 250, 1));
+  opacity: 0.88;
 }
 
 .main-tile--info .main-tile__accent {
-  background: linear-gradient(90deg, rgba(34, 197, 94, 1), rgba(59, 130, 246, 1));
+  background: linear-gradient(90deg, rgba(52, 211, 153, 1), rgba(10, 132, 255, 1));
 }
 
 .main-tile__title {
@@ -660,9 +786,10 @@ const restartSingbox = async () => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding-top: 14px;
+  padding-top: 16px;
   padding-bottom: 10px;
   font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 .main-tile__actions {
@@ -684,7 +811,7 @@ const restartSingbox = async () => {
 }
 
 .main-info-grid__label {
-  color: rgba(71, 85, 105, 0.82);
+  color: var(--np-text-muted);
 }
 
 .main-info-grid__value {
@@ -697,6 +824,8 @@ const restartSingbox = async () => {
 
 .main-menu {
   overflow: hidden;
+  border-radius: 30px;
+  background: rgba(255, 255, 255, 0.42);
 }
 
 .main-menu__title {
@@ -704,6 +833,7 @@ const restartSingbox = async () => {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  padding: 18px 20px;
 }
 
 .main-menu__group {
@@ -711,7 +841,76 @@ const restartSingbox = async () => {
 }
 
 .main-menu__section {
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.28);
+}
+
+:global(.v-theme--dark) .main-shell__glow--one {
+  background: radial-gradient(circle, rgba(125, 211, 252, 0.18), transparent 68%);
+}
+
+:global(.v-theme--dark) .main-shell__glow--two {
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.12), transparent 70%);
+}
+
+:global(.v-theme--dark) .main-hero,
+:global(.v-theme--dark) .main-toolbar,
+:global(.v-theme--dark) .main-tile,
+:global(.v-theme--dark) .main-menu,
+:global(.v-theme--dark) .main-hero__panel {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 30%),
+    rgba(10, 16, 28, 0.68);
+  border-color: rgba(125, 211, 252, 0.1);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.22);
+}
+
+:global(.v-theme--dark) .main-hero__badge,
+:global(.v-theme--dark) .main-toolbar__button,
+:global(.v-theme--dark) .main-hero__chip,
+:global(.v-theme--dark) .main-menu__section {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(125, 211, 252, 0.1);
+}
+
+:global(.v-theme--dark) .main-hero__status-row {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03)),
+    rgba(10, 16, 28, 0.8);
+  border-color: rgba(125, 211, 252, 0.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 16px 26px rgba(0, 0, 0, 0.18);
+}
+
+:global(.v-theme--dark) .main-hero__status-row-icon {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(125, 211, 252, 0.12);
+}
+
+:global(.v-theme--dark) .main-hero__status-row-label {
+  color: rgba(186, 202, 224, 0.76);
+}
+
+:global(.v-theme--dark) .main-hero__status-row-value {
+  color: rgba(237, 244, 255, 0.96);
+}
+
+:global(.v-theme--dark) .main-hero__badge--soft {
+  color: rgba(186, 202, 224, 0.78);
+}
+
+:global(.v-theme--dark) .main-hero__brand-icon {
+  border-color: rgba(125, 211, 252, 0.14);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04)),
+    rgba(10, 16, 28, 0.82);
+}
+
+:global(.v-theme--dark) .main-toolbar__label,
+:global(.v-theme--dark) .main-info-grid__label,
+:global(.v-theme--dark) .main-hero__subtitle,
+:global(.v-theme--dark) .main-hero__panel-title {
+  color: rgba(186, 202, 224, 0.78);
 }
 
 @media (max-width: 960px) {
@@ -728,23 +927,28 @@ const restartSingbox = async () => {
     align-items: flex-start;
     flex-direction: column;
   }
-
-  .main-hero__panel-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 600px) {
   .main-hero__brand {
-    align-items: flex-start;
-  }
-
-  .main-hero__title {
-    font-size: 1.7rem;
+    align-items: center;
+    gap: 12px;
   }
 
   .main-hero__subtitle {
     font-size: 0.95rem;
+  }
+
+  .main-hero__panel {
+    padding: 14px;
+  }
+
+  .main-hero__status-row {
+    gap: 10px;
+  }
+
+  .main-hero__status-row-label {
+    font-size: 0.78rem;
   }
 }
 </style>
