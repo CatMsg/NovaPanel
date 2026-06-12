@@ -915,12 +915,18 @@ const restartSingbox = async () => {
 
 @media (max-width: 960px) {
   .main-shell {
-    padding: 16px 12px 24px;
+    min-height: auto;
+    overflow: visible;
+    padding: 12px 10px 20px;
+  }
+
+  .main-shell__glow {
+    display: none;
   }
 
   .main-hero,
   .main-toolbar {
-    padding: 16px;
+    padding: 14px;
   }
 
   .main-toolbar {
@@ -949,6 +955,10 @@ const restartSingbox = async () => {
 
   .main-hero__status-row-label {
     font-size: 0.78rem;
+  }
+
+  .main-grid {
+    margin-top: 12px;
   }
 }
 </style>

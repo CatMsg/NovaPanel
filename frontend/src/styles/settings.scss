@@ -476,12 +476,17 @@ body::after {
 }
 
 @media (max-width: 960px) {
+  body {
+    background-attachment: scroll;
+  }
+
   .v-main {
-    padding: 12px;
+    padding: 10px;
   }
 
   .app-main {
-    padding-top: 88px;
+    min-height: calc(100dvh - 72px);
+    padding-top: 16px;
   }
 
   .page-shell {
