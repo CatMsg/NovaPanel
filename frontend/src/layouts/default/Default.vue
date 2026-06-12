@@ -1,6 +1,11 @@
 <template>
   <v-app class="app-root">
-    <drawer :isMobile="isMobile" :displayDrawer="displayDrawer" @toggleDrawer="toggleDrawer" />
+    <drawer
+      v-if="!isMobile || displayDrawer"
+      :isMobile="isMobile"
+      :displayDrawer="displayDrawer"
+      @update:displayDrawer="displayDrawer = $event"
+    />
     <default-bar :isMobile="isMobile" @toggleDrawer="toggleDrawer" />
     <default-view />
   </v-app>

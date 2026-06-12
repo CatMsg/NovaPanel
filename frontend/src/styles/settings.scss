@@ -55,6 +55,8 @@ $typoOptions: text-h1, text-sm-h1, text-md-h1, text-lg-h1, text-h2, text-sm-h2,
   text-caption;
 
 body {
+  position: relative;
+  isolation: isolate;
   font-family: -apple-system, BlinkMacSystemFont, $body-font-family, sans-serif !important;
   color: var(--np-text-main);
   background:
@@ -72,8 +74,35 @@ body {
   }
 }
 
+html:has(.v-theme--dark),
+body:has(.v-theme--dark) {
+  color-scheme: dark;
+  background-color: #050b15;
+}
+
+body:has(.v-theme--dark) {
+  --np-bg-1: #050b15;
+  --np-bg-2: #07111d;
+  --np-bg-3: #0a1627;
+  --np-surface: rgba(11, 18, 31, 0.72);
+  --np-surface-strong: rgba(16, 24, 41, 0.86);
+  --np-surface-muted: rgba(255, 255, 255, 0.045);
+  --np-border: rgba(125, 211, 252, 0.12);
+  --np-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+  --np-shadow-soft: 0 12px 30px rgba(0, 0, 0, 0.2);
+  --np-text-main: rgba(237, 244, 255, 0.96);
+  --np-text-muted: rgba(186, 202, 224, 0.76);
+  --np-accent: #7dd3fc;
+  background:
+    radial-gradient(circle at 16% 6%, rgba(125, 211, 252, 0.1), transparent 26%),
+    radial-gradient(circle at 86% 0%, rgba(59, 130, 246, 0.08), transparent 24%),
+    linear-gradient(180deg, var(--np-bg-1) 0%, var(--np-bg-2) 52%, var(--np-bg-3) 100%);
+}
+
 #app,
 .v-application {
+  position: relative;
+  z-index: 1;
   min-height: 100vh;
   background: transparent;
 }
@@ -82,23 +111,25 @@ body::before {
   content: '';
   position: fixed;
   inset: -12vh -8vw;
+  z-index: 0;
   pointer-events: none;
   background:
     radial-gradient(circle at 10% 18%, rgba(255, 255, 255, 0.26), transparent 18%),
     radial-gradient(circle at 88% 16%, rgba(255, 255, 255, 0.18), transparent 16%),
     radial-gradient(circle at 48% 100%, rgba(255, 255, 255, 0.1), transparent 28%);
-  opacity: 0.72;
+  opacity: 0;
 }
 
 body::after {
   content: '';
   position: fixed;
   inset: 0;
+  z-index: 0;
   pointer-events: none;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.16), transparent 14%),
     linear-gradient(180deg, transparent 84%, rgba(15, 23, 42, 0.03));
-  opacity: 0.55;
+  opacity: 0;
 }
 
 .v-application {
@@ -218,7 +249,9 @@ body::after {
 
 @media (max-width: 600px) {
   .app-bar {
-    width: calc(100% - 16px);
+    left: 8px !important;
+    right: 8px !important;
+    width: auto !important;
     margin: 8px auto 0;
     border-radius: 24px;
   }
@@ -452,20 +485,41 @@ body::after {
   background: rgba(10, 16, 28, 0.94);
 }
 
+.v-theme--dark .v-card,
+.v-theme--dark .v-list,
+.v-theme--dark .v-navigation-drawer,
+.v-theme--dark .v-menu > .v-overlay__content,
+.v-theme--dark .v-overlay__content .v-list,
+.v-theme--dark .v-overlay__content .v-card {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
 .v-overlay .v-list-item,
 .v-field__input {
   direction: ltr;
 }
 
+.v-overlay.v-tooltip {
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.v-overlay.v-tooltip::before,
+.v-overlay.v-tooltip::after,
+.v-overlay.v-tooltip > .v-overlay__scrim {
+  display: none !important;
+}
+
 .v-card,
-.v-list,
-.v-navigation-drawer {
+.v-list {
   position: relative;
 }
 
 .v-card::before,
-.v-list::before,
-.v-navigation-drawer::before {
+.v-list::before {
   content: '';
   position: absolute;
   inset: 0;
@@ -485,8 +539,8 @@ body::after {
   }
 
   .app-main {
-    min-height: calc(100dvh - 72px);
-    padding-top: 16px;
+    min-height: calc(100dvh - 88px);
+    padding-top: 88px;
   }
 
   .page-shell {
@@ -496,7 +550,7 @@ body::after {
   .page-shell > .v-row:first-of-type,
   .page-shell > .v-card:first-of-type,
   .page-shell > .v-sheet:first-of-type {
-    margin-top: 18px;
+    margin-top: 8px;
   }
 
   .app-bar__title {
@@ -504,8 +558,8 @@ body::after {
   }
 
   body::before {
-    inset: -6vh -4vw;
-    opacity: 0.5;
+    display: none;
+    opacity: 0;
   }
 }
 

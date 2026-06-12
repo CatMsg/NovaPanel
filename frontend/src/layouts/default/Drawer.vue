@@ -8,7 +8,7 @@
   >
     <v-list-item class="app-drawer__brand" :prepend-avatar="logoUrl" title="NovaPanel" :subtitle="$t('main.hero.badge')">
       <template v-slot:append v-if="isMobile">
-        <v-btn icon variant="text" @click.stop="emit('toggleDrawer')">
+        <v-btn icon variant="text" @click.stop="emit('update:displayDrawer', false)">
           <v-icon icon="mdi-close" />
         </v-btn>
       </template>
@@ -42,12 +42,12 @@ import { logout } from '@/plugins/httputil'
 import logoUrl from '@/assets/logo.png'
 
 const props = defineProps(['isMobile','displayDrawer'])
-const emit = defineEmits(['toggleDrawer'])
+const emit = defineEmits(['update:displayDrawer'])
 
 const showDrawer = computed({
   get: () => props.displayDrawer,
   set: (value: boolean) => {
-    if (value !== props.displayDrawer) emit('toggleDrawer')
+    emit('update:displayDrawer', value)
   },
 })
 
