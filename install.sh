@@ -6,6 +6,7 @@ yellow='\033[0;33m'
 plain='\033[0m'
 
 cur_dir=$(pwd)
+AUTO_UPGRADE="${SUI_AUTO_UPGRADE:-0}"
 
 # 检查 root 权限
 [[ $EUID -ne 0 ]] && echo -e "${red}致命错误：${plain}请使用 root 权限运行此脚本 \n " && exit 1
@@ -100,6 +101,22 @@ install_firewall_backend() {
 config_after_install() {
     echo -e "${yellow}正在迁移... ${plain}"
     /usr/local/s-ui/sui migrate
+
+    if [[ "${AUTO_UPGRADE}" == "1" ]]; then
+        if [[ ! -f "/usr/local/s-ui/db/s-ui.db" ]]; then
+            local usernameTemp=$(head -c 6 /dev/urandom | base64)
+            local passwordTemp=$(head -c 6 /dev/urandom | base64)
+            echo -e "检测到自动安装模式，已生成随机登录信息："
+            echo -e "###############################################"
+            echo -e "${green}用户名：${usernameTemp}${plain}"
+            echo -e "${green}密码：${passwordTemp}${plain}"
+            echo -e "###############################################"
+            /usr/local/s-ui/sui admin -username ${usernameTemp} -password ${passwordTemp}
+        else
+            echo -e "${green}检测到自动升级模式，已保留现有配置并跳过交互提示。${plain}"
+        fi
+        return 0
+    fi
 
     echo -e "${yellow}安装/更新完成！出于安全考虑，建议修改面板设置 ${plain}"
     read -p "是否继续修改设置 [y/n]？": config_confirm

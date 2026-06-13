@@ -74,15 +74,7 @@ install() {
 }
 
 update() {
-    confirm "此功能将强制重装最新版本，数据不会丢失。是否继续？" "n"
-    if [[ $? != 0 ]]; then
-        LOGE "已取消"
-        if [[ $# == 0 ]]; then
-            before_show_menu
-        fi
-        return 0
-    fi
-    bash <(curl -Ls https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh)
+    SUI_AUTO_UPGRADE=1 bash <(curl -Ls https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh)
     if [[ $? == 0 ]]; then
         LOGI "更新完成，面板已自动重启"
         exit 0
