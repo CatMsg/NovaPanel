@@ -23,20 +23,6 @@
                 </div>
               </div>
               <p class="main-hero__subtitle">{{ $t('main.hero.subtitle') }}</p>
-              <div class="main-hero__chips">
-                <v-chip
-                  v-for="stat in heroStats"
-                  :key="stat.label"
-                  class="main-hero__chip"
-                  :color="stat.color"
-                  variant="flat"
-                  density="comfortable"
-                >
-                  <v-icon :icon="stat.icon" start size="small" />
-                  <span class="main-hero__chip-label">{{ stat.label }}:</span>
-                  <span>{{ stat.value }}</span>
-                </v-chip>
-              </div>
             </v-col>
             <v-col cols="12" lg="5">
               <v-card class="main-hero__panel" rounded="xl" variant="flat">
@@ -311,33 +297,6 @@ const tileKind = (key: string) => {
   if (key == 'i-sys' || key == 'i-sbd') return 'info'
   return key.charAt(0) == 'g' ? 'gauge' : 'chart'
 }
-
-const heroStats = computed(() => [
-  {
-    label: i18n.global.t('main.info.host'),
-    value: tilesData.value.sys?.hostName || i18n.global.t('none'),
-    color: 'primary',
-    icon: 'mdi-server',
-  },
-  {
-    label: i18n.global.t('main.info.firewall'),
-    value: tilesData.value.sys?.firewallBackend || i18n.global.t('none'),
-    color: 'teal',
-    icon: 'mdi-shield-cog-outline',
-  },
-  {
-    label: i18n.global.t('main.info.running'),
-    value: tilesData.value.sbd?.running ? i18n.global.t('yes') : i18n.global.t('no'),
-    color: tilesData.value.sbd?.running ? 'success' : 'error',
-    icon: 'mdi-rocket-launch-outline',
-  },
-  {
-    label: i18n.global.t('version'),
-    value: tilesData.value.sys?.appVersion ? `v${tilesData.value.sys?.appVersion}` : '--',
-    color: 'blue',
-    icon: 'mdi-tag-outline',
-  },
-])
 
 const heroStackItems = computed(() => [
   {

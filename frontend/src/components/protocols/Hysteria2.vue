@@ -114,6 +114,9 @@
         <v-col cols="12" sm="8" v-if="optionMPort">
           <v-text-field
             :label="$t('rule.portRange') + ' ' + $t('commaSeparated')"
+            placeholder="端口1,端口2,端口3-端口4"
+            hint="支持单端口和范围，非法值会阻止保存"
+            persistent-hint
             v-model="server_ports">
           </v-text-field>
         </v-col>
@@ -185,7 +188,10 @@ export default {
     },
     server_ports: {
       get() { return this.$props.data.server_ports?.join(',')?? [] },
-      set(v:string) { this.$props.data.server_ports = v.length > 0 ? v.split(',') : undefined }
+      set(v:string) {
+        const ports = v.split(',').map((item) => item.trim()).filter(Boolean)
+        this.$props.data.server_ports = ports.length > 0 ? ports : undefined
+      }
     },
     masqueradeType: {
       get() { return typeof this.$props.data.masquerade === 'object' ? this.$props.data.masquerade.type?? '' : '' },

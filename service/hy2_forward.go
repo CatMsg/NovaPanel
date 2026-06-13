@@ -29,6 +29,7 @@ func (s *InboundService) syncHy2PortForwarding(oldInbound *model.Inbound, inboun
 		if err != nil {
 			return err
 		}
+		ports = mergeHy2ForwardPorts(listenPort, ports)
 
 		if err := runHy2ForwardScript("apply", inbound.Tag, listenPort, ports); err != nil {
 			return err
@@ -122,20 +123,36 @@ func getHy2ServerPorts(outJson json.RawMessage) ([]int, error) {
 
 	ports := make([]int, 0)
 	seen := map[int]struct{}{}
-	appendPort := func(raw string) error {
+	appendPort := func(port int) {
+		if port < 1 || port > 65535 {
+			return
+		}
+		if _, exists := seen[port]; exists {
+			return
+		}
+		seen[port] = struct{}{}
+		ports = append(ports, port)
+	}
+	appendToken := func(raw string) error {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
 			return nil
 		}
+		if strings.Count(raw, "-") == 1 {
+			start, end, err := parseHy2PortRange(raw)
+			if err != nil {
+				return err
+			}
+			for port := start; port <= end; port++ {
+				appendPort(port)
+			}
+			return nil
+		}
 		port, err := strconv.Atoi(raw)
-		if err != nil || port < 1 || port > 65535 {
-			return nil
+		if err != nil {
+			return fmt.Errorf("invalid server_ports token: %s", raw)
 		}
-		if _, exists := seen[port]; exists {
-			return nil
-		}
-		seen[port] = struct{}{}
-		ports = append(ports, port)
+		appendPort(port)
 		return nil
 	}
 
@@ -145,26 +162,19 @@ func getHy2ServerPorts(outJson json.RawMessage) ([]int, error) {
 			if item == nil {
 				continue
 			}
-			switch v := item.(type) {
-			case string:
-				if err := appendPort(v); err != nil {
-					return nil, err
-				}
-			default:
-				if err := appendPort(fmt.Sprint(v)); err != nil {
-					return nil, err
-				}
+			if err := appendToken(fmt.Sprint(item)); err != nil {
+				return nil, err
 			}
 		}
 	case []string:
 		for _, item := range typed {
-			if err := appendPort(item); err != nil {
+			if err := appendToken(item); err != nil {
 				return nil, err
 			}
 		}
 	case string:
 		for _, item := range strings.Split(typed, ",") {
-			if err := appendPort(item); err != nil {
+			if err := appendToken(item); err != nil {
 				return nil, err
 			}
 		}
@@ -173,6 +183,55 @@ func getHy2ServerPorts(outJson json.RawMessage) ([]int, error) {
 	}
 
 	return ports, nil
+}
+
+func parseHy2PortRange(raw string) (int, int, error) {
+	parts := strings.SplitN(raw, "-", 2)
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("invalid server_ports token: %s", raw)
+	}
+
+	start, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid server_ports token: %s", raw)
+	}
+
+	end, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid server_ports token: %s", raw)
+	}
+
+	if start < 1 || start > 65535 || end < 1 || end > 65535 {
+		return 0, 0, fmt.Errorf("invalid server_ports token: %s", raw)
+	}
+
+	if start > end {
+		return 0, 0, fmt.Errorf("invalid server_ports range: %s", raw)
+	}
+
+	return start, end, nil
+}
+
+func mergeHy2ForwardPorts(listenPort int, ports []int) []int {
+	merged := make([]int, 0, len(ports)+1)
+	seen := map[int]struct{}{}
+	appendPort := func(port int) {
+		if port < 1 || port > 65535 {
+			return
+		}
+		if _, exists := seen[port]; exists {
+			return
+		}
+		seen[port] = struct{}{}
+		merged = append(merged, port)
+	}
+
+	appendPort(listenPort)
+	for _, port := range ports {
+		appendPort(port)
+	}
+
+	return merged
 }
 
 func joinPorts(ports []int) string {

@@ -34,23 +34,45 @@ has_cmd() {
 
 normalize_ports() {
   local raw="${1:-}"
-  local seen=""
-  local part trimmed
+  local part trimmed start end port
+  declare -A seen=()
+
+  emit_port() {
+    local value="${1:-}"
+    if [[ -z "${value}" || "${value}" -lt 1 || "${value}" -gt 65535 ]]; then
+      return 0
+    fi
+    if [[ -n "${seen[${value}]:-}" ]]; then
+      return 0
+    fi
+    seen["${value}"]=1
+    printf '%s\n' "${value}"
+  }
 
   IFS=',' read -r -a parts <<< "${raw}"
   for part in "${parts[@]}"; do
     trimmed="$(printf '%s' "${part}" | tr -d '[:space:]')"
-    if [[ -z "${trimmed}" || ! "${trimmed}" =~ ^[0-9]+$ ]]; then
+    if [[ -z "${trimmed}" ]]; then
       continue
     fi
-    if [[ "${trimmed}" -lt 1 || "${trimmed}" -gt 65535 ]]; then
+    if [[ "${trimmed}" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+      start="${BASH_REMATCH[1]}"
+      end="${BASH_REMATCH[2]}"
+      if [[ "${start}" -lt 1 || "${end}" -gt 65535 || "${start}" -gt "${end}" ]]; then
+        echo "invalid server_ports range: ${trimmed}" >&2
+        return 1
+      fi
+      for ((port=start; port<=end; port++)); do
+        emit_port "${port}"
+      done
       continue
     fi
-    case " ${seen} " in
-      *" ${trimmed} "*) continue ;;
-    esac
-    seen="${seen} ${trimmed}"
-    printf '%s\n' "${trimmed}"
+    if [[ "${trimmed}" =~ ^[0-9]+$ ]]; then
+      emit_port "${trimmed}"
+      continue
+    fi
+    echo "invalid server_ports token: ${trimmed}" >&2
+    return 1
   done
 }
 

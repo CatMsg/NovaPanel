@@ -137,7 +137,7 @@ docker build -t novapanel .
 - 支持流量统计、在线资源和系统监控。
 - 支持面板与订阅分离配置，便于不同场景部署。
 - 支持 HTTPS 访问、证书配置和自定义路径。
-- Hysteria2 的 `server_ports` 端口跳跃只会同步到专用 NAT 转发规则，不会修改 VPS 的全局默认放行策略；安装脚本会先确保系统里有可用的 `ufw`、`nftables` 或 `iptables`，后续脚本会自动适配，并且可以用 `HY2_FORWARD_BACKEND` 强制指定后端。
+- Hysteria2 的 `server_ports` 端口跳跃只会同步到专用 NAT 转发规则，不会修改 VPS 的全局默认放行策略；支持逗号分隔的单端口和范围写法，例如 `端口1,端口2,端口3-端口4`。安装脚本会先确保系统里有可用的 `ufw`、`nftables` 或 `iptables`，后续脚本会自动适配，并且可以用 `HY2_FORWARD_BACKEND` 强制指定后端。
 - 支持通过脚本、Docker 或源码方式部署。
 
 ## 默认信息

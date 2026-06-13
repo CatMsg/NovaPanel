@@ -14,19 +14,33 @@ import (
 )
 
 func TestGetHy2ServerPorts(t *testing.T) {
-	ports, err := getHy2ServerPorts(json.RawMessage(`{"server_ports":[443," 8443 ",443,"bad",70000,12345]}`))
+	ports, err := getHy2ServerPorts(json.RawMessage(`{"server_ports":[443," 8443 ",443,"500-502",70000,12345]}`))
 	if err != nil {
 		t.Fatalf("getHy2ServerPorts returned error: %v", err)
 	}
 
 	got := fmt.Sprint(ports)
-	want := "[443 8443 12345]"
+	want := "[443 8443 500 501 502 12345]"
 	if got != want {
 		t.Fatalf("unexpected ports: got %s want %s", got, want)
 	}
 
-	if joinPorts(ports) != "443,8443,12345" {
+	if joinPorts(ports) != "443,8443,500,501,502,12345" {
 		t.Fatalf("unexpected joinPorts result: %s", joinPorts(ports))
+	}
+}
+
+func TestGetHy2ServerPortsRejectsDirtyValues(t *testing.T) {
+	_, err := getHy2ServerPorts(json.RawMessage(`{"server_ports":["500","bad","1000-1400"]}`))
+	if err == nil {
+		t.Fatal("expected getHy2ServerPorts to reject invalid token")
+	}
+}
+
+func TestMergeHy2ForwardPorts(t *testing.T) {
+	ports := mergeHy2ForwardPorts(500, []int{900, 500, 1000})
+	if got := fmt.Sprint(ports); got != "[500 900 1000]" {
+		t.Fatalf("unexpected merged ports: %s", got)
 	}
 }
 
