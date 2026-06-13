@@ -17,6 +17,8 @@ tmp
 
 # Log files
 *.log*
+.runSUI.pid
+.runSUI.log
 .cache
 
 # Windows build artifacts
