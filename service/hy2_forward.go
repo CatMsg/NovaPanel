@@ -2,17 +2,58 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
 
+	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
 	"github.com/CatMsg/NovaPanel/logger"
 )
 
 const hy2ForwardScript = "scripts/hy2-forward.sh"
+
+func (s *InboundService) RebuildHy2PortForwarding() error {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+
+	backend, err := ensureFirewallBackend()
+	if err != nil {
+		return err
+	}
+	logger.Info("rebuilding hy2 port forwarding with backend: ", backend)
+
+	if err := runHy2ForwardScript("purge", "", 0, nil); err != nil {
+		return err
+	}
+
+	var inbounds []*model.Inbound
+	if err := database.GetDB().Model(model.Inbound{}).Find(&inbounds).Error; err != nil {
+		return err
+	}
+
+	var errs []error
+	for _, inbound := range inbounds {
+		if inbound.Type != "hysteria2" {
+			continue
+		}
+		if err := s.syncHy2PortForwarding(nil, inbound); err != nil {
+			wrapped := fmt.Errorf("rebuild %s: %w", inbound.Tag, err)
+			errs = append(errs, wrapped)
+			logger.Warning("hy2 port forwarding rebuild failed: ", wrapped)
+		}
+	}
+
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+
+	return nil
+}
 
 func (s *InboundService) syncHy2PortForwarding(oldInbound *model.Inbound, inbound *model.Inbound) error {
 	if inbound == nil {
@@ -55,11 +96,14 @@ func runHy2ForwardScript(action string, tag string, listenPort int, ports []int)
 		return nil
 	}
 
-	if tag == "" {
+	if action != "purge" && tag == "" {
 		return nil
 	}
 
-	args := []string{action, tag, strconv.Itoa(listenPort), joinPorts(ports)}
+	args := []string{action}
+	if action != "purge" {
+		args = append(args, tag, strconv.Itoa(listenPort), joinPorts(ports))
+	}
 	cmd := exec.Command("bash", append([]string{hy2ForwardScript}, args...)...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {

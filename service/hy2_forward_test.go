@@ -113,6 +113,10 @@ func TestRunHy2ForwardScriptIptables(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(stateDir, "iptables.jump")); !os.IsNotExist(err) {
 		t.Fatalf("iptables jump rule still exists after remove: %v", err)
 	}
+
+	if err := runHy2ForwardScriptWithEnv(repoRoot, env, "purge", "", 0, nil); err != nil {
+		t.Fatalf("purge failed: %v", err)
+	}
 }
 
 func TestRunHy2ForwardScriptNftables(t *testing.T) {

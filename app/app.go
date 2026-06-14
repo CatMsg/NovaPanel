@@ -84,6 +84,11 @@ func (a *APP) Start() error {
 		logger.Error(err)
 	}
 
+	err = a.configService.RebuildHy2PortForwarding()
+	if err != nil {
+		logger.Warning("rebuild hy2 port forwarding failed:", err)
+	}
+
 	return nil
 }
 

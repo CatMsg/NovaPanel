@@ -17,6 +17,11 @@ if [[ "${action}" != "apply" && "${action}" != "remove" ]]; then
   exit 1
 fi
 
+if [[ "${action}" != "purge" && -z "${tag}" ]]; then
+  echo "usage: $0 <apply|remove|purge> <tag> <listen_port> <ports_csv>" >&2
+  exit 1
+fi
+
 if [[ "${action}" == "apply" ]]; then
   if [[ -z "${listen_port}" || ! "${listen_port}" =~ ^[0-9]+$ || "${listen_port}" -lt 1 || "${listen_port}" -gt 65535 ]]; then
     echo "invalid listen port: ${listen_port}" >&2
