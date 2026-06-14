@@ -74,6 +74,22 @@ install() {
 }
 
 update() {
+    current_version=""
+    latest_version=""
+    if [[ -x /usr/local/s-ui/sui ]]; then
+        current_version=$(/usr/local/s-ui/sui -v 2>/dev/null | awk '/^NovaPanel Panel[[:space:]]+/ {print $2}' | head -n1)
+    fi
+    latest_version=$(curl -Ls "https://api.github.com/repos/CatMsg/NovaPanel/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    if [[ -n "${current_version}" && -n "${latest_version}" && "${current_version}" == "${latest_version}" ]]; then
+        confirm "当前版本 ${current_version} 与最新版本一致，是否仍然覆盖安装？" "n"
+        if [[ $? != 0 ]]; then
+            LOGE "已取消"
+            if [[ $# == 0 ]]; then
+                before_show_menu
+            fi
+            return 0
+        fi
+    fi
     SUI_AUTO_UPGRADE=1 bash <(curl -Ls https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh)
     if [[ $? == 0 ]]; then
         LOGI "更新完成，面板已自动重启"
