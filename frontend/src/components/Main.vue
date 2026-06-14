@@ -686,9 +686,10 @@ const restartSingbox = async () => {
   margin-top: 16px;
   padding: 14px 16px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 12px;
   border-radius: 28px;
 }
 
@@ -702,6 +703,8 @@ const restartSingbox = async () => {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  width: 100%;
+  justify-content: flex-start;
 }
 
 .main-toolbar__button {
@@ -1023,28 +1026,35 @@ const restartSingbox = async () => {
     margin-top: 12px;
     padding: 12px;
     gap: 10px;
+    align-items: stretch;
   }
 
   .main-toolbar__label {
     margin-bottom: 2px;
+    align-self: flex-start;
   }
 
   .main-toolbar__actions {
+    display: grid;
+    grid-template-columns: 1fr;
     gap: 8px;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    padding-bottom: 2px;
-    scrollbar-width: none;
-  }
-
-  .main-toolbar__actions::-webkit-scrollbar {
-    display: none;
+    width: 100%;
+    align-self: stretch;
   }
 
   .main-toolbar__button {
-    flex: 0 0 auto;
-    min-height: 34px;
-    padding-inline: 12px;
+    width: 100%;
+    min-height: 42px;
+    padding-inline: 14px;
+    justify-content: flex-start;
+    border-radius: 16px;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.58)),
+      rgba(255, 255, 255, 0.4);
+    border: 1px solid rgba(148, 163, 184, 0.12);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.62),
+      0 10px 18px rgba(15, 23, 42, 0.06);
   }
 
   .main-tile {
