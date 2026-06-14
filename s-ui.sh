@@ -620,8 +620,9 @@ ssl_cert_issue_CF() {
     LOGD "******使用说明******"
     echo "1) 从 Cloudflare 申请新证书"
     echo "2) 强制续签已有证书"
-    echo "3) 返回菜单"
-    read -p "请输入你的选择 [1-3]： " choice
+    echo "3) 清除面板 HTTPS 路径"
+    echo "4) 返回菜单"
+    read -p "请输入你的选择 [1-4]： " choice
 
     certPath="/root/cert-CF"
 
@@ -716,11 +717,53 @@ ssl_cert_issue_CF() {
                     LOGI "证书已安装，并已开启自动续签。"
                     ls -lah ${certPath}/${CF_Domain}
                     chmod 755 ${certPath}/${CF_Domain}
+
+                    local acmeCertDir="${HOME}/.acme.sh/${CF_Domain}_ecc"
+                    local panelCertFile="${acmeCertDir}/fullchain.cer"
+                    local panelKeyFile="${acmeCertDir}/${CF_Domain}.key"
+                    if [ ! -f "${panelCertFile}" ] || [ ! -f "${panelKeyFile}" ]; then
+                        acmeCertDir="${HOME}/.acme.sh/${CF_Domain}"
+                        panelCertFile="${acmeCertDir}/fullchain.cer"
+                        panelKeyFile="${acmeCertDir}/${CF_Domain}.key"
+                    fi
+
+                    if [ -f "${panelCertFile}" ] && [ -f "${panelKeyFile}" ]; then
+                        LOGI "正在自动回填面板 HTTPS 路径..."
+                        /usr/local/s-ui/sui setting -webCertFile "${panelCertFile}" -webKeyFile "${panelKeyFile}"
+                        if [ $? -ne 0 ]; then
+                            LOGE "自动回填面板路径失败，请稍后手动检查设置-界面"
+                        else
+                            LOGI "面板 HTTPS 路径已自动回填："
+                            echo -e "${green}${panelCertFile}${plain}"
+                            echo -e "${green}${panelKeyFile}${plain}"
+                            LOGI "正在重启面板以应用新证书..."
+                            /usr/local/s-ui/sui restart
+                            if [ $? -ne 0 ]; then
+                                LOGE "面板重启失败，请手动重启服务"
+                            fi
+                        fi
+                    else
+                        LOGE "未找到可回填的证书文件，请检查 acme.sh 生成目录"
+                    fi
                 fi
             fi
             show_menu
             ;;
         3)
+            LOGD "准备清除面板 HTTPS 路径..."
+            /usr/local/s-ui/sui setting -clearWebTLS
+            if [ $? -ne 0 ]; then
+                LOGE "清除面板 HTTPS 路径失败，请手动检查"
+            else
+                LOGI "面板 HTTPS 路径已清除，正在重启面板..."
+                /usr/local/s-ui/sui restart
+                if [ $? -ne 0 ]; then
+                    LOGE "面板重启失败，请手动重启服务"
+                fi
+            fi
+            show_menu
+            ;;
+        4)
             echo "正在退出..."
             show_menu
             ;;

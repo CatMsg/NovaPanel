@@ -31,7 +31,7 @@ func resetSetting() {
 	}
 }
 
-func updateSetting(port int, path string, subPort int, subPath string) {
+func updateSetting(port int, path string, subPort int, subPath string, webCertFile string, webKeyFile string, clearWebTLS bool) {
 	err := database.InitDB(config.GetDBPath())
 	if err != nil {
 		fmt.Println(err)
@@ -72,6 +72,36 @@ func updateSetting(port int, path string, subPort int, subPath string) {
 			fmt.Println("set sub path success")
 		}
 	}
+	if webCertFile != "" {
+		err := settingService.SetCertFile(webCertFile)
+		if err != nil {
+			fmt.Println("set web cert file failed:", err)
+		} else {
+			fmt.Println("set web cert file success")
+		}
+	}
+	if webKeyFile != "" {
+		err := settingService.SetKeyFile(webKeyFile)
+		if err != nil {
+			fmt.Println("set web key file failed:", err)
+		} else {
+			fmt.Println("set web key file success")
+		}
+	}
+	if clearWebTLS {
+		err := settingService.SetCertFile("")
+		if err != nil {
+			fmt.Println("clear web cert file failed:", err)
+		} else {
+			fmt.Println("clear web cert file success")
+		}
+		err = settingService.SetKeyFile("")
+		if err != nil {
+			fmt.Println("clear web key file failed:", err)
+		} else {
+			fmt.Println("clear web key file success")
+		}
+	}
 }
 
 func showSetting() {
@@ -97,6 +127,12 @@ func showSetting() {
 	if (*allSetting)["webURI"] != "" {
 		fmt.Println("\tPanel URI:\t", (*allSetting)["webURI"])
 	}
+	if (*allSetting)["webCertFile"] != "" {
+		fmt.Println("\tPanel Cert:\t", (*allSetting)["webCertFile"])
+	}
+	if (*allSetting)["webKeyFile"] != "" {
+		fmt.Println("\tPanel Key:\t", (*allSetting)["webKeyFile"])
+	}
 	fmt.Println()
 	fmt.Println("Current subscription settings:")
 	fmt.Println("\tSub port:\t", (*allSetting)["subPort"])
@@ -109,6 +145,12 @@ func showSetting() {
 	}
 	if (*allSetting)["subURI"] != "" {
 		fmt.Println("\tSub URI:\t", (*allSetting)["subURI"])
+	}
+	if (*allSetting)["subCertFile"] != "" {
+		fmt.Println("\tSub Cert:\t", (*allSetting)["subCertFile"])
+	}
+	if (*allSetting)["subKeyFile"] != "" {
+		fmt.Println("\tSub Key:\t", (*allSetting)["subKeyFile"])
 	}
 }
 

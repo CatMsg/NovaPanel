@@ -23,6 +23,9 @@ func ParseCmd() {
 	var path string
 	var subPort int
 	var subPath string
+	var webCertFile string
+	var webKeyFile string
+	var clearWebTLS bool
 	var reset bool
 	var show bool
 	settingCmd.BoolVar(&reset, "reset", false, "reset all settings")
@@ -31,6 +34,9 @@ func ParseCmd() {
 	settingCmd.StringVar(&path, "path", "", "set panel path")
 	settingCmd.IntVar(&subPort, "subPort", 0, "set sub port")
 	settingCmd.StringVar(&subPath, "subPath", "", "set sub path")
+	settingCmd.StringVar(&webCertFile, "webCertFile", "", "set panel cert file")
+	settingCmd.StringVar(&webKeyFile, "webKeyFile", "", "set panel key file")
+	settingCmd.BoolVar(&clearWebTLS, "clearWebTLS", false, "clear panel cert and key file")
 
 	adminCmd.BoolVar(&show, "show", false, "show first admin credentials")
 	adminCmd.BoolVar(&reset, "reset", false, "reset first admin credentials")
@@ -102,7 +108,7 @@ func ParseCmd() {
 		case reset:
 			resetSetting()
 		default:
-			updateSetting(port, path, subPort, subPath)
+			updateSetting(port, path, subPort, subPath, webCertFile, webKeyFile, clearWebTLS)
 			showSetting()
 		}
 	default:
