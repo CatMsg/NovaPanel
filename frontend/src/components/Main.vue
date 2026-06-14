@@ -302,7 +302,7 @@ const heroStackItems = computed(() => [
   {
     label: i18n.global.t('main.info.firewall'),
     value: tilesData.value.sys?.firewallBackend || i18n.global.t('none'),
-    icon: 'mdi-shield-cog-outline',
+    icon: 'mdi-shield-lock-outline',
     tone: 'blue',
   },
   {
