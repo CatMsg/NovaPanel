@@ -219,16 +219,7 @@ func naiveLink(
 }
 
 func naiveBaseUri(inbound map[string]interface{}) string {
-	switch strings.ToLower(strings.TrimSpace(fmt.Sprint(inbound["http_version"]))) {
-	case "http1":
-		return "http1://"
-	case "http3":
-		return "http3://"
-	case "http2":
-		fallthrough
-	default:
-		return "http2://"
-	}
+	return "http2://"
 }
 
 func hysteriaLink(

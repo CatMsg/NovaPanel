@@ -77,6 +77,13 @@ func (i Inbound) MarshalJSON() ([]byte, error) {
 		}
 	}
 
+	// `http_version` is a panel-side hint for Naive link generation only.
+	// It is not part of sing-box Naive inbound config, so strip it before
+	// handing the payload to the core.
+	if i.Type == "naive" {
+		delete(combined, "http_version")
+	}
+
 	return json.Marshal(combined)
 }
 

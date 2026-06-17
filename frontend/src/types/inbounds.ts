@@ -93,7 +93,6 @@ export interface Trojan extends InboundBasics {
 export interface Naive extends InboundBasics {
   tls: iTls,
   quic_congestion_control?: "" | "bbr" | "bbr2" | "cubic" | "reno"
-  http_version?: "http1" | "http2" | "http3"
 }
 export interface Hysteria extends InboundBasics {
   up_mbps: number
@@ -213,7 +212,7 @@ const defaultValues: Record<InType, Inbound> = {
   shadowsocks: <Shadowsocks>{ type: InTypes.Shadowsocks, method: 'none' },
   vmess: <VMess>{ type: InTypes.VMess, tls_id: 0, transport: {} },
   trojan: <Trojan>{ type: InTypes.Trojan, tls_id: 0, transport: {} },
-  naive: <Naive>{ type: InTypes.Naive, tls_id: 0, http_version: "http2" },
+  naive: <Naive>{ type: InTypes.Naive, tls_id: 0 },
   hysteria: <Hysteria>{ type: InTypes.Hysteria, up_mbps: 100, down_mbps: 100, tls_id: 0 },
   shadowtls: <ShadowTLS>{ type: InTypes.ShadowTLS, version: 3, handshake: {}, handshake_for_server_name: {} },
   tuic: <TUIC>{ type: InTypes.TUIC, congestion_control: "cubic", tls_id: 0 },

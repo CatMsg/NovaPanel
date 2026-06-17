@@ -10,14 +10,6 @@
         <v-col cols="12" sm="6" md="4">
           <v-select
             hide-details
-            :label="$t('types.naive.httpVersion')"
-            :items="httpVersions"
-            v-model="httpVersion">
-          </v-select>
-        </v-col>
-        <v-col cols="12" sm="6" md="4">
-          <v-select
-            hide-details
             :label="$t('types.naive.quicCongestion')"
             :items="inbCngs"
             v-model="data.quic_congestion_control"
@@ -88,11 +80,6 @@ export default {
   props: ['data', 'direction'],
   data() {
     return {
-      httpVersions: [
-        { title: 'HTTP/1', value: 'http1' },
-        { title: 'HTTP/2', value: 'http2' },
-        { title: 'HTTP/3', value: 'http3' },
-      ],
       inbCngs: [
         { title: 'BBR', value: 'bbr'},
         { title: 'BBR Standard', value: 'bbr_standard'},
@@ -110,14 +97,6 @@ export default {
     }
   },
   computed: {
-    httpVersion: {
-      get(): string {
-        return this.$props.data?.http_version ?? 'http2'
-      },
-      set(v: string) {
-        this.$props.data.http_version = v
-      }
-    },
     udpOverTcp: {
       get(): boolean {
         const d = this.$props.data
