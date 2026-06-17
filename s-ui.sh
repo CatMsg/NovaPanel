@@ -800,12 +800,12 @@ ssl_cert_issue_CF() {
             show_menu
             ;;
         3)
-            LOGD "准备清除面板 HTTPS 路径..."
-            /usr/local/s-ui/sui setting -clearWebTLS
+            LOGD "准备清除面板和 Sub HTTPS 路径..."
+            /usr/local/s-ui/sui setting -clearWebTLS -clearSubTLS
             if [ $? -ne 0 ]; then
-                LOGE "清除面板 HTTPS 路径失败，请手动检查"
+                LOGE "清除 HTTPS 路径失败，请手动检查"
             else
-                LOGI "面板 HTTPS 路径已清除，正在重启面板..."
+                LOGI "面板和 Sub HTTPS 路径已清除，正在重启面板..."
                 /usr/local/s-ui/sui restart
                 if [ $? -ne 0 ]; then
                     LOGE "面板重启失败，请手动重启服务"
