@@ -1,6 +1,9 @@
 package sub
 
 import (
+	"net"
+	"strings"
+
 	"github.com/CatMsg/NovaPanel/logger"
 	"github.com/CatMsg/NovaPanel/service"
 
@@ -29,7 +32,7 @@ func (s *SubHandler) initRouter(g *gin.RouterGroup) {
 
 func (s *SubHandler) aggregate(c *gin.Context) {
 	format := c.Query("format")
-	result, headers, err := s.AggregateService.GetAggregate(format)
+	result, headers, err := s.AggregateService.GetAggregate(format, requestHost(c))
 	if err != nil || result == nil {
 		logger.Error(err)
 		c.String(400, "Error!")
@@ -51,7 +54,7 @@ func (s *SubHandler) aggregateHeaders(c *gin.Context) {
 		c.String(404, "")
 		return
 	}
-	_, usage, err := s.AggregateService.collectAggregateLinks()
+	_, usage, err := s.AggregateService.collectAggregateLinks(requestHost(c))
 	if err != nil {
 		logger.Error(err)
 		c.String(400, "Error!")
@@ -112,4 +115,15 @@ func (s *SubHandler) addHeaders(c *gin.Context, headers []string) {
 	c.Writer.Header().Set("Subscription-Userinfo", headers[0])
 	c.Writer.Header().Set("Profile-Update-Interval", headers[1])
 	c.Writer.Header().Set("Profile-Title", headers[2])
+}
+
+func requestHost(c *gin.Context) string {
+	host := c.Request.Host
+	if strings.Contains(host, ":") {
+		host, _, _ = net.SplitHostPort(host)
+		if strings.Contains(host, ":") {
+			host = "[" + host + "]"
+		}
+	}
+	return host
 }

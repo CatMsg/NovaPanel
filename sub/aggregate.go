@@ -25,7 +25,7 @@ type aggregateUsage struct {
 	expire   int64
 }
 
-func (a *AggregateService) GetAggregate(format string) (*string, []string, error) {
+func (a *AggregateService) GetAggregate(format string, host string) (*string, []string, error) {
 	mode, err := a.SettingService.GetSubMode()
 	if err != nil {
 		return nil, nil, err
@@ -34,7 +34,7 @@ func (a *AggregateService) GetAggregate(format string) (*string, []string, error
 		return nil, nil, common.NewError("aggregate subscription is disabled in slave mode")
 	}
 
-	links, usage, err := a.collectAggregateLinks()
+	links, usage, err := a.collectAggregateLinks(host)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -126,7 +126,7 @@ func (a *AggregateService) aggregateFormatResult(result string, usage aggregateU
 	return &result, a.aggregateHeaders(usage), nil
 }
 
-func (a *AggregateService) collectAggregateLinks() ([]string, aggregateUsage, error) {
+func (a *AggregateService) collectAggregateLinks(host string) ([]string, aggregateUsage, error) {
 	seen := make(map[string]struct{})
 	links := make([]string, 0)
 	usage := aggregateUsage{}
@@ -135,7 +135,15 @@ func (a *AggregateService) collectAggregateLinks() ([]string, aggregateUsage, er
 	if err != nil {
 		return nil, aggregateUsage{}, err
 	}
+	selfAggregateURI, err := a.selfAggregateURI(host)
+	if err != nil {
+		return nil, aggregateUsage{}, err
+	}
 	for _, source := range sources {
+		if sameSubscriptionSource(source, selfAggregateURI) {
+			logger.Warning("aggregate: skip self source:", source)
+			continue
+		}
 		data, headers := util.GetExternalLinkWithHeaders(source)
 		if len(data) == 0 {
 			logger.Warning("aggregate: failed to load remote subscription:", source)
@@ -159,6 +167,18 @@ func (a *AggregateService) collectAggregateLinks() ([]string, aggregateUsage, er
 		return nil, aggregateUsage{}, common.NewError("no subscription links found")
 	}
 	return links, usage, nil
+}
+
+func (a *AggregateService) selfAggregateURI(host string) (string, error) {
+	base, err := a.SettingService.GetFinalSubURI(host)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(strings.TrimSpace(base), "/") + "/aggregate", nil
+}
+
+func sameSubscriptionSource(left string, right string) bool {
+	return strings.TrimRight(strings.TrimSpace(left), "/") == strings.TrimRight(strings.TrimSpace(right), "/")
 }
 
 func (a *AggregateService) outboundsFromLinks(links []string) (*[]map[string]interface{}, *[]string, error) {
