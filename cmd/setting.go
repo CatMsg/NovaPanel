@@ -31,7 +31,7 @@ func resetSetting() {
 	}
 }
 
-func updateSetting(port int, path string, subPort int, subPath string, webCertFile string, webKeyFile string, clearWebTLS bool) {
+func updateSetting(port int, path string, subPort int, subPath string, webCertFile string, webKeyFile string, subCertFile string, subKeyFile string, clearWebTLS bool, clearSubTLS bool) {
 	err := database.InitDB(config.GetDBPath())
 	if err != nil {
 		fmt.Println(err)
@@ -88,6 +88,22 @@ func updateSetting(port int, path string, subPort int, subPath string, webCertFi
 			fmt.Println("set web key file success")
 		}
 	}
+	if subCertFile != "" {
+		err := settingService.SetSubCertFile(subCertFile)
+		if err != nil {
+			fmt.Println("set sub cert file failed:", err)
+		} else {
+			fmt.Println("set sub cert file success")
+		}
+	}
+	if subKeyFile != "" {
+		err := settingService.SetSubKeyFile(subKeyFile)
+		if err != nil {
+			fmt.Println("set sub key file failed:", err)
+		} else {
+			fmt.Println("set sub key file success")
+		}
+	}
 	if clearWebTLS {
 		err := settingService.SetCertFile("")
 		if err != nil {
@@ -100,6 +116,20 @@ func updateSetting(port int, path string, subPort int, subPath string, webCertFi
 			fmt.Println("clear web key file failed:", err)
 		} else {
 			fmt.Println("clear web key file success")
+		}
+	}
+	if clearSubTLS {
+		err := settingService.SetSubCertFile("")
+		if err != nil {
+			fmt.Println("clear sub cert file failed:", err)
+		} else {
+			fmt.Println("clear sub cert file success")
+		}
+		err = settingService.SetSubKeyFile("")
+		if err != nil {
+			fmt.Println("clear sub key file failed:", err)
+		} else {
+			fmt.Println("clear sub key file success")
 		}
 	}
 }

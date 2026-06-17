@@ -198,6 +198,11 @@ func (s *SettingService) GetCertFile() (string, error) {
 }
 
 func (s *SettingService) SetCertFile(certFile string) error {
+	if certFile != "" {
+		if err := s.fileExists(certFile); err != nil {
+			return common.NewError(" -> ", certFile, " is not exists")
+		}
+	}
 	return s.setString("webCertFile", certFile)
 }
 
@@ -206,6 +211,11 @@ func (s *SettingService) GetKeyFile() (string, error) {
 }
 
 func (s *SettingService) SetKeyFile(keyFile string) error {
+	if keyFile != "" {
+		if err := s.fileExists(keyFile); err != nil {
+			return common.NewError(" -> ", keyFile, " is not exists")
+		}
+	}
 	return s.setString("webKeyFile", keyFile)
 }
 
@@ -313,8 +323,26 @@ func (s *SettingService) GetSubCertFile() (string, error) {
 	return s.getString("subCertFile")
 }
 
+func (s *SettingService) SetSubCertFile(certFile string) error {
+	if certFile != "" {
+		if err := s.fileExists(certFile); err != nil {
+			return common.NewError(" -> ", certFile, " is not exists")
+		}
+	}
+	return s.setString("subCertFile", certFile)
+}
+
 func (s *SettingService) GetSubKeyFile() (string, error) {
 	return s.getString("subKeyFile")
+}
+
+func (s *SettingService) SetSubKeyFile(keyFile string) error {
+	if keyFile != "" {
+		if err := s.fileExists(keyFile); err != nil {
+			return common.NewError(" -> ", keyFile, " is not exists")
+		}
+	}
+	return s.setString("subKeyFile", keyFile)
 }
 
 func (s *SettingService) GetSubUpdates() (int, error) {
@@ -458,6 +486,15 @@ func (s *SettingService) GetSubClashExt() (string, error) {
 }
 
 func (s *SettingService) fileExists(path string) error {
-	_, err := os.Stat(path)
-	return err
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return common.NewErrorf("%s is a directory, not a file", path)
+	}
+	if info.Size() <= 0 {
+		return common.NewErrorf("%s is empty", path)
+	}
+	return nil
 }

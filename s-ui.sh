@@ -615,6 +615,30 @@ ssl_cert_issue() {
     fi
 }
 
+resolve_acme_cert_files() {
+    local domain="$1"
+    local acmeCertDir="${HOME}/.acme.sh/${domain}_ecc"
+    local certFile="${acmeCertDir}/fullchain.cer"
+    local keyFile="${acmeCertDir}/${domain}.key"
+
+    if [ ! -s "${certFile}" ] || [ ! -s "${keyFile}" ]; then
+        acmeCertDir="${HOME}/.acme.sh/${domain}"
+        certFile="${acmeCertDir}/fullchain.cer"
+        keyFile="${acmeCertDir}/${domain}.key"
+    fi
+
+    if [ -s "${certFile}" ] && [ -s "${keyFile}" ]; then
+        printf '%s\n%s\n' "${certFile}" "${keyFile}"
+        return 0
+    fi
+
+    return 1
+}
+
+get_current_sub_domain() {
+    /usr/local/s-ui/sui setting -show 2>/dev/null | sed -n 's/^[[:space:]]*Sub Domain:[[:space:]]*//p' | head -n 1 | tr -d '\r'
+}
+
 ssl_cert_issue_CF() {
     echo -E ""
     LOGD "******使用说明******"
@@ -718,24 +742,50 @@ ssl_cert_issue_CF() {
                     ls -lah ${certPath}/${CF_Domain}
                     chmod 755 ${certPath}/${CF_Domain}
 
-                    local acmeCertDir="${HOME}/.acme.sh/${CF_Domain}_ecc"
-                    local panelCertFile="${acmeCertDir}/fullchain.cer"
-                    local panelKeyFile="${acmeCertDir}/${CF_Domain}.key"
-                    if [ ! -f "${panelCertFile}" ] || [ ! -f "${panelKeyFile}" ]; then
-                        acmeCertDir="${HOME}/.acme.sh/${CF_Domain}"
-                        panelCertFile="${acmeCertDir}/fullchain.cer"
-                        panelKeyFile="${acmeCertDir}/${CF_Domain}.key"
+                    local panelCertFile=""
+                    local panelKeyFile=""
+                    local subCertFile=""
+                    local subKeyFile=""
+                    local certFiles=()
+                    local subCertFiles=()
+                    local currentSubDomain=""
+
+                    if mapfile -t certFiles < <(resolve_acme_cert_files "${CF_Domain}"); then
+                        panelCertFile="${certFiles[0]}"
+                        panelKeyFile="${certFiles[1]}"
                     fi
 
-                    if [ -f "${panelCertFile}" ] && [ -f "${panelKeyFile}" ]; then
+                    currentSubDomain="$(get_current_sub_domain)"
+                    if [ -n "${currentSubDomain}" ]; then
+                        if [ "${currentSubDomain}" = "${CF_Domain}" ]; then
+                            subCertFile="${panelCertFile}"
+                            subKeyFile="${panelKeyFile}"
+                        else
+                            if mapfile -t subCertFiles < <(resolve_acme_cert_files "${currentSubDomain}"); then
+                                subCertFile="${subCertFiles[0]}"
+                                subKeyFile="${subCertFiles[1]}"
+                            fi
+                        fi
+                    fi
+
+                    if [ -n "${panelCertFile}" ] && [ -n "${panelKeyFile}" ]; then
                         LOGI "正在自动回填面板 HTTPS 路径..."
-                        /usr/local/s-ui/sui setting -webCertFile "${panelCertFile}" -webKeyFile "${panelKeyFile}"
+                        local settingArgs=(/usr/local/s-ui/sui setting -webCertFile "${panelCertFile}" -webKeyFile "${panelKeyFile}")
+                        if [ -n "${subCertFile}" ] && [ -n "${subKeyFile}" ]; then
+                            settingArgs+=(-subCertFile "${subCertFile}" -subKeyFile "${subKeyFile}")
+                        fi
+                        "${settingArgs[@]}"
                         if [ $? -ne 0 ]; then
                             LOGE "自动回填面板路径失败，请稍后手动检查设置-界面"
                         else
                             LOGI "面板 HTTPS 路径已自动回填："
                             echo -e "${green}${panelCertFile}${plain}"
                             echo -e "${green}${panelKeyFile}${plain}"
+                            if [ -n "${subCertFile}" ] && [ -n "${subKeyFile}" ]; then
+                                LOGI "Sub HTTPS 路径已自动回填："
+                                echo -e "${green}${subCertFile}${plain}"
+                                echo -e "${green}${subKeyFile}${plain}"
+                            fi
                             LOGI "正在重启面板以应用新证书..."
                             /usr/local/s-ui/sui restart
                             if [ $? -ne 0 ]; then
