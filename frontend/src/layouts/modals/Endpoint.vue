@@ -194,9 +194,14 @@ export default {
     },
     findFreeIP(): string{
       const peerAllowedIPs = this.endpoint.peers.map((peer: any) => peer.allowed_ips).flat()
+      const localIPv4 = this.endpoint.address?.find((address: string) => address.includes('.'))?.split('/')[0]
+      const octets = localIPv4?.split('.').map((part: string) => Number(part)) ?? []
+      const hasValidIPv4 = octets.length === 4 && octets.every((part: number) => Number.isInteger(part) && part >= 0 && part <= 255)
+      const subnet = hasValidIPv4 ? octets.slice(0, 3).join('.') : '10.0.1'
+
       for (let i = 2; i < 255; i++) {
-        const newIP = '10.0.1.'+ i.toString() +'/32'
-        if (!peerAllowedIPs.includes(newIP)) return newIP
+        const newIP = subnet + '.' + i.toString() + '/32'
+        if (i !== octets[3] && !peerAllowedIPs.includes(newIP)) return newIP
       }
       return '0.0.0.0/0'
     },

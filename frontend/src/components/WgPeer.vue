@@ -3,32 +3,39 @@
     <v-col cols="12" sm="8">
       <v-text-field
         v-model="privateKey"
-        :label="$t('types.wg.privKey')"
-        append-icon="mdi-key-star"
-        @click:append="refreshKey"
-        hide-details></v-text-field>
+        :label="$t('types.wg.clientPrivateKey')"
+        :hint="$t('types.wg.clientPrivateHint')"
+        append-inner-icon="mdi-key-star"
+        @click:append-inner="refreshKey"
+        persistent-hint></v-text-field>
     </v-col>
     <v-col cols="12" sm="8">
-      <v-text-field v-model="publicKey" :label="$t('types.wg.pubKey')" hide-details></v-text-field>
+      <v-text-field
+        v-model="publicKey"
+        :label="$t('types.wg.clientPublicKey')"
+        :hint="$t('types.wg.clientPublicHint')"
+        persistent-hint></v-text-field>
     </v-col>
     <v-col cols="12" sm="8">
-      <v-text-field v-model="data.pre_shared_key" :label="$t('types.wg.psk')" hide-details></v-text-field>
+      <v-text-field v-model="data.pre_shared_key" :label="$t('types.wg.psk')" :hint="$t('types.wg.optionalHint')" persistent-hint></v-text-field>
     </v-col>
   </v-row>
   <v-row>
     <v-col cols="12" sm="6" md="4">
       <v-text-field
-      :label="$t('out.addr')"
-      hide-details
+      :label="$t('types.wg.peerAddress')"
+      :hint="$t('types.wg.peerAddressHint')"
+      persistent-hint
       v-model="address">
       </v-text-field>
     </v-col>
     <v-col cols="12" sm="6" md="4">
       <v-text-field
-      :label="$t('out.port')"
+      :label="$t('types.wg.peerPort')"
       type="number"
       min="0"
-      hide-details
+      :hint="$t('types.wg.peerPortHint')"
+      persistent-hint
       v-model.number="port">
       </v-text-field>
     </v-col>
@@ -38,14 +45,20 @@
       type="number"
       min="0"
       :suffix="$t('date.s')"
-      hide-details
+      :hint="$t('types.wg.keepAliveHint')"
+      persistent-hint
       v-model.number="keepAlive">
       </v-text-field>
     </v-col>
   </v-row>
   <v-row>
     <v-col cols="12" sm="6">
-      <v-text-field v-model="allowed_ips" :label="$t('types.wg.allowedIp') + ' ' + $t('commaSeparated')" hide-details></v-text-field>
+      <v-text-field
+        v-model="allowed_ips"
+        :label="$t('types.wg.clientTunnelIp')"
+        :hint="$t('types.wg.allowedIpHint')"
+        placeholder="10.10.0.2/32"
+        persistent-hint></v-text-field>
     </v-col>
     <v-col cols="12" sm="6">
       <v-text-field v-model="reserved" :label="'Reserved ' + $t('commaSeparated')" hide-details></v-text-field>
