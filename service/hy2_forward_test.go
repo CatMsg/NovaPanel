@@ -44,6 +44,37 @@ func TestMergeHy2ForwardPorts(t *testing.T) {
 	}
 }
 
+func TestHy2ForwardScriptAllowsPurgeWithoutTag(t *testing.T) {
+	workDir := t.TempDir()
+	binDir := filepath.Join(workDir, "bin")
+	etcDir := filepath.Join(workDir, "etc", "ufw")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+	if err := os.MkdirAll(etcDir, 0o755); err != nil {
+		t.Fatalf("mkdir ufw dir: %v", err)
+	}
+
+	script, err := os.ReadFile(filepath.Join(mustRepoRoot(t), "scripts", "hy2-forward.sh"))
+	if err != nil {
+		t.Fatalf("read script: %v", err)
+	}
+	script = []byte(strings.NewReplacer(
+		"/etc/ufw/before.rules", filepath.Join(etcDir, "before.rules"),
+		"/etc/ufw/before6.rules", filepath.Join(etcDir, "before6.rules"),
+	).Replace(string(script)))
+	scriptPath := filepath.Join(workDir, "hy2-forward.sh")
+	if err := os.WriteFile(scriptPath, script, 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	cmd := exec.Command("bash", scriptPath, "purge")
+	cmd.Env = append(os.Environ(), "PATH="+binDir)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("purge without tag failed: %v\n%s", err, output)
+	}
+}
+
 func TestRunHy2ForwardScriptIptables(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("hy2 forwarding script is only exercised on linux")

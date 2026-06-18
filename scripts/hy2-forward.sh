@@ -7,20 +7,25 @@ listen_port="${3:-}"
 ports_csv="${4:-}"
 backend_override="${HY2_FORWARD_BACKEND:-auto}"
 
-if [[ -z "${action}" || -z "${tag}" ]]; then
-  echo "usage: $0 <apply|remove> <tag> <listen_port> <ports_csv>" >&2
+if [[ -z "${action}" ]]; then
+  echo "usage: $0 <apply|remove|purge> [tag] [listen_port] [ports_csv]" >&2
   exit 1
 fi
 
-if [[ "${action}" != "apply" && "${action}" != "remove" ]]; then
-  echo "invalid action: ${action}" >&2
-  exit 1
-fi
-
-if [[ "${action}" != "purge" && -z "${tag}" ]]; then
-  echo "usage: $0 <apply|remove|purge> <tag> <listen_port> <ports_csv>" >&2
-  exit 1
-fi
+case "${action}" in
+  apply|remove)
+    if [[ -z "${tag}" ]]; then
+      echo "usage: $0 <${action}> <tag> <listen_port> <ports_csv>" >&2
+      exit 1
+    fi
+    ;;
+  purge)
+    ;;
+  *)
+    echo "invalid action: ${action}" >&2
+    exit 1
+    ;;
+esac
 
 if [[ "${action}" == "apply" ]]; then
   if [[ -z "${listen_port}" || ! "${listen_port}" =~ ^[0-9]+$ || "${listen_port}" -lt 1 || "${listen_port}" -gt 65535 ]]; then
@@ -29,9 +34,14 @@ if [[ "${action}" == "apply" ]]; then
   fi
 fi
 
-chain="NPHY2_$(printf '%s' "${tag}" | sha256sum | awk '{print substr($1, 1, 12)}')"
-begin_marker="# NOVAPANEL HY2 BEGIN ${chain}"
-end_marker="# NOVAPANEL HY2 END ${chain}"
+chain=""
+begin_marker="# NOVAPANEL HY2 BEGIN"
+end_marker="# NOVAPANEL HY2 END"
+if [[ "${action}" != "purge" ]]; then
+  chain="NPHY2_$(printf '%s' "${tag}" | sha256sum | awk '{print substr($1, 1, 12)}')"
+  begin_marker="# NOVAPANEL HY2 BEGIN ${chain}"
+  end_marker="# NOVAPANEL HY2 END ${chain}"
+fi
 
 has_cmd() {
   command -v "$1" >/dev/null 2>&1
@@ -396,6 +406,15 @@ select_backend() {
   printf '%s' "none"
 }
 
+if [[ "${action}" == "purge" ]]; then
+  purge_ufw
+  purge_nftables_family ip
+  purge_nftables_family ip6
+  purge_iptables_bin iptables
+  purge_iptables_bin ip6tables
+  exit 0
+fi
+
 normalized_ports="$(normalize_ports "${ports_csv}")"
 backend="$(select_backend)"
 
@@ -436,12 +455,5 @@ case "${action}" in
         exit 0
         ;;
     esac
-    ;;
-  purge)
-    purge_ufw
-    purge_nftables_family ip
-    purge_nftables_family ip6
-    purge_iptables_bin iptables
-    purge_iptables_bin ip6tables
     ;;
 esac
