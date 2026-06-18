@@ -120,5 +120,6 @@ func ParseCmd() {
 	default:
 		fmt.Println("Invalid subcommands")
 		flag.Usage()
+		os.Exit(2)
 	}
 }

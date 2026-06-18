@@ -256,17 +256,25 @@ stop() {
 }
 
 restart() {
-    systemctl restart $1
+    local service_name="$1"
+    local result=0
+
+    if ! systemctl restart "${service_name}"; then
+        LOGE "重启 ${service_name} 失败，systemctl 返回错误"
+        result=1
+    fi
     sleep 2
-    check_status $1
-    if [[ $? == 0 ]]; then
-        LOGI "${1} 重启成功"
+    check_status "${service_name}"
+    if [[ $? == 0 && ${result} -eq 0 ]]; then
+        LOGI "${service_name} 重启成功"
     else
-        LOGE "重启 ${1} 失败，可能是启动时间超过两秒，请稍后查看日志信息"
+        LOGE "重启 ${service_name} 失败，可能是启动时间超过两秒，请稍后查看日志信息"
+        result=1
     fi
     if [[ $# == 1 ]]; then
         before_show_menu
     fi
+    return ${result}
 }
 
 status() {
@@ -787,7 +795,7 @@ ssl_cert_issue_CF() {
                                 echo -e "${green}${subKeyFile}${plain}"
                             fi
                             LOGI "正在重启面板以应用新证书..."
-                            /usr/local/s-ui/sui restart
+                            restart s-ui 0
                             if [ $? -ne 0 ]; then
                                 LOGE "面板重启失败，请手动重启服务"
                             fi
@@ -806,7 +814,7 @@ ssl_cert_issue_CF() {
                 LOGE "清除 HTTPS 路径失败，请手动检查"
             else
                 LOGI "面板和 Sub HTTPS 路径已清除，正在重启面板..."
-                /usr/local/s-ui/sui restart
+                restart s-ui 0
                 if [ $? -ne 0 ]; then
                     LOGE "面板重启失败，请手动重启服务"
                 fi
