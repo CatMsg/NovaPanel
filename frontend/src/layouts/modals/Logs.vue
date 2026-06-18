@@ -2,11 +2,12 @@
   <v-dialog
     v-model="control.visible"
     transition="dialog-bottom-transition"
+    scrollable
     width="90%"
     max-width="1200"
     :loading="loading"
   >
-    <v-card class="rounded-lg">
+    <v-card class="rounded-lg log-dialog">
       <v-card-title>
         <v-row>
           <v-col>
@@ -20,8 +21,8 @@
         </v-row>
       </v-card-title>
       <v-divider></v-divider>
-      <v-card-text>
-        <v-row>
+      <v-card-text class="log-dialog__body">
+        <v-row class="log-dialog__controls">
           <v-col cols="12" sm="6" md="4">
             <v-select
             hide-details
@@ -58,7 +59,9 @@
           </v-col>
         </v-row>
         <v-alert v-if="!loading && filteredLines.length === 0" type="warning" variant="outlined" :text="$t('noData')" />
-        <v-card v-else style="background-color: background" dir="ltr" v-html="filteredLines.join('<br />')"></v-card>
+        <v-sheet v-else class="log-dialog__viewer" rounded="lg" dir="ltr">
+          <div class="log-dialog__content" v-html="filteredLines.join('<br />')"></div>
+        </v-sheet>
       </v-card-text>
     </v-card>
   </v-dialog>
@@ -136,3 +139,51 @@ export default {
   },
 }
 </script>
+
+<style scoped lang="scss">
+.log-dialog {
+  display: flex;
+  flex-direction: column;
+  max-height: min(90vh, 900px);
+}
+
+.log-dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.log-dialog__controls {
+  flex: 0 0 auto;
+}
+
+.log-dialog__viewer {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  background: rgb(var(--v-theme-surface));
+  border: 1px solid rgba(var(--v-border-color), 0.12);
+}
+
+.log-dialog__content {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-word;
+  white-space: normal;
+}
+
+@media (max-width: 600px) {
+  .log-dialog {
+    max-height: calc(100vh - 96px);
+  }
+
+  .log-dialog__viewer {
+    padding: 12px;
+  }
+}
+</style>
