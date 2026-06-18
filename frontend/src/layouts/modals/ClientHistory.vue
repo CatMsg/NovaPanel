@@ -2,11 +2,12 @@
   <v-dialog
     :model-value="visible"
     transition="dialog-bottom-transition"
+    scrollable
     width="90%"
     max-width="1200"
     @update:model-value="onDialogUpdate"
   >
-    <v-card class="rounded-lg" :loading="loading">
+    <v-card class="rounded-lg history-dialog" :loading="loading">
       <v-card-title>
         <v-row>
           <v-col>
@@ -20,8 +21,8 @@
         </v-row>
       </v-card-title>
       <v-divider></v-divider>
-      <v-card-text>
-        <v-row class="mb-2" align="center">
+      <v-card-text class="history-dialog__body">
+        <v-row class="mb-2 history-dialog__filters" align="center">
           <v-col cols="12" md="8">
             <v-text-field
               v-model="keyword"
@@ -44,44 +45,45 @@
           variant="outlined"
           :text="$t('noData')"
         />
-        <v-data-table
-          v-else
-          :headers="headers"
-          :items="filteredHistory"
-          item-value="dateTime"
-          density="compact"
-          items-per-page="10"
-          :mobile="smAndDown"
-          mobile-breakpoint="sm"
-          hide-no-data
-          fixed-header
-          width="100%"
-          class="elevation-1 rounded"
-        >
-          <template v-slot:item.dateTime="{ value }">
-            <v-chip variant="text" dir="ltr" density="compact">
-              {{ dateFormatted(value) }}
-            </v-chip>
-          </template>
-          <template v-slot:item.domain="{ value }">
-            <span dir="ltr">{{ value || '-' }}</span>
-          </template>
-          <template v-slot:item.destination="{ value }">
-            <span dir="ltr">{{ value || '-' }}</span>
-          </template>
-          <template v-slot:item.inbound="{ value }">
-            {{ value || '-' }}
-          </template>
-          <template v-slot:item.outbound="{ value }">
-            {{ value || '-' }}
-          </template>
-          <template v-slot:item.network="{ value }">
-            {{ value || '-' }}
-          </template>
-          <template v-slot:item.protocol="{ value }">
-            {{ value || '-' }}
-          </template>
-        </v-data-table>
+        <div v-else class="history-dialog__table-shell">
+          <v-data-table
+            :headers="headers"
+            :items="filteredHistory"
+            item-value="dateTime"
+            density="compact"
+            items-per-page="10"
+            :mobile="smAndDown"
+            mobile-breakpoint="sm"
+            hide-no-data
+            fixed-header
+            width="100%"
+            class="history-dialog__table elevation-1 rounded"
+          >
+            <template v-slot:item.dateTime="{ value }">
+              <v-chip variant="text" dir="ltr" density="compact">
+                {{ dateFormatted(value) }}
+              </v-chip>
+            </template>
+            <template v-slot:item.domain="{ value }">
+              <span dir="ltr">{{ value || '-' }}</span>
+            </template>
+            <template v-slot:item.destination="{ value }">
+              <span dir="ltr">{{ value || '-' }}</span>
+            </template>
+            <template v-slot:item.inbound="{ value }">
+              {{ value || '-' }}
+            </template>
+            <template v-slot:item.outbound="{ value }">
+              {{ value || '-' }}
+            </template>
+            <template v-slot:item.network="{ value }">
+              {{ value || '-' }}
+            </template>
+            <template v-slot:item.protocol="{ value }">
+              {{ value || '-' }}
+            </template>
+          </v-data-table>
+        </div>
       </v-card-text>
     </v-card>
   </v-dialog>
@@ -190,3 +192,45 @@ watch(
   { immediate: true },
 )
 </script>
+
+<style scoped lang="scss">
+.history-dialog {
+  display: flex;
+  flex-direction: column;
+  max-height: min(90vh, 900px);
+}
+
+.history-dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.history-dialog__filters {
+  flex: 0 0 auto;
+}
+
+.history-dialog__table-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.history-dialog__table {
+  height: 100%;
+}
+
+.history-dialog__table :deep(.v-table__wrapper) {
+  max-height: 100%;
+  overflow: auto;
+}
+
+@media (max-width: 600px) {
+  .history-dialog {
+    max-height: calc(100vh - 96px);
+  }
+}
+</style>
