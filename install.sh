@@ -70,22 +70,22 @@ install_firewall_backend() {
         return 0
     fi
 
-    echo -e "${yellow}未检测到 ufw / nftables / iptables，正在尝试安装 nftables...${plain}"
+    echo -e "${yellow}未检测到 ufw / iptables / nftables，正在尝试安装 iptables...${plain}"
     case "${release}" in
     centos | almalinux | rocky | oracle)
-        yum install -y -q nftables || yum install -y -q iptables
+        yum install -y -q iptables || yum install -y -q nftables
         ;;
     fedora)
-        dnf install -y -q nftables || dnf install -y -q iptables
+        dnf install -y -q iptables || dnf install -y -q nftables
         ;;
     arch | manjaro | parch)
-        pacman -S --noconfirm --needed nftables || pacman -S --noconfirm --needed iptables
+        pacman -S --noconfirm --needed iptables || pacman -S --noconfirm --needed nftables
         ;;
     opensuse-tumbleweed)
-        zypper -q install -y nftables || zypper -q install -y iptables
+        zypper -q install -y iptables || zypper -q install -y nftables
         ;;
     *)
-        apt-get install -y -q nftables || apt-get install -y -q iptables
+        apt-get install -y -q iptables || apt-get install -y -q nftables
         ;;
     esac
 

@@ -11,11 +11,11 @@ func detectFirewallBackend() string {
 	if isUFWActive() {
 		return "UFW"
 	}
-	if commandExists("nft") {
-		return "nftables"
-	}
 	if commandExists("iptables") || commandExists("ip6tables") {
 		return "iptables"
+	}
+	if commandExists("nft") {
+		return "nftables"
 	}
 	return "unknown"
 }
@@ -75,30 +75,30 @@ func installFirewallBackend() error {
 
 	switch release {
 	case "centos", "almalinux", "rocky", "oracle":
-		if err := run("yum", "install", "-y", "-q", "nftables"); err == nil {
+		if err := run("yum", "install", "-y", "-q", "iptables"); err == nil {
 			return nil
 		}
-		return run("yum", "install", "-y", "-q", "iptables")
+		return run("yum", "install", "-y", "-q", "nftables")
 	case "fedora":
-		if err := run("dnf", "install", "-y", "-q", "nftables"); err == nil {
+		if err := run("dnf", "install", "-y", "-q", "iptables"); err == nil {
 			return nil
 		}
-		return run("dnf", "install", "-y", "-q", "iptables")
+		return run("dnf", "install", "-y", "-q", "nftables")
 	case "arch", "manjaro", "parch":
-		if err := run("pacman", "-S", "--noconfirm", "--needed", "nftables"); err == nil {
+		if err := run("pacman", "-S", "--noconfirm", "--needed", "iptables"); err == nil {
 			return nil
 		}
-		return run("pacman", "-S", "--noconfirm", "--needed", "iptables")
+		return run("pacman", "-S", "--noconfirm", "--needed", "nftables")
 	case "opensuse-tumbleweed":
-		if err := run("zypper", "-q", "install", "-y", "nftables"); err == nil {
+		if err := run("zypper", "-q", "install", "-y", "iptables"); err == nil {
 			return nil
 		}
-		return run("zypper", "-q", "install", "-y", "iptables")
+		return run("zypper", "-q", "install", "-y", "nftables")
 	default:
-		if err := run("apt-get", "install", "-y", "-q", "nftables"); err == nil {
+		if err := run("apt-get", "install", "-y", "-q", "iptables"); err == nil {
 			return nil
 		}
-		return run("apt-get", "install", "-y", "-q", "iptables")
+		return run("apt-get", "install", "-y", "-q", "nftables")
 	}
 }
 

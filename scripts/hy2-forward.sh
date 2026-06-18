@@ -383,13 +383,13 @@ select_backend() {
     return 0
   fi
 
-  if has_cmd nft; then
-    printf '%s' "nftables"
+  if has_cmd iptables || has_cmd ip6tables; then
+    printf '%s' "iptables"
     return 0
   fi
 
-  if has_cmd iptables || has_cmd ip6tables; then
-    printf '%s' "iptables"
+  if has_cmd nft; then
+    printf '%s' "nftables"
     return 0
   fi
 
