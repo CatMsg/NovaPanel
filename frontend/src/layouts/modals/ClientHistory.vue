@@ -197,6 +197,7 @@ watch(
 .history-dialog {
   display: flex;
   flex-direction: column;
+  height: min(90dvh, 900px);
   max-height: min(90vh, 900px);
 }
 
@@ -214,22 +215,34 @@ watch(
 }
 
 .history-dialog__table-shell {
+  display: flex;
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
 }
 
 .history-dialog__table {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   height: 100%;
+  min-height: 0;
 }
 
 .history-dialog__table :deep(.v-table__wrapper) {
-  max-height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.history-dialog__table :deep(.v-data-table-footer) {
+  flex: 0 0 auto;
 }
 
 @media (max-width: 600px) {
   .history-dialog {
+    height: calc(100dvh - 32px);
     max-height: calc(100vh - 96px);
   }
 }
