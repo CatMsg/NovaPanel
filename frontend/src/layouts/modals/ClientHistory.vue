@@ -2,7 +2,6 @@
   <v-dialog
     :model-value="visible"
     transition="dialog-bottom-transition"
-    scrollable
     width="90%"
     max-width="1200"
     @update:model-value="onDialogUpdate"
@@ -45,19 +44,21 @@
           variant="outlined"
           :text="$t('noData')"
         />
-        <div v-else class="history-dialog__table-shell">
+        <div v-else ref="tableShell" class="history-dialog__table-shell">
           <v-data-table
+            v-model:items-per-page="itemsPerPage"
             :headers="headers"
             :items="filteredHistory"
             item-value="dateTime"
             density="compact"
-            items-per-page="10"
             :mobile="smAndDown"
             mobile-breakpoint="sm"
             hide-no-data
             fixed-header
             width="100%"
             class="history-dialog__table elevation-1 rounded"
+            @update:items-per-page="resetTableScroll"
+            @update:page="resetTableScroll"
           >
             <template v-slot:item.dateTime="{ value }">
               <v-chip variant="text" dir="ltr" density="compact">
@@ -93,7 +94,7 @@
 import Data from '@/store/modules/data'
 import { i18n } from '@/locales'
 import { HistoryEntry } from '@/types/clients'
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useDisplay } from 'vuetify'
 
 const { smAndDown } = useDisplay()
@@ -109,6 +110,8 @@ const loading = ref(false)
 const clientName = ref('')
 const history = ref<HistoryEntry[]>([])
 const keyword = ref('')
+const itemsPerPage = ref(10)
+const tableShell = ref<HTMLElement | null>(null)
 
 const headers = [
   { title: i18n.global.t('admin.date') + '-' + i18n.global.t('admin.time'), key: 'dateTime' },
@@ -169,6 +172,15 @@ const dateFormatted = (dt: number): string => {
   return date.toLocaleString(locale)
 }
 
+const resetTableScroll = () => {
+  nextTick(() => {
+    requestAnimationFrame(() => {
+      const wrapper = tableShell.value?.querySelector<HTMLElement>('.v-table__wrapper')
+      if (wrapper) wrapper.scrollTop = 0
+    })
+  })
+}
+
 const onDialogUpdate = (v: boolean) => {
   if (!v) {
     history.value = []
@@ -227,6 +239,7 @@ watch(
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  overflow: hidden;
 }
 
 .history-dialog__table :deep(.v-table__wrapper) {
@@ -234,6 +247,19 @@ watch(
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.history-dialog__table :deep(.v-table__wrapper::-webkit-scrollbar) {
+  width: 8px;
+  height: 8px;
+}
+
+.history-dialog__table :deep(.v-table__wrapper::-webkit-scrollbar-thumb) {
+  background: rgba(var(--v-theme-on-surface), 0.24);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
 }
 
 .history-dialog__table :deep(.v-data-table-footer) {
