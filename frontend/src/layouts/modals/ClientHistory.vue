@@ -46,9 +46,9 @@
         />
         <div v-else ref="tableShell" class="history-dialog__table-shell">
           <v-data-table
-            v-model:items-per-page="itemsPerPage"
             :headers="headers"
             :items="filteredHistory"
+            :items-per-page="10"
             item-value="dateTime"
             density="compact"
             :mobile="smAndDown"
@@ -57,7 +57,6 @@
             fixed-header
             width="100%"
             class="history-dialog__table elevation-1 rounded"
-            @update:items-per-page="resetTableScroll"
             @update:page="resetTableScroll"
           >
             <template v-slot:item.dateTime="{ value }">
@@ -110,7 +109,6 @@ const loading = ref(false)
 const clientName = ref('')
 const history = ref<HistoryEntry[]>([])
 const keyword = ref('')
-const itemsPerPage = ref(10)
 const tableShell = ref<HTMLElement | null>(null)
 
 const headers = [
@@ -264,6 +262,10 @@ watch(
 
 .history-dialog__table :deep(.v-data-table-footer) {
   flex: 0 0 auto;
+}
+
+.history-dialog__table :deep(.v-data-table-footer__items-per-page) {
+  display: none;
 }
 
 @media (max-width: 600px) {
