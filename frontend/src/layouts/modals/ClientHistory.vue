@@ -110,27 +110,27 @@
             @update:page="resetTableScroll"
           >
             <template v-slot:item.dateTime="{ value }">
-              <v-chip variant="text" dir="ltr" density="compact">
+              <v-chip class="history-dialog__date-chip" variant="text" dir="ltr" density="compact">
                 {{ dateFormatted(value) }}
               </v-chip>
             </template>
             <template v-slot:item.domain="{ value }">
-              <span dir="ltr">{{ value || '-' }}</span>
+              <span class="history-dialog__table-text" dir="ltr" :title="value || '-'">{{ value || '-' }}</span>
             </template>
             <template v-slot:item.destination="{ value }">
-              <span dir="ltr">{{ value || '-' }}</span>
+              <span class="history-dialog__table-text" dir="ltr" :title="value || '-'">{{ value || '-' }}</span>
             </template>
             <template v-slot:item.inbound="{ value }">
-              {{ value || '-' }}
+              <span class="history-dialog__table-text" :title="value || '-'">{{ value || '-' }}</span>
             </template>
             <template v-slot:item.outbound="{ value }">
-              {{ value || '-' }}
+              <span class="history-dialog__table-text" :title="value || '-'">{{ value || '-' }}</span>
             </template>
             <template v-slot:item.network="{ value }">
-              {{ value || '-' }}
+              <span class="history-dialog__table-text" :title="value || '-'">{{ value || '-' }}</span>
             </template>
             <template v-slot:item.protocol="{ value }">
-              {{ value || '-' }}
+              <span class="history-dialog__table-text" :title="value || '-'">{{ value || '-' }}</span>
             </template>
           </v-data-table>
         </div>
@@ -302,14 +302,15 @@ watch(
 
 .history-dialog__table-shell {
   display: flex;
-  flex: 1 1 auto;
+  flex: 1 1 0;
+  height: 0;
   min-height: 0;
   overflow: hidden;
 }
 
 .history-dialog__table {
   display: flex;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   flex-direction: column;
   height: 100%;
   min-height: 0;
@@ -317,11 +318,46 @@ watch(
 }
 
 .history-dialog__table :deep(.v-table__wrapper) {
-  flex: 1 1 auto;
+  flex: 1 1 0;
+  height: 0;
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+}
+
+.history-dialog__table :deep(table) {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.history-dialog__table :deep(th),
+.history-dialog__table :deep(td) {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.history-dialog__table :deep(tbody tr) {
+  height: 44px;
+}
+
+.history-dialog__table :deep(.v-data-table__td) {
+  max-width: 1px;
+}
+
+.history-dialog__date-chip {
+  max-width: 100%;
+}
+
+.history-dialog__table-text,
+.history-dialog__date-chip :deep(.v-chip__content) {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .history-dialog__table :deep(.v-table__wrapper::-webkit-scrollbar) {
