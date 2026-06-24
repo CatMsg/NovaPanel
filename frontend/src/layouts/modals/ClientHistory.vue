@@ -302,15 +302,14 @@ watch(
 
 .history-dialog__table-shell {
   display: flex;
-  flex: 1 1 0;
-  height: 0;
+  flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
 }
 
 .history-dialog__table {
   display: flex;
-  flex: 1 1 0;
+  flex: 1 1 auto;
   flex-direction: column;
   height: 100%;
   min-height: 0;
@@ -318,8 +317,7 @@ watch(
 }
 
 .history-dialog__table :deep(.v-table__wrapper) {
-  flex: 1 1 0;
-  height: 0;
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
@@ -340,10 +338,6 @@ watch(
 
 .history-dialog__table :deep(tbody tr) {
   height: 44px;
-}
-
-.history-dialog__table :deep(.v-data-table__td) {
-  max-width: 1px;
 }
 
 .history-dialog__date-chip {
