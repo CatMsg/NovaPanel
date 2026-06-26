@@ -1,0 +1,58 @@
+# This file is a backup of the GHCR publishing portion removed from .github/workflows/release.yml.
+# Keep it here for easy restoration when GHCR publishing is needed again.
+
+permissions:
+  contents: write
+  packages: write
+  actions: write
+
+env:
+  GHCR_IMAGE: ghcr.io/catmsg/novapanel-app
+
+jobs:
+  publish-image:
+    name: 发布 GHCR 镜像
+    needs: build-linux
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v6.0.2
+
+      - name: 规范化发布标签
+        id: vars
+        run: |
+          VERSION="$(tr -d '[:space:]' < config/version)"
+          TAG="${{ inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="v$VERSION"
+          fi
+          case "$TAG" in
+            v*) echo "tag=$TAG" >> "$GITHUB_OUTPUT" ;;
+            *) echo "tag=v$TAG" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: 登录 GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: 构建并推送镜像
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.GHCR_IMAGE }}:${{ steps.vars.outputs.tag }}
+            ${{ env.GHCR_IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.title=NovaPanel
+            org.opencontainers.image.description=NovaPanel is a web panel and subscription manager evolved from s-ui
+            org.opencontainers.image.source=https://github.com/CatMsg/NovaPanel
+            org.opencontainers.image.version=${{ steps.vars.outputs.tag }}
