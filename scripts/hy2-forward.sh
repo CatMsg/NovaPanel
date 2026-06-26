@@ -241,6 +241,10 @@ apply_ufw_allow_rules() {
   local normalized_ports="${1:-}"
   local port
 
+  if ! has_cmd ufw; then
+    return 0
+  fi
+
   while IFS= read -r port; do
     if [[ -n "${port}" ]]; then
       ufw allow "${port}" comment "NovaPanel ${chain}" >/dev/null
@@ -252,6 +256,10 @@ remove_ufw_allow_rules() {
   local normalized_ports="${1:-}"
   local port
 
+  if ! has_cmd ufw; then
+    return 0
+  fi
+
   while IFS= read -r port; do
     if [[ -n "${port}" ]]; then
       ufw --force delete allow "${port}" >/dev/null 2>&1 || true
@@ -261,10 +269,22 @@ remove_ufw_allow_rules() {
 
 remove_iptables() {
   local bin="$1"
+  local normalized_ports="${2:-}"
+  local port
   local protocol
   if ! has_cmd "${bin}"; then
     return 0
   fi
+
+  while IFS= read -r port; do
+    if [[ -n "${port}" && -n "${listen_port}" && "${listen_port}" =~ ^[0-9]+$ ]]; then
+      for protocol in tcp udp; do
+        while "${bin}" -t nat -C PREROUTING -p "${protocol}" --dport "${port}" -j REDIRECT --to-ports "${listen_port}" >/dev/null 2>&1; do
+          "${bin}" -t nat -D PREROUTING -p "${protocol}" --dport "${port}" -j REDIRECT --to-ports "${listen_port}" || true
+        done
+      done
+    fi
+  done <<< "${normalized_ports}"
 
   for protocol in tcp udp; do
     while "${bin}" -t nat -C PREROUTING -p "${protocol}" -j "${chain}" >/dev/null 2>&1; do
@@ -286,8 +306,10 @@ purge_iptables_bin() {
 
   while IFS= read -r chain_name; do
     [[ "${chain_name}" == NPHY2_* ]] || continue
-    while "${bin}" -t nat -C PREROUTING -p udp -j "${chain_name}" >/dev/null 2>&1; do
-      "${bin}" -t nat -D PREROUTING -p udp -j "${chain_name}" || true
+    for protocol in tcp udp; do
+      while "${bin}" -t nat -C PREROUTING -p "${protocol}" -j "${chain_name}" >/dev/null 2>&1; do
+        "${bin}" -t nat -D PREROUTING -p "${protocol}" -j "${chain_name}" || true
+      done
     done
     "${bin}" -t nat -F "${chain_name}" 2>/dev/null || true
     "${bin}" -t nat -X "${chain_name}" 2>/dev/null || true
@@ -479,21 +501,10 @@ case "${action}" in
     esac
     ;;
   remove)
-    case "${backend}" in
-      ufw)
-        remove_ufw "${normalized_ports}"
-        ;;
-      nftables)
-        remove_nftables_family ip
-        remove_nftables_family ip6
-        ;;
-      iptables)
-        remove_iptables iptables
-        remove_iptables ip6tables
-        ;;
-      none)
-        exit 0
-        ;;
-    esac
+    remove_ufw "${normalized_ports}"
+    remove_nftables_family ip
+    remove_nftables_family ip6
+    remove_iptables iptables "${normalized_ports}"
+    remove_iptables ip6tables "${normalized_ports}"
     ;;
 esac
