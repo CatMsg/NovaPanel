@@ -119,7 +119,7 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		var oldInbound *model.Inbound
 		if act == "edit" {
 			oldInbound = &model.Inbound{}
-			err = tx.Model(model.Inbound{}).Select("tag", "type").Where("id = ?", inbound.Id).First(oldInbound).Error
+			err = tx.Model(model.Inbound{}).Where("id = ?", inbound.Id).First(oldInbound).Error
 			if err != nil {
 				return err
 			}
@@ -191,7 +191,7 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			return err
 		}
 		oldInbound := &model.Inbound{}
-		err = tx.Model(model.Inbound{}).Select("tag", "type").Where("tag = ?", tag).First(oldInbound).Error
+		err = tx.Model(model.Inbound{}).Where("tag = ?", tag).First(oldInbound).Error
 		if err != nil {
 			return err
 		}

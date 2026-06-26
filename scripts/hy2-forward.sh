@@ -237,6 +237,28 @@ reload_ufw() {
   fi
 }
 
+apply_ufw_allow_rules() {
+  local normalized_ports="${1:-}"
+  local port
+
+  while IFS= read -r port; do
+    if [[ -n "${port}" ]]; then
+      ufw allow "${port}" comment "NovaPanel ${chain}" >/dev/null
+    fi
+  done <<< "${normalized_ports}"
+}
+
+remove_ufw_allow_rules() {
+  local normalized_ports="${1:-}"
+  local port
+
+  while IFS= read -r port; do
+    if [[ -n "${port}" ]]; then
+      ufw --force delete allow "${port}" >/dev/null 2>&1 || true
+    fi
+  done <<< "${normalized_ports}"
+}
+
 remove_iptables() {
   local bin="$1"
   local protocol
@@ -377,12 +399,16 @@ remove_ufw_file() {
 apply_ufw() {
   local normalized_ports="${1:-}"
 
+  apply_ufw_allow_rules "${normalized_ports}"
   apply_ufw_file "/etc/ufw/before.rules" "ip" "${normalized_ports}"
   apply_ufw_file "/etc/ufw/before6.rules" "ip6" "${normalized_ports}"
   reload_ufw
 }
 
 remove_ufw() {
+  local normalized_ports="${1:-}"
+
+  remove_ufw_allow_rules "${normalized_ports}"
   remove_ufw_file "/etc/ufw/before.rules"
   remove_ufw_file "/etc/ufw/before6.rules"
   reload_ufw
@@ -455,7 +481,7 @@ case "${action}" in
   remove)
     case "${backend}" in
       ufw)
-        remove_ufw
+        remove_ufw "${normalized_ports}"
         ;;
       nftables)
         remove_nftables_family ip

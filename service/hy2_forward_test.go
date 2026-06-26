@@ -256,8 +256,15 @@ func TestRunHy2ForwardScriptUFW(t *testing.T) {
 	if !bytes.Contains(beforeRules, []byte("NOVAPANEL HY2 BEGIN")) || !bytes.Contains(beforeRules, []byte("-p tcp --dport 443")) || !bytes.Contains(beforeRules, []byte("-p udp --dport 8443")) || !bytes.Contains(beforeRules, []byte("REDIRECT --to-ports 12345")) {
 		t.Fatalf("ufw apply did not write expected NAT block:\n%s", string(beforeRules))
 	}
+	ufwLog, err := os.ReadFile(filepath.Join(workDir, "ufw.log"))
+	if err != nil {
+		t.Fatalf("read ufw log: %v", err)
+	}
+	if !bytes.Contains(ufwLog, []byte("ufw allow 443 comment NovaPanel ")) || !bytes.Contains(ufwLog, []byte("ufw allow 8443 comment NovaPanel ")) {
+		t.Fatalf("ufw apply did not add allow rules:\n%s", string(ufwLog))
+	}
 
-	cmd = exec.Command("bash", scriptPath, "remove", "hy2-demo-ufw", "0", "")
+	cmd = exec.Command("bash", scriptPath, "remove", "hy2-demo-ufw", "12345", "443,8443")
 	cmd.Env = env
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("remove failed: %v\n%s", err, string(out))
@@ -269,6 +276,13 @@ func TestRunHy2ForwardScriptUFW(t *testing.T) {
 	}
 	if bytes.Contains(beforeRules, []byte("NOVAPANEL HY2 BEGIN")) || bytes.Contains(beforeRules, []byte("REDIRECT --to-ports 12345")) {
 		t.Fatalf("ufw remove did not clear NAT block:\n%s", string(beforeRules))
+	}
+	ufwLog, err = os.ReadFile(filepath.Join(workDir, "ufw.log"))
+	if err != nil {
+		t.Fatalf("read ufw log after remove: %v", err)
+	}
+	if !bytes.Contains(ufwLog, []byte("ufw --force delete allow 443")) || !bytes.Contains(ufwLog, []byte("ufw --force delete allow 8443")) {
+		t.Fatalf("ufw remove did not delete allow rules:\n%s", string(ufwLog))
 	}
 }
 

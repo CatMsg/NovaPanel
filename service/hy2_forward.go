@@ -67,30 +67,36 @@ func (s *InboundService) RebuildHy2PortForwarding() error {
 }
 
 func (s *InboundService) syncInboundPortForwarding(oldInbound *model.Inbound, inbound *model.Inbound) error {
-	if inbound == nil {
-		if oldInbound == nil {
-			return nil
+	var listenPort int
+	var ports []int
+	if inbound != nil {
+		var err error
+		listenPort, ports, err = collectInboundForwardPorts(inbound)
+		if err != nil {
+			return err
 		}
-		return runInboundForwardScript("remove", oldInbound.Tag, 0, nil)
+
+		if err := validateInboundPortsAgainstSSH(inbound, ports); err != nil {
+			return err
+		}
 	}
 
-	listenPort, ports, err := collectInboundForwardPorts(inbound)
-	if err != nil {
-		return err
+	if oldInbound != nil {
+		oldListenPort, oldPorts, err := collectInboundForwardPorts(oldInbound)
+		if err != nil {
+			return err
+		}
+		if err := runInboundForwardScript("remove", oldInbound.Tag, oldListenPort, oldPorts); err != nil {
+			return err
+		}
 	}
 
-	if err := validateInboundPortsAgainstSSH(inbound, ports); err != nil {
-		return err
+	if inbound == nil {
+		return nil
 	}
 
 	if err := runInboundForwardScript("apply", inbound.Tag, listenPort, ports); err != nil {
 		return err
-	}
-
-	if oldInbound != nil && oldInbound.Tag != inbound.Tag {
-		if err := runInboundForwardScript("remove", oldInbound.Tag, 0, nil); err != nil {
-			return err
-		}
 	}
 
 	return nil
