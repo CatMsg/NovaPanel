@@ -11,7 +11,6 @@ on:
 
 permissions:
   contents: write
-  packages: write
   actions: write
 
 env:
@@ -21,7 +20,6 @@ env:
   BOOTLIN_BASE_URL: https://toolchains.bootlin.com/downloads/releases/toolchains
   GOPROXY: https://proxy.golang.org
   GOSUMDB: sum.golang.org
-  GHCR_IMAGE: ghcr.io/catmsg/novapanel-app
 
 jobs:
   build-frontend:
@@ -223,59 +221,11 @@ jobs:
           body_path: ${{ steps.body.outputs.body_path }}
           files: release-assets/*
 
-  publish-image:
-    name: 发布 GHCR 镜像
-    needs: build-linux
-    runs-on: ubuntu-latest
-    steps:
-      - name: 检出仓库
-        uses: actions/checkout@v6.0.2
-
-      - name: 规范化发布标签
-        id: vars
-        run: |
-          VERSION="$(tr -d '[:space:]' < config/version)"
-          TAG="${{ inputs.tag }}"
-          if [ -z "$TAG" ]; then
-            TAG="v$VERSION"
-          fi
-          case "$TAG" in
-            v*) echo "tag=$TAG" >> "$GITHUB_OUTPUT" ;;
-            *) echo "tag=v$TAG" >> "$GITHUB_OUTPUT" ;;
-          esac
-
-      - name: 登录 GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: 设置 Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: 构建并推送镜像
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ env.GHCR_IMAGE }}:${{ steps.vars.outputs.tag }}
-            ${{ env.GHCR_IMAGE }}:latest
-          labels: |
-            org.opencontainers.image.title=NovaPanel
-            org.opencontainers.image.description=NovaPanel is a web panel and subscription manager evolved from s-ui
-            org.opencontainers.image.source=https://github.com/CatMsg/NovaPanel
-            org.opencontainers.image.version=${{ steps.vars.outputs.tag }}
-
   cleanup-failed-runs:
     name: 清理失败的旧 Run
     needs:
       - publish-release
-      - publish-image
-    if: ${{ needs.publish-release.result == 'success' && needs.publish-image.result == 'success' }}
+    if: ${{ needs.publish-release.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: 删除同提交失败的旧 Run
