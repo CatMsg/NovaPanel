@@ -492,6 +492,8 @@ remove_ufw_file() {
 apply_ufw() {
   local normalized_ports="${1:-}"
 
+  remove_ufw_live_redirects "/etc/ufw/before.rules" iptables
+  remove_ufw_live_redirects "/etc/ufw/before6.rules" ip6tables
   remove_port_live_redirects iptables "${normalized_ports}"
   remove_port_live_redirects ip6tables "${normalized_ports}"
   apply_ufw_allow_rules "${normalized_ports}"
@@ -503,6 +505,8 @@ apply_ufw() {
 remove_ufw() {
   local normalized_ports="${1:-}"
 
+  remove_ufw_live_redirects "/etc/ufw/before.rules" iptables
+  remove_ufw_live_redirects "/etc/ufw/before6.rules" ip6tables
   remove_port_live_redirects iptables "${normalized_ports}"
   remove_port_live_redirects ip6tables "${normalized_ports}"
   remove_ufw_allow_rules "${normalized_ports}"
