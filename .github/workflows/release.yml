@@ -64,12 +64,6 @@ jobs:
       matrix:
         include:
           - { platform: amd64, arch: amd64, goarm: "", bootlin: x86-64, naive: true }
-          - { platform: arm64, arch: arm64, goarm: "", bootlin: aarch64, naive: true }
-          # - { platform: armv7, arch: arm, goarm: "7", bootlin: armv7-eabihf, naive: true }
-          # - { platform: armv6, arch: arm, goarm: "6", bootlin: armv6-eabihf, naive: true }
-          # - { platform: armv5, arch: arm, goarm: "5", bootlin: armv5-eabi, naive: false }
-          # - { platform: "386", arch: "386", bootlin: x86-i686, naive: true }
-          # - { platform: s390x, arch: s390x, bootlin: s390x-z13, naive: false }
     runs-on: ubuntu-latest
     steps:
       - name: 检出仓库
@@ -178,71 +172,10 @@ jobs:
           path: ./NovaPanel-linux-${{ matrix.platform }}.tar.gz
           retention-days: 1
 
-  build-windows:
-    needs: build-frontend
-    name: 构建-windows-${{ matrix.arch }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { arch: amd64, runner: ubuntu-latest }
-          - { arch: arm64, runner: ubuntu-latest }
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - name: 检出仓库
-        uses: actions/checkout@v6.0.2
-
-      - name: 下载前端构建产物
-        uses: actions/download-artifact@v8
-        with:
-          name: frontend-dist
-          path: web/html
-
-      - name: 设置 Go
-        uses: actions/setup-go@v6
-        with:
-          cache: false
-          go-version-file: go.mod
-
-      - name: 修补 sing-box Windows 接口兼容
-        shell: bash
-        run: go run ./scripts/patch-sing-box-windows.go
-
-      - name: 构建 NovaPanel
-        shell: bash
-        run: |
-          set -e
-          export GOOS=windows
-          export GOARCH=${{ matrix.arch }}
-          export CGO_ENABLED=0
-
-          BUILD_TAGS="with_quic,with_grpc,with_utls,with_acme,with_gvisor,with_tailscale"
-          echo "正在为 Windows ${{ matrix.arch }} 构建"
-          go version
-          go env GOOS GOARCH
-          go build -ldflags="-w -s -checklinkname=0" -tags "$BUILD_TAGS" -o sui.exe main.go
-          file sui.exe
-
-          mkdir -p NovaPanel-windows
-          cp sui.exe NovaPanel-windows/
-          cp -r windows/* NovaPanel-windows/
-
-      - name: 打包
-        shell: bash
-        run: zip -r "NovaPanel-windows-${{ matrix.arch }}.zip" NovaPanel-windows
-
-      - name: 上传构建产物
-        uses: actions/upload-artifact@v7
-        with:
-          name: NovaPanel-windows-${{ matrix.arch }}
-          path: ./NovaPanel-windows-${{ matrix.arch }}.zip
-          retention-days: 1
-
   publish-release:
     name: 发布 Release 产物
     needs:
       - build-linux
-      - build-windows
     runs-on: ubuntu-latest
     steps:
       - name: 检出仓库
@@ -326,6 +259,7 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
+          platforms: linux/amd64
           push: true
           tags: |
             ${{ env.GHCR_IMAGE }}:${{ steps.vars.outputs.tag }}
