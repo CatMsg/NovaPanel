@@ -40,6 +40,7 @@ export default {
   pages: {
     login: "ورود",
     home: "خانه",
+    ports: "مدیریت پورت‌ها",
     inbounds: "ورودی‌ها",
     outbounds: "خروجی‌ها",
     endpoints: "درگاه‌ها",

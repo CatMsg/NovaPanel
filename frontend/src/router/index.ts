@@ -21,6 +21,11 @@ const routes = [
         component: () => import('@/views/Home.vue'),
       },
       {
+        path: '/ports',
+        name: 'pages.ports',
+        component: () => import('@/views/Ports.vue'),
+      },
+      {
         path: '/inbounds',
         name: 'pages.inbounds',
         component: () => import('@/views/Inbounds.vue'),

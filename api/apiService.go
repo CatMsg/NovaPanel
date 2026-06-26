@@ -219,6 +219,11 @@ func (a *ApiService) GetStatus(c *gin.Context) {
 	jsonObj(c, result, nil)
 }
 
+func (a *ApiService) GetPorts(c *gin.Context) {
+	result := a.ServerService.GetPortStatus()
+	jsonObj(c, result, nil)
+}
+
 func (a *ApiService) GetOnlines(c *gin.Context) {
 	onlines, err := a.StatsService.GetOnlines()
 	jsonObj(c, onlines, err)

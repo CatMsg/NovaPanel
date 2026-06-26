@@ -53,6 +53,7 @@ const showDrawer = computed({
 
 const menu = [
   { title: 'pages.home', icon: 'mdi-home',  path: '/' },
+  { title: 'pages.ports', icon: 'mdi-lan',  path: '/ports' },
   { title: 'pages.inbounds', icon: 'mdi-cloud-download',  path: '/inbounds' },
   { title: 'pages.clients', icon: 'mdi-account-multiple',  path: '/clients' },
   { title: 'pages.outbounds', icon: 'mdi-cloud-upload',  path: '/outbounds' },

@@ -40,6 +40,7 @@ export default {
   pages: {
     login: "Login",
     home: "Home",
+    ports: "Port Management",
     inbounds: "Inbounds",
     outbounds: "Outbounds",
     services: "Services",

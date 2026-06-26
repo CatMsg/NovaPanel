@@ -40,6 +40,7 @@ export default {
   pages: {
     login: "登錄",
     home: "主頁",
+    ports: "端口管理",
     inbounds: "入站管理",
     outbounds: "出站管理",
     services: "服務管理",

@@ -40,6 +40,7 @@ export default {
   pages: {
     login: "Đăng nhập",
     home: "Trang chủ",
+    ports: "Quản lý cổng",
     inbounds: "Đầu Vào",
     outbounds: "Đầu ra",
     services: "Thiết bị",

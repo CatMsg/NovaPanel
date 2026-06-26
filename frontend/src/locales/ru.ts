@@ -40,6 +40,7 @@ export default {
   pages: {
     login: "Вход",
     home: "Главная",
+    ports: "Управление портами",
     inbounds: "Входящие",
     outbounds: "Исходящие",
     services: "Устройства",
