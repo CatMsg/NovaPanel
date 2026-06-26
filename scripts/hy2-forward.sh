@@ -146,6 +146,86 @@ strip_ufw_blocks() {
   fi
 }
 
+delete_direct_redirects() {
+  local bin="$1"
+  local redirects="${2:-}"
+  local protocol port target_port
+
+  if ! has_cmd "${bin}"; then
+    return 0
+  fi
+
+  while read -r protocol port target_port; do
+    if [[ -n "${protocol}" && -n "${port}" && -n "${target_port}" ]]; then
+      while "${bin}" -t nat -C PREROUTING -p "${protocol}" --dport "${port}" -j REDIRECT --to-ports "${target_port}" >/dev/null 2>&1; do
+        "${bin}" -t nat -D PREROUTING -p "${protocol}" --dport "${port}" -j REDIRECT --to-ports "${target_port}" || true
+      done
+    fi
+  done <<< "${redirects}"
+}
+
+collect_ufw_block_redirects() {
+  local file="$1"
+
+  [[ -f "${file}" ]] || return 0
+
+  awk '
+    /^# NOVAPANEL HY2 BEGIN/ {
+      in_block = 1
+      next
+    }
+    /^# NOVAPANEL HY2 END/ {
+      in_block = 0
+      next
+    }
+    in_block && $1 == "-A" && $2 == "PREROUTING" {
+      proto = ""
+      dport = ""
+      target = ""
+      for (i = 1; i <= NF; i++) {
+        if ($i == "-p" && i + 1 <= NF) proto = $(i + 1)
+        if ($i == "--dport" && i + 1 <= NF) dport = $(i + 1)
+        if ($i == "--to-ports" && i + 1 <= NF) target = $(i + 1)
+      }
+      if (proto != "" && dport != "" && target != "") {
+        print proto, dport, target
+      }
+    }
+  ' "${file}"
+}
+
+remove_ufw_live_redirects() {
+  local file="$1"
+  local bin="$2"
+  local redirects
+
+  redirects="$(collect_ufw_block_redirects "${file}")"
+  if [[ -n "${redirects}" ]]; then
+    delete_direct_redirects "${bin}" "${redirects}"
+  fi
+}
+
+remove_port_live_redirects() {
+  local bin="$1"
+  local normalized_ports="${2:-}"
+  local port
+  local protocol
+
+  if ! has_cmd "${bin}"; then
+    return 0
+  fi
+
+  while IFS= read -r port; do
+    if [[ -n "${port}" && -n "${listen_port}" && "${listen_port}" =~ ^[0-9]+$ ]]; then
+      for protocol in tcp udp; do
+        while "${bin}" -t nat -C PREROUTING -p "${protocol}" --dport "${port}" -j REDIRECT --to-ports "${listen_port}" >/dev/null 2>&1; do
+          "${bin}" -t nat -D PREROUTING -p "${protocol}" --dport "${port}" -j REDIRECT --to-ports "${listen_port}" || true
+        done
+      done
+    fi
+  done <<< "${normalized_ports}"
+}
+
 rewrite_ufw_file() {
   local file="$1"
   local block="$2"
@@ -270,21 +350,12 @@ remove_ufw_allow_rules() {
 remove_iptables() {
   local bin="$1"
   local normalized_ports="${2:-}"
-  local port
   local protocol
   if ! has_cmd "${bin}"; then
     return 0
   fi
 
-  while IFS= read -r port; do
-    if [[ -n "${port}" && -n "${listen_port}" && "${listen_port}" =~ ^[0-9]+$ ]]; then
-      for protocol in tcp udp; do
-        while "${bin}" -t nat -C PREROUTING -p "${protocol}" --dport "${port}" -j REDIRECT --to-ports "${listen_port}" >/dev/null 2>&1; do
-          "${bin}" -t nat -D PREROUTING -p "${protocol}" --dport "${port}" -j REDIRECT --to-ports "${listen_port}" || true
-        done
-      done
-    fi
-  done <<< "${normalized_ports}"
+  remove_port_live_redirects "${bin}" "${normalized_ports}"
 
   for protocol in tcp udp; do
     while "${bin}" -t nat -C PREROUTING -p "${protocol}" -j "${chain}" >/dev/null 2>&1; do
@@ -421,6 +492,8 @@ remove_ufw_file() {
 apply_ufw() {
   local normalized_ports="${1:-}"
 
+  remove_port_live_redirects iptables "${normalized_ports}"
+  remove_port_live_redirects ip6tables "${normalized_ports}"
   apply_ufw_allow_rules "${normalized_ports}"
   apply_ufw_file "/etc/ufw/before.rules" "ip" "${normalized_ports}"
   apply_ufw_file "/etc/ufw/before6.rules" "ip6" "${normalized_ports}"
@@ -430,6 +503,8 @@ apply_ufw() {
 remove_ufw() {
   local normalized_ports="${1:-}"
 
+  remove_port_live_redirects iptables "${normalized_ports}"
+  remove_port_live_redirects ip6tables "${normalized_ports}"
   remove_ufw_allow_rules "${normalized_ports}"
   remove_ufw_file "/etc/ufw/before.rules"
   remove_ufw_file "/etc/ufw/before6.rules"
@@ -437,6 +512,8 @@ remove_ufw() {
 }
 
 purge_ufw() {
+  remove_ufw_live_redirects "/etc/ufw/before.rules" iptables
+  remove_ufw_live_redirects "/etc/ufw/before6.rules" ip6tables
   strip_ufw_blocks "/etc/ufw/before.rules"
   strip_ufw_blocks "/etc/ufw/before6.rules"
   reload_ufw

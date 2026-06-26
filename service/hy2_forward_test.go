@@ -286,6 +286,111 @@ func TestRunHy2ForwardScriptUFW(t *testing.T) {
 	}
 }
 
+func TestRunHy2ForwardScriptPurgeRemovesUfwLiveRedirects(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("hy2 forwarding script is only exercised on linux")
+	}
+
+	workDir := t.TempDir()
+	binDir := filepath.Join(workDir, "bin")
+	etcDir := filepath.Join(workDir, "etc", "ufw")
+	stateDir := filepath.Join(workDir, "state")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+	if err := os.MkdirAll(etcDir, 0o755); err != nil {
+		t.Fatalf("mkdir ufw dir: %v", err)
+	}
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatalf("mkdir state dir: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(binDir, "ufw"), []byte(mockUfwScript(t)), 0o755); err != nil {
+		t.Fatalf("write mock ufw: %v", err)
+	}
+	mockIptables := mockDirectRedirectIptablesScript(t)
+	if err := os.WriteFile(filepath.Join(binDir, "iptables"), []byte(mockIptables), 0o755); err != nil {
+		t.Fatalf("write mock iptables: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "ip6tables"), []byte(mockIptables), 0o755); err != nil {
+		t.Fatalf("write mock ip6tables: %v", err)
+	}
+
+	beforeRules := `*nat
+:PREROUTING ACCEPT [0:0]
+# NOVAPANEL HY2 BEGIN NPHY2_demo ip
+-A PREROUTING -p tcp --dport 443 -j REDIRECT --to-ports 443
+-A PREROUTING -p udp --dport 443 -j REDIRECT --to-ports 443
+# NOVAPANEL HY2 END NPHY2_demo ip
+COMMIT
+`
+	before6Rules := strings.ReplaceAll(beforeRules, " ip", " ip6")
+	if err := os.WriteFile(filepath.Join(etcDir, "before.rules"), []byte(beforeRules), 0o644); err != nil {
+		t.Fatalf("write before.rules: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(etcDir, "before6.rules"), []byte(before6Rules), 0o644); err != nil {
+		t.Fatalf("write before6.rules: %v", err)
+	}
+
+	for _, bin := range []string{"iptables", "ip6tables"} {
+		for _, protocol := range []string{"tcp", "udp"} {
+			key := filepath.Join(stateDir, fmt.Sprintf("%s.%s.443.443.count", bin, protocol))
+			if err := os.WriteFile(key, []byte("3"), 0o644); err != nil {
+				t.Fatalf("seed live redirect count: %v", err)
+			}
+		}
+	}
+
+	scriptCopy, err := os.ReadFile(filepath.Join(mustRepoRoot(t), "scripts", "hy2-forward.sh"))
+	if err != nil {
+		t.Fatalf("read script: %v", err)
+	}
+	replaced := strings.NewReplacer(
+		"/etc/ufw/before.rules", filepath.Join(etcDir, "before.rules"),
+		"/etc/ufw/before6.rules", filepath.Join(etcDir, "before6.rules"),
+	).Replace(string(scriptCopy))
+	scriptPath := filepath.Join(workDir, "hy2-forward.sh")
+	if err := os.WriteFile(scriptPath, []byte(replaced), 0o755); err != nil {
+		t.Fatalf("write script copy: %v", err)
+	}
+
+	env := append(os.Environ(),
+		"PATH="+binDir+":"+os.Getenv("PATH"),
+		"HY2_MOCK_STATE_DIR="+stateDir,
+		"HY2_MOCK_LOG="+filepath.Join(workDir, "purge.log"),
+	)
+	cmd := exec.Command("bash", scriptPath, "purge")
+	cmd.Env = env
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("purge failed: %v\n%s", err, string(out))
+	}
+
+	for _, bin := range []string{"iptables", "ip6tables"} {
+		for _, protocol := range []string{"tcp", "udp"} {
+			key := filepath.Join(stateDir, fmt.Sprintf("%s.%s.443.443.count", bin, protocol))
+			data, err := os.ReadFile(key)
+			if err != nil {
+				t.Fatalf("read live redirect count: %v", err)
+			}
+			if strings.TrimSpace(string(data)) != "0" {
+				t.Fatalf("%s %s live redirect count was not cleared: %s", bin, protocol, string(data))
+			}
+		}
+	}
+
+	afterRules, err := os.ReadFile(filepath.Join(etcDir, "before.rules"))
+	if err != nil {
+		t.Fatalf("read before.rules after purge: %v", err)
+	}
+	after6Rules, err := os.ReadFile(filepath.Join(etcDir, "before6.rules"))
+	if err != nil {
+		t.Fatalf("read before6.rules after purge: %v", err)
+	}
+	if bytes.Contains(afterRules, []byte("NOVAPANEL HY2 BEGIN")) || bytes.Contains(after6Rules, []byte("NOVAPANEL HY2 BEGIN")) {
+		t.Fatalf("purge did not strip UFW marker blocks:\n%s\n%s", string(afterRules), string(after6Rules))
+	}
+}
+
 func mustRepoRoot(t *testing.T) string {
 	t.Helper()
 	wd, err := os.Getwd()
@@ -434,6 +539,61 @@ case "${1:-}" in
     printf 'Status: active\n'
     ;;
   reload)
+    :
+    ;;
+esac
+`
+}
+
+func mockDirectRedirectIptablesScript(t *testing.T) string {
+	t.Helper()
+	return `#!/usr/bin/env bash
+set -euo pipefail
+
+state_dir="${HY2_MOCK_STATE_DIR:?}"
+log_file="${HY2_MOCK_LOG:?}"
+cmd="$(basename "$0")"
+printf '%s %s\n' "$cmd" "$*" >> "$log_file"
+
+if [[ "${1:-}" == "-t" ]]; then
+  shift 2
+fi
+
+extract_arg() {
+  local name="$1"
+  shift
+  while [[ "$#" -gt 0 ]]; do
+    if [[ "$1" == "$name" && "$#" -gt 1 ]]; then
+      printf '%s' "$2"
+      return 0
+    fi
+    shift
+  done
+}
+
+protocol="$(extract_arg "-p" "$@")"
+port="$(extract_arg "--dport" "$@")"
+target="$(extract_arg "--to-ports" "$@")"
+count_file="${state_dir}/${cmd}.${protocol}.${port}.${target}.count"
+
+case "${1:-}" in
+  -C)
+    count=0
+    if [[ -f "$count_file" ]]; then
+      count="$(cat "$count_file")"
+    fi
+    [[ "$count" -gt 0 ]]
+    ;;
+  -D)
+    count=0
+    if [[ -f "$count_file" ]]; then
+      count="$(cat "$count_file")"
+    fi
+    if [[ "$count" -gt 0 ]]; then
+      printf '%s' "$((count - 1))" > "$count_file"
+    fi
+    ;;
+  -S)
     :
     ;;
 esac
