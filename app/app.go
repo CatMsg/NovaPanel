@@ -39,6 +39,10 @@ func (a *APP) Init() error {
 		return err
 	}
 
+	if err := service.InitSSHListenPorts(); err != nil {
+		logger.Warning("init ssh listen ports failed:", err)
+	}
+
 	// Init Setting
 	a.SettingService.GetAllSetting()
 
@@ -84,9 +88,9 @@ func (a *APP) Start() error {
 		logger.Error(err)
 	}
 
-	err = a.configService.RebuildHy2PortForwarding()
+	err = a.configService.RebuildInboundPortForwarding()
 	if err != nil {
-		logger.Warning("rebuild hy2 port forwarding failed:", err)
+		logger.Warning("rebuild inbound port forwarding failed:", err)
 	}
 
 	return nil

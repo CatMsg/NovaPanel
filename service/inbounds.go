@@ -125,6 +125,14 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			}
 		}
 
+		if _, ports, err := collectInboundForwardPorts(&inbound); err == nil {
+			if err := validateInboundPortsAgainstSSH(&inbound, ports); err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		}
+
 		if corePtr.IsRunning() {
 			if act == "edit" {
 				err = corePtr.RemoveInbound(oldInbound.Tag)
@@ -158,7 +166,7 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			return err
 		}
 
-		err = s.syncHy2PortForwarding(oldInbound, &inbound)
+		err = s.syncInboundPortForwarding(oldInbound, &inbound)
 		if err != nil {
 			return err
 		}
@@ -193,7 +201,7 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 				return err
 			}
 		}
-		err = s.syncHy2PortForwarding(oldInbound, nil)
+		err = s.syncInboundPortForwarding(oldInbound, nil)
 		if err != nil {
 			return err
 		}
@@ -214,6 +222,45 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		return common.NewErrorf("unknown action: %s", act)
 	}
 	return nil
+}
+
+func (s *InboundService) removeInboundByTag(tag string) error {
+	db := database.GetDB()
+	tx := db.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+	var err error
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	oldInbound := &model.Inbound{}
+	err = tx.Model(model.Inbound{}).Select("id", "tag").Where("tag = ?", tag).First(oldInbound).Error
+	if err != nil {
+		return err
+	}
+
+	if corePtr.IsRunning() {
+		err = corePtr.RemoveInbound(tag)
+		if err != nil && err != os.ErrInvalid {
+			return err
+		}
+	}
+
+	err = s.ClientService.UpdateClientsOnInboundDelete(tx, oldInbound.Id, tag)
+	if err != nil {
+		return err
+	}
+
+	err = tx.Where("tag = ?", tag).Delete(model.Inbound{}).Error
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit().Error
 }
 
 func (s *InboundService) UpdateOutJsons(tx *gorm.DB, inboundIds []uint, hostname string) error {

@@ -16,7 +16,7 @@ import (
 
 const hy2ForwardScript = "scripts/hy2-forward.sh"
 
-func (s *InboundService) RebuildHy2PortForwarding() error {
+func (s *InboundService) RebuildInboundPortForwarding() error {
 	if runtime.GOOS != "linux" {
 		return nil
 	}
@@ -25,9 +25,9 @@ func (s *InboundService) RebuildHy2PortForwarding() error {
 	if err != nil {
 		return err
 	}
-	logger.Info("rebuilding hy2 port forwarding with backend: ", backend)
+	logger.Info("rebuilding inbound port forwarding with backend: ", backend)
 
-	if err := runHy2ForwardScript("purge", "", 0, nil); err != nil {
+	if err := runInboundForwardScript("purge", "", 0, nil); err != nil {
 		return err
 	}
 
@@ -38,13 +38,20 @@ func (s *InboundService) RebuildHy2PortForwarding() error {
 
 	var errs []error
 	for _, inbound := range inbounds {
-		if inbound.Type != "hysteria2" {
-			continue
-		}
-		if err := s.syncHy2PortForwarding(nil, inbound); err != nil {
+		if err := s.syncInboundPortForwarding(nil, inbound); err != nil {
+			var conflictErr *sshPortConflictError
+			if errors.As(err, &conflictErr) {
+				logger.Warning("inbound port forwarding conflict detected, removing inbound: ", inbound.Tag, " ports: ", conflictErr.ports)
+				if removeErr := s.removeInboundByTag(inbound.Tag); removeErr != nil {
+					wrapped := fmt.Errorf("remove conflicted inbound %s: %w", inbound.Tag, removeErr)
+					errs = append(errs, wrapped)
+					logger.Warning("remove conflicted inbound failed: ", wrapped)
+				}
+				continue
+			}
 			wrapped := fmt.Errorf("rebuild %s: %w", inbound.Tag, err)
 			errs = append(errs, wrapped)
-			logger.Warning("hy2 port forwarding rebuild failed: ", wrapped)
+			logger.Warning("inbound port forwarding rebuild failed: ", wrapped)
 		}
 	}
 
@@ -55,43 +62,63 @@ func (s *InboundService) RebuildHy2PortForwarding() error {
 	return nil
 }
 
-func (s *InboundService) syncHy2PortForwarding(oldInbound *model.Inbound, inbound *model.Inbound) error {
+func (s *InboundService) RebuildHy2PortForwarding() error {
+	return s.RebuildInboundPortForwarding()
+}
+
+func (s *InboundService) syncInboundPortForwarding(oldInbound *model.Inbound, inbound *model.Inbound) error {
 	if inbound == nil {
-		return nil
+		if oldInbound == nil {
+			return nil
+		}
+		return runInboundForwardScript("remove", oldInbound.Tag, 0, nil)
 	}
 
-	if inbound.Type == "hysteria2" {
-		listenPort, err := getInboundListenPort(inbound)
-		if err != nil {
-			return err
-		}
-
-		ports, err := getHy2ServerPorts(inbound.OutJson)
-		if err != nil {
-			return err
-		}
-		ports = mergeHy2ForwardPorts(listenPort, ports)
-
-		if err := runHy2ForwardScript("apply", inbound.Tag, listenPort, ports); err != nil {
-			return err
-		}
-
-		if oldInbound != nil && oldInbound.Type == "hysteria2" && oldInbound.Tag != inbound.Tag {
-			if err := runHy2ForwardScript("remove", oldInbound.Tag, 0, nil); err != nil {
-				return err
-			}
-		}
-		return nil
+	listenPort, ports, err := collectInboundForwardPorts(inbound)
+	if err != nil {
+		return err
 	}
 
-	if oldInbound != nil && oldInbound.Type == "hysteria2" {
-		return runHy2ForwardScript("remove", oldInbound.Tag, 0, nil)
+	if err := validateInboundPortsAgainstSSH(inbound, ports); err != nil {
+		return err
+	}
+
+	if err := runInboundForwardScript("apply", inbound.Tag, listenPort, ports); err != nil {
+		return err
+	}
+
+	if oldInbound != nil && oldInbound.Tag != inbound.Tag {
+		if err := runInboundForwardScript("remove", oldInbound.Tag, 0, nil); err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
-func runHy2ForwardScript(action string, tag string, listenPort int, ports []int) error {
+func (s *InboundService) syncHy2PortForwarding(oldInbound *model.Inbound, inbound *model.Inbound) error {
+	return s.syncInboundPortForwarding(oldInbound, inbound)
+}
+
+func collectInboundForwardPorts(inbound *model.Inbound) (int, []int, error) {
+	listenPort, err := getInboundListenPort(inbound)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	ports := []int{listenPort}
+	if inbound.Type == "hysteria2" {
+		extraPorts, err := getHy2ServerPorts(inbound.OutJson)
+		if err != nil {
+			return 0, nil, err
+		}
+		ports = mergeInboundForwardPorts(listenPort, extraPorts)
+	}
+
+	return listenPort, ports, nil
+}
+
+func runInboundForwardScript(action string, tag string, listenPort int, ports []int) error {
 	if runtime.GOOS != "linux" {
 		return nil
 	}
@@ -111,7 +138,7 @@ func runHy2ForwardScript(action string, tag string, listenPort int, ports []int)
 		if trimmed != "" {
 			err = fmt.Errorf("%w: %s", err, trimmed)
 		}
-		logger.Warning("hy2 port forwarding sync failed: ", err)
+		logger.Warning("inbound port forwarding sync failed: ", err)
 		return err
 	}
 
@@ -256,7 +283,7 @@ func parseHy2PortRange(raw string) (int, int, error) {
 	return start, end, nil
 }
 
-func mergeHy2ForwardPorts(listenPort int, ports []int) []int {
+func mergeInboundForwardPorts(listenPort int, ports []int) []int {
 	merged := make([]int, 0, len(ports)+1)
 	seen := map[int]struct{}{}
 	appendPort := func(port int) {
@@ -276,6 +303,10 @@ func mergeHy2ForwardPorts(listenPort int, ports []int) []int {
 	}
 
 	return merged
+}
+
+func mergeHy2ForwardPorts(listenPort int, ports []int) []int {
+	return mergeInboundForwardPorts(listenPort, ports)
 }
 
 func joinPorts(ports []int) string {

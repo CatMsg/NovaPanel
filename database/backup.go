@@ -260,6 +260,10 @@ func ImportDB(file multipart.File) error {
 		return common.NewErrorf("Error migrating db: %v", err)
 	}
 
+	if err := cleanupRestoredInboundConflicts(); err != nil {
+		logger.Warning("cleanup conflicted inbounds after restore failed:", err)
+	}
+
 	// Restart app
 	err = SendSighup()
 	if err != nil {

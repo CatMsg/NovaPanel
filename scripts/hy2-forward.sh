@@ -96,13 +96,16 @@ render_ufw_block() {
   local family_label="${2:-}"
   local output=""
   local port
+  local protocol
 
   while IFS= read -r port; do
     if [[ -n "${port}" ]]; then
-      if [[ -n "${output}" ]]; then
-        output="${output}"$'\n'
-      fi
-      output="${output}-A PREROUTING -p udp --dport ${port} -j REDIRECT --to-ports ${listen_port}"
+      for protocol in tcp udp; do
+        if [[ -n "${output}" ]]; then
+          output="${output}"$'\n'
+        fi
+        output="${output}-A PREROUTING -p ${protocol} --dport ${port} -j REDIRECT --to-ports ${listen_port}"
+      done
     fi
   done <<< "${ports}"
 
@@ -236,12 +239,15 @@ reload_ufw() {
 
 remove_iptables() {
   local bin="$1"
+  local protocol
   if ! has_cmd "${bin}"; then
     return 0
   fi
 
-  while "${bin}" -t nat -C PREROUTING -p udp -j "${chain}" >/dev/null 2>&1; do
-    "${bin}" -t nat -D PREROUTING -p udp -j "${chain}" || true
+  for protocol in tcp udp; do
+    while "${bin}" -t nat -C PREROUTING -p "${protocol}" -j "${chain}" >/dev/null 2>&1; do
+      "${bin}" -t nat -D PREROUTING -p "${protocol}" -j "${chain}" || true
+    done
   done
 
   "${bin}" -t nat -F "${chain}" 2>/dev/null || true
@@ -272,6 +278,7 @@ apply_iptables() {
   local bin="$1"
   local normalized_ports="${2:-}"
   local port
+  local protocol
 
   if ! has_cmd "${bin}"; then
     return 0
@@ -285,13 +292,17 @@ apply_iptables() {
     return 0
   fi
 
-  if ! "${bin}" -t nat -C PREROUTING -p udp -j "${chain}" >/dev/null 2>&1; then
-    "${bin}" -t nat -A PREROUTING -p udp -j "${chain}"
-  fi
+  for protocol in tcp udp; do
+    if ! "${bin}" -t nat -C PREROUTING -p "${protocol}" -j "${chain}" >/dev/null 2>&1; then
+      "${bin}" -t nat -A PREROUTING -p "${protocol}" -j "${chain}"
+    fi
+  done
 
   while IFS= read -r port; do
     if [[ -n "${port}" ]]; then
-      "${bin}" -t nat -A "${chain}" -p udp --dport "${port}" -j REDIRECT --to-ports "${listen_port}"
+      for protocol in tcp udp; do
+        "${bin}" -t nat -A "${chain}" -p "${protocol}" --dport "${port}" -j REDIRECT --to-ports "${listen_port}"
+      done
     fi
   done <<< "${normalized_ports}"
 }
@@ -324,6 +335,7 @@ apply_nftables_family() {
   local family="$1"
   local normalized_ports="${2:-}"
   local port
+  local protocol
 
   if ! has_cmd nft; then
     return 0
@@ -340,7 +352,9 @@ apply_nftables_family() {
 
   while IFS= read -r port; do
     if [[ -n "${port}" ]]; then
-      nft add rule "${family}" nat "${chain}" udp dport "${port}" redirect to :"${listen_port}"
+      for protocol in tcp udp; do
+        nft add rule "${family}" nat "${chain}" "${protocol}" dport "${port}" redirect to :"${listen_port}"
+      done
     fi
   done <<< "${normalized_ports}"
 }

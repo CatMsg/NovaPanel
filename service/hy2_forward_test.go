@@ -134,7 +134,7 @@ func TestRunHy2ForwardScriptIptables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read log file: %v", err)
 	}
-	if !bytes.Contains(logData, []byte("--dport 443")) || !bytes.Contains(logData, []byte("--dport 8443")) {
+	if !bytes.Contains(logData, []byte("-p tcp --dport 443")) || !bytes.Contains(logData, []byte("-p udp --dport 8443")) {
 		t.Fatalf("iptables apply did not emit expected redirect rules:\n%s", string(logData))
 	}
 
@@ -196,7 +196,7 @@ func TestRunHy2ForwardScriptNftables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read log file: %v", err)
 	}
-	if !bytes.Contains(logData, []byte("add chain ip nat")) || !bytes.Contains(logData, []byte("redirect to :12345")) {
+	if !bytes.Contains(logData, []byte("add chain ip nat")) || !bytes.Contains(logData, []byte("tcp dport")) || !bytes.Contains(logData, []byte("udp dport")) || !bytes.Contains(logData, []byte("redirect to :12345")) {
 		t.Fatalf("nft apply did not emit expected commands:\n%s", string(logData))
 	}
 
@@ -253,7 +253,7 @@ func TestRunHy2ForwardScriptUFW(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read before.rules: %v", err)
 	}
-	if !bytes.Contains(beforeRules, []byte("NOVAPANEL HY2 BEGIN")) || !bytes.Contains(beforeRules, []byte("REDIRECT --to-ports 12345")) {
+	if !bytes.Contains(beforeRules, []byte("NOVAPANEL HY2 BEGIN")) || !bytes.Contains(beforeRules, []byte("-p tcp --dport 443")) || !bytes.Contains(beforeRules, []byte("-p udp --dport 8443")) || !bytes.Contains(beforeRules, []byte("REDIRECT --to-ports 12345")) {
 		t.Fatalf("ufw apply did not write expected NAT block:\n%s", string(beforeRules))
 	}
 
