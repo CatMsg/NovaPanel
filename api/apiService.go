@@ -321,6 +321,11 @@ func (a *ApiService) Save(c *gin.Context, loginUser string) {
 		jsonMsg(c, "save", err)
 		return
 	}
+	if obj == "settings" {
+		if restartErr := a.PanelService.RestartPanel(3); restartErr != nil {
+			logger.Warning("schedule panel restart failed:", restartErr)
+		}
+	}
 	err = a.LoadPartialData(c, objs)
 	if err != nil {
 		jsonMsg(c, obj, err)

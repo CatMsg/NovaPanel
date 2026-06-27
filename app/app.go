@@ -93,6 +93,11 @@ func (a *APP) Start() error {
 		logger.Warning("rebuild inbound port forwarding failed:", err)
 	}
 
+	err = a.SettingService.RebuildManagedPortForwarding()
+	if err != nil {
+		logger.Warning("rebuild managed port forwarding failed:", err)
+	}
+
 	return nil
 }
 

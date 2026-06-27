@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
@@ -125,30 +124,7 @@ func collectInboundForwardPorts(inbound *model.Inbound) (int, []int, error) {
 }
 
 func runInboundForwardScript(action string, tag string, listenPort int, ports []int) error {
-	if runtime.GOOS != "linux" {
-		return nil
-	}
-
-	if action != "purge" && tag == "" {
-		return nil
-	}
-
-	args := []string{action}
-	if action != "purge" {
-		args = append(args, tag, strconv.Itoa(listenPort), joinPorts(ports))
-	}
-	cmd := exec.Command("bash", append([]string{hy2ForwardScript}, args...)...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		trimmed := strings.TrimSpace(string(output))
-		if trimmed != "" {
-			err = fmt.Errorf("%w: %s", err, trimmed)
-		}
-		logger.Warning("inbound port forwarding sync failed: ", err)
-		return err
-	}
-
-	return nil
+	return runPortForwardScript(action, tag, listenPort, ports)
 }
 
 func getInboundListenPort(inbound *model.Inbound) (int, error) {

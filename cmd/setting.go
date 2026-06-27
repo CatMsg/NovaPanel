@@ -39,6 +39,30 @@ func updateSetting(port int, path string, subPort int, subPath string, webCertFi
 	}
 
 	settingService := service.SettingService{}
+	oldWebPort, err := settingService.GetPort()
+	if err != nil {
+		fmt.Println("get current port failed:", err)
+		return
+	}
+	oldSubPort, err := settingService.GetSubPort()
+	if err != nil {
+		fmt.Println("get current sub port failed:", err)
+		return
+	}
+	newWebPort := oldWebPort
+	newSubPort := oldSubPort
+	if port > 0 {
+		newWebPort = port
+	}
+	if subPort > 0 {
+		newSubPort = subPort
+	}
+	if newWebPort != oldWebPort || newSubPort != oldSubPort {
+		if err := service.ValidateManagedPanelPorts(newWebPort, newSubPort); err != nil {
+			fmt.Println("validate panel ports failed:", err)
+			return
+		}
+	}
 
 	if port > 0 {
 		err := settingService.SetPort(port)
@@ -130,6 +154,34 @@ func updateSetting(port int, path string, subPort int, subPath string, webCertFi
 			fmt.Println("clear sub key file failed:", err)
 		} else {
 			fmt.Println("clear sub key file success")
+		}
+	}
+
+	currentWebPort, err := settingService.GetPort()
+	if err != nil {
+		fmt.Println("get panel port after update failed:", err)
+		return
+	}
+	currentSubPort, err := settingService.GetSubPort()
+	if err != nil {
+		fmt.Println("get sub port after update failed:", err)
+		return
+	}
+	if currentWebPort != oldWebPort || currentSubPort != oldSubPort {
+		if err := settingService.SyncManagedPanelPortForwarding(oldWebPort, currentWebPort, oldSubPort, currentSubPort); err != nil {
+			fmt.Println("sync panel port forwarding failed:", err)
+			if currentWebPort != oldWebPort {
+				if rollbackErr := settingService.SetPort(oldWebPort); rollbackErr != nil {
+					fmt.Println("rollback panel port failed:", rollbackErr)
+				}
+			}
+			if currentSubPort != oldSubPort {
+				if rollbackErr := settingService.SetSubPort(oldSubPort); rollbackErr != nil {
+					fmt.Println("rollback sub port failed:", rollbackErr)
+				}
+			}
+		} else {
+			fmt.Println("sync panel port forwarding success")
 		}
 	}
 }

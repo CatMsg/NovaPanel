@@ -1,0 +1,88 @@
+package service
+
+import (
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+)
+
+func TestValidateManagedPanelPorts(t *testing.T) {
+	originalPorts := getSSHListenPorts()
+	t.Cleanup(func() {
+		_ = storeSSHListenPorts(originalPorts, nil)
+	})
+
+	if err := ValidateManagedPanelPorts(2095, 2096); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+
+	if err := ValidateManagedPanelPorts(2095, 2095); err == nil {
+		t.Fatal("expected duplicate panel ports to be rejected")
+	}
+
+	if err := storeSSHListenPorts([]int{2095}, nil); err != nil {
+		t.Fatalf("store ssh listen ports: %v", err)
+	}
+	if err := ValidateManagedPanelPorts(2095, 2096); err == nil {
+		t.Fatal("expected ssh conflict to be rejected")
+	}
+}
+
+func TestSyncManagedPanelPortForwardingInvokesScript(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("panel port forwarding is only exercised on linux")
+	}
+
+	originalPorts := getSSHListenPorts()
+	t.Cleanup(func() {
+		_ = storeSSHListenPorts(originalPorts, nil)
+	})
+	if err := storeSSHListenPorts([]int{2222}, nil); err != nil {
+		t.Fatalf("store ssh listen ports: %v", err)
+	}
+
+	workDir := t.TempDir()
+	scriptsDir := filepath.Join(workDir, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatalf("mkdir scripts dir: %v", err)
+	}
+
+	logFile := filepath.Join(workDir, "panel-forward.log")
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${HY2_MOCK_LOG:?}"
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "hy2-forward.sh"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get wd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	if err := os.Chdir(workDir); err != nil {
+		t.Fatalf("chdir workdir: %v", err)
+	}
+
+	t.Setenv("HY2_MOCK_LOG", logFile)
+
+	svc := &SettingService{}
+	if err := svc.SyncManagedPanelPortForwarding(2095, 3000, 2096, 3001); err != nil {
+		t.Fatalf("sync managed panel ports failed: %v", err)
+	}
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	log := string(data)
+	if !strings.Contains(log, "apply panel-web-port 3000 3000") {
+		t.Fatalf("web port forwarding was not applied:\n%s", log)
+	}
+	if !strings.Contains(log, "apply panel-sub-port 3001 3001") {
+		t.Fatalf("sub port forwarding was not applied:\n%s", log)
+	}
+}

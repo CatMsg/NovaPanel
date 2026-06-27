@@ -439,6 +439,40 @@ func (s *SettingService) Save(tx *gorm.DB, data json.RawMessage) error {
 	if err != nil {
 		return err
 	}
+
+	oldWebPort, err := s.GetPort()
+	if err != nil {
+		return err
+	}
+	oldSubPort, err := s.GetSubPort()
+	if err != nil {
+		return err
+	}
+	newWebPort := oldWebPort
+	newSubPort := oldSubPort
+	webPortChanged := false
+	subPortChanged := false
+
+	if rawWebPort, ok := settings["webPort"]; ok && rawWebPort != "" {
+		newWebPort, err = strconv.Atoi(rawWebPort)
+		if err != nil {
+			return err
+		}
+		webPortChanged = newWebPort != oldWebPort
+	}
+	if rawSubPort, ok := settings["subPort"]; ok && rawSubPort != "" {
+		newSubPort, err = strconv.Atoi(rawSubPort)
+		if err != nil {
+			return err
+		}
+		subPortChanged = newSubPort != oldSubPort
+	}
+	if webPortChanged || subPortChanged {
+		if err := ValidateManagedPanelPorts(newWebPort, newSubPort); err != nil {
+			return err
+		}
+	}
+
 	for key, obj := range settings {
 		// Secure file existence check
 		if obj != "" && (key == "webCertFile" ||
@@ -471,6 +505,11 @@ func (s *SettingService) Save(tx *gorm.DB, data json.RawMessage) error {
 		}
 		err = tx.Model(model.Setting{}).Where("key = ?", key).Update("value", obj).Error
 		if err != nil {
+			return err
+		}
+	}
+	if webPortChanged || subPortChanged {
+		if err := s.SyncManagedPanelPortForwarding(oldWebPort, newWebPort, oldSubPort, newSubPort); err != nil {
 			return err
 		}
 	}
