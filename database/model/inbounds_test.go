@@ -51,3 +51,61 @@ func TestInboundMarshalFullKeepsNaiveHttpVersion(t *testing.T) {
 		t.Fatalf("MarshalFull unexpectedly removed http_version: %#v", *got)
 	}
 }
+
+func TestInboundMarshalJSONAddsTuicH3AlpnWhenTlsPresent(t *testing.T) {
+	inb := Inbound{
+		Type: "tuic",
+		Tag:  "tuic-demo",
+		Tls: &Tls{
+			Server: json.RawMessage(`{
+				"enabled": true,
+				"server_name": "example.com"
+			}`),
+		},
+		Options: json.RawMessage(`{
+			"listen_port": 8080,
+			"congestion_control": "cubic"
+		}`),
+	}
+
+	raw, err := inb.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON returned error: %v", err)
+	}
+
+	got := string(raw)
+	if !strings.Contains(got, `"alpn":["h3"]`) {
+		t.Fatalf("expected tuic tls to include h3 alpn: %s", got)
+	}
+}
+
+func TestInboundMarshalJSONPreservesExistingTuicAlpn(t *testing.T) {
+	inb := Inbound{
+		Type: "tuic",
+		Tag:  "tuic-demo",
+		Tls: &Tls{
+			Server: json.RawMessage(`{
+				"enabled": true,
+				"server_name": "example.com",
+				"alpn": ["h2", "http/1.1"]
+			}`),
+		},
+		Options: json.RawMessage(`{
+			"listen_port": 8080,
+			"congestion_control": "cubic"
+		}`),
+	}
+
+	raw, err := inb.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON returned error: %v", err)
+	}
+
+	got := string(raw)
+	if !strings.Contains(got, `"alpn":["h2","http/1.1"]`) {
+		t.Fatalf("expected tuic tls to preserve existing alpn: %s", got)
+	}
+	if strings.Contains(got, `"alpn":["h3"`) {
+		t.Fatalf("expected tuic tls not to inject h3 when alpn exists: %s", got)
+	}
+}

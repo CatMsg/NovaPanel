@@ -347,6 +347,9 @@ func tuic(u *url.URL, i int) (*map[string]interface{}, string, error) {
 		"udp_relay_mode":     query.Get("udp_relay_mode"),
 		"tls":                getTls(security, &query),
 	}
+	if tls, ok := tuic["tls"].(map[string]interface{}); ok {
+		tuic["tls"] = ensureTuicALPN(tls)
+	}
 	return &tuic, tag, nil
 }
 

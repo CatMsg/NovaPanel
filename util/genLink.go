@@ -27,6 +27,9 @@ func LinkGenerator(clientConfig json.RawMessage, i *model.Inbound, hostname stri
 	var tls map[string]interface{}
 	if i.TlsId > 0 {
 		tls = prepareTls(i.Tls)
+		if i.Type == "tuic" {
+			tls = ensureTuicALPN(tls)
+		}
 	}
 
 	var userConfig map[string]map[string]interface{}
@@ -62,6 +65,9 @@ func LinkGenerator(clientConfig json.RawMessage, i *model.Inbound, hostname stri
 					for k, v := range addrTls {
 						newTls[k] = v
 					}
+				}
+				if i.Type == "tuic" {
+					newTls = ensureTuicALPN(newTls)
 				}
 				Addrs[index]["tls"] = newTls
 			}
@@ -125,6 +131,18 @@ func prepareTls(t *model.Tls) map[string]interface{} {
 		}
 	}
 	return oTls
+}
+
+func ensureTuicALPN(tls map[string]interface{}) map[string]interface{} {
+	if tls == nil {
+		return nil
+	}
+
+	raw, ok := tls["alpn"]
+	if !ok || raw == nil {
+		tls["alpn"] = []string{"h3"}
+	}
+	return tls
 }
 
 func socksLink(userConfig map[string]interface{}, addrs []map[string]interface{}) []string {
@@ -609,11 +627,14 @@ func getTlsParams(params *[]LinkParam, tls map[string]interface{}, insecureKey s
 	if sni, ok := tls["server_name"].(string); ok {
 		*params = append(*params, LinkParam{"sni", sni})
 	}
-	if alpn, ok := tls["alpn"].([]interface{}); ok {
+	switch alpn := tls["alpn"].(type) {
+	case []interface{}:
 		alpnList := make([]string, len(alpn))
 		for i, v := range alpn {
 			alpnList[i] = v.(string)
 		}
 		*params = append(*params, LinkParam{"alpn", strings.Join(alpnList, ",")})
+	case []string:
+		*params = append(*params, LinkParam{"alpn", strings.Join(alpn, ",")})
 	}
 }
