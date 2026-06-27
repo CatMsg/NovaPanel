@@ -98,6 +98,11 @@ func (a *APP) Start() error {
 		logger.Warning("rebuild managed port forwarding failed:", err)
 	}
 
+	err = a.configService.EndpointService.RebuildEndpointPortForwarding()
+	if err != nil {
+		logger.Warning("rebuild endpoint port forwarding failed:", err)
+	}
+
 	return nil
 }
 

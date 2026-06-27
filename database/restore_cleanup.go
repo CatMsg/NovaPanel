@@ -26,6 +26,17 @@ func cleanupRestoredInboundConflicts() error {
 	return pruneInboundConflictsBySSHPorts(sshPorts)
 }
 
+func cleanupRestoredEndpointConflicts() error {
+	sshPorts, err := detectSSHListenPortsForRestore()
+	if err != nil || len(sshPorts) == 0 {
+		sshPorts = []int{22}
+		if err != nil {
+			logger.Warning("detect ssh listen ports for restore failed, fallback to 22:", err)
+		}
+	}
+	return pruneEndpointConflictsBySSHPorts(sshPorts)
+}
+
 func pruneInboundConflictsBySSHPorts(sshPorts []int) error {
 	if len(sshPorts) == 0 || db == nil {
 		return nil
@@ -85,6 +96,65 @@ func pruneInboundConflictsBySSHPorts(sshPorts []int) error {
 	return nil
 }
 
+func pruneEndpointConflictsBySSHPorts(sshPorts []int) error {
+	if len(sshPorts) == 0 || db == nil {
+		return nil
+	}
+
+	sshSet := make(map[int]struct{}, len(sshPorts))
+	for _, port := range sshPorts {
+		if port < 1 || port > 65535 {
+			continue
+		}
+		sshSet[port] = struct{}{}
+	}
+	if len(sshSet) == 0 {
+		return nil
+	}
+
+	tx := db.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+
+	var err error
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	var endpoints []model.Endpoint
+	if err = tx.Model(model.Endpoint{}).Find(&endpoints).Error; err != nil {
+		return err
+	}
+
+	removedTags := make([]string, 0)
+	for _, endpoint := range endpoints {
+		ports, ok, err := collectEndpointPortsForRestore(&endpoint)
+		if err != nil {
+			logger.Warning("skip endpoint restore conflict check failed: ", err)
+			continue
+		}
+		if !ok || !hasPortConflict(ports, sshSet) {
+			continue
+		}
+		if err = removeEndpointFromRestoreTx(tx, &endpoint); err != nil {
+			return err
+		}
+		removedTags = append(removedTags, endpoint.Tag)
+	}
+
+	if err = tx.Commit().Error; err != nil {
+		return err
+	}
+
+	if len(removedTags) > 0 {
+		logger.Info("removed conflicted endpoints during restore: ", strings.Join(removedTags, ","))
+	}
+	return nil
+}
+
 func collectInboundPortsForRestore(inbound *model.Inbound) ([]int, bool, error) {
 	full, err := inbound.MarshalFull()
 	if err != nil {
@@ -113,7 +183,59 @@ func collectInboundPortsForRestore(inbound *model.Inbound) ([]int, bool, error) 
 	return ports, true, nil
 }
 
+func collectEndpointPortsForRestore(endpoint *model.Endpoint) ([]int, bool, error) {
+	full, err := endpoint.MarshalJSON()
+	if err != nil {
+		return nil, false, err
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(full, &payload); err != nil {
+		return nil, false, err
+	}
+
+	rawPort, ok := payload["listen_port"]
+	if !ok || rawPort == nil {
+		return nil, false, nil
+	}
+
+	listenPort, err := normalizeRestorePort(rawPort)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return []int{listenPort}, true, nil
+}
+
 func normalizeInboundPort(raw interface{}) (int, error) {
+	switch v := raw.(type) {
+	case float64:
+		if v < 1 || v > 65535 {
+			return 0, fmt.Errorf("invalid listen_port: %v", v)
+		}
+		return int(v), nil
+	case json.Number:
+		port, err := v.Int64()
+		if err != nil {
+			return 0, err
+		}
+		if port < 1 || port > 65535 {
+			return 0, fmt.Errorf("invalid listen_port: %d", port)
+		}
+		return int(port), nil
+	default:
+		port, err := strconv.Atoi(fmt.Sprint(raw))
+		if err != nil {
+			return 0, err
+		}
+		if port < 1 || port > 65535 {
+			return 0, fmt.Errorf("invalid listen_port: %d", port)
+		}
+		return port, nil
+	}
+}
+
+func normalizeRestorePort(raw interface{}) (int, error) {
 	switch v := raw.(type) {
 	case float64:
 		if v < 1 || v > 65535 {
@@ -337,6 +459,10 @@ func detectSSHListenPortsForRestore() ([]int, error) {
 		return ports, nil
 	}
 	return nil, fmt.Errorf("no ssh port detected")
+}
+
+func removeEndpointFromRestoreTx(tx *gorm.DB, endpoint *model.Endpoint) error {
+	return tx.Where("tag = ?", endpoint.Tag).Delete(model.Endpoint{}).Error
 }
 
 func detectSSHPortsFromSSHD() ([]int, error) {

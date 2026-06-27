@@ -263,6 +263,9 @@ func ImportDB(file multipart.File) error {
 	if err := cleanupRestoredInboundConflicts(); err != nil {
 		logger.Warning("cleanup conflicted inbounds after restore failed:", err)
 	}
+	if err := cleanupRestoredEndpointConflicts(); err != nil {
+		logger.Warning("cleanup conflicted endpoints after restore failed:", err)
+	}
 
 	// Restart app
 	err = SendSighup()

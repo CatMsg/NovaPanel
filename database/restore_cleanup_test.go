@@ -90,3 +90,45 @@ func TestPruneInboundConflictsBySSHPorts(t *testing.T) {
 		t.Fatalf("unexpected client links after prune: %#v", links)
 	}
 }
+
+func TestPruneEndpointConflictsBySSHPorts(t *testing.T) {
+	logger.InitLogger(logging.ERROR)
+
+	dir := t.TempDir()
+	if err := InitDB(filepath.Join(dir, "restore.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	bad := model.Endpoint{
+		Type: "wireguard",
+		Tag:  "ssh-conflict-endpoint",
+		Options: json.RawMessage(`{
+			"listen_port": 22
+		}`),
+	}
+	good := model.Endpoint{
+		Type: "wireguard",
+		Tag:  "safe-endpoint",
+		Options: json.RawMessage(`{
+			"listen_port": 8080
+		}`),
+	}
+	if err := db.Create(&bad).Error; err != nil {
+		t.Fatalf("create bad endpoint: %v", err)
+	}
+	if err := db.Create(&good).Error; err != nil {
+		t.Fatalf("create good endpoint: %v", err)
+	}
+
+	if err := pruneEndpointConflictsBySSHPorts([]int{22}); err != nil {
+		t.Fatalf("prune conflicted endpoints: %v", err)
+	}
+
+	var endpoints []model.Endpoint
+	if err := db.Find(&endpoints).Error; err != nil {
+		t.Fatalf("load endpoints: %v", err)
+	}
+	if len(endpoints) != 1 || endpoints[0].Tag != good.Tag {
+		t.Fatalf("unexpected endpoints after prune: %#v", endpoints)
+	}
+}

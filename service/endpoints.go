@@ -72,6 +72,15 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) er
 			return err
 		}
 
+		var oldEndpoint *model.Endpoint
+		if act == "edit" {
+			oldEndpoint = &model.Endpoint{}
+			err = tx.Model(model.Endpoint{}).Where("id = ?", endpoint.Id).First(oldEndpoint).Error
+			if err != nil {
+				return err
+			}
+		}
+
 		if endpoint.Type == "warp" {
 			if act == "new" {
 				err = s.WarpService.RegisterWarp(&endpoint)
@@ -91,18 +100,18 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) er
 			}
 		}
 
+		err = s.SyncManagedEndpointPortForwarding(oldEndpoint, &endpoint)
+		if err != nil {
+			return err
+		}
+
 		if corePtr.IsRunning() {
 			configData, err := endpoint.MarshalJSON()
 			if err != nil {
 				return err
 			}
 			if act == "edit" {
-				var oldTag string
-				err = tx.Model(model.Endpoint{}).Select("tag").Where("id = ?", endpoint.Id).Find(&oldTag).Error
-				if err != nil {
-					return err
-				}
-				err = corePtr.RemoveEndpoint(oldTag)
+				err = corePtr.RemoveEndpoint(oldEndpoint.Tag)
 				if err != nil && err != os.ErrInvalid {
 					return err
 				}
@@ -123,11 +132,20 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) er
 		if err != nil {
 			return err
 		}
+		oldEndpoint := &model.Endpoint{}
+		err = tx.Model(model.Endpoint{}).Where("tag = ?", tag).First(oldEndpoint).Error
+		if err != nil {
+			return err
+		}
 		if corePtr.IsRunning() {
 			err = corePtr.RemoveEndpoint(tag)
 			if err != nil && err != os.ErrInvalid {
 				return err
 			}
+		}
+		err = s.SyncManagedEndpointPortForwarding(oldEndpoint, nil)
+		if err != nil {
+			return err
 		}
 		err = tx.Where("tag = ?", tag).Delete(model.Endpoint{}).Error
 		if err != nil {
