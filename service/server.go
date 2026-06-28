@@ -1,7 +1,13 @@
 package service
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/pem"
+	"errors"
 	"os"
 	"runtime"
 	"strconv"
@@ -213,6 +219,8 @@ func (s *ServerService) GenKeypair(keyType string, options string) []string {
 		return s.generateRealityKeyPair()
 	case "wireguard":
 		return s.generateWireGuardKey(options)
+	case "masque":
+		return s.generateMasqueKey(options)
 	}
 
 	return []string{"Failed to generate keypair"}
@@ -253,6 +261,65 @@ func (s *ServerService) generateWireGuardKey(pk string) []string {
 		return []string{"Failed to generate wireguard keypair: ", err.Error()}
 	}
 	return []string{"PrivateKey: " + wgKeys.String(), "PublicKey: " + wgKeys.PublicKey().String()}
+}
+
+func (s *ServerService) generateMasqueKey(pk string) []string {
+	if len(strings.TrimSpace(pk)) > 0 {
+		pub, err := masquePublicKeyFromPrivate(pk)
+		if err != nil {
+			return []string{"Failed to generate masque keypair: ", err.Error()}
+		}
+		return []string{"PublicKey: " + pub}
+	}
+
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return []string{"Failed to generate masque keypair: ", err.Error()}
+	}
+	privDER, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		return []string{"Failed to generate masque keypair: ", err.Error()}
+	}
+	pubDER, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+	if err != nil {
+		return []string{"Failed to generate masque keypair: ", err.Error()}
+	}
+
+	return []string{
+		"PrivateKey: " + base64.StdEncoding.EncodeToString(privDER),
+		"PublicKey: " + base64.StdEncoding.EncodeToString(pubDER),
+	}
+}
+
+func masquePublicKeyFromPrivate(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", errors.New("empty private key")
+	}
+
+	var data []byte
+	if block, _ := pem.Decode([]byte(trimmed)); block != nil {
+		data = block.Bytes
+	} else {
+		data, _ = base64.StdEncoding.DecodeString(trimmed)
+		if len(data) == 0 {
+			data, _ = base64.RawStdEncoding.DecodeString(trimmed)
+		}
+		if len(data) == 0 {
+			return "", errors.New("invalid base64 ECDSA private key")
+		}
+	}
+
+	priv, err := x509.ParseECPrivateKey(data)
+	if err != nil {
+		return "", err
+	}
+
+	pubDER, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(pubDER), nil
 }
 
 func (s *ServerService) GetDatabaseInfo() map[string]int64 {

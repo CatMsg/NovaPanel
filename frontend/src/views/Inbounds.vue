@@ -128,7 +128,7 @@ const tlsConfigs = computed((): any[] => {
 })
 
 const inTags = computed((): string[] => {
-  return [...inbounds.value?.map(i => i.tag), ...Data().endpoints?.filter((e:any) => e.listen_port > 0).map((e:any) => e.tag)]
+  return [...inbounds.value?.map(i => i.tag), ...Data().endpoints?.filter((e:any) => e.listen_port > 0 && e.type != "masque").map((e:any) => e.tag)]
 })
 
 const onlines = computed(() => {

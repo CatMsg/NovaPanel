@@ -34,24 +34,44 @@
           </v-row>
         </v-card-subtitle>
         <v-card-text>
-          <v-row>
-            <v-col>{{ $t('in.addr') }}</v-col>
-            <v-col>
-              {{ item.address?.length>0 ? item.address[0] : '-' }}
-            </v-col>
-          </v-row>
-          <v-row>
-            <v-col>{{ $t('in.port') }}</v-col>
-            <v-col>
-              {{ item.listen_port>0 ? item.listen_port : '-' }}
-            </v-col>
-          </v-row>
-          <v-row>
-            <v-col>{{ $t('types.wg.peers') }}</v-col>
-            <v-col>
-              {{ item.peers?.length?? '-'  }}
-            </v-col>
-          </v-row>
+          <template v-if="item.type == 'masque'">
+            <v-row>
+              <v-col>Server</v-col>
+              <v-col>{{ item.server ?? '-' }}</v-col>
+            </v-row>
+            <v-row>
+              <v-col>Port</v-col>
+              <v-col>{{ item.port ?? '-' }}</v-col>
+            </v-row>
+            <v-row>
+              <v-col>Network</v-col>
+              <v-col>{{ item.network ?? '-' }}</v-col>
+            </v-row>
+            <v-row>
+              <v-col>IP</v-col>
+              <v-col>{{ item.ip ?? '-' }}</v-col>
+            </v-row>
+          </template>
+          <template v-else>
+            <v-row>
+              <v-col>{{ $t('in.addr') }}</v-col>
+              <v-col>
+                {{ item.address?.length>0 ? item.address[0] : '-' }}
+              </v-col>
+            </v-row>
+            <v-row>
+              <v-col>{{ $t('in.port') }}</v-col>
+              <v-col>
+                {{ item.listen_port>0 ? item.listen_port : '-' }}
+              </v-col>
+            </v-row>
+            <v-row>
+              <v-col>{{ $t('types.wg.peers') }}</v-col>
+              <v-col>
+                {{ item.peers?.length?? '-'  }}
+              </v-col>
+            </v-row>
+          </template>
           <v-row>
             <v-col>{{ $t('online') }}</v-col>
             <v-col>
@@ -71,6 +91,10 @@
           <v-btn icon="mdi-file-remove" style="margin-inline-start:0;" color="warning" @click="delOverlay[index] = true">
             <v-icon />
             <v-tooltip activator="parent" location="top" :text="$t('actions.del')"></v-tooltip>
+          </v-btn>
+          <v-btn v-if="item.type == 'masque'" icon="mdi-content-copy" @click="copyMasque(item)">
+            <v-icon />
+            <v-tooltip activator="parent" location="top" text="Copy config"></v-tooltip>
           </v-btn>
           <v-overlay
             v-model="delOverlay[index]"
@@ -109,6 +133,7 @@ import EndpointVue from '@/layouts/modals/Endpoint.vue'
 import Stats from '@/layouts/modals/Stats.vue'
 import QrCode from '@/layouts/modals/WgQrCode.vue'
 import { Endpoint } from '@/types/endpoints'
+import { buildMasqueConfig } from '@/plugins/masqueUtil'
 import { computed, ref } from 'vue'
 
 const endpoints = computed((): Endpoint[] => {
@@ -172,5 +197,10 @@ const showQrCode = (id: number) => {
 }
 const closeQrCode = () => {
   qrcode.value.visible = false
+}
+
+const copyMasque = async (item: any) => {
+  const text = buildMasqueConfig(item)
+  await navigator.clipboard.writeText(text)
 }
 </script>

@@ -60,6 +60,9 @@ func (o *EndpointService) GetAllConfig(db *gorm.DB) ([]json.RawMessage, error) {
 		if err != nil {
 			return nil, err
 		}
+		if len(endpointJson) == 0 {
+			continue
+		}
 		endpointsJson = append(endpointsJson, endpointJson)
 	}
 	return endpointsJson, nil
@@ -67,6 +70,9 @@ func (o *EndpointService) GetAllConfig(db *gorm.DB) ([]json.RawMessage, error) {
 
 func marshalEndpointConfigForCore(endpoint *model.Endpoint) ([]byte, error) {
 	if endpoint == nil {
+		return nil, nil
+	}
+	if endpoint.Type == "masque" {
 		return nil, nil
 	}
 

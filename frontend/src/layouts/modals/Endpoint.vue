@@ -30,7 +30,8 @@
           @refreshPeerKey="refreshWgPeerKey" />
         <Warp v-if="endpoint.type == epTypes.Warp" :data="endpoint" />
         <TailscaleVue v-if="endpoint.type == epTypes.Tailscale" :data="endpoint" />
-        <Dial :dial="endpoint" />
+        <Masque v-if="endpoint.type == epTypes.Masque" :data="endpoint" />
+        <Dial v-if="endpoint.type != epTypes.Masque" :dial="endpoint" />
       </v-card-text>
       <v-card-actions>
         <v-spacer></v-spacer>
@@ -61,6 +62,7 @@ import Dial from '@/components/Dial.vue'
 import Wireguard from '@/components/protocols/Wireguard.vue'
 import Warp from '@/components/protocols/Warp.vue'
 import TailscaleVue from '@/components/protocols/Tailscale.vue'
+import Masque from '@/components/protocols/Masque.vue'
 import HttpUtils from '@/plugins/httputil'
 import { push } from 'notivue'
 import { i18n } from '@/locales'
@@ -85,10 +87,10 @@ export default {
         this.title = "edit"
       }
       else {
-        this.endpoint.type = "wireguard"
-        this.endpoint.listen_port = RandomUtil.randomIntRange(10000, 60000)
-        this.changeType()
-        this.title = "add"
+      this.endpoint.type = "wireguard"
+      this.endpoint.listen_port = RandomUtil.randomIntRange(10000, 60000)
+      this.changeType()
+      this.title = "add"
       }
       this.tab = "t1"
     },
@@ -122,6 +124,23 @@ export default {
         case EpTypes.Tailscale:
           prevConfig = { tag: tag }
           break
+        case EpTypes.Masque: {
+          const masqueKeys = await this.genMasqueKey()
+          const randomIPoctet = RandomUtil.randomIntRange(2, 254)
+          prevConfig = {
+            tag: tag,
+            server: '',
+            port: 443,
+            network: 'quic',
+            private_key: masqueKeys.private_key,
+            public_key: masqueKeys.public_key,
+            ip: `172.16.0.${randomIPoctet}/32`,
+            ipv6: `fd00::${randomIPoctet.toString(16)}/128`,
+            mtu: 1280,
+            udp: true,
+          }
+          break
+        }
       }
       this.endpoint = createEndpoint(this.endpoint.type, prevConfig)
     },
@@ -147,6 +166,14 @@ export default {
         }
       }
 
+      if (this.endpoint.type == EpTypes.Masque && !String(this.endpoint.server ?? '').trim()) {
+        push.error({
+          message: 'MASQUE 需要填写 Server',
+          duration: 5000,
+        })
+        return
+      }
+
       // save data
       this.loading = true
       const success = await Data().save("endpoints", this.$props.id == 0 ? "new" : "edit", this.endpoint)
@@ -156,6 +183,27 @@ export default {
     async genWgKey(){
       this.loading = true
       const msg = await HttpUtils.get('api/keypairs', { k: "wireguard" })
+      this.loading = false
+      let result = { private_key: "", public_key: "" }
+      if (msg.success) {
+        msg.obj.forEach((line:string) => {
+          if (line.startsWith("PrivateKey")){
+            result.private_key = line.substring(12)
+          }
+          if (line.startsWith("PublicKey")){
+            result.public_key = line.substring(11)
+          }
+        })
+      } else {
+        push.error({
+          message: i18n.global.t('error') + ": " + msg.obj
+        })
+      }
+      return result
+    },
+    async genMasqueKey() {
+      this.loading = true
+      const msg = await HttpUtils.get('api/keypairs', { k: "masque" })
       this.loading = false
       let result = { private_key: "", public_key: "" }
       if (msg.success) {
@@ -238,6 +286,6 @@ export default {
       }
     },
   },
-  components: { Dial, Wireguard, Warp, TailscaleVue }
+  components: { Dial, Wireguard, Warp, TailscaleVue, Masque }
 }
 </script>
