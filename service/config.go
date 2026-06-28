@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -109,7 +110,12 @@ func (s *ConfigService) StartCore() error {
 	}()
 
 	logger.Info("starting core")
-	rawConfig, err := s.GetConfig("")
+	var rawConfig *[]byte
+	err := retryOnDatabaseLocked(3, 100*time.Millisecond, func() error {
+		var err error
+		rawConfig, err = s.GetConfig("")
+		return err
+	})
 	if err != nil {
 		return err
 	}
@@ -153,7 +159,12 @@ func (s *ConfigService) restartCoreWithConfig(config json.RawMessage) error {
 			return err
 		}
 	}
-	rawConfig, err := s.GetConfig(string(config))
+	var rawConfig *[]byte
+	err := retryOnDatabaseLocked(3, 100*time.Millisecond, func() error {
+		var err error
+		rawConfig, err = s.GetConfig(string(config))
+		return err
+	})
 	if err != nil {
 		logger.Error("restart sing-box err (get config):", err.Error())
 		return err
@@ -227,7 +238,7 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 		}
 		configData := make(json.RawMessage, len(data))
 		copy(configData, data)
-		go func() { _ = s.restartCoreWithConfig(configData) }()
+		postCommit = func() error { return s.restartCoreWithConfig(configData) }
 	case "settings":
 		err = s.SettingService.Save(tx, data)
 	default:
@@ -275,6 +286,30 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 	LastUpdate = time.Now().Unix()
 
 	return objs, nil
+}
+
+func retryOnDatabaseLocked(attempts int, delay time.Duration, fn func() error) error {
+	if attempts < 1 {
+		attempts = 1
+	}
+	var err error
+	for i := 0; i < attempts; i++ {
+		err = fn()
+		if !isDatabaseLocked(err) {
+			return err
+		}
+		if i < attempts-1 {
+			time.Sleep(delay)
+		}
+	}
+	return err
+}
+
+func isDatabaseLocked(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "database is locked")
 }
 
 func (s *ConfigService) CheckChanges(lu string) (bool, error) {

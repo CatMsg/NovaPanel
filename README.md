@@ -26,7 +26,7 @@
 
 | 能力 | 说明 |
 | --- | --- |
-| 多协议 | Mixed、SOCKS、HTTP、HTTPS、Direct、Redirect、TProxy、VLESS、VMess、Trojan、Shadowsocks、ShadowTLS、Hysteria、Hysteria2、Naive、TUIC |
+| 多协议 | Mixed、SOCKS、HTTP、HTTPS、Direct、Redirect、TProxy、VLESS、VMess、Trojan、Shadowsocks、ShadowTLS、Hysteria、Hysteria2、Naive、TUIC、MASQUE |
 | 订阅输出 | `link`、`json`、`clash`、`info` |
 | 运维面板 | 入站、出站、端点、服务、规则、路由 |
 | 可视化 | 客户端、流量、在线状态、系统状态、访问记录 |
@@ -136,8 +136,10 @@ docker build -t novapanel .
 - 新增端口管理页，可查看当前监听端口、NAT IPv4 / IPv6 规则和端口转发后端状态。
 - 面板端口新增、修改会自动同步到本地端口转发规则，减少手工维护。
 - Hysteria2 的 `server_ports` 支持单端口、范围和组合写法，例如 `500,900,1000-1400`，恢复备份后会自动重建对应规则。
+- 新增 MASQUE 协议支持，面板可直接管理并启动对应服务进程。
 - 备份恢复前会检查端口管理后端，自动适配 `ufw`、`nftables` 或 `iptables`，并在冲突场景下尽量保证恢复结果可用。
 - SSL 证书申请成功后可自动回填面板配置路径，并提供重置入口作为兜底。
+- 修复配置保存过程中偶发的 `database is locked` 问题，减少保存后重启核心时的并发冲突。
 - 首页与登录页已做移动端适配，信息卡和实时状态也针对小屏做了重新整理。
 - 支持订阅聚合、导出和信息头展示，支持流量统计、在线资源和系统监控。
 - 支持面板与订阅分离配置，便于不同场景部署。
