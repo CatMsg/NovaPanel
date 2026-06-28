@@ -78,6 +78,8 @@ func (a *APIv2Handler) getHandler(c *gin.Context) {
 		a.ApiService.GetStats(c)
 	case "status":
 		a.ApiService.GetStatus(c)
+	case "masque-status":
+		a.ApiService.GetMasqueStatus(c)
 	case "onlines":
 		a.ApiService.GetOnlines(c)
 	case "logs":

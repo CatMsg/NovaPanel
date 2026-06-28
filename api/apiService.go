@@ -9,6 +9,7 @@ import (
 	"github.com/CatMsg/NovaPanel/logger"
 	"github.com/CatMsg/NovaPanel/service"
 	"github.com/CatMsg/NovaPanel/util"
+	"github.com/CatMsg/NovaPanel/util/common"
 
 	"github.com/gin-gonic/gin"
 )
@@ -221,6 +222,21 @@ func (a *ApiService) GetStatus(c *gin.Context) {
 
 func (a *ApiService) GetPorts(c *gin.Context) {
 	result := a.ServerService.GetPortStatus()
+	jsonObj(c, result, nil)
+}
+
+func (a *ApiService) GetMasqueStatus(c *gin.Context) {
+	tag := c.Query("tag")
+	masqueService := service.GetMasqueService()
+	if masqueService == nil {
+		jsonMsg(c, "", common.NewError("masque service not initialized"))
+		return
+	}
+	result, err := masqueService.GetStatus(tag)
+	if err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
 	jsonObj(c, result, nil)
 }
 

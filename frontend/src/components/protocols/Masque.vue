@@ -3,9 +3,6 @@
     <v-card-text>
       <v-row>
         <v-col cols="12" sm="6" md="4">
-          <v-text-field v-model="data.server" label="Server" hide-details></v-text-field>
-        </v-col>
-        <v-col cols="12" sm="6" md="4">
           <v-text-field v-model.number="data.port" label="Port" type="number" min="1" max="65535" hide-details></v-text-field>
         </v-col>
         <v-col cols="12" sm="6" md="4">

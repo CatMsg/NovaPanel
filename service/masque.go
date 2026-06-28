@@ -25,12 +25,16 @@ import (
 var masquePtr *MasqueService
 
 type masqueRuntime struct {
-	tag      string
-	port     int
-	host     string
-	proxy    *masque.Proxy
-	server   *http3.Server
-	template *uritemplate.Template
+	tag         string
+	port        int
+	host        string
+	bindAddr    string
+	certFile    string
+	keyFile     string
+	templateStr string
+	proxy       *masque.Proxy
+	server      *http3.Server
+	template    *uritemplate.Template
 }
 
 type MasqueService struct {
@@ -48,6 +52,10 @@ func NewMasqueService() *MasqueService {
 
 func SetMasqueService(s *MasqueService) {
 	masquePtr = s
+}
+
+func GetMasqueService() *MasqueService {
+	return masquePtr
 }
 
 func (s *MasqueService) SyncFromDB() error {
@@ -98,6 +106,68 @@ func (s *MasqueService) Stop() error {
 		runtime.stop()
 	}
 	return nil
+}
+
+func (s *MasqueService) GetStatus(tag string) (map[string]interface{}, error) {
+	if s == nil {
+		return nil, common.NewError("masque service not initialized")
+	}
+
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return nil, common.NewError("missing endpoint tag")
+	}
+
+	db := database.GetDB()
+	endpoint := &model.Endpoint{}
+	if err := db.Model(model.Endpoint{}).Where("tag = ? AND type = ?", tag, "masque").First(endpoint).Error; err != nil {
+		return nil, err
+	}
+
+	config, err := parseMasqueEndpoint(endpoint)
+	if err != nil {
+		return nil, err
+	}
+
+	certFile, keyFile, certErr := s.resolveMasqueCertFiles(config.Host)
+
+	s.mu.Lock()
+	runtime := s.runtimes[tag]
+	s.mu.Unlock()
+
+	status := map[string]interface{}{
+		"tag":       endpoint.Tag,
+		"host":      config.Host,
+		"port":      config.Port,
+		"network":   config.Network,
+		"running":   runtime != nil,
+		"bind_addr": net.JoinHostPort("0.0.0.0", strconv.Itoa(config.Port)),
+		"template":  fmt.Sprintf("https://%s/?h={target_host}&p={target_port}", config.Host),
+	}
+
+	if runtime != nil {
+		if runtime.bindAddr != "" {
+			status["bind_addr"] = runtime.bindAddr
+		}
+		if runtime.templateStr != "" {
+			status["template"] = runtime.templateStr
+		}
+		if runtime.certFile != "" {
+			status["cert_file"] = runtime.certFile
+		}
+		if runtime.keyFile != "" {
+			status["key_file"] = runtime.keyFile
+		}
+	}
+
+	if certErr != nil {
+		status["cert_error"] = certErr.Error()
+	} else {
+		status["cert_file"] = certFile
+		status["key_file"] = keyFile
+	}
+
+	return status, nil
 }
 
 func (s *MasqueService) loadMasqueEndpoints() ([]*model.Endpoint, error) {
@@ -182,12 +252,16 @@ func (s *MasqueService) startEndpoint(endpoint *model.Endpoint) (*masqueRuntime,
 	}
 
 	handle := &masqueRuntime{
-		tag:      endpoint.Tag,
-		port:     config.Port,
-		host:     config.Host,
-		proxy:    proxy,
-		server:   srv,
-		template: template,
+		tag:         endpoint.Tag,
+		port:        config.Port,
+		host:        config.Host,
+		bindAddr:    bindAddr,
+		certFile:    certFile,
+		keyFile:     keyFile,
+		templateStr: templateStr,
+		proxy:       proxy,
+		server:      srv,
+		template:    template,
 	}
 
 	go func() {

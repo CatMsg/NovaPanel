@@ -14,6 +14,12 @@
     :tag="stats.tag"
     @close="closeStats"
   />
+  <MasqueStatus
+    v-model="masqueStatus.visible"
+    :visible="masqueStatus.visible"
+    :data="masqueStatus.data"
+    @close="closeMasqueStatus"
+  />
   <QrCode
     v-model="qrcode.visible"
     :visible="qrcode.visible"
@@ -96,6 +102,10 @@
             <v-icon />
             <v-tooltip activator="parent" location="top" text="Copy config"></v-tooltip>
           </v-btn>
+          <v-btn v-if="item.type == 'masque'" icon="mdi-information-outline" @click="showMasqueStatus(item.id)">
+            <v-icon />
+            <v-tooltip activator="parent" location="top" text="MASQUE status"></v-tooltip>
+          </v-btn>
           <v-overlay
             v-model="delOverlay[index]"
             contained
@@ -131,6 +141,7 @@
 import Data from '@/store/modules/data'
 import EndpointVue from '@/layouts/modals/Endpoint.vue'
 import Stats from '@/layouts/modals/Stats.vue'
+import MasqueStatus from '@/layouts/modals/MasqueStatus.vue'
 import QrCode from '@/layouts/modals/WgQrCode.vue'
 import { Endpoint } from '@/types/endpoints'
 import { buildMasqueConfig } from '@/plugins/masqueUtil'
@@ -191,12 +202,26 @@ const qrcode = ref({
   data: <any>{},
 })
 
+const masqueStatus = ref({
+  visible: false,
+  data: <any>{},
+})
+
 const showQrCode = (id: number) => {
   qrcode.value.data = endpoints.value.findLast(o => o.id == id)
   qrcode.value.visible = true
 }
 const closeQrCode = () => {
   qrcode.value.visible = false
+}
+
+const showMasqueStatus = (id: number) => {
+  masqueStatus.value.data = endpoints.value.findLast(o => o.id == id)
+  masqueStatus.value.visible = true
+}
+
+const closeMasqueStatus = () => {
+  masqueStatus.value.visible = false
 }
 
 const copyMasque = async (item: any) => {

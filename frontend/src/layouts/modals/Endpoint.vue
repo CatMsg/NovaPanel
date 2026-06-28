@@ -127,9 +127,10 @@ export default {
         case EpTypes.Masque: {
           const masqueKeys = await this.genMasqueKey()
           const randomIPoctet = RandomUtil.randomIntRange(2, 254)
+          const server = await this.getMasqueServer()
           prevConfig = {
             tag: tag,
-            server: '',
+            server,
             port: 443,
             network: 'quic',
             private_key: masqueKeys.private_key,
@@ -167,11 +168,7 @@ export default {
       }
 
       if (this.endpoint.type == EpTypes.Masque && !String(this.endpoint.server ?? '').trim()) {
-        push.error({
-          message: 'MASQUE 需要填写 Server',
-          duration: 5000,
-        })
-        return
+        this.endpoint.server = await this.getMasqueServer()
       }
 
       // save data
@@ -221,6 +218,21 @@ export default {
         })
       }
       return result
+    },
+    async getMasqueServer() {
+      try {
+        const msg = await HttpUtils.get('api/status', { r: 'sys' })
+        const ipv4List = msg.success ? msg.obj?.sys?.ipv4 : []
+        if (Array.isArray(ipv4List) && ipv4List.length > 0) {
+          const host = String(ipv4List[0] ?? '').trim()
+          if (host) {
+            return host.split('/')[0]
+          }
+        }
+      } catch {
+        // ignore and use fallback
+      }
+      return window.location.hostname || ''
     },
     async newWgKey(){
       this.loading = true
