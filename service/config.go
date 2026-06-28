@@ -260,6 +260,12 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 		s.StartCore()
 	}
 
+	if masquePtr != nil && (obj == "endpoints" || obj == "settings") {
+		if err := masquePtr.SyncFromDB(); err != nil {
+			logger.Warning("sync masque service failed:", err)
+		}
+	}
+
 	if postCommit != nil {
 		if err = postCommit(); err != nil {
 			return nil, err

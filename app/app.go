@@ -18,6 +18,7 @@ import (
 type APP struct {
 	service.SettingService
 	configService *service.ConfigService
+	masqueService *service.MasqueService
 	webServer     *web.Server
 	subServer     *sub.Server
 	cronJob       *cronjob.CronJob
@@ -47,6 +48,8 @@ func (a *APP) Init() error {
 	a.SettingService.GetAllSetting()
 
 	a.core = core.NewCore()
+	a.masqueService = service.NewMasqueService()
+	service.SetMasqueService(a.masqueService)
 
 	a.cronJob = cronjob.NewCronJob()
 	a.webServer = web.NewServer()
@@ -93,6 +96,13 @@ func (a *APP) Start() error {
 		logger.Warning("rebuild inbound port forwarding failed:", err)
 	}
 
+	if a.masqueService != nil {
+		err = a.masqueService.SyncFromDB()
+		if err != nil {
+			logger.Warning("rebuild masque service failed:", err)
+		}
+	}
+
 	err = a.SettingService.RebuildManagedPortForwarding()
 	if err != nil {
 		logger.Warning("rebuild managed port forwarding failed:", err)
@@ -119,6 +129,12 @@ func (a *APP) Stop() {
 	err = a.configService.StopCore()
 	if err != nil {
 		logger.Warning("stop Core err:", err)
+	}
+	if a.masqueService != nil {
+		err = a.masqueService.Stop()
+		if err != nil {
+			logger.Warning("stop Masque Service err:", err)
+		}
 	}
 }
 
