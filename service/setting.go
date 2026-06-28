@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -61,7 +62,7 @@ var defaultValueMap = map[string]string{
 	"subKeyFile":       "",
 	"subUpdates":       "12",
 	"subEncode":        "true",
-	"subShowInfo":      "false",
+	"subShowInfo":      "true",
 	"subURI":           "",
 	"subMode":          "slave",
 	"subMasterSources": "",
@@ -97,12 +98,53 @@ func (s *SettingService) GetAllSetting() (*map[string]string, error) {
 		}
 	}
 
+	s.fillSubCertFiles(allSetting)
+
 	// Due to security principles
 	delete(allSetting, "secret")
 	delete(allSetting, "config")
 	delete(allSetting, "version")
 
 	return &allSetting, nil
+}
+
+func (s *SettingService) fillSubCertFiles(allSetting map[string]string) {
+	if allSetting == nil {
+		return
+	}
+	if allSetting["subCertFile"] != "" && allSetting["subKeyFile"] != "" {
+		return
+	}
+
+	seen := map[string]struct{}{}
+	tryDomains := func(domain string) bool {
+		domain = strings.TrimSpace(domain)
+		if domain == "" {
+			return false
+		}
+		if _, ok := seen[domain]; ok {
+			return false
+		}
+		seen[domain] = struct{}{}
+
+		certFile, keyFile, ok := resolveAcmeCertFiles(domain)
+		if !ok {
+			return false
+		}
+
+		if allSetting["subCertFile"] == "" {
+			allSetting["subCertFile"] = certFile
+		}
+		if allSetting["subKeyFile"] == "" {
+			allSetting["subKeyFile"] = keyFile
+		}
+		return true
+	}
+
+	if tryDomains(allSetting["subDomain"]) {
+		return
+	}
+	tryDomains(allSetting["webDomain"])
 }
 
 func (s *SettingService) ResetSettings() error {
@@ -534,6 +576,51 @@ func (s *SettingService) fileExists(path string) error {
 	}
 	if info.Size() <= 0 {
 		return common.NewErrorf("%s is empty", path)
+	}
+	return nil
+}
+
+func resolveAcmeCertFiles(domain string) (string, string, bool) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil || homeDir == "" {
+		return "", "", false
+	}
+	return resolveAcmeCertFilesFromHome(homeDir, domain)
+}
+
+func resolveAcmeCertFilesFromHome(homeDir, domain string) (string, string, bool) {
+	domain = strings.TrimSpace(domain)
+	if domain == "" {
+		return "", "", false
+	}
+
+	candidates := []string{
+		filepath.Join(homeDir, ".acme.sh", domain+"_ecc"),
+		filepath.Join(homeDir, ".acme.sh", domain),
+	}
+
+	for _, certDir := range candidates {
+		certFile := filepath.Join(certDir, "fullchain.cer")
+		keyFile := filepath.Join(certDir, domain+".key")
+		if err := fileMustExist(certFile); err != nil {
+			continue
+		}
+		if err := fileMustExist(keyFile); err != nil {
+			continue
+		}
+		return certFile, keyFile, true
+	}
+
+	return "", "", false
+}
+
+func fileMustExist(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() || info.Size() <= 0 {
+		return common.NewErrorf("%s is invalid", path)
 	}
 	return nil
 }

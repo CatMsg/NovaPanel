@@ -136,6 +136,17 @@ export default {
       const isDuplicatedTag = Data().checkTag("endpoint",this.endpoint.id, this.endpoint.tag)
       if (isDuplicatedTag) return
 
+      if (this.endpoint.type == EpTypes.Wireguard) {
+        const invalidPeer = this.endpoint.peers?.find((peer: any) => !String(peer.address ?? '').trim())
+        if (invalidPeer) {
+          push.error({
+            message: 'WireGuard peer 需要填写公网地址',
+            duration: 5000,
+          })
+          return
+        }
+      }
+
       // save data
       this.loading = true
       const success = await Data().save("endpoints", this.$props.id == 0 ? "new" : "edit", this.endpoint)

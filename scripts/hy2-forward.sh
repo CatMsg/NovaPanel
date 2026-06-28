@@ -5,17 +5,18 @@ action="${1:-}"
 tag="${2:-}"
 listen_port="${3:-}"
 ports_csv="${4:-}"
+protocols_csv="${5:-tcp,udp}"
 backend_override="${HY2_FORWARD_BACKEND:-auto}"
 
 if [[ -z "${action}" ]]; then
-  echo "usage: $0 <apply|remove|purge> [tag] [listen_port] [ports_csv]" >&2
+  echo "usage: $0 <apply|remove|purge> [tag] [listen_port] [ports_csv] [protocols_csv]" >&2
   exit 1
 fi
 
 case "${action}" in
   apply|remove)
     if [[ -z "${tag}" ]]; then
-      echo "usage: $0 <${action}> <tag> <listen_port> <ports_csv>" >&2
+      echo "usage: $0 <${action}> <tag> <listen_port> <ports_csv> [protocols_csv]" >&2
       exit 1
     fi
     ;;
@@ -34,6 +35,41 @@ if [[ "${action}" == "apply" ]]; then
   fi
 fi
 
+normalize_protocols() {
+  local raw="${1:-tcp,udp}"
+  local part trimmed
+  local seen="|"
+
+  IFS=',' read -r -a parts <<< "${raw}"
+  for part in "${parts[@]}"; do
+    trimmed="$(printf '%s' "${part}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+    case "${trimmed}" in
+      tcp|udp)
+        if [[ "${seen}" != *"|${trimmed}|"* ]]; then
+          seen="${seen}${trimmed}|"
+          printf '%s\n' "${trimmed}"
+        fi
+        ;;
+      "")
+        ;;
+      *)
+        echo "invalid protocol token: ${trimmed}" >&2
+        return 1
+        ;;
+    esac
+  done
+}
+
+protocols=()
+while IFS= read -r protocol; do
+  if [[ -n "${protocol}" ]]; then
+    protocols+=("${protocol}")
+  fi
+done < <(normalize_protocols "${protocols_csv}")
+if [[ ${#protocols[@]} -eq 0 ]]; then
+  protocols=(tcp udp)
+fi
+
 chain=""
 begin_marker="# NOVAPANEL HY2 BEGIN"
 end_marker="# NOVAPANEL HY2 END"
@@ -50,17 +86,17 @@ has_cmd() {
 normalize_ports() {
   local raw="${1:-}"
   local part trimmed start end port
-  declare -A seen=()
+  local seen="|"
 
   emit_port() {
     local value="${1:-}"
     if [[ -z "${value}" || "${value}" -lt 1 || "${value}" -gt 65535 ]]; then
       return 0
     fi
-    if [[ -n "${seen[${value}]:-}" ]]; then
+    if [[ "${seen}" == *"|${value}|"* ]]; then
       return 0
     fi
-    seen["${value}"]=1
+    seen="${seen}${value}|"
     printf '%s\n' "${value}"
   }
 
@@ -100,7 +136,7 @@ render_ufw_block() {
 
   while IFS= read -r port; do
     if [[ -n "${port}" ]]; then
-      for protocol in tcp udp; do
+      for protocol in "${protocols[@]}"; do
         if [[ -n "${output}" ]]; then
           output="${output}"$'\n'
         fi
@@ -217,7 +253,7 @@ remove_port_live_redirects() {
 
   while IFS= read -r port; do
     if [[ -n "${port}" && -n "${listen_port}" && "${listen_port}" =~ ^[0-9]+$ ]]; then
-      for protocol in tcp udp; do
+      for protocol in "${protocols[@]}"; do
         while "${bin}" -t nat -C PREROUTING -p "${protocol}" --dport "${port}" -j REDIRECT --to-ports "${listen_port}" >/dev/null 2>&1; do
           "${bin}" -t nat -D PREROUTING -p "${protocol}" --dport "${port}" -j REDIRECT --to-ports "${listen_port}" || true
         done
@@ -357,7 +393,7 @@ remove_iptables() {
 
   remove_port_live_redirects "${bin}" "${normalized_ports}"
 
-  for protocol in tcp udp; do
+  for protocol in "${protocols[@]}"; do
     while "${bin}" -t nat -C PREROUTING -p "${protocol}" -j "${chain}" >/dev/null 2>&1; do
       "${bin}" -t nat -D PREROUTING -p "${protocol}" -j "${chain}" || true
     done
@@ -370,6 +406,7 @@ remove_iptables() {
 purge_iptables_bin() {
   local bin="$1"
   local chain_name
+  local all_protocols=(tcp udp)
 
   if ! has_cmd "${bin}"; then
     return 0
@@ -377,7 +414,7 @@ purge_iptables_bin() {
 
   while IFS= read -r chain_name; do
     [[ "${chain_name}" == NPHY2_* ]] || continue
-    for protocol in tcp udp; do
+    for protocol in "${all_protocols[@]}"; do
       while "${bin}" -t nat -C PREROUTING -p "${protocol}" -j "${chain_name}" >/dev/null 2>&1; do
         "${bin}" -t nat -D PREROUTING -p "${protocol}" -j "${chain_name}" || true
       done
@@ -394,6 +431,7 @@ apply_iptables() {
   local normalized_ports="${2:-}"
   local port
   local protocol
+  local cleanup_protocols=(tcp udp)
 
   if ! has_cmd "${bin}"; then
     return 0
@@ -407,7 +445,13 @@ apply_iptables() {
     return 0
   fi
 
-  for protocol in tcp udp; do
+  for protocol in "${cleanup_protocols[@]}"; do
+    while "${bin}" -t nat -C PREROUTING -p "${protocol}" -j "${chain}" >/dev/null 2>&1; do
+      "${bin}" -t nat -D PREROUTING -p "${protocol}" -j "${chain}" || true
+    done
+  done
+
+  for protocol in "${protocols[@]}"; do
     if ! "${bin}" -t nat -C PREROUTING -p "${protocol}" -j "${chain}" >/dev/null 2>&1; then
       "${bin}" -t nat -A PREROUTING -p "${protocol}" -j "${chain}"
     fi
@@ -415,7 +459,7 @@ apply_iptables() {
 
   while IFS= read -r port; do
     if [[ -n "${port}" ]]; then
-      for protocol in tcp udp; do
+      for protocol in "${protocols[@]}"; do
         "${bin}" -t nat -A "${chain}" -p "${protocol}" --dport "${port}" -j REDIRECT --to-ports "${listen_port}"
       done
     fi
@@ -467,7 +511,7 @@ apply_nftables_family() {
 
   while IFS= read -r port; do
     if [[ -n "${port}" ]]; then
-      for protocol in tcp udp; do
+      for protocol in "${protocols[@]}"; do
         nft add rule "${family}" nat "${chain}" "${protocol}" dport "${port}" redirect to :"${listen_port}"
       done
     fi

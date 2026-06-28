@@ -3,9 +3,11 @@ package service
 import (
 	"encoding/json"
 	"os"
+	"strings"
 
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
+	"github.com/CatMsg/NovaPanel/logger"
 	"github.com/CatMsg/NovaPanel/util/common"
 
 	"gorm.io/gorm"
@@ -52,13 +54,69 @@ func (o *EndpointService) GetAllConfig(db *gorm.DB) ([]json.RawMessage, error) {
 		return nil, err
 	}
 	for _, endpoint := range endpoints {
-		endpointJson, err := endpoint.MarshalJSON()
+		endpointJson, err := marshalEndpointConfigForCore(endpoint)
 		if err != nil {
 			return nil, err
 		}
 		endpointsJson = append(endpointsJson, endpointJson)
 	}
 	return endpointsJson, nil
+}
+
+func marshalEndpointConfigForCore(endpoint *model.Endpoint) ([]byte, error) {
+	if endpoint == nil {
+		return nil, nil
+	}
+
+	endpointJson, err := endpoint.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+
+	if endpoint.Type != "wireguard" && endpoint.Type != "warp" {
+		return endpointJson, nil
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(endpointJson, &payload); err != nil {
+		return nil, err
+	}
+
+	rawPeers, ok := payload["peers"].([]interface{})
+	if !ok || len(rawPeers) == 0 {
+		return endpointJson, nil
+	}
+
+	filteredPeers := make([]interface{}, 0, len(rawPeers))
+	droppedPeers := 0
+	for _, rawPeer := range rawPeers {
+		peerMap, ok := rawPeer.(map[string]interface{})
+		if !ok {
+			filteredPeers = append(filteredPeers, rawPeer)
+			continue
+		}
+
+		address, _ := peerMap["address"].(string)
+		if strings.TrimSpace(address) == "" {
+			droppedPeers++
+			continue
+		}
+
+		filteredPeers = append(filteredPeers, rawPeer)
+	}
+
+	if droppedPeers == 0 {
+		return endpointJson, nil
+	}
+
+	payload["peers"] = filteredPeers
+	sanitized, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+
+	logger.Warning("skip wireguard peers without endpoint while building core config: ", endpoint.Tag, " dropped=", droppedPeers)
+	return sanitized, nil
 }
 
 func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) error {
@@ -106,7 +164,7 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) er
 		}
 
 		if corePtr.IsRunning() {
-			configData, err := endpoint.MarshalJSON()
+			configData, err := marshalEndpointConfigForCore(&endpoint)
 			if err != nil {
 				return err
 			}

@@ -82,10 +82,13 @@ printf '%s\n' "$*" >> "${HY2_MOCK_LOG:?}"
 		t.Fatalf("read log file: %v", err)
 	}
 	log := string(data)
-	if !strings.Contains(log, "apply panel-web-port 3000 3000") {
+	if !strings.Contains(log, "apply panel-web-port 3000 3000 tcp") {
 		t.Fatalf("web port forwarding was not applied:\n%s", log)
 	}
-	if !strings.Contains(log, "apply panel-sub-port 3001 3001") {
+	if strings.Contains(log, "udp") {
+		t.Fatalf("panel port forwarding unexpectedly included udp:\n%s", log)
+	}
+	if !strings.Contains(log, "apply panel-sub-port 3001 3001 tcp") {
 		t.Fatalf("sub port forwarding was not applied:\n%s", log)
 	}
 }

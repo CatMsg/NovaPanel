@@ -124,7 +124,7 @@ func collectInboundForwardPorts(inbound *model.Inbound) (int, []int, error) {
 }
 
 func runInboundForwardScript(action string, tag string, listenPort int, ports []int) error {
-	return runPortForwardScript(action, tag, listenPort, ports)
+	return runPortForwardScript(action, tag, listenPort, ports, []string{"tcp", "udp"})
 }
 
 func getInboundListenPort(inbound *model.Inbound) (int, error) {

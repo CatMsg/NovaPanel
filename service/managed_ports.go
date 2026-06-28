@@ -21,6 +21,9 @@ const (
 )
 
 var portForwardingMu sync.Mutex
+var managedPanelApplyProtocols = []string{"tcp"}
+var managedPanelCleanupProtocols = []string{"tcp", "udp"}
+var managedForwardProtocols = []string{"tcp", "udp"}
 
 func ValidateManagedPanelPorts(webPort, subPort int) error {
 	if webPort < 1 || webPort > 65535 {
@@ -49,14 +52,14 @@ func syncManagedPortForwarding(tag string, oldPort, newPort int) error {
 		return nil
 	}
 
-	if err := runPortForwardScript("apply", tag, newPort, []int{newPort}); err != nil {
+	if err := runPortForwardScript("apply", tag, newPort, []int{newPort}, managedPanelApplyProtocols); err != nil {
 		if oldPort > 0 {
-			rollbackErr := runPortForwardScript("apply", tag, oldPort, []int{oldPort})
+			rollbackErr := runPortForwardScript("apply", tag, oldPort, []int{oldPort}, managedPanelApplyProtocols)
 			if rollbackErr != nil {
 				return errors.Join(err, fmt.Errorf("rollback managed port forwarding for %s failed: %w", tag, rollbackErr))
 			}
 		} else {
-			rollbackErr := runPortForwardScript("remove", tag, newPort, []int{newPort})
+			rollbackErr := runPortForwardScript("remove", tag, newPort, []int{newPort}, managedPanelCleanupProtocols)
 			if rollbackErr != nil {
 				return errors.Join(err, fmt.Errorf("cleanup managed port forwarding for %s failed: %w", tag, rollbackErr))
 			}
@@ -67,7 +70,7 @@ func syncManagedPortForwarding(tag string, oldPort, newPort int) error {
 	return nil
 }
 
-func runPortForwardScript(action string, tag string, listenPort int, ports []int) error {
+func runPortForwardScript(action string, tag string, listenPort int, ports []int, protocols []string) error {
 	if runtime.GOOS != "linux" {
 		return nil
 	}
@@ -82,6 +85,7 @@ func runPortForwardScript(action string, tag string, listenPort int, ports []int
 	args := []string{action}
 	if action != "purge" {
 		args = append(args, tag, strconv.Itoa(listenPort), joinPorts(ports))
+		args = append(args, strings.Join(protocols, ","))
 	}
 	cmd := exec.Command("bash", append([]string{hy2ForwardScript}, args...)...)
 	output, err := cmd.CombinedOutput()
@@ -129,9 +133,9 @@ func syncManagedPanelPortForwarding(oldWebPort, newWebPort, oldSubPort, newSubPo
 			if changedWeb {
 				var rollbackErr error
 				if oldWebPort > 0 {
-					rollbackErr = runPortForwardScript("apply", managedWebPortForwardTag, oldWebPort, []int{oldWebPort})
+					rollbackErr = runPortForwardScript("apply", managedWebPortForwardTag, oldWebPort, []int{oldWebPort}, managedPanelApplyProtocols)
 				} else {
-					rollbackErr = runPortForwardScript("remove", managedWebPortForwardTag, newWebPort, []int{newWebPort})
+					rollbackErr = runPortForwardScript("remove", managedWebPortForwardTag, newWebPort, []int{newWebPort}, managedPanelCleanupProtocols)
 				}
 				if rollbackErr != nil {
 					return errors.Join(err, fmt.Errorf("rollback managed web port forwarding failed: %w", rollbackErr))
@@ -279,7 +283,7 @@ func syncManagedEndpointPortForwarding(oldEndpoint, newEndpoint *model.Endpoint)
 	}
 
 	if oldActive {
-		if err := runPortForwardScript("remove", oldTag, oldListenPort, oldPorts); err != nil {
+		if err := runPortForwardScript("remove", oldTag, oldListenPort, oldPorts, managedForwardProtocols); err != nil {
 			return err
 		}
 	}
@@ -288,14 +292,14 @@ func syncManagedEndpointPortForwarding(oldEndpoint, newEndpoint *model.Endpoint)
 		return nil
 	}
 
-	if err := runPortForwardScript("apply", newTag, newListenPort, newPorts); err != nil {
+	if err := runPortForwardScript("apply", newTag, newListenPort, newPorts, managedForwardProtocols); err != nil {
 		if oldActive {
-			rollbackErr := runPortForwardScript("apply", oldTag, oldListenPort, oldPorts)
+			rollbackErr := runPortForwardScript("apply", oldTag, oldListenPort, oldPorts, managedForwardProtocols)
 			if rollbackErr != nil {
 				return errors.Join(err, fmt.Errorf("rollback managed endpoint port forwarding for %s failed: %w", newTag, rollbackErr))
 			}
 		} else {
-			rollbackErr := runPortForwardScript("remove", newTag, newListenPort, newPorts)
+			rollbackErr := runPortForwardScript("remove", newTag, newListenPort, newPorts, managedForwardProtocols)
 			if rollbackErr != nil {
 				return errors.Join(err, fmt.Errorf("cleanup managed endpoint port forwarding for %s failed: %w", newTag, rollbackErr))
 			}

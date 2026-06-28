@@ -375,7 +375,7 @@ export default {
     }
   },
   methods: {
-    updateData(id: number) {
+    async updateData(id: number) {
       if (id > 0) {
         const newData = <tls>JSON.parse(this.$props.data)
         this.tls = newData
@@ -384,12 +384,30 @@ export default {
         this.tlsType = newData.server?.reality == undefined ? 0 : 1
         this.usePath = newData.server?.key == undefined ? 0 : 1
         this.title = "edit"
+        return
       }
       else {
         this.tls = <tls>{ id: 0, name: '', server: {enabled: true}, client: {} }
         this.tlsType = 0
         this.usePath = 0
         this.title = "add"
+        await this.autoFillPanelTls()
+      }
+    },
+    async autoFillPanelTls() {
+      if (this.inTls.certificate_path || this.inTls.key_path) {
+        return
+      }
+      const msg = await HttpUtils.get('api/settings')
+      if (!msg.success || !msg.obj) {
+        return
+      }
+      const webCertFile = msg.obj.webCertFile ?? ''
+      const webKeyFile = msg.obj.webKeyFile ?? ''
+      if (webCertFile !== '' && webKeyFile !== '') {
+        this.inTls.certificate_path = webCertFile
+        this.inTls.key_path = webKeyFile
+        this.usePath = 0
       }
     },
     changeTlsType(){

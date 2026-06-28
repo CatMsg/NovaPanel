@@ -204,7 +204,7 @@ const settings = ref({
 	subKeyFile: "",
 	subUpdates: "12",
 	subEncode: "true",
-	subShowInfo: "false",
+	subShowInfo: "true",
   subURI: "",
   subMode: "slave",
   subMasterSources: "",
