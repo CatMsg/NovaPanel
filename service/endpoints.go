@@ -2,6 +2,8 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"strings"
 
@@ -119,6 +121,60 @@ func marshalEndpointConfigForCore(endpoint *model.Endpoint) ([]byte, error) {
 	return sanitized, nil
 }
 
+func rollbackEndpointCoreState(act string, oldEndpoint, newEndpoint *model.Endpoint) error {
+	if corePtr == nil || !corePtr.IsRunning() {
+		return nil
+	}
+
+	switch act {
+	case "new":
+		if newEndpoint == nil {
+			return nil
+		}
+		if err := corePtr.RemoveEndpoint(newEndpoint.Tag); err != nil && err != os.ErrInvalid {
+			return err
+		}
+	case "edit", "del":
+		if oldEndpoint == nil {
+			return nil
+		}
+		configData, err := marshalEndpointConfigForCore(oldEndpoint)
+		if err != nil {
+			return err
+		}
+		if err := corePtr.AddEndpoint(configData); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func rollbackEndpointExternalState(act string, oldEndpoint, newEndpoint *model.Endpoint) error {
+	var errs []error
+
+	switch act {
+	case "new":
+		if err := syncManagedEndpointPortForwarding(newEndpoint, nil); err != nil {
+			errs = append(errs, fmt.Errorf("rollback managed endpoint port forwarding failed: %w", err))
+		}
+	case "edit":
+		if err := syncManagedEndpointPortForwarding(newEndpoint, oldEndpoint); err != nil {
+			errs = append(errs, fmt.Errorf("rollback managed endpoint port forwarding failed: %w", err))
+		}
+	case "del":
+		if err := syncManagedEndpointPortForwarding(nil, oldEndpoint); err != nil {
+			errs = append(errs, fmt.Errorf("rollback managed endpoint port forwarding failed: %w", err))
+		}
+	}
+
+	if err := rollbackEndpointCoreState(act, oldEndpoint, newEndpoint); err != nil {
+		errs = append(errs, fmt.Errorf("rollback endpoint core failed: %w", err))
+	}
+
+	return errors.Join(errs...)
+}
+
 func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) error {
 	var err error
 
@@ -166,22 +222,36 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) er
 		if corePtr.IsRunning() {
 			configData, err := marshalEndpointConfigForCore(&endpoint)
 			if err != nil {
+				if rollbackErr := syncManagedEndpointPortForwarding(&endpoint, oldEndpoint); rollbackErr != nil {
+					return errors.Join(err, rollbackErr)
+				}
 				return err
 			}
 			if act == "edit" {
 				err = corePtr.RemoveEndpoint(oldEndpoint.Tag)
 				if err != nil && err != os.ErrInvalid {
+					if rollbackErr := syncManagedEndpointPortForwarding(&endpoint, oldEndpoint); rollbackErr != nil {
+						return errors.Join(err, rollbackErr)
+					}
 					return err
 				}
 			}
 			err = corePtr.AddEndpoint(configData)
 			if err != nil {
+				rollbackErr := rollbackEndpointExternalState(act, oldEndpoint, &endpoint)
+				if rollbackErr != nil {
+					return errors.Join(err, rollbackErr)
+				}
 				return err
 			}
 		}
 
 		err = tx.Save(&endpoint).Error
 		if err != nil {
+			rollbackErr := rollbackEndpointExternalState(act, oldEndpoint, &endpoint)
+			if rollbackErr != nil {
+				return errors.Join(err, rollbackErr)
+			}
 			return err
 		}
 	case "del":
@@ -203,10 +273,18 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) er
 		}
 		err = s.SyncManagedEndpointPortForwarding(oldEndpoint, nil)
 		if err != nil {
+			rollbackErr := rollbackEndpointExternalState("del", oldEndpoint, nil)
+			if rollbackErr != nil {
+				return errors.Join(err, rollbackErr)
+			}
 			return err
 		}
 		err = tx.Where("tag = ?", tag).Delete(model.Endpoint{}).Error
 		if err != nil {
+			rollbackErr := rollbackEndpointExternalState("del", oldEndpoint, nil)
+			if rollbackErr != nil {
+				return errors.Join(err, rollbackErr)
+			}
 			return err
 		}
 	default:
