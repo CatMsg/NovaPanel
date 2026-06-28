@@ -100,20 +100,21 @@ func (s *InboundService) FromIds(ids []uint) ([]*model.Inbound, error) {
 	return inbounds, nil
 }
 
-func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, initUserIds string, hostname string) error {
+func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, initUserIds string, hostname string) (func() error, error) {
 	var err error
+	var postCommit func() error
 
 	switch act {
 	case "new", "edit":
 		var inbound model.Inbound
 		err = inbound.UnmarshalJSON(data)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if inbound.TlsId > 0 {
 			err = tx.Model(model.Tls{}).Where("id = ?", inbound.TlsId).Find(&inbound.Tls).Error
 			if err != nil {
-				return err
+				return nil, err
 			}
 		}
 		var oldInbound *model.Inbound
@@ -121,59 +122,26 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			oldInbound = &model.Inbound{}
 			err = tx.Model(model.Inbound{}).Where("id = ?", inbound.Id).First(oldInbound).Error
 			if err != nil {
-				return err
+				return nil, err
 			}
 		}
 
 		if _, ports, err := collectInboundForwardPorts(&inbound); err == nil {
 			if err := validateInboundPortsAgainstSSH(&inbound, ports); err != nil {
-				return err
+				return nil, err
 			}
 		} else if err != nil {
-			return err
-		}
-
-		if corePtr.IsRunning() {
-			if act == "edit" {
-				err = corePtr.RemoveInbound(oldInbound.Tag)
-				if err != nil && err != os.ErrInvalid {
-					return err
-				}
-			}
-
-			inboundConfig, err := inbound.MarshalJSON()
-			if err != nil {
-				return err
-			}
-
-			if act == "edit" {
-				inboundConfig, err = s.addUsers(tx, inboundConfig, inbound.Id, inbound.Type)
-			} else {
-				inboundConfig, err = s.initUsers(tx, inboundConfig, initUserIds, inbound.Type)
-			}
-			if err != nil {
-				return err
-			}
-
-			err = corePtr.AddInbound(inboundConfig)
-			if err != nil {
-				return err
-			}
+			return nil, err
 		}
 
 		err = util.FillOutJson(&inbound, hostname)
 		if err != nil {
-			return err
-		}
-
-		err = s.syncInboundPortForwarding(oldInbound, &inbound)
-		if err != nil {
-			return err
+			return nil, err
 		}
 
 		err = tx.Save(&inbound).Error
 		if err != nil {
-			return err
+			return nil, err
 		}
 		switch act {
 		case "new":
@@ -182,46 +150,82 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			err = s.ClientService.UpdateLinksByInboundChange(tx, &[]model.Inbound{inbound}, hostname, oldInbound.Tag)
 		}
 		if err != nil {
-			return err
+			return nil, err
+		}
+
+		var inboundConfig []byte
+		if corePtr.IsRunning() {
+			inboundConfig, err = inbound.MarshalJSON()
+			if err != nil {
+				return nil, err
+			}
+
+			if act == "edit" {
+				inboundConfig, err = s.addUsers(tx, inboundConfig, inbound.Id, inbound.Type)
+			} else {
+				inboundConfig, err = s.initUsers(tx, inboundConfig, initUserIds, inbound.Type)
+			}
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		inboundSnapshot := inbound
+		oldSnapshot := oldInbound
+		inboundConfigSnapshot := append([]byte(nil), inboundConfig...)
+		postCommit = func() error {
+			if corePtr.IsRunning() {
+				if act == "edit" {
+					if err := corePtr.RemoveInbound(oldSnapshot.Tag); err != nil && err != os.ErrInvalid {
+						return err
+					}
+				}
+
+				if len(inboundConfigSnapshot) > 0 {
+					if err := corePtr.AddInbound(inboundConfigSnapshot); err != nil {
+						return err
+					}
+				}
+			}
+			return s.syncInboundPortForwarding(oldSnapshot, &inboundSnapshot)
 		}
 	case "del":
 		var tag string
 		err = json.Unmarshal(data, &tag)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		oldInbound := &model.Inbound{}
 		err = tx.Model(model.Inbound{}).Where("tag = ?", tag).First(oldInbound).Error
 		if err != nil {
-			return err
-		}
-		if corePtr.IsRunning() {
-			err = corePtr.RemoveInbound(tag)
-			if err != nil && err != os.ErrInvalid {
-				return err
-			}
-		}
-		err = s.syncInboundPortForwarding(oldInbound, nil)
-		if err != nil {
-			return err
+			return nil, err
 		}
 		var id uint
 		err = tx.Model(model.Inbound{}).Select("id").Where("tag = ?", tag).Scan(&id).Error
 		if err != nil {
-			return err
+			return nil, err
 		}
 		err = s.ClientService.UpdateClientsOnInboundDelete(tx, id, tag)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		err = tx.Where("tag = ?", tag).Delete(model.Inbound{}).Error
 		if err != nil {
-			return err
+			return nil, err
+		}
+		oldSnapshot := oldInbound
+		postCommit = func() error {
+			if corePtr.IsRunning() {
+				if err := corePtr.RemoveInbound(tag); err != nil && err != os.ErrInvalid {
+					return err
+				}
+			}
+			return s.syncInboundPortForwarding(oldSnapshot, nil)
 		}
 	default:
-		return common.NewErrorf("unknown action: %s", act)
+		return nil, common.NewErrorf("unknown action: %s", act)
 	}
-	return nil
+	return postCommit, nil
 }
 
 func (s *InboundService) removeInboundByTag(tag string) error {

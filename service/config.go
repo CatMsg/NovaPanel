@@ -186,22 +186,16 @@ func (s *ConfigService) CheckOutbound(tag string, link string) core.CheckOutboun
 }
 
 func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initUsers string, loginUser string, hostname string) ([]string, error) {
-	var err error
 	var objs []string = []string{obj}
+	var postCommit func() error
 
 	db := database.GetDB()
 	tx := db.Begin()
-	defer func() {
-		if err == nil {
-			tx.Commit()
-			// Try to start core if it is not running
-			if !corePtr.IsRunning() {
-				s.StartCore()
-			}
-		} else {
-			tx.Rollback()
-		}
-	}()
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+
+	var err error
 
 	switch obj {
 	case "clients":
@@ -218,7 +212,7 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 		err = s.TlsService.Save(tx, act, data, hostname)
 		objs = append(objs, "clients", "inbounds")
 	case "inbounds":
-		err = s.InboundService.Save(tx, act, data, initUsers, hostname)
+		postCommit, err = s.InboundService.Save(tx, act, data, initUsers, hostname)
 		objs = append(objs, "clients")
 	case "outbounds":
 		err = s.OutboundService.Save(tx, act, data)
@@ -240,6 +234,7 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 		return nil, common.NewError("unknown object: ", obj)
 	}
 	if err != nil {
+		tx.Rollback()
 		return nil, err
 	}
 
@@ -252,7 +247,23 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 		Obj:      data,
 	}).Error
 	if err != nil {
+		tx.Rollback()
 		return nil, err
+	}
+
+	if err = tx.Commit().Error; err != nil {
+		return nil, err
+	}
+
+	// Try to start core if it is not running.
+	if !corePtr.IsRunning() {
+		s.StartCore()
+	}
+
+	if postCommit != nil {
+		if err = postCommit(); err != nil {
+			return nil, err
+		}
 	}
 
 	LastUpdate = time.Now().Unix()
