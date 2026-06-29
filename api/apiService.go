@@ -220,6 +220,11 @@ func (a *ApiService) GetStatus(c *gin.Context) {
 	jsonObj(c, result, nil)
 }
 
+func (a *ApiService) GetPublicIP(c *gin.Context) {
+	ip := a.ServerService.GetPublicIP()
+	jsonObj(c, ip, nil)
+}
+
 func (a *ApiService) GetPorts(c *gin.Context) {
 	result := a.ServerService.GetPortStatus()
 	jsonObj(c, result, nil)
@@ -290,7 +295,16 @@ func (a *ApiService) postActions(c *gin.Context) (string, json.RawMessage, error
 
 func (a *ApiService) Login(c *gin.Context) {
 	remoteIP := getRemoteIp(c)
-	loginUser, err := a.UserService.Login(c.Request.FormValue("user"), c.Request.FormValue("pass"), remoteIP)
+	var payload struct {
+		User string `form:"user" json:"user"`
+		Pass string `form:"pass" json:"pass"`
+	}
+	if err := c.ShouldBind(&payload); err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
+
+	loginUser, err := a.UserService.Login(payload.User, payload.Pass, remoteIP)
 	if err != nil {
 		jsonMsg(c, "", err)
 		return

@@ -85,6 +85,8 @@ func (a *APIHandler) getHandler(c *gin.Context) {
 		a.ApiService.GetStats(c)
 	case "status":
 		a.ApiService.GetStatus(c)
+	case "public-ip":
+		a.ApiService.GetPublicIP(c)
 	case "ports":
 		a.ApiService.GetPorts(c)
 	case "masque-status":

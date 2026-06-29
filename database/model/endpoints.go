@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"strings"
 )
 
 type Endpoint struct {
@@ -48,7 +49,7 @@ func (o Endpoint) MarshalJSON() ([]byte, error) {
 	}
 	combined["tag"] = o.Tag
 
-	if o.Options != nil {
+	if len(strings.TrimSpace(string(o.Options))) > 0 {
 		var restFields map[string]json.RawMessage
 		if err := json.Unmarshal(o.Options, &restFields); err != nil {
 			return nil, err

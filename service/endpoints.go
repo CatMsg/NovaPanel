@@ -34,13 +34,14 @@ func (o *EndpointService) GetAll() (*[]map[string]interface{}, error) {
 			"tag":  endpoint.Tag,
 			"ext":  endpoint.Ext,
 		}
-		if endpoint.Options != nil {
+		if len(strings.TrimSpace(string(endpoint.Options))) > 0 {
 			var restFields map[string]json.RawMessage
 			if err := json.Unmarshal(endpoint.Options, &restFields); err != nil {
-				return nil, err
-			}
-			for k, v := range restFields {
-				epData[k] = v
+				logger.Warning("skip invalid endpoint options while loading endpoint list: ", endpoint.Tag, " err=", err)
+			} else {
+				for k, v := range restFields {
+					epData[k] = v
+				}
 			}
 		}
 		data = append(data, epData)
@@ -137,6 +138,9 @@ func rollbackEndpointCoreState(act string, oldEndpoint, newEndpoint *model.Endpo
 		if newEndpoint == nil {
 			return nil
 		}
+		if newEndpoint.Type == "masque" {
+			return nil
+		}
 		if err := corePtr.RemoveEndpoint(newEndpoint.Tag); err != nil && err != os.ErrInvalid {
 			return err
 		}
@@ -144,9 +148,15 @@ func rollbackEndpointCoreState(act string, oldEndpoint, newEndpoint *model.Endpo
 		if oldEndpoint == nil {
 			return nil
 		}
+		if oldEndpoint.Type == "masque" {
+			return nil
+		}
 		configData, err := marshalEndpointConfigForCore(oldEndpoint)
 		if err != nil {
 			return err
+		}
+		if len(configData) == 0 {
+			return nil
 		}
 		if err := corePtr.AddEndpoint(configData); err != nil {
 			return err
@@ -233,22 +243,26 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) er
 				}
 				return err
 			}
-			if act == "edit" {
-				err = corePtr.RemoveEndpoint(oldEndpoint.Tag)
-				if err != nil && err != os.ErrInvalid {
-					if rollbackErr := syncManagedEndpointPortForwarding(&endpoint, oldEndpoint); rollbackErr != nil {
+			if len(configData) > 0 {
+				if act == "edit" {
+					if oldEndpoint != nil && oldEndpoint.Type != "masque" {
+						err = corePtr.RemoveEndpoint(oldEndpoint.Tag)
+						if err != nil && err != os.ErrInvalid {
+							if rollbackErr := syncManagedEndpointPortForwarding(&endpoint, oldEndpoint); rollbackErr != nil {
+								return errors.Join(err, rollbackErr)
+							}
+							return err
+						}
+					}
+				}
+				err = corePtr.AddEndpoint(configData)
+				if err != nil {
+					rollbackErr := rollbackEndpointExternalState(act, oldEndpoint, &endpoint)
+					if rollbackErr != nil {
 						return errors.Join(err, rollbackErr)
 					}
 					return err
 				}
-			}
-			err = corePtr.AddEndpoint(configData)
-			if err != nil {
-				rollbackErr := rollbackEndpointExternalState(act, oldEndpoint, &endpoint)
-				if rollbackErr != nil {
-					return errors.Join(err, rollbackErr)
-				}
-				return err
 			}
 		}
 
