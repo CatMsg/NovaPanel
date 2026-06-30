@@ -130,6 +130,9 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			if err := validateInboundPortsAgainstSSH(&inbound, ports); err != nil {
 				return nil, err
 			}
+			if err := validateManagedPortConflicts(tx, "入站", inbound.Tag, inbound.Id, 0, ports); err != nil {
+				return nil, err
+			}
 		} else if err != nil {
 			return nil, err
 		}

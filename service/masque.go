@@ -142,7 +142,7 @@ func (s *MasqueService) GetStatus(tag string) (map[string]interface{}, error) {
 		"network":   config.Network,
 		"running":   runtime != nil,
 		"bind_addr": net.JoinHostPort("0.0.0.0", strconv.Itoa(config.Port)),
-		"template":  fmt.Sprintf("https://%s/?h={target_host}&p={target_port}", config.Host),
+		"template":  fmt.Sprintf("https://%s/?h={target_host}&p={target_port}", formatMasqueHost(config.Host)),
 	}
 
 	if runtime != nil {
@@ -215,7 +215,7 @@ func (s *MasqueService) startEndpoint(endpoint *model.Endpoint) (*masqueRuntime,
 	}
 
 	bindAddr := net.JoinHostPort("0.0.0.0", strconv.Itoa(config.Port))
-	templateStr := fmt.Sprintf("https://%s/?h={target_host}&p={target_port}", config.Host)
+	templateStr := fmt.Sprintf("https://%s/?h={target_host}&p={target_port}", formatMasqueHost(config.Host))
 	template, err := uritemplate.New(templateStr)
 	if err != nil {
 		return nil, fmt.Errorf("build masque uri template failed: %w", err)
@@ -313,6 +313,20 @@ func parseMasqueEndpoint(endpoint *model.Endpoint) (*masqueEndpointConfig, error
 		Port:    payload.Port,
 		Network: strings.TrimSpace(payload.Network),
 	}, nil
+}
+
+func formatMasqueHost(host string) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return ""
+	}
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		return host
+	}
+	if strings.Count(host, ":") > 1 {
+		return "[" + host + "]"
+	}
+	return host
 }
 
 func (s *MasqueService) resolveMasqueCertFiles(host string) (string, string, error) {

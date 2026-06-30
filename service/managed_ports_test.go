@@ -163,3 +163,150 @@ printf '%s\n' "$*" >> "${HY2_MOCK_LOG:?}"
 		t.Fatalf("new endpoint port forwarding was not applied:\n%s", log)
 	}
 }
+
+func TestSyncManagedMasqueEndpointPortForwardingInvokesScript(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("endpoint port forwarding is only exercised on linux")
+	}
+
+	originalPorts := getSSHListenPorts()
+	t.Cleanup(func() {
+		_ = storeSSHListenPorts(originalPorts, nil)
+	})
+	if err := storeSSHListenPorts([]int{2222}, nil); err != nil {
+		t.Fatalf("store ssh listen ports: %v", err)
+	}
+
+	workDir := t.TempDir()
+	scriptsDir := filepath.Join(workDir, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatalf("mkdir scripts dir: %v", err)
+	}
+
+	logFile := filepath.Join(workDir, "masque-forward.log")
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${HY2_MOCK_LOG:?}"
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "hy2-forward.sh"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get wd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	if err := os.Chdir(workDir); err != nil {
+		t.Fatalf("chdir workdir: %v", err)
+	}
+
+	t.Setenv("HY2_MOCK_LOG", logFile)
+
+	oldEndpoint := &model.Endpoint{
+		Type: "masque",
+		Tag:  "masque-old",
+		Options: json.RawMessage(`{
+			"port": 443,
+			"server": "tk.mile.news"
+		}`),
+	}
+	newEndpoint := &model.Endpoint{
+		Type: "masque",
+		Tag:  "masque-new",
+		Options: json.RawMessage(`{
+			"port": 8444,
+			"server": "tk.mile.news"
+		}`),
+	}
+
+	if err := syncManagedEndpointPortForwarding(oldEndpoint, newEndpoint); err != nil {
+		t.Fatalf("sync managed masque endpoint ports failed: %v", err)
+	}
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	log := string(data)
+	if !strings.Contains(log, "remove masque-old 443 443 udp") {
+		t.Fatalf("old masque port forwarding was not removed:\n%s", log)
+	}
+	if !strings.Contains(log, "apply masque-new 8444 8444 udp") {
+		t.Fatalf("new masque port forwarding was not applied:\n%s", log)
+	}
+	if strings.Contains(log, "tcp") {
+		t.Fatalf("masque port forwarding unexpectedly included tcp:\n%s", log)
+	}
+}
+
+func TestSyncManagedTailscaleEndpointPortForwardingInvokesScript(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("endpoint port forwarding is only exercised on linux")
+	}
+
+	originalPorts := getSSHListenPorts()
+	t.Cleanup(func() {
+		_ = storeSSHListenPorts(originalPorts, nil)
+	})
+	if err := storeSSHListenPorts([]int{2222}, nil); err != nil {
+		t.Fatalf("store ssh listen ports: %v", err)
+	}
+
+	workDir := t.TempDir()
+	scriptsDir := filepath.Join(workDir, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatalf("mkdir scripts dir: %v", err)
+	}
+
+	logFile := filepath.Join(workDir, "tailscale-forward.log")
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${HY2_MOCK_LOG:?}"
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "hy2-forward.sh"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get wd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	if err := os.Chdir(workDir); err != nil {
+		t.Fatalf("chdir workdir: %v", err)
+	}
+
+	t.Setenv("HY2_MOCK_LOG", logFile)
+
+	oldEndpoint := &model.Endpoint{
+		Type: "tailscale",
+		Tag:  "tailscale-old",
+		Options: json.RawMessage(`{
+			"relay_server_port": 41641
+		}`),
+	}
+	newEndpoint := &model.Endpoint{
+		Type: "tailscale",
+		Tag:  "tailscale-new",
+		Options: json.RawMessage(`{
+			"relay_server_port": 41642
+		}`),
+	}
+
+	if err := syncManagedEndpointPortForwarding(oldEndpoint, newEndpoint); err != nil {
+		t.Fatalf("sync managed tailscale endpoint ports failed: %v", err)
+	}
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	log := string(data)
+	if !strings.Contains(log, "remove tailscale-old 41641 41641") {
+		t.Fatalf("old tailscale port forwarding was not removed:\n%s", log)
+	}
+	if !strings.Contains(log, "apply tailscale-new 41642 41642") {
+		t.Fatalf("new tailscale port forwarding was not applied:\n%s", log)
+	}
+}

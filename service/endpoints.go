@@ -211,6 +211,19 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) er
 			}
 		}
 
+		if _, ports, _, active, err := collectEndpointForwardPorts(&endpoint); err == nil {
+			if active {
+				if err := validateInboundPortsAgainstSSH(nil, ports); err != nil {
+					return err
+				}
+				if err := validateManagedPortConflicts(tx, "节点", endpoint.Tag, 0, endpoint.Id, ports); err != nil {
+					return err
+				}
+			}
+		} else {
+			return err
+		}
+
 		if endpoint.Type == "warp" {
 			if act == "new" {
 				err = s.WarpService.RegisterWarp(&endpoint)

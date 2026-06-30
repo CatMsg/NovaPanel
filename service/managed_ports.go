@@ -187,32 +187,41 @@ func (s *SettingService) RebuildManagedPortForwarding() error {
 	return nil
 }
 
-func collectEndpointForwardPorts(endpoint *model.Endpoint) (int, []int, bool, error) {
+func collectEndpointForwardPorts(endpoint *model.Endpoint) (int, []int, []string, bool, error) {
 	if endpoint == nil {
-		return 0, nil, false, nil
+		return 0, nil, nil, false, nil
 	}
 
 	full, err := endpoint.MarshalJSON()
 	if err != nil {
-		return 0, nil, false, err
+		return 0, nil, nil, false, err
 	}
 
 	var payload map[string]interface{}
 	if err := json.Unmarshal(full, &payload); err != nil {
-		return 0, nil, false, err
+		return 0, nil, nil, false, err
 	}
 
-	rawPort, ok := payload["listen_port"]
+	portKey := "listen_port"
+	protocols := managedForwardProtocols
+	if strings.EqualFold(endpoint.Type, "tailscale") {
+		portKey = "relay_server_port"
+	} else if strings.EqualFold(endpoint.Type, "masque") {
+		portKey = "port"
+		protocols = []string{"udp"}
+	}
+
+	rawPort, ok := payload[portKey]
 	if !ok || rawPort == nil {
-		return 0, nil, false, nil
+		return 0, nil, nil, false, nil
 	}
 
 	listenPort, err := normalizeManagedPort(rawPort)
 	if err != nil {
-		return 0, nil, false, fmt.Errorf("invalid listen_port for endpoint %s: %w", endpoint.Tag, err)
+		return 0, nil, nil, false, fmt.Errorf("invalid %s for endpoint %s: %w", portKey, endpoint.Tag, err)
 	}
 
-	return listenPort, []int{listenPort}, true, nil
+	return listenPort, []int{listenPort}, protocols, true, nil
 }
 
 func normalizeManagedPort(raw interface{}) (int, error) {
@@ -251,11 +260,12 @@ func syncManagedEndpointPortForwarding(oldEndpoint, newEndpoint *model.Endpoint)
 	var oldTag string
 	var oldListenPort int
 	var oldPorts []int
+	var oldProtocols []string
 	var oldActive bool
 	var err error
 	if oldEndpoint != nil {
 		oldTag = oldEndpoint.Tag
-		oldListenPort, oldPorts, oldActive, err = collectEndpointForwardPorts(oldEndpoint)
+		oldListenPort, oldPorts, oldProtocols, oldActive, err = collectEndpointForwardPorts(oldEndpoint)
 		if err != nil {
 			return err
 		}
@@ -264,10 +274,11 @@ func syncManagedEndpointPortForwarding(oldEndpoint, newEndpoint *model.Endpoint)
 	var newTag string
 	var newListenPort int
 	var newPorts []int
+	var newProtocols []string
 	var newActive bool
 	if newEndpoint != nil {
 		newTag = newEndpoint.Tag
-		newListenPort, newPorts, newActive, err = collectEndpointForwardPorts(newEndpoint)
+		newListenPort, newPorts, newProtocols, newActive, err = collectEndpointForwardPorts(newEndpoint)
 		if err != nil {
 			return err
 		}
@@ -283,7 +294,7 @@ func syncManagedEndpointPortForwarding(oldEndpoint, newEndpoint *model.Endpoint)
 	}
 
 	if oldActive {
-		if err := runPortForwardScript("remove", oldTag, oldListenPort, oldPorts, managedForwardProtocols); err != nil {
+		if err := runPortForwardScript("remove", oldTag, oldListenPort, oldPorts, oldProtocols); err != nil {
 			return err
 		}
 	}
@@ -292,14 +303,14 @@ func syncManagedEndpointPortForwarding(oldEndpoint, newEndpoint *model.Endpoint)
 		return nil
 	}
 
-	if err := runPortForwardScript("apply", newTag, newListenPort, newPorts, managedForwardProtocols); err != nil {
+	if err := runPortForwardScript("apply", newTag, newListenPort, newPorts, newProtocols); err != nil {
 		if oldActive {
-			rollbackErr := runPortForwardScript("apply", oldTag, oldListenPort, oldPorts, managedForwardProtocols)
+			rollbackErr := runPortForwardScript("apply", oldTag, oldListenPort, oldPorts, oldProtocols)
 			if rollbackErr != nil {
 				return errors.Join(err, fmt.Errorf("rollback managed endpoint port forwarding for %s failed: %w", newTag, rollbackErr))
 			}
 		} else {
-			rollbackErr := runPortForwardScript("remove", newTag, newListenPort, newPorts, managedForwardProtocols)
+			rollbackErr := runPortForwardScript("remove", newTag, newListenPort, newPorts, newProtocols)
 			if rollbackErr != nil {
 				return errors.Join(err, fmt.Errorf("cleanup managed endpoint port forwarding for %s failed: %w", newTag, rollbackErr))
 			}

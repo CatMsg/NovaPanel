@@ -131,7 +131,7 @@ export default {
           prevConfig = {
             tag: tag,
             server,
-            port: 443,
+            port: RandomUtil.randomIntRange(10000, 60000),
             network: 'quic',
             private_key: masqueKeys.private_key,
             public_key: masqueKeys.public_key,
