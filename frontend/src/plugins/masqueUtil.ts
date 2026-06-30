@@ -10,10 +10,6 @@ export function buildMasqueConfig(endpoint: any): string {
     `public-key: ${yamlStr(endpoint.public_key ?? '')}`,
     `ip: ${yamlStr(endpoint.ip ?? '')}`,
   ]
-
-  if (endpoint.ipv6) {
-    fields.push(`ipv6: ${yamlStr(endpoint.ipv6)}`)
-  }
   if (endpoint.mtu) {
     fields.push(`mtu: ${endpoint.mtu}`)
   }

@@ -12,9 +12,6 @@
           <v-text-field v-model="data.ip" label="IP" hide-details></v-text-field>
         </v-col>
         <v-col cols="12" sm="6" md="4">
-          <v-text-field v-model="data.ipv6" label="IPv6" hide-details></v-text-field>
-        </v-col>
-        <v-col cols="12" sm="6" md="4">
           <v-text-field v-model.number="data.mtu" label="MTU" type="number" min="576" max="9000" hide-details></v-text-field>
         </v-col>
         <v-col cols="12" sm="6" md="4">

@@ -136,7 +136,6 @@ export default {
             private_key: masqueKeys.private_key,
             public_key: masqueKeys.public_key,
             ip: `172.16.0.${randomIPoctet}/32`,
-            ipv6: `fd00::${randomIPoctet.toString(16)}/128`,
             mtu: 1280,
             udp: true,
           }
@@ -169,6 +168,9 @@ export default {
 
       if (this.endpoint.type == EpTypes.Masque && !String(this.endpoint.server ?? '').trim()) {
         this.endpoint.server = await this.getMasqueServer()
+      }
+      if (this.endpoint.type == EpTypes.Masque) {
+        delete (this.endpoint as any).ipv6
       }
 
       // save data
