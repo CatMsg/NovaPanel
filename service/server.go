@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/netip"
 	"os"
 	"runtime"
 	"strconv"
@@ -104,11 +105,16 @@ func (s *ServerService) GetPublicIP() string {
 	}()
 
 	for res := range ch {
-		if res.err == nil && res.ip != "" {
+		if res.err == nil && isIPv4Literal(res.ip) {
 			return res.ip
 		}
 	}
 	return ""
+}
+
+func isIPv4Literal(value string) bool {
+	addr, err := netip.ParseAddr(strings.TrimSpace(value))
+	return err == nil && addr.Is4()
 }
 
 func (s *ServerService) GetCpuPercent() float64 {

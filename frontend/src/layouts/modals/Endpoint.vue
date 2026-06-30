@@ -220,24 +220,18 @@ export default {
       return result
     },
     async getMasqueServer() {
+      const isIpv4 = (host: string) => /^(\d{1,3}\.){3}\d{1,3}$/.test(host)
+      const normalizeHost = (value: any) => String(value ?? '').trim().replace(/^\[|\]$/g, '')
       try {
         const msg = await HttpUtils.get('api/public-ip')
-        const host = String(msg.success ? msg.obj ?? '' : '').trim()
-        if (host) {
+        const host = normalizeHost(msg.success ? msg.obj ?? '' : '')
+        if (isIpv4(host)) {
           return host
         }
       } catch {
         // ignore and use fallback
       }
-      const msg = await HttpUtils.get('api/status', { r: 'sys' })
-      const ipv4List = msg.success ? msg.obj?.sys?.ipv4 : []
-      if (Array.isArray(ipv4List) && ipv4List.length > 0) {
-        const host = String(ipv4List.find((item: string) => String(item).trim()) ?? '').trim()
-        if (host) {
-          return host.split('/')[0]
-        }
-      }
-      return window.location.hostname || ''
+      return ''
     },
     async newWgKey(){
       this.loading = true
