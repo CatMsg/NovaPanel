@@ -166,10 +166,20 @@ export default {
         }
       }
 
-      if (this.endpoint.type == EpTypes.Masque && !String(this.endpoint.server ?? '').trim()) {
-        this.endpoint.server = await this.getMasqueServer()
-      }
       if (this.endpoint.type == EpTypes.Masque) {
+        const preferredHost = await this.getMasqueServer()
+        const currentHost = String(this.endpoint.server ?? '').trim()
+        if (!currentHost || this.isIpLiteral(currentHost)) {
+          if (!preferredHost) {
+            push.error({
+              message: 'MASQUE 需要先在 设置-界面 里配置 subDomain 或 webDomain',
+              duration: 5000,
+            })
+            this.loading = false
+            return
+          }
+          this.endpoint.server = preferredHost
+        }
         delete (this.endpoint as any).ipv6
       }
 
@@ -222,18 +232,27 @@ export default {
       return result
     },
     async getMasqueServer() {
-      const isIpv4 = (host: string) => /^(\d{1,3}\.){3}\d{1,3}$/.test(host)
-      const normalizeHost = (value: any) => String(value ?? '').trim().replace(/^\[|\]$/g, '')
       try {
-        const msg = await HttpUtils.get('api/public-ip')
-        const host = normalizeHost(msg.success ? msg.obj ?? '' : '')
-        if (isIpv4(host)) {
-          return host
+        const msg = await HttpUtils.get('api/settings')
+        if (!msg.success || !msg.obj) {
+          return ''
+        }
+        const subDomain = String(msg.obj.subDomain ?? '').trim()
+        if (subDomain && !this.isIpLiteral(subDomain)) {
+          return subDomain
+        }
+        const webDomain = String(msg.obj.webDomain ?? '').trim()
+        if (webDomain && !this.isIpLiteral(webDomain)) {
+          return webDomain
         }
       } catch {
         // ignore and use fallback
       }
       return ''
+    },
+    isIpLiteral(host: string) {
+      const normalized = String(host ?? '').trim().replace(/^\[|\]$/g, '')
+      return /^(\d{1,3}\.){3}\d{1,3}$/.test(normalized) || /^[0-9a-fA-F:]+$/.test(normalized)
     },
     async newWgKey(){
       this.loading = true
