@@ -273,7 +273,7 @@ func (s *MasqueService) startEndpoint(endpoint *model.Endpoint) (*masqueRuntime,
 
 	mux := mhttp.NewServeMux()
 	mux.HandleFunc(handlePath, func(w mhttp.ResponseWriter, r *mhttp.Request) {
-		req, err := connectip.ParseRequest(r, template)
+		req, err := parseMasqueConnectIPRequest(r, template)
 		if err != nil {
 			var perr *connectip.RequestParseError
 			if errors.As(err, &perr) {
@@ -459,6 +459,36 @@ func parseMasquePeerPrefix(raw string) (netip.Prefix, error) {
 		return netip.Prefix{}, common.NewError("masque client ip must be IPv4")
 	}
 	return prefix.Masked(), nil
+}
+
+func parseMasqueConnectIPRequest(r *mhttp.Request, template *uritemplate.Template) (*connectip.Request, error) {
+	req, err := connectip.ParseRequest(r, template)
+	if err == nil {
+		return req, nil
+	}
+	if r == nil || r.Method != mhttp.MethodConnect || r.Proto != "cf-connect-ip" {
+		return nil, err
+	}
+	u, parseErr := url.Parse(template.Raw())
+	if parseErr != nil {
+		return nil, &connectip.RequestParseError{
+			HTTPStatus: mhttp.StatusInternalServerError,
+			Err:        parseErr,
+		}
+	}
+	if r.Host != u.Host {
+		return nil, &connectip.RequestParseError{
+			HTTPStatus: mhttp.StatusBadRequest,
+			Err:        fmt.Errorf("host in :authority (%s) does not match template host (%s)", r.Host, u.Host),
+		}
+	}
+	if _, ok := r.Header[mhttp3.CapsuleProtocolHeader]; !ok {
+		return nil, &connectip.RequestParseError{
+			HTTPStatus: mhttp.StatusBadRequest,
+			Err:        fmt.Errorf("missing Capsule-Protocol header"),
+		}
+	}
+	return &connectip.Request{}, nil
 }
 
 func (s *MasqueService) loadMasqueTLSCertificate(config *masqueEndpointConfig) (mtls.Certificate, string, string, string, error) {
