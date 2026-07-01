@@ -142,7 +142,7 @@ func (s *MasqueService) GetStatus(tag string) (map[string]interface{}, error) {
 		"network":   config.Network,
 		"running":   runtime != nil,
 		"bind_addr": net.JoinHostPort("0.0.0.0", strconv.Itoa(config.Port)),
-		"template":  fmt.Sprintf("https://%s/?h={target_host}&p={target_port}", formatMasqueHost(config.Host)),
+		"template":  fmt.Sprintf("https://%s/masque?h={target_host}&p={target_port}", formatMasqueHost(config.Host)),
 	}
 
 	if runtime != nil {
@@ -215,7 +215,7 @@ func (s *MasqueService) startEndpoint(endpoint *model.Endpoint) (*masqueRuntime,
 	}
 
 	bindAddr := net.JoinHostPort("0.0.0.0", strconv.Itoa(config.Port))
-	templateStr := fmt.Sprintf("https://%s/?h={target_host}&p={target_port}", formatMasqueHost(config.Host))
+	templateStr := fmt.Sprintf("https://%s/masque?h={target_host}&p={target_port}", formatMasqueHost(config.Host))
 	template, err := uritemplate.New(templateStr)
 	if err != nil {
 		return nil, fmt.Errorf("build masque uri template failed: %w", err)
