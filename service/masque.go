@@ -354,6 +354,12 @@ func (r *masqueRuntime) serveConnectIP(ctx context.Context, w mhttp.ResponseWrit
 	}
 	cancel()
 
+	if r.tun != nil {
+		if err := r.tun.configureKernelForwarding(); err != nil {
+			return err
+		}
+	}
+
 	logger.Info("masque connect-ip session started: ", r.tag, " peer=", r.peerPrefix)
 	errc := make(chan error, 2)
 	go func() {

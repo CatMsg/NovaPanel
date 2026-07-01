@@ -22,6 +22,10 @@ func (t *masqueTun) WritePacket(packet []byte) error {
 	return context.Canceled
 }
 
+func (t *masqueTun) configureKernelForwarding() error {
+	return context.Canceled
+}
+
 func (t *masqueTun) Close() error {
 	return nil
 }
