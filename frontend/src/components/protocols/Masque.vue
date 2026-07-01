@@ -9,7 +9,7 @@
           <v-select v-model="data.network" :items="networkItems" label="Network" hide-details></v-select>
         </v-col>
         <v-col cols="12" sm="6" md="4">
-          <v-text-field v-model="data.ip" label="IP" :disabled="data.network == 'h3-l4proxy'" hide-details></v-text-field>
+          <v-text-field v-model="data.ip" label="IP" hide-details></v-text-field>
         </v-col>
         <v-col cols="12" sm="6" md="4">
           <v-text-field v-model.number="data.mtu" label="MTU" type="number" min="576" max="9000" hide-details></v-text-field>
@@ -74,7 +74,6 @@ export default {
     return {
       loading: false,
       networkItems: [
-        { title: 'h3-l4proxy', value: 'h3-l4proxy' },
         { title: 'quic', value: 'quic' },
         { title: 'h2', value: 'h2' },
       ],

@@ -1,18 +1,17 @@
 package service
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"net"
-	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -23,11 +22,12 @@ import (
 	"github.com/CatMsg/NovaPanel/database/model"
 	"github.com/CatMsg/NovaPanel/logger"
 	"github.com/CatMsg/NovaPanel/util/common"
-	masque "github.com/quic-go/masque-go"
-	"github.com/quic-go/quic-go"
-	"github.com/quic-go/quic-go/http3"
+	connectip "github.com/metacubex/connect-ip-go"
+	mhttp "github.com/metacubex/http"
+	mquic "github.com/metacubex/quic-go"
+	mhttp3 "github.com/metacubex/quic-go/http3"
+	mtls "github.com/metacubex/tls"
 	"github.com/yosida95/uritemplate/v3"
-	"log/slog"
 )
 
 var masquePtr *MasqueService
@@ -41,9 +41,12 @@ type masqueRuntime struct {
 	keyFile     string
 	certSource  string
 	templateStr string
-	proxy       *masque.Proxy
-	server      *http3.Server
+	proxy       *connectip.Proxy
+	server      *mhttp3.Server
 	template    *uritemplate.Template
+	tun         *masqueTun
+	peerPrefix  netip.Prefix
+	connMu      sync.Mutex
 }
 
 type MasqueService struct {
@@ -219,8 +222,12 @@ func (s *MasqueService) startEndpoint(endpoint *model.Endpoint) (*masqueRuntime,
 	if config.Port < 1 || config.Port > 65535 {
 		return nil, fmt.Errorf("invalid masque port: %d", config.Port)
 	}
-	if config.Network != "" && config.Network != "quic" && config.Network != "h3-l4proxy" {
-		logger.Warning("masque service currently runs with quic/h3; network=", config.Network, " is kept for config preview only")
+	if config.Network != "" && config.Network != "quic" && config.Network != "h2" {
+		logger.Warning("masque service currently supports quic/h2 config preview; network=", config.Network)
+	}
+	peerPrefix, err := parseMasquePeerPrefix(config.IP)
+	if err != nil {
+		return nil, err
 	}
 
 	cert, certFile, keyFile, certSource, err := s.loadMasqueTLSCertificate(config)
@@ -229,7 +236,7 @@ func (s *MasqueService) startEndpoint(endpoint *model.Endpoint) (*masqueRuntime,
 	}
 
 	bindAddr := net.JoinHostPort("0.0.0.0", strconv.Itoa(config.Port))
-	templateStr := fmt.Sprintf("https://%s/masque?h={target_host}&p={target_port}", formatMasqueHost(config.Host))
+	templateStr := masqueTemplateDescription(config)
 	template, err := uritemplate.New(templateStr)
 	if err != nil {
 		return nil, fmt.Errorf("build masque uri template failed: %w", err)
@@ -238,45 +245,17 @@ func (s *MasqueService) startEndpoint(endpoint *model.Endpoint) (*masqueRuntime,
 	if err != nil {
 		return nil, fmt.Errorf("parse masque uri template failed: %w", err)
 	}
-
-	proxy := &masque.Proxy{}
-	mux := http.NewServeMux()
-	mux.HandleFunc(parsedURL.Path, func(w http.ResponseWriter, r *http.Request) {
-		req, err := masque.ParseRequest(r, template)
-		if err != nil {
-			var perr *masque.RequestParseError
-			if errors.As(err, &perr) {
-				logger.Warning("masque request parse failed: ", endpoint.Tag, " status=", perr.HTTPStatus, " err=", perr.Err)
-				w.WriteHeader(perr.HTTPStatus)
-				return
-			}
-			logger.Warning("masque request parse failed: ", endpoint.Tag, " err=", err)
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		if err := proxy.Proxy(w, req); err != nil && !errors.Is(err, net.ErrClosed) {
-			logger.Warning("masque proxy failed: ", err)
-		}
-	})
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodConnect {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		if err := proxyMasqueConnect(w, r); err != nil && !errors.Is(err, net.ErrClosed) {
-			logger.Warning("masque connect proxy failed: ", endpoint.Tag, " target=", r.Host, " err=", err)
-		}
-	})
-
-	srv := &http3.Server{
-		Addr:            bindAddr,
-		QUICConfig:      &quic.Config{EnableDatagrams: true},
-		TLSConfig:       http3.ConfigureTLSConfig(&tls.Config{Certificates: []tls.Certificate{cert}}),
-		Handler:         mux,
-		EnableDatagrams: true,
-		Logger:          slog.Default(),
+	handlePath := parsedURL.Path
+	if handlePath == "" {
+		handlePath = "/"
 	}
 
+	tun, err := newMasqueTun(endpoint.Tag, peerPrefix, config.MTU)
+	if err != nil {
+		return nil, fmt.Errorf("setup masque tun failed: %w", err)
+	}
+
+	proxy := &connectip.Proxy{}
 	handle := &masqueRuntime{
 		tag:         endpoint.Tag,
 		port:        config.Port,
@@ -287,12 +266,43 @@ func (s *MasqueService) startEndpoint(endpoint *model.Endpoint) (*masqueRuntime,
 		certSource:  certSource,
 		templateStr: templateStr,
 		proxy:       proxy,
-		server:      srv,
 		template:    template,
+		tun:         tun,
+		peerPrefix:  peerPrefix,
 	}
 
+	mux := mhttp.NewServeMux()
+	mux.HandleFunc(handlePath, func(w mhttp.ResponseWriter, r *mhttp.Request) {
+		req, err := connectip.ParseRequest(r, template)
+		if err != nil {
+			var perr *connectip.RequestParseError
+			if errors.As(err, &perr) {
+				logger.Warning("masque request parse failed: ", endpoint.Tag, " status=", perr.HTTPStatus, " err=", perr.Err)
+				w.WriteHeader(perr.HTTPStatus)
+				return
+			}
+			logger.Warning("masque request parse failed: ", endpoint.Tag, " err=", err)
+			w.WriteHeader(mhttp.StatusBadRequest)
+			return
+		}
+		if err := handle.serveConnectIP(r.Context(), w, req); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, context.Canceled) {
+			logger.Warning("masque connect-ip bridge failed: ", endpoint.Tag, " err=", err)
+			return
+		}
+	})
+
+	srv := &mhttp3.Server{
+		Addr:            bindAddr,
+		QUICConfig:      &mquic.Config{EnableDatagrams: true},
+		TLSConfig:       mhttp3.ConfigureTLSConfig(&mtls.Config{Certificates: []mtls.Certificate{cert}}),
+		Handler:         mux,
+		EnableDatagrams: true,
+	}
+
+	handle.server = srv
+
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, mhttp.ErrServerClosed) {
 			logger.Warning("masque server stopped unexpectedly: ", endpoint.Tag, " err=", err)
 		}
 	}()
@@ -305,16 +315,86 @@ func (r *masqueRuntime) stop() {
 	if r == nil {
 		return
 	}
-	if r.proxy != nil {
-		if err := r.proxy.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
-			logger.Warning("masque proxy close failed: ", r.tag, " err=", err)
-		}
-	}
 	if r.server != nil {
-		if err := r.server.Close(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := r.server.Close(); err != nil && !errors.Is(err, mhttp.ErrServerClosed) {
 			logger.Warning("masque server close failed: ", r.tag, " err=", err)
 		}
 	}
+	if r.tun != nil {
+		if err := r.tun.Close(); err != nil {
+			logger.Warning("masque tun close failed: ", r.tag, " err=", err)
+		}
+	}
+}
+
+func (r *masqueRuntime) serveConnectIP(ctx context.Context, w mhttp.ResponseWriter, req *connectip.Request) error {
+	r.connMu.Lock()
+	defer r.connMu.Unlock()
+
+	conn, err := r.proxy.Proxy(w, req)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	setupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	if err := conn.AssignAddresses(setupCtx, []netip.Prefix{r.peerPrefix}); err != nil {
+		cancel()
+		return err
+	}
+	if err := conn.AdvertiseRoute(setupCtx, []connectip.IPRoute{
+		{
+			IPProtocol: 0,
+			StartIP:    netip.AddrFrom4([4]byte{}),
+			EndIP:      netip.AddrFrom4([4]byte{255, 255, 255, 255}),
+		},
+	}); err != nil {
+		cancel()
+		return err
+	}
+	cancel()
+
+	logger.Info("masque connect-ip session started: ", r.tag, " peer=", r.peerPrefix)
+	errc := make(chan error, 2)
+	go func() {
+		for ctx.Err() == nil {
+			packet, err := conn.ReadPacket()
+			if err != nil {
+				errc <- err
+				return
+			}
+			if len(packet) == 0 {
+				continue
+			}
+			if err := r.tun.WritePacket(packet); err != nil {
+				errc <- err
+				return
+			}
+		}
+		errc <- ctx.Err()
+	}()
+	go func() {
+		buf := make([]byte, 65535)
+		for ctx.Err() == nil {
+			n, err := r.tun.ReadPacket(ctx, buf)
+			if err != nil {
+				errc <- err
+				return
+			}
+			if n <= 0 {
+				continue
+			}
+			if _, err := conn.WritePacket(append([]byte(nil), buf[:n]...)); err != nil {
+				errc <- err
+				return
+			}
+		}
+		errc <- ctx.Err()
+	}()
+
+	err = <-errc
+	logger.Info("masque connect-ip session stopped: ", r.tag, " err=", err)
+	return err
 }
 
 type masqueEndpointConfig struct {
@@ -322,6 +402,8 @@ type masqueEndpointConfig struct {
 	Port       int
 	Network    string
 	PrivateKey string
+	IP         string
+	MTU        int
 }
 
 func parseMasqueEndpoint(endpoint *model.Endpoint) (*masqueEndpointConfig, error) {
@@ -330,6 +412,8 @@ func parseMasqueEndpoint(endpoint *model.Endpoint) (*masqueEndpointConfig, error
 		Port       int    `json:"port"`
 		Network    string `json:"network"`
 		PrivateKey string `json:"private_key"`
+		IP         string `json:"ip"`
+		MTU        int    `json:"mtu"`
 	}
 	if endpoint.Options != nil {
 		if err := json.Unmarshal(endpoint.Options, &payload); err != nil {
@@ -342,99 +426,65 @@ func parseMasqueEndpoint(endpoint *model.Endpoint) (*masqueEndpointConfig, error
 		Port:       payload.Port,
 		Network:    normalizeMasqueNetwork(payload.Network),
 		PrivateKey: strings.TrimSpace(payload.PrivateKey),
+		IP:         strings.TrimSpace(payload.IP),
+		MTU:        payload.MTU,
 	}, nil
 }
 
 func normalizeMasqueNetwork(network string) string {
 	network = strings.TrimSpace(network)
 	if network == "" {
-		return "h3-l4proxy"
+		return "quic"
 	}
 	return network
 }
 
 func masqueTemplateDescription(config *masqueEndpointConfig) string {
-	if config != nil && config.Network == "h3-l4proxy" {
-		return "h3 CONNECT TCP proxy"
-	}
-	return fmt.Sprintf("https://%s/masque?h={target_host}&p={target_port}", formatMasqueHost(config.Host))
+	return "https://cloudflareaccess.com"
 }
 
-func proxyMasqueConnect(w http.ResponseWriter, r *http.Request) error {
-	target := strings.TrimSpace(r.Host)
-	if target == "" {
-		target = strings.TrimSpace(r.URL.Host)
+func parseMasquePeerPrefix(raw string) (netip.Prefix, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return netip.Prefix{}, common.NewError("masque client ip is required")
 	}
-	if target == "" {
-		http.Error(w, "missing connect target", http.StatusBadRequest)
-		return nil
+	if !strings.Contains(raw, "/") {
+		raw += "/32"
 	}
-	if _, _, err := net.SplitHostPort(target); err != nil {
-		http.Error(w, "invalid connect target", http.StatusBadRequest)
-		return nil
-	}
-
-	streamer, ok := w.(http3.HTTPStreamer)
-	if !ok {
-		http.Error(w, "http3 stream unavailable", http.StatusInternalServerError)
-		return nil
-	}
-
-	targetConn, err := net.DialTimeout("tcp", target, 15*time.Second)
+	prefix, err := netip.ParsePrefix(raw)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
-		return err
+		return netip.Prefix{}, fmt.Errorf("invalid masque client ip: %w", err)
 	}
-	defer targetConn.Close()
-
-	w.WriteHeader(http.StatusOK)
-	stream := streamer.HTTPStream()
-	defer stream.Close()
-
-	errc := make(chan error, 2)
-	go func() {
-		_, err := io.Copy(targetConn, stream)
-		if tcpConn, ok := targetConn.(*net.TCPConn); ok {
-			_ = tcpConn.CloseWrite()
-		}
-		errc <- err
-	}()
-	go func() {
-		_, err := io.Copy(stream, targetConn)
-		errc <- err
-	}()
-
-	err = <-errc
-	if err == nil || errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
-		return nil
+	if !prefix.Addr().Is4() {
+		return netip.Prefix{}, common.NewError("masque client ip must be IPv4")
 	}
-	return err
+	return prefix.Masked(), nil
 }
 
-func (s *MasqueService) loadMasqueTLSCertificate(config *masqueEndpointConfig) (tls.Certificate, string, string, string, error) {
+func (s *MasqueService) loadMasqueTLSCertificate(config *masqueEndpointConfig) (mtls.Certificate, string, string, string, error) {
 	if config != nil && strings.TrimSpace(config.PrivateKey) != "" {
 		cert, err := generateMasqueTLSCertificate(config.PrivateKey)
 		if err != nil {
-			return tls.Certificate{}, "", "", "", err
+			return mtls.Certificate{}, "", "", "", err
 		}
 		return cert, "", "", "endpoint-key", nil
 	}
 
 	certFile, keyFile, err := s.resolveMasqueCertFiles(config.Host)
 	if err != nil {
-		return tls.Certificate{}, "", "", "", err
+		return mtls.Certificate{}, "", "", "", err
 	}
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	cert, err := mtls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
-		return tls.Certificate{}, "", "", "", err
+		return mtls.Certificate{}, "", "", "", err
 	}
 	return cert, certFile, keyFile, "file", nil
 }
 
-func generateMasqueTLSCertificate(rawPrivateKey string) (tls.Certificate, error) {
+func generateMasqueTLSCertificate(rawPrivateKey string) (mtls.Certificate, error) {
 	priv, err := parseMasquePrivateKey(rawPrivateKey)
 	if err != nil {
-		return tls.Certificate{}, err
+		return mtls.Certificate{}, err
 	}
 
 	now := time.Now()
@@ -447,9 +497,9 @@ func generateMasqueTLSCertificate(rawPrivateKey string) (tls.Certificate, error)
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &priv.PublicKey, priv)
 	if err != nil {
-		return tls.Certificate{}, err
+		return mtls.Certificate{}, err
 	}
-	return tls.Certificate{
+	return mtls.Certificate{
 		Certificate: [][]byte{der},
 		PrivateKey:  priv,
 	}, nil

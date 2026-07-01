@@ -131,12 +131,12 @@ export default {
             tag: tag,
             server,
             port: RandomUtil.randomIntRange(10000, 60000),
-            network: 'h3-l4proxy',
+            network: 'quic',
             private_key: masqueKeys.private_key,
             public_key: masqueKeys.public_key,
-            ip: '',
+            ip: '172.16.0.' + RandomUtil.randomIntRange(2, 254).toString() + '/32',
             mtu: 1280,
-            udp: false,
+            udp: true,
           }
           break
         }
@@ -179,9 +179,13 @@ export default {
           }
           this.endpoint.server = preferredHost
         }
-        if (this.endpoint.network == 'h3-l4proxy') {
-          this.endpoint.udp = false
-          this.endpoint.ip = ''
+        if (!String(this.endpoint.ip ?? '').trim()) {
+          push.error({
+            message: 'MASQUE 需要填写客户端 IPv4，例如 172.16.0.2/32',
+            duration: 5000,
+          })
+          this.loading = false
+          return
         }
         delete (this.endpoint as any).ipv6
       }

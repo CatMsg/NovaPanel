@@ -90,6 +90,16 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.30 // indirect
 	github.com/mdlayher/netlink v1.9.0 // indirect
 	github.com/mdlayher/socket v0.5.1 // indirect
+	github.com/metacubex/connect-ip-go v0.0.0-20260412152424-e1625567920a // indirect
+	github.com/metacubex/cpu v0.1.0 // indirect
+	github.com/metacubex/hkdf v0.1.0 // indirect
+	github.com/metacubex/hpke v0.1.0 // indirect
+	github.com/metacubex/http v0.1.6 // indirect
+	github.com/metacubex/mlkem v0.1.0 // indirect
+	github.com/metacubex/qpack v0.6.0 // indirect
+	github.com/metacubex/quic-go v0.59.1-0.20260520020949-fcd18c7b6ace // indirect
+	github.com/metacubex/randv2 v0.2.0 // indirect
+	github.com/metacubex/tls v0.1.6 // indirect
 	github.com/metacubex/utls v1.8.4 // indirect
 	github.com/mholt/acmez/v3 v3.1.6 // indirect
 	github.com/miekg/dns v1.1.72 // indirect
