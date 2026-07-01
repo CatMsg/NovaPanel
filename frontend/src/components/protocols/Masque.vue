@@ -43,7 +43,19 @@
 
       <v-row>
         <v-col cols="12">
-          <v-textarea :model-value="masqueConfig" label="mihomo config" rows="10" auto-grow readonly hide-details></v-textarea>
+          <div class="d-flex flex-wrap ga-2 align-center justify-space-between mb-2">
+            <span class="text-caption text-medium-emphasis">mihomo config</span>
+            <v-btn
+              color="primary"
+              variant="tonal"
+              size="small"
+              prepend-icon="mdi-content-copy"
+              @click="copyMasqueConfig"
+            >
+              复制 OpenClash 节点
+            </v-btn>
+          </div>
+          <v-textarea :model-value="masqueConfig" rows="10" auto-grow readonly hide-details></v-textarea>
         </v-col>
       </v-row>
     </v-card-text>
@@ -69,6 +81,38 @@ export default {
     },
   },
   methods: {
+    async copyMasqueConfig() {
+      const text = this.masqueConfig
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(text)
+        } else {
+          this.copyWithFallback(text)
+        }
+        push.success({ message: '已复制 OpenClash 节点配置' })
+      } catch (error) {
+        try {
+          this.copyWithFallback(text)
+          push.success({ message: '已复制 OpenClash 节点配置' })
+        } catch {
+          push.error({ message: '复制失败，请手动复制 mihomo config' })
+        }
+      }
+    },
+    copyWithFallback(text: string) {
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      textarea.setAttribute('readonly', 'true')
+      textarea.style.position = 'fixed'
+      textarea.style.left = '-9999px'
+      document.body.appendChild(textarea)
+      textarea.select()
+      const ok = document.execCommand('copy')
+      document.body.removeChild(textarea)
+      if (!ok) {
+        throw new Error('copy command failed')
+      }
+    },
     async genMasqueKey() {
       this.loading = true
       const msg = await HttpUtils.get('api/keypairs', { k: 'masque' })

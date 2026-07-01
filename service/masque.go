@@ -233,9 +233,11 @@ func (s *MasqueService) startEndpoint(endpoint *model.Endpoint) (*masqueRuntime,
 		if err != nil {
 			var perr *masque.RequestParseError
 			if errors.As(err, &perr) {
+				logger.Warning("masque request parse failed: ", endpoint.Tag, " status=", perr.HTTPStatus, " err=", perr.Err)
 				w.WriteHeader(perr.HTTPStatus)
 				return
 			}
+			logger.Warning("masque request parse failed: ", endpoint.Tag, " err=", err)
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
