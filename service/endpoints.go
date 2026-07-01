@@ -191,15 +191,16 @@ func rollbackEndpointExternalState(act string, oldEndpoint, newEndpoint *model.E
 	return errors.Join(errs...)
 }
 
-func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) error {
+func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) (func() error, error) {
 	var err error
+	var postCommit func() error
 
 	switch act {
 	case "new", "edit":
 		var endpoint model.Endpoint
 		err = endpoint.UnmarshalJSON(data)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		var oldEndpoint *model.Endpoint
@@ -207,121 +208,110 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) er
 			oldEndpoint = &model.Endpoint{}
 			err = tx.Model(model.Endpoint{}).Where("id = ?", endpoint.Id).First(oldEndpoint).Error
 			if err != nil {
-				return err
+				return nil, err
 			}
 		}
 
 		if _, ports, _, active, err := collectEndpointForwardPorts(&endpoint); err == nil {
 			if active {
 				if err := validateInboundPortsAgainstSSH(nil, ports); err != nil {
-					return err
+					return nil, err
 				}
 				if err := validateManagedPortConflicts(tx, "节点", endpoint.Tag, 0, endpoint.Id, ports); err != nil {
-					return err
+					return nil, err
 				}
 			}
 		} else {
-			return err
+			return nil, err
 		}
 
 		if endpoint.Type == "warp" {
 			if act == "new" {
 				err = s.WarpService.RegisterWarp(&endpoint)
 				if err != nil {
-					return err
+					return nil, err
 				}
 			} else {
 				var old_license string
 				err = tx.Model(model.Endpoint{}).Select("json_extract(ext, '$.license_key')").Where("id = ?", endpoint.Id).Find(&old_license).Error
 				if err != nil {
-					return err
+					return nil, err
 				}
 				err = s.WarpService.SetWarpLicense(old_license, &endpoint)
 				if err != nil {
-					return err
+					return nil, err
 				}
 			}
 		}
 
-		err = s.SyncManagedEndpointPortForwarding(oldEndpoint, &endpoint)
-		if err != nil {
-			return err
-		}
-
-		if corePtr.IsRunning() {
-			configData, err := marshalEndpointConfigForCore(&endpoint)
+		coreWasRunning := corePtr != nil && corePtr.IsRunning()
+		var configData []byte
+		if coreWasRunning {
+			configData, err = marshalEndpointConfigForCore(&endpoint)
 			if err != nil {
-				if rollbackErr := syncManagedEndpointPortForwarding(&endpoint, oldEndpoint); rollbackErr != nil {
-					return errors.Join(err, rollbackErr)
-				}
-				return err
-			}
-			if len(configData) > 0 {
-				if act == "edit" {
-					if oldEndpoint != nil && oldEndpoint.Type != "masque" {
-						err = corePtr.RemoveEndpoint(oldEndpoint.Tag)
-						if err != nil && err != os.ErrInvalid {
-							if rollbackErr := syncManagedEndpointPortForwarding(&endpoint, oldEndpoint); rollbackErr != nil {
-								return errors.Join(err, rollbackErr)
-							}
-							return err
-						}
-					}
-				}
-				err = corePtr.AddEndpoint(configData)
-				if err != nil {
-					rollbackErr := rollbackEndpointExternalState(act, oldEndpoint, &endpoint)
-					if rollbackErr != nil {
-						return errors.Join(err, rollbackErr)
-					}
-					return err
-				}
+				return nil, err
 			}
 		}
 
 		err = tx.Save(&endpoint).Error
 		if err != nil {
-			rollbackErr := rollbackEndpointExternalState(act, oldEndpoint, &endpoint)
-			if rollbackErr != nil {
-				return errors.Join(err, rollbackErr)
+			return nil, err
+		}
+
+		endpointSnapshot := endpoint
+		oldSnapshot := oldEndpoint
+		configDataSnapshot := append([]byte(nil), configData...)
+		postCommit = func() error {
+			if err := s.SyncManagedEndpointPortForwarding(oldSnapshot, &endpointSnapshot); err != nil {
+				return err
 			}
-			return err
+
+			if !coreWasRunning {
+				return nil
+			}
+			if act == "edit" && oldSnapshot != nil && oldSnapshot.Type != "masque" {
+				err := corePtr.RemoveEndpoint(oldSnapshot.Tag)
+				if err != nil && err != os.ErrInvalid {
+					return err
+				}
+			}
+			if len(configDataSnapshot) > 0 {
+				return corePtr.AddEndpoint(configDataSnapshot)
+			}
+			return nil
 		}
 	case "del":
 		var tag string
 		err = json.Unmarshal(data, &tag)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		oldEndpoint := &model.Endpoint{}
 		err = tx.Model(model.Endpoint{}).Where("tag = ?", tag).First(oldEndpoint).Error
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if corePtr.IsRunning() {
-			err = corePtr.RemoveEndpoint(tag)
-			if err != nil && err != os.ErrInvalid {
-				return err
-			}
-		}
-		err = s.SyncManagedEndpointPortForwarding(oldEndpoint, nil)
-		if err != nil {
-			rollbackErr := rollbackEndpointExternalState("del", oldEndpoint, nil)
-			if rollbackErr != nil {
-				return errors.Join(err, rollbackErr)
-			}
-			return err
-		}
+
+		coreWasRunning := corePtr != nil && corePtr.IsRunning()
 		err = tx.Where("tag = ?", tag).Delete(model.Endpoint{}).Error
 		if err != nil {
-			rollbackErr := rollbackEndpointExternalState("del", oldEndpoint, nil)
-			if rollbackErr != nil {
-				return errors.Join(err, rollbackErr)
+			return nil, err
+		}
+		oldSnapshot := oldEndpoint
+		postCommit = func() error {
+			if err := s.SyncManagedEndpointPortForwarding(oldSnapshot, nil); err != nil {
+				return err
 			}
-			return err
+			if coreWasRunning && oldSnapshot.Type != "masque" {
+				err := corePtr.RemoveEndpoint(tag)
+				if err != nil && err != os.ErrInvalid {
+					return err
+				}
+			}
+			return nil
 		}
 	default:
-		return common.NewErrorf("unknown action: %s", act)
+		return nil, common.NewErrorf("unknown action: %s", act)
 	}
-	return nil
+	return postCommit, nil
 }

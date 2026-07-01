@@ -230,7 +230,7 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 	case "services":
 		err = s.ServicesService.Save(tx, act, data)
 	case "endpoints":
-		err = s.EndpointService.Save(tx, act, data)
+		postCommit, err = s.EndpointService.Save(tx, act, data)
 	case "config":
 		err = s.SettingService.SaveConfig(tx, data)
 		if err != nil {
