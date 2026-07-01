@@ -17,6 +17,7 @@ import (
 	"github.com/CatMsg/NovaPanel/logger"
 	"github.com/CatMsg/NovaPanel/util/common"
 	masque "github.com/quic-go/masque-go"
+	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"github.com/yosida95/uritemplate/v3"
 	"log/slog"
@@ -245,6 +246,7 @@ func (s *MasqueService) startEndpoint(endpoint *model.Endpoint) (*masqueRuntime,
 
 	srv := &http3.Server{
 		Addr:            bindAddr,
+		QUICConfig:      &quic.Config{EnableDatagrams: true},
 		TLSConfig:       http3.ConfigureTLSConfig(&tls.Config{Certificates: []tls.Certificate{cert}}),
 		Handler:         mux,
 		EnableDatagrams: true,
