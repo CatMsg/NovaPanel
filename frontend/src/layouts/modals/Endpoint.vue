@@ -126,18 +126,17 @@ export default {
           break
         case EpTypes.Masque: {
           const masqueKeys = await this.genMasqueKey()
-          const randomIPoctet = RandomUtil.randomIntRange(2, 254)
           const server = await this.getMasqueServer()
           prevConfig = {
             tag: tag,
             server,
             port: RandomUtil.randomIntRange(10000, 60000),
-            network: 'quic',
+            network: 'h3-l4proxy',
             private_key: masqueKeys.private_key,
             public_key: masqueKeys.public_key,
-            ip: `172.16.0.${randomIPoctet}/32`,
+            ip: '',
             mtu: 1280,
-            udp: true,
+            udp: false,
           }
           break
         }
@@ -179,6 +178,10 @@ export default {
             return
           }
           this.endpoint.server = preferredHost
+        }
+        if (this.endpoint.network == 'h3-l4proxy') {
+          this.endpoint.udp = false
+          this.endpoint.ip = ''
         }
         delete (this.endpoint as any).ipv6
       }

@@ -1,16 +1,23 @@
 package service
 
 import (
+	"crypto/ecdsa"
+	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
@@ -32,6 +39,7 @@ type masqueRuntime struct {
 	bindAddr    string
 	certFile    string
 	keyFile     string
+	certSource  string
 	templateStr string
 	proxy       *masque.Proxy
 	server      *http3.Server
@@ -130,7 +138,11 @@ func (s *MasqueService) GetStatus(tag string) (map[string]interface{}, error) {
 		return nil, err
 	}
 
-	certFile, keyFile, certErr := s.resolveMasqueCertFiles(config.Host)
+	var certFile, keyFile string
+	var certErr error
+	if config.PrivateKey == "" {
+		certFile, keyFile, certErr = s.resolveMasqueCertFiles(config.Host)
+	}
 
 	s.mu.Lock()
 	runtime := s.runtimes[tag]
@@ -143,7 +155,7 @@ func (s *MasqueService) GetStatus(tag string) (map[string]interface{}, error) {
 		"network":   config.Network,
 		"running":   runtime != nil,
 		"bind_addr": net.JoinHostPort("0.0.0.0", strconv.Itoa(config.Port)),
-		"template":  fmt.Sprintf("https://%s/masque?h={target_host}&p={target_port}", formatMasqueHost(config.Host)),
+		"template":  masqueTemplateDescription(config),
 	}
 
 	if runtime != nil {
@@ -159,9 +171,14 @@ func (s *MasqueService) GetStatus(tag string) (map[string]interface{}, error) {
 		if runtime.keyFile != "" {
 			status["key_file"] = runtime.keyFile
 		}
+		if runtime.certSource != "" {
+			status["cert_source"] = runtime.certSource
+		}
 	}
 
-	if certErr != nil {
+	if config.PrivateKey != "" {
+		status["cert_source"] = "endpoint-key"
+	} else if certErr != nil {
 		status["cert_error"] = certErr.Error()
 	} else {
 		status["cert_file"] = certFile
@@ -202,15 +219,11 @@ func (s *MasqueService) startEndpoint(endpoint *model.Endpoint) (*masqueRuntime,
 	if config.Port < 1 || config.Port > 65535 {
 		return nil, fmt.Errorf("invalid masque port: %d", config.Port)
 	}
-	if config.Network != "" && config.Network != "quic" {
+	if config.Network != "" && config.Network != "quic" && config.Network != "h3-l4proxy" {
 		logger.Warning("masque service currently runs with quic/h3; network=", config.Network, " is kept for config preview only")
 	}
 
-	certFile, keyFile, err := s.resolveMasqueCertFiles(config.Host)
-	if err != nil {
-		return nil, err
-	}
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	cert, certFile, keyFile, certSource, err := s.loadMasqueTLSCertificate(config)
 	if err != nil {
 		return nil, fmt.Errorf("load masque certificate failed: %w", err)
 	}
@@ -245,6 +258,15 @@ func (s *MasqueService) startEndpoint(endpoint *model.Endpoint) (*masqueRuntime,
 			logger.Warning("masque proxy failed: ", err)
 		}
 	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodConnect {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if err := proxyMasqueConnect(w, r); err != nil && !errors.Is(err, net.ErrClosed) {
+			logger.Warning("masque connect proxy failed: ", endpoint.Tag, " target=", r.Host, " err=", err)
+		}
+	})
 
 	srv := &http3.Server{
 		Addr:            bindAddr,
@@ -262,6 +284,7 @@ func (s *MasqueService) startEndpoint(endpoint *model.Endpoint) (*masqueRuntime,
 		bindAddr:    bindAddr,
 		certFile:    certFile,
 		keyFile:     keyFile,
+		certSource:  certSource,
 		templateStr: templateStr,
 		proxy:       proxy,
 		server:      srv,
@@ -295,16 +318,18 @@ func (r *masqueRuntime) stop() {
 }
 
 type masqueEndpointConfig struct {
-	Host    string
-	Port    int
-	Network string
+	Host       string
+	Port       int
+	Network    string
+	PrivateKey string
 }
 
 func parseMasqueEndpoint(endpoint *model.Endpoint) (*masqueEndpointConfig, error) {
 	var payload struct {
-		Server  string `json:"server"`
-		Port    int    `json:"port"`
-		Network string `json:"network"`
+		Server     string `json:"server"`
+		Port       int    `json:"port"`
+		Network    string `json:"network"`
+		PrivateKey string `json:"private_key"`
 	}
 	if endpoint.Options != nil {
 		if err := json.Unmarshal(endpoint.Options, &payload); err != nil {
@@ -313,10 +338,133 @@ func parseMasqueEndpoint(endpoint *model.Endpoint) (*masqueEndpointConfig, error
 	}
 
 	return &masqueEndpointConfig{
-		Host:    strings.TrimSpace(payload.Server),
-		Port:    payload.Port,
-		Network: strings.TrimSpace(payload.Network),
+		Host:       strings.TrimSpace(payload.Server),
+		Port:       payload.Port,
+		Network:    normalizeMasqueNetwork(payload.Network),
+		PrivateKey: strings.TrimSpace(payload.PrivateKey),
 	}, nil
+}
+
+func normalizeMasqueNetwork(network string) string {
+	network = strings.TrimSpace(network)
+	if network == "" {
+		return "h3-l4proxy"
+	}
+	return network
+}
+
+func masqueTemplateDescription(config *masqueEndpointConfig) string {
+	if config != nil && config.Network == "h3-l4proxy" {
+		return "h3 CONNECT TCP proxy"
+	}
+	return fmt.Sprintf("https://%s/masque?h={target_host}&p={target_port}", formatMasqueHost(config.Host))
+}
+
+func proxyMasqueConnect(w http.ResponseWriter, r *http.Request) error {
+	target := strings.TrimSpace(r.Host)
+	if target == "" {
+		target = strings.TrimSpace(r.URL.Host)
+	}
+	if target == "" {
+		http.Error(w, "missing connect target", http.StatusBadRequest)
+		return nil
+	}
+	if _, _, err := net.SplitHostPort(target); err != nil {
+		http.Error(w, "invalid connect target", http.StatusBadRequest)
+		return nil
+	}
+
+	streamer, ok := w.(http3.HTTPStreamer)
+	if !ok {
+		http.Error(w, "http3 stream unavailable", http.StatusInternalServerError)
+		return nil
+	}
+
+	targetConn, err := net.DialTimeout("tcp", target, 15*time.Second)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return err
+	}
+	defer targetConn.Close()
+
+	w.WriteHeader(http.StatusOK)
+	stream := streamer.HTTPStream()
+	defer stream.Close()
+
+	errc := make(chan error, 2)
+	go func() {
+		_, err := io.Copy(targetConn, stream)
+		if tcpConn, ok := targetConn.(*net.TCPConn); ok {
+			_ = tcpConn.CloseWrite()
+		}
+		errc <- err
+	}()
+	go func() {
+		_, err := io.Copy(stream, targetConn)
+		errc <- err
+	}()
+
+	err = <-errc
+	if err == nil || errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
+		return nil
+	}
+	return err
+}
+
+func (s *MasqueService) loadMasqueTLSCertificate(config *masqueEndpointConfig) (tls.Certificate, string, string, string, error) {
+	if config != nil && strings.TrimSpace(config.PrivateKey) != "" {
+		cert, err := generateMasqueTLSCertificate(config.PrivateKey)
+		if err != nil {
+			return tls.Certificate{}, "", "", "", err
+		}
+		return cert, "", "", "endpoint-key", nil
+	}
+
+	certFile, keyFile, err := s.resolveMasqueCertFiles(config.Host)
+	if err != nil {
+		return tls.Certificate{}, "", "", "", err
+	}
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return tls.Certificate{}, "", "", "", err
+	}
+	return cert, certFile, keyFile, "file", nil
+}
+
+func generateMasqueTLSCertificate(rawPrivateKey string) (tls.Certificate, error) {
+	priv, err := parseMasquePrivateKey(rawPrivateKey)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+
+	now := time.Now()
+	tpl := &x509.Certificate{
+		SerialNumber: big.NewInt(now.UnixNano()),
+		NotBefore:    now.Add(-time.Hour),
+		NotAfter:     now.AddDate(10, 0, 0),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &priv.PublicKey, priv)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	return tls.Certificate{
+		Certificate: [][]byte{der},
+		PrivateKey:  priv,
+	}, nil
+}
+
+func parseMasquePrivateKey(raw string) (*ecdsa.PrivateKey, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, common.NewError("empty masque private key")
+	}
+	data, err := base64.StdEncoding.DecodeString(trimmed)
+	if err != nil {
+		return nil, err
+	}
+	return x509.ParseECPrivateKey(data)
 }
 
 func formatMasqueHost(host string) string {

@@ -62,7 +62,7 @@ export interface Tailscale extends EndpointBasics, Dial {
 export interface Masque extends EndpointBasics {
   server: string
   port: number
-  network: 'quic' | 'h2'
+  network: 'quic' | 'h2' | 'h3-l4proxy'
   private_key: string
   public_key: string
   ip: string
@@ -86,7 +86,7 @@ const defaultValues: Record<EpType, Endpoint> = {
   wireguard: { type: EpTypes.Wireguard, address: ['10.0.0.2/32','fe80::2/128'], private_key: '', listen_port: 0 },
   warp: { type: EpTypes.Warp, address: [], private_key: '', listen_port: 0, mtu: 1420, peers: [{ address: '', port: 0, public_key: ''}] },
   tailscale: { type: EpTypes.Tailscale, domain_resolver: 'local' },
-  masque: { type: EpTypes.Masque, server: '', port: 443, network: 'quic', private_key: '', public_key: '', ip: '172.16.0.2/32', mtu: 1280, udp: true },
+  masque: { type: EpTypes.Masque, server: '', port: 443, network: 'h3-l4proxy', private_key: '', public_key: '', ip: '', mtu: 1280, udp: false },
 }
 
 export function createEndpoint<T extends Endpoint>(type: string,json?: Partial<T>): Endpoint {
