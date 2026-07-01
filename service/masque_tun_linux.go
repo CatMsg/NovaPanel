@@ -75,15 +75,14 @@ func (t *masqueTun) configure(mtu int) error {
 		{"ip", "addr", "replace", localAddr + "/32", "dev", t.name},
 		{"ip", "link", "set", "dev", t.name, "up"},
 		{"ip", "route", "replace", t.peerPrefix.String(), "dev", t.name},
-		{"sysctl", "-w", "net.ipv4.ip_forward=1"},
-		{"sysctl", "-w", "net.ipv4.conf.all.rp_filter=0"},
-		{"sysctl", "-w", "net.ipv4.conf.default.rp_filter=0"},
-		{"sysctl", "-w", "net.ipv4.conf." + t.name + ".rp_filter=0"},
 	}
 	for _, args := range cmds {
 		if err := runMasqueTunCommand(args...); err != nil {
 			return err
 		}
+	}
+	if err := t.configureKernelForwarding(); err != nil {
+		return err
 	}
 
 	if err := ensureMasqueTunIptablesRule(
@@ -102,6 +101,21 @@ func (t *masqueTun) configure(mtu int) error {
 	if err := runMasqueTunCommand("iptables", "-t", "nat", "-C", "POSTROUTING", "-s", t.peerPrefix.String(), "!", "-o", t.name, "-j", "MASQUERADE"); err != nil {
 		if err := runMasqueTunCommand("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", t.peerPrefix.String(), "!", "-o", t.name, "-j", "MASQUERADE"); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func (t *masqueTun) configureKernelForwarding() error {
+	settings := map[string]string{
+		"/proc/sys/net/ipv4/ip_forward":                    "1\n",
+		"/proc/sys/net/ipv4/conf/all/rp_filter":            "0\n",
+		"/proc/sys/net/ipv4/conf/default/rp_filter":        "0\n",
+		"/proc/sys/net/ipv4/conf/" + t.name + "/rp_filter": "0\n",
+	}
+	for path, value := range settings {
+		if err := os.WriteFile(path, []byte(value), 0o644); err != nil {
+			return fmt.Errorf("write %s failed: %w", path, err)
 		}
 	}
 	return nil
