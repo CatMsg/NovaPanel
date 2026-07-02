@@ -166,6 +166,19 @@
               </v-row>
               <v-row>
                 <v-col>
+                  <v-select
+                    v-model="masqueTags"
+                    :items="masqueEndpointTags"
+                    label="MASQUE"
+                    clearable
+                    multiple
+                    chips
+                    hide-details
+                  ></v-select>
+                </v-col>
+              </v-row>
+              <v-row>
+                <v-col>
                   <v-btn color="primary" @click="extLinks.push({ type: 'external', uri: ''})">{{ $t('actions.add') }} {{ $t('client.external') }}</v-btn>
                 </v-col>
               </v-row>
@@ -242,6 +255,7 @@ export default {
       links: <Link[]>[],
       extLinks: <Link[]>[],
       subLinks: <Link[]>[],
+      masqueLinks: <string[]>[],
     }
   },
   methods: {
@@ -262,6 +276,7 @@ export default {
       this.links = this.client.links?.filter(l => l.type == 'local')?? []
       this.extLinks = this.client.links?.filter(l => l.type == 'external')?? []
       this.subLinks = this.client.links?.filter(l => l.type == 'sub')?? []
+      this.masqueLinks = this.client.links?.filter(l => l.type == 'masque').map(l => l.uri || l.remark || '').filter(Boolean) ?? []
       this.tab = "t1"
       this.loading = false
     },
@@ -281,9 +296,11 @@ export default {
       // save data
       this.loading = true
       this.client.config = updateConfigs(this.clientConfig, this.client.name)
+      const masqueLinks: Link[] = this.masqueLinks.map(tag => ({ type: 'masque', remark: tag, uri: tag }))
       this.client.links = [
                         ...this.extLinks.filter(l => l.uri != ''),
-                        ...this.subLinks.filter(l => l.uri != '')]
+                        ...this.subLinks.filter(l => l.uri != ''),
+                        ...masqueLinks]
       const success = await Data().save("clients", this.$props.id == 0 ? "new" : "edit", this.client)
       if (success) this.closeModal()
       this.loading = false
@@ -356,6 +373,20 @@ export default {
     },
     percent() :number { return this.client.volume>0 ? Math.round((this.client.up + this.client.down) *100 / this.client.volume) : 0 },
     percentColor() :string { return (this.client.up+this.client.down) >= this.client.volume ? 'error' : this.percent>90 ? 'warning' : 'success' },
+    masqueEndpointTags(): string[] {
+      return (Data().endpoints ?? [])
+        .filter((endpoint: any) => endpoint.type == 'masque')
+        .map((endpoint: any) => endpoint.tag)
+        .sort()
+    },
+    masqueTags: {
+      get(): string[] {
+        return [...this.masqueLinks]
+      },
+      set(v: string[]) {
+        this.masqueLinks = [...new Set((v ?? []).filter(Boolean))]
+      }
+    },
   },
   watch: {
     visible(newValue) {
