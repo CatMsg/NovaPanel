@@ -156,6 +156,21 @@ func (s *SettingService) RebuildManagedPortForwarding() error {
 	if runtime.GOOS != "linux" {
 		return nil
 	}
+
+	backend, err := ensureFirewallBackend()
+	if err != nil {
+		return err
+	}
+	logger.Info("rebuilding managed port forwarding with backend: ", backend)
+
+	return s.rebuildManagedPanelPortForwardingFromCurrentState()
+}
+
+func (s *SettingService) rebuildManagedPanelPortForwardingFromCurrentState() error {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+
 	webPort, err := s.GetPort()
 	if err != nil {
 		return err
@@ -168,12 +183,6 @@ func (s *SettingService) RebuildManagedPortForwarding() error {
 	if err := ValidateManagedPanelPorts(webPort, subPort); err != nil {
 		return err
 	}
-
-	backend, err := ensureFirewallBackend()
-	if err != nil {
-		return err
-	}
-	logger.Info("rebuilding managed port forwarding with backend: ", backend)
 
 	var errs []error
 	if err := s.SyncManagedPanelPortForwarding(0, webPort, 0, subPort); err != nil {
@@ -336,6 +345,14 @@ func (s *EndpointService) RebuildEndpointPortForwarding() error {
 	}
 	logger.Info("rebuilding endpoint port forwarding with backend: ", backend)
 
+	return s.rebuildEndpointPortForwardingFromCurrentState()
+}
+
+func (s *EndpointService) rebuildEndpointPortForwardingFromCurrentState() error {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+
 	var endpoints []*model.Endpoint
 	if err := database.GetDB().Model(model.Endpoint{}).Find(&endpoints).Error; err != nil {
 		return err
@@ -350,6 +367,42 @@ func (s *EndpointService) RebuildEndpointPortForwarding() error {
 		}
 	}
 
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+
+	return nil
+}
+
+func (s *SettingService) RebuildAllManagedPortForwarding(inboundService *InboundService, endpointService *EndpointService) error {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+
+	backend, err := ensureFirewallBackend()
+	if err != nil {
+		return err
+	}
+	logger.Info("rebuilding all managed port forwarding with backend: ", backend)
+
+	if err := runPortForwardScript("purge", "", 0, nil, nil); err != nil {
+		return err
+	}
+
+	var errs []error
+	if err := s.rebuildManagedPanelPortForwardingFromCurrentState(); err != nil {
+		errs = append(errs, err)
+	}
+	if inboundService != nil {
+		if err := inboundService.rebuildInboundPortForwardingFromCurrentState(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if endpointService != nil {
+		if err := endpointService.rebuildEndpointPortForwardingFromCurrentState(); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	if len(errs) > 0 {
 		return errors.Join(errs...)
 	}

@@ -44,46 +44,38 @@ func (s *StatsService) SaveStats(enableTraffic bool) error {
 		return nil
 	}
 
-	var err error
-	db := database.GetDB()
-	tx := db.Begin()
-	defer func() {
-		if err == nil {
-			tx.Commit()
-		} else {
-			tx.Rollback()
-		}
-	}()
-
-	for _, stat := range *stats {
-		if stat.Resource == "user" {
+	return retryWriteTx(func(tx *gorm.DB) error {
+		for _, stat := range *stats {
+			if stat.Resource == "user" {
+				var err error
+				if stat.Direction {
+					err = tx.Model(model.Client{}).Where("name = ?", stat.Tag).
+						UpdateColumn("up", gorm.Expr("up + ?", stat.Traffic)).Error
+				} else {
+					err = tx.Model(model.Client{}).Where("name = ?", stat.Tag).
+						UpdateColumn("down", gorm.Expr("down + ?", stat.Traffic)).Error
+				}
+				if err != nil {
+					return err
+				}
+			}
 			if stat.Direction {
-				err = tx.Model(model.Client{}).Where("name = ?", stat.Tag).
-					UpdateColumn("up", gorm.Expr("up + ?", stat.Traffic)).Error
-			} else {
-				err = tx.Model(model.Client{}).Where("name = ?", stat.Tag).
-					UpdateColumn("down", gorm.Expr("down + ?", stat.Traffic)).Error
-			}
-			if err != nil {
-				return err
-			}
-		}
-		if stat.Direction {
-			switch stat.Resource {
-			case "inbound":
-				onlineResources.Inbound = append(onlineResources.Inbound, stat.Tag)
-			case "outbound":
-				onlineResources.Outbound = append(onlineResources.Outbound, stat.Tag)
-			case "user":
-				onlineResources.User = append(onlineResources.User, stat.Tag)
+				switch stat.Resource {
+				case "inbound":
+					onlineResources.Inbound = append(onlineResources.Inbound, stat.Tag)
+				case "outbound":
+					onlineResources.Outbound = append(onlineResources.Outbound, stat.Tag)
+				case "user":
+					onlineResources.User = append(onlineResources.User, stat.Tag)
+				}
 			}
 		}
-	}
 
-	if !enableTraffic {
-		return nil
-	}
-	return tx.Create(&stats).Error
+		if !enableTraffic {
+			return nil
+		}
+		return tx.Create(&stats).Error
+	})
 }
 
 func (s *StatsService) GetStats(resource string, tag string, limit int) ([]model.Stats, error) {

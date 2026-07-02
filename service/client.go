@@ -387,66 +387,64 @@ func (s *ClientService) UpdateLinksByInboundChange(tx *gorm.DB, inbounds *[]mode
 }
 
 func (s *ClientService) DepleteClients() ([]uint, error) {
-	var err error
 	var clients []model.Client
 	var changes []model.Changes
 	var users []string
 	var inboundIds []uint
 
 	dt := time.Now().Unix()
-	db := database.GetDB()
+	err := retryWriteTx(func(tx *gorm.DB) error {
+		var err error
 
-	tx := db.Begin()
-	defer func() {
-		if err == nil {
-			tx.Commit()
-			if err1 := db.Exec("PRAGMA wal_checkpoint(FULL)").Error; err1 != nil {
-				logger.Error("Error checkpointing WAL: ", err1.Error())
+		// Reset clients
+		inboundIds, err = s.ResetClients(tx, dt)
+		if err != nil {
+			return err
+		}
+
+		// Deplete clients
+		err = tx.Model(model.Client{}).Where("enable = true AND ((volume >0 AND up+down > volume) OR (expiry > 0 AND expiry < ?))", dt).Scan(&clients).Error
+		if err != nil {
+			return err
+		}
+
+		for _, client := range clients {
+			logger.Debug("Client ", client.Name, " is going to be disabled")
+			users = append(users, client.Name)
+			var userInbounds []uint
+			json.Unmarshal(client.Inbounds, &userInbounds)
+			inboundIds = common.UnionUintArray(inboundIds, userInbounds)
+			changes = append(changes, model.Changes{
+				DateTime: dt,
+				Actor:    "DepleteJob",
+				Key:      "clients",
+				Action:   "disable",
+				Obj:      json.RawMessage("\"" + client.Name + "\""),
+			})
+		}
+
+		if len(changes) > 0 {
+			err = tx.Model(model.Client{}).Where("enable = true AND ((volume >0 AND up+down > volume) OR (expiry > 0 AND expiry < ?))", dt).Update("enable", false).Error
+			if err != nil {
+				return err
 			}
-		} else {
-			tx.Rollback()
+			err = tx.Model(model.Changes{}).Create(&changes).Error
+			if err != nil {
+				return err
+			}
+			LastUpdate = dt
 		}
-	}()
 
-	// Reset clients
-	inboundIds, err = s.ResetClients(tx, dt)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	// Deplete clients
-	err = tx.Model(model.Client{}).Where("enable = true AND ((volume >0 AND up+down > volume) OR (expiry > 0 AND expiry < ?))", dt).Scan(&clients).Error
-	if err != nil {
-		return nil, err
-	}
-
-	for _, client := range clients {
-		logger.Debug("Client ", client.Name, " is going to be disabled")
-		users = append(users, client.Name)
-		var userInbounds []uint
-		json.Unmarshal(client.Inbounds, &userInbounds)
-		// Find changed inbounds
-		inboundIds = common.UnionUintArray(inboundIds, userInbounds)
-		changes = append(changes, model.Changes{
-			DateTime: dt,
-			Actor:    "DepleteJob",
-			Key:      "clients",
-			Action:   "disable",
-			Obj:      json.RawMessage("\"" + client.Name + "\""),
-		})
-	}
-
-	// Save changes
-	if len(changes) > 0 {
-		err = tx.Model(model.Client{}).Where("enable = true AND ((volume >0 AND up+down > volume) OR (expiry > 0 AND expiry < ?))", dt).Update("enable", false).Error
-		if err != nil {
-			return nil, err
-		}
-		err = tx.Model(model.Changes{}).Create(&changes).Error
-		if err != nil {
-			return nil, err
-		}
-		LastUpdate = dt
+	if err := retryWrite(func(db *gorm.DB) error {
+		return db.Exec("PRAGMA wal_checkpoint(FULL)").Error
+	}); err != nil {
+		logger.Error("Error checkpointing WAL: ", err.Error())
 	}
 
 	return inboundIds, nil

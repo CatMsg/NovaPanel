@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
 )
 
@@ -308,5 +309,109 @@ printf '%s\n' "$*" >> "${HY2_MOCK_LOG:?}"
 	}
 	if !strings.Contains(log, "apply tailscale-new 41642 41642") {
 		t.Fatalf("new tailscale port forwarding was not applied:\n%s", log)
+	}
+}
+
+func TestRebuildAllManagedPortForwardingPurgesBeforeRebuild(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("managed port forwarding is only exercised on linux")
+	}
+
+	originalPorts := getSSHListenPorts()
+	t.Cleanup(func() {
+		_ = storeSSHListenPorts(originalPorts, nil)
+	})
+	if err := storeSSHListenPorts([]int{2222}, nil); err != nil {
+		t.Fatalf("store ssh listen ports: %v", err)
+	}
+
+	workDir := t.TempDir()
+	if err := database.InitDB(filepath.Join(workDir, "managed-ports.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	scriptsDir := filepath.Join(workDir, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatalf("mkdir scripts dir: %v", err)
+	}
+
+	logFile := filepath.Join(workDir, "rebuild-all.log")
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${HY2_MOCK_LOG:?}"
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "hy2-forward.sh"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	binDir := filepath.Join(workDir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatalf("mkdir bin dir: %v", err)
+	}
+	writeExecutable(t, filepath.Join(binDir, "iptables"), "#!/bin/sh\nexit 0\n")
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get wd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	if err := os.Chdir(workDir); err != nil {
+		t.Fatalf("chdir workdir: %v", err)
+	}
+
+	t.Setenv("HY2_MOCK_LOG", logFile)
+	t.Setenv("PATH", binDir)
+
+	db := database.GetDB()
+	inbound := model.Inbound{
+		Type: "vless",
+		Tag:  "inbound-a",
+		Options: json.RawMessage(`{
+			"listen_port": 4100
+		}`),
+	}
+	if err := db.Create(&inbound).Error; err != nil {
+		t.Fatalf("create inbound: %v", err)
+	}
+
+	endpoint := model.Endpoint{
+		Type: "wireguard",
+		Tag:  "endpoint-a",
+		Options: json.RawMessage(`{
+			"listen_port": 4200
+		}`),
+	}
+	if err := db.Create(&endpoint).Error; err != nil {
+		t.Fatalf("create endpoint: %v", err)
+	}
+
+	settingSvc := &SettingService{}
+	inboundSvc := &InboundService{}
+	endpointSvc := &EndpointService{}
+	if err := settingSvc.RebuildAllManagedPortForwarding(inboundSvc, endpointSvc); err != nil {
+		t.Fatalf("rebuild all managed port forwarding failed: %v", err)
+	}
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	lines := strings.Fields(strings.TrimSpace(string(data)))
+	if len(lines) < 1 || lines[0] != "purge" {
+		t.Fatalf("expected first command to purge existing rules, got %q", string(data))
+	}
+
+	log := string(data)
+	if !strings.Contains(log, "apply panel-web-port 2095 2095 tcp") {
+		t.Fatalf("panel web port forwarding was not rebuilt:\n%s", log)
+	}
+	if !strings.Contains(log, "apply panel-sub-port 2096 2096 tcp") {
+		t.Fatalf("panel sub port forwarding was not rebuilt:\n%s", log)
+	}
+	if !strings.Contains(log, "apply inbound-a 4100 4100 tcp,udp") {
+		t.Fatalf("inbound port forwarding was not rebuilt:\n%s", log)
+	}
+	if !strings.Contains(log, "apply endpoint-a 4200 4200 tcp,udp") {
+		t.Fatalf("endpoint port forwarding was not rebuilt:\n%s", log)
 	}
 }

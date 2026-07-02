@@ -91,11 +91,6 @@ func (a *APP) Start() error {
 		logger.Error(err)
 	}
 
-	err = a.configService.RebuildInboundPortForwarding()
-	if err != nil {
-		logger.Warning("rebuild inbound port forwarding failed:", err)
-	}
-
 	if a.masqueService != nil {
 		err = a.masqueService.SyncFromDB()
 		if err != nil {
@@ -103,14 +98,9 @@ func (a *APP) Start() error {
 		}
 	}
 
-	err = a.SettingService.RebuildManagedPortForwarding()
+	err = a.SettingService.RebuildAllManagedPortForwarding(&a.configService.InboundService, &a.configService.EndpointService)
 	if err != nil {
-		logger.Warning("rebuild managed port forwarding failed:", err)
-	}
-
-	err = a.configService.EndpointService.RebuildEndpointPortForwarding()
-	if err != nil {
-		logger.Warning("rebuild endpoint port forwarding failed:", err)
+		logger.Warning("rebuild all managed port forwarding failed:", err)
 	}
 
 	return nil

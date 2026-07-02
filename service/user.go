@@ -8,6 +8,7 @@ import (
 	"github.com/CatMsg/NovaPanel/database/model"
 	"github.com/CatMsg/NovaPanel/logger"
 	"github.com/CatMsg/NovaPanel/util/common"
+	"gorm.io/gorm"
 )
 
 type UserService struct {
@@ -32,19 +33,20 @@ func (s *UserService) UpdateFirstUser(username string, password string) error {
 	} else if password == "" {
 		return common.NewError("password can not be empty")
 	}
-	db := database.GetDB()
-	user := &model.User{}
-	err := db.Model(model.User{}).First(user).Error
-	if database.IsNotFound(err) {
+	return retryWrite(func(db *gorm.DB) error {
+		user := &model.User{}
+		err := db.Model(model.User{}).First(user).Error
+		if database.IsNotFound(err) {
+			user.Username = username
+			user.Password = password
+			return db.Model(model.User{}).Create(user).Error
+		} else if err != nil {
+			return err
+		}
 		user.Username = username
 		user.Password = password
-		return db.Model(model.User{}).Create(user).Error
-	} else if err != nil {
-		return err
-	}
-	user.Username = username
-	user.Password = password
-	return db.Save(user).Error
+		return db.Save(user).Error
+	})
 }
 
 func (s *UserService) Login(username string, password string, remoteIP string) (string, error) {
@@ -71,9 +73,11 @@ func (s *UserService) CheckUser(username string, password string, remoteIP strin
 	}
 
 	lastLoginTxt := time.Now().Format("2006-01-02 15:04:05") + " " + remoteIP
-	err = db.Model(model.User{}).
-		Where("username = ?", username).
-		Update("last_logins", &lastLoginTxt).Error
+	err = retryWrite(func(db *gorm.DB) error {
+		return db.Model(model.User{}).
+			Where("username = ?", username).
+			Update("last_logins", &lastLoginTxt).Error
+	})
 	if err != nil {
 		logger.Warning("unable to log login data", err)
 	}
@@ -91,15 +95,16 @@ func (s *UserService) GetUsers() (*[]model.User, error) {
 }
 
 func (s *UserService) ChangePass(id string, oldPass string, newUser string, newPass string) error {
-	db := database.GetDB()
-	user := &model.User{}
-	err := db.Model(model.User{}).Where("id = ? AND password = ?", id, oldPass).First(user).Error
-	if err != nil || database.IsNotFound(err) {
-		return err
-	}
-	user.Username = newUser
-	user.Password = newPass
-	return db.Save(user).Error
+	return retryWrite(func(db *gorm.DB) error {
+		user := &model.User{}
+		err := db.Model(model.User{}).Where("id = ? AND password = ?", id, oldPass).First(user).Error
+		if err != nil || database.IsNotFound(err) {
+			return err
+		}
+		user.Username = newUser
+		user.Password = newPass
+		return db.Save(user).Error
+	})
 }
 
 func (s *UserService) LoadTokens() ([]byte, error) {
@@ -133,12 +138,6 @@ func (s *UserService) GetUserTokens(username string) (*[]model.Tokens, error) {
 }
 
 func (s *UserService) AddToken(username string, expiry int64, desc string) (string, error) {
-	db := database.GetDB()
-	var userId uint
-	err := db.Model(model.User{}).Where("username = ?", username).Select("id").Scan(&userId).Error
-	if err != nil {
-		return "", err
-	}
 	if expiry > 0 {
 		expiry = expiry*86400 + time.Now().Unix()
 	}
@@ -146,16 +145,25 @@ func (s *UserService) AddToken(username string, expiry int64, desc string) (stri
 		Token:  common.Random(32),
 		Desc:   desc,
 		Expiry: expiry,
-		UserId: userId,
 	}
-	err = db.Create(token).Error
+
+	err := retryWrite(func(db *gorm.DB) error {
+		var userId uint
+		if err := db.Model(model.User{}).Where("username = ?", username).Select("id").Scan(&userId).Error; err != nil {
+			return err
+		}
+		token.UserId = userId
+		return db.Create(token).Error
+	})
 	if err != nil {
 		return "", err
 	}
+
 	return token.Token, nil
 }
 
 func (s *UserService) DeleteToken(id string) error {
-	db := database.GetDB()
-	return db.Model(model.Tokens{}).Where("id = ?", id).Delete(&model.Tokens{}).Error
+	return retryWrite(func(db *gorm.DB) error {
+		return db.Model(model.Tokens{}).Where("id = ?", id).Delete(&model.Tokens{}).Error
+	})
 }

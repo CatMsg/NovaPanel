@@ -30,6 +30,14 @@ func (s *InboundService) RebuildInboundPortForwarding() error {
 		return err
 	}
 
+	return s.rebuildInboundPortForwardingFromCurrentState()
+}
+
+func (s *InboundService) rebuildInboundPortForwardingFromCurrentState() error {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+
 	var inbounds []*model.Inbound
 	if err := database.GetDB().Model(model.Inbound{}).Find(&inbounds).Error; err != nil {
 		return err

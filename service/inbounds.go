@@ -232,42 +232,26 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 }
 
 func (s *InboundService) removeInboundByTag(tag string) error {
-	db := database.GetDB()
-	tx := db.Begin()
-	if tx.Error != nil {
-		return tx.Error
-	}
-	var err error
-	defer func() {
+	return retryWriteTx(func(tx *gorm.DB) error {
+		oldInbound := &model.Inbound{}
+		err := tx.Model(model.Inbound{}).Select("id", "tag").Where("tag = ?", tag).First(oldInbound).Error
 		if err != nil {
-			tx.Rollback()
-		}
-	}()
-
-	oldInbound := &model.Inbound{}
-	err = tx.Model(model.Inbound{}).Select("id", "tag").Where("tag = ?", tag).First(oldInbound).Error
-	if err != nil {
-		return err
-	}
-
-	if corePtr.IsRunning() {
-		err = corePtr.RemoveInbound(tag)
-		if err != nil && err != os.ErrInvalid {
 			return err
 		}
-	}
 
-	err = s.ClientService.UpdateClientsOnInboundDelete(tx, oldInbound.Id, tag)
-	if err != nil {
-		return err
-	}
+		if corePtr.IsRunning() {
+			err = corePtr.RemoveInbound(tag)
+			if err != nil && err != os.ErrInvalid {
+				return err
+			}
+		}
 
-	err = tx.Where("tag = ?", tag).Delete(model.Inbound{}).Error
-	if err != nil {
-		return err
-	}
+		if err := s.ClientService.UpdateClientsOnInboundDelete(tx, oldInbound.Id, tag); err != nil {
+			return err
+		}
 
-	return tx.Commit().Error
+		return tx.Where("tag = ?", tag).Delete(model.Inbound{}).Error
+	})
 }
 
 func (s *InboundService) UpdateOutJsons(tx *gorm.DB, inboundIds []uint, hostname string) error {

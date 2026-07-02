@@ -148,8 +148,9 @@ func (s *SettingService) fillSubCertFiles(allSetting map[string]string) {
 }
 
 func (s *SettingService) ResetSettings() error {
-	db := database.GetDB()
-	return db.Where("1 = 1").Delete(model.Setting{}).Error
+	return retryWrite(func(db *gorm.DB) error {
+		return db.Where("1 = 1").Delete(model.Setting{}).Error
+	})
 }
 
 func (s *SettingService) getSetting(key string) (*model.Setting, error) {
@@ -177,19 +178,21 @@ func (s *SettingService) getString(key string) (string, error) {
 }
 
 func (s *SettingService) saveSetting(key string, value string) error {
-	setting, err := s.getSetting(key)
-	db := database.GetDB()
-	if database.IsNotFound(err) {
-		return db.Create(&model.Setting{
-			Key:   key,
-			Value: value,
-		}).Error
-	} else if err != nil {
-		return err
-	}
-	setting.Key = key
-	setting.Value = value
-	return db.Save(setting).Error
+	return retryWrite(func(db *gorm.DB) error {
+		setting := &model.Setting{}
+		err := db.Model(model.Setting{}).Where("key = ?", key).First(setting).Error
+		if database.IsNotFound(err) {
+			return db.Create(&model.Setting{
+				Key:   key,
+				Value: value,
+			}).Error
+		} else if err != nil {
+			return err
+		}
+		setting.Key = key
+		setting.Value = value
+		return db.Save(setting).Error
+	})
 }
 
 func (s *SettingService) setString(key string, value string) error {
