@@ -85,6 +85,14 @@ func validateManagedPortConflicts(tx *gorm.DB, ownerKind string, ownerTag string
 	}
 }
 
+func validateManagedPanelPortConflicts(tx *gorm.DB, webPort int, subPort int) error {
+	candidatePorts := normalizeManagedPorts([]int{webPort, subPort})
+	if len(candidatePorts) == 0 {
+		return nil
+	}
+	return validateManagedPortConflicts(tx, "面板", "web/sub", 0, 0, candidatePorts)
+}
+
 func collectManagedPortUsages(tx *gorm.DB, skipInboundID uint, skipEndpointID uint) ([]managedPortUsage, error) {
 	usages := make([]managedPortUsage, 0)
 

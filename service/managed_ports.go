@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/CatMsg/NovaPanel/logger"
+	"gorm.io/gorm"
 )
 
 const (
@@ -36,6 +37,16 @@ func ValidateManagedPanelPorts(webPort, subPort int) error {
 		return fmt.Errorf("panel port and sub port cannot be the same: %d", webPort)
 	}
 	return validateInboundPortsAgainstSSH(nil, []int{webPort, subPort})
+}
+
+func ValidateManagedPanelPortsWithConflicts(tx *gorm.DB, webPort, subPort int) error {
+	if err := ValidateManagedPanelPorts(webPort, subPort); err != nil {
+		return err
+	}
+	if tx == nil {
+		return nil
+	}
+	return validateManagedPanelPortConflicts(tx, webPort, subPort)
 }
 
 func syncManagedPortForwarding(tag string, oldPort, newPort int) error {

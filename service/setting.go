@@ -513,7 +513,7 @@ func (s *SettingService) Save(tx *gorm.DB, data json.RawMessage) error {
 		subPortChanged = newSubPort != oldSubPort
 	}
 	if webPortChanged || subPortChanged {
-		if err := ValidateManagedPanelPorts(newWebPort, newSubPort); err != nil {
+		if err := ValidateManagedPanelPortsWithConflicts(tx, newWebPort, newSubPort); err != nil {
 			return err
 		}
 	}

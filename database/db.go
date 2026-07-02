@@ -2,6 +2,7 @@ package database
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path"
 	"strings"
@@ -120,4 +121,48 @@ func GetDB() *gorm.DB {
 
 func IsNotFound(err error) bool {
 	return err == gorm.ErrRecordNotFound
+}
+
+func IsLockedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "database is locked")
+}
+
+func RetryOnLocked(attempts int, delay time.Duration, fn func() error) error {
+	if attempts < 1 {
+		attempts = 1
+	}
+
+	var errs []error
+	for attempt := 0; attempt < attempts; attempt++ {
+		err := fn()
+		if err == nil {
+			return nil
+		}
+		errs = append(errs, err)
+		if !IsLockedError(err) || attempt == attempts-1 {
+			break
+		}
+		time.Sleep(delay)
+	}
+
+	return errors.Join(errs...)
+}
+
+func WithRetryTx(attempts int, delay time.Duration, fn func(tx *gorm.DB) error) error {
+	return RetryOnLocked(attempts, delay, func() error {
+		tx := GetDB().Begin()
+		if tx.Error != nil {
+			return tx.Error
+		}
+
+		if err := fn(tx); err != nil {
+			tx.Rollback()
+			return err
+		}
+
+		return tx.Commit().Error
+	})
 }

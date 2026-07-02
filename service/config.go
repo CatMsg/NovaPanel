@@ -3,7 +3,6 @@ package service
 import (
 	"encoding/json"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -330,10 +329,7 @@ func retryOnDatabaseLocked(attempts int, delay time.Duration, fn func() error) e
 }
 
 func isDatabaseLocked(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(strings.ToLower(err.Error()), "database is locked")
+	return database.IsLockedError(err)
 }
 
 func (s *ConfigService) CheckChanges(lu string) (bool, error) {

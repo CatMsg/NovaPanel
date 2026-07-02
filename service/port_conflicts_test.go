@@ -62,3 +62,40 @@ func TestValidateManagedPortConflicts(t *testing.T) {
 		t.Fatalf("expected self port to be ignored on edit: %v", err)
 	}
 }
+
+func TestValidateManagedPanelPortConflicts(t *testing.T) {
+	logger.InitLogger(logging.ERROR)
+
+	originalPorts := getSSHListenPorts()
+	t.Cleanup(func() {
+		_ = storeSSHListenPorts(originalPorts, nil)
+	})
+	if err := storeSSHListenPorts([]int{2222}, nil); err != nil {
+		t.Fatalf("store ssh listen ports: %v", err)
+	}
+
+	dir := t.TempDir()
+	if err := database.InitDB(filepath.Join(dir, "panel-ports.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	db := database.GetDB()
+	inbound := model.Inbound{
+		Type: "vless",
+		Tag:  "inbound-panel-conflict",
+		Options: json.RawMessage(`{
+			"listen_port": 2095
+		}`),
+	}
+	if err := db.Create(&inbound).Error; err != nil {
+		t.Fatalf("create inbound: %v", err)
+	}
+
+	if err := ValidateManagedPanelPortsWithConflicts(db, 2095, 2096); err == nil {
+		t.Fatal("expected panel port conflict with inbound")
+	}
+
+	if err := ValidateManagedPanelPortsWithConflicts(db, 3000, 3001); err != nil {
+		t.Fatalf("expected non-conflicting panel ports to pass: %v", err)
+	}
+}
