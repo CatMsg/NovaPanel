@@ -91,6 +91,84 @@ func TestPruneInboundConflictsBySSHPorts(t *testing.T) {
 	}
 }
 
+func TestPruneHy2InboundServerPortsConflictBySSHPorts(t *testing.T) {
+	logger.InitLogger(logging.ERROR)
+
+	dir := t.TempDir()
+	if err := InitDB(filepath.Join(dir, "restore-hy2.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	bad := model.Inbound{
+		Type: "hysteria2",
+		Tag:  "hy2-ssh-conflict",
+		Options: json.RawMessage(`{
+			"listen_port": 8443
+		}`),
+		OutJson: json.RawMessage(`{
+			"server_ports": "20-22,9000"
+		}`),
+	}
+	good := model.Inbound{
+		Type: "hysteria2",
+		Tag:  "hy2-safe",
+		Options: json.RawMessage(`{
+			"listen_port": 9443
+		}`),
+		OutJson: json.RawMessage(`{
+			"server_ports": "9444-9446"
+		}`),
+	}
+	if err := db.Create(&bad).Error; err != nil {
+		t.Fatalf("create bad inbound: %v", err)
+	}
+	if err := db.Create(&good).Error; err != nil {
+		t.Fatalf("create good inbound: %v", err)
+	}
+
+	client := model.Client{
+		Enable: true,
+		Name:   "hy2-demo",
+		Inbounds: json.RawMessage(fmt.Sprintf(
+			"[%d,%d]",
+			bad.Id,
+			good.Id,
+		)),
+		Links: json.RawMessage(fmt.Sprintf(`[
+			{"remark":"%s"},
+			{"remark":"%s"}
+		]`, bad.Tag, good.Tag)),
+	}
+	if err := db.Create(&client).Error; err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+
+	if err := pruneInboundConflictsBySSHPorts([]int{22}); err != nil {
+		t.Fatalf("prune conflicted hy2 inbounds: %v", err)
+	}
+
+	var inbounds []model.Inbound
+	if err := db.Find(&inbounds).Error; err != nil {
+		t.Fatalf("load inbounds: %v", err)
+	}
+	if len(inbounds) != 1 || inbounds[0].Tag != good.Tag {
+		t.Fatalf("unexpected hy2 inbounds after prune: %#v", inbounds)
+	}
+
+	var gotClient model.Client
+	if err := db.First(&gotClient, client.Id).Error; err != nil {
+		t.Fatalf("load client: %v", err)
+	}
+
+	var inboundIDs []uint
+	if err := json.Unmarshal(gotClient.Inbounds, &inboundIDs); err != nil {
+		t.Fatalf("decode client inbounds: %v", err)
+	}
+	if len(inboundIDs) != 1 || inboundIDs[0] != good.Id {
+		t.Fatalf("unexpected client inbounds after hy2 prune: %v", inboundIDs)
+	}
+}
+
 func TestPruneEndpointConflictsBySSHPorts(t *testing.T) {
 	logger.InitLogger(logging.ERROR)
 

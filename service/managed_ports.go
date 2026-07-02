@@ -222,12 +222,9 @@ func collectEndpointForwardPorts(endpoint *model.Endpoint) (int, []int, []string
 		return 0, nil, nil, false, err
 	}
 
-	portKey := "listen_port"
+	portKey := model.EndpointPortKey(endpoint.Type)
 	protocols := managedForwardProtocols
-	if strings.EqualFold(endpoint.Type, "tailscale") {
-		portKey = "relay_server_port"
-	} else if strings.EqualFold(endpoint.Type, "masque") {
-		portKey = "port"
+	if strings.EqualFold(endpoint.Type, "masque") {
 		protocols = []string{"udp"}
 	}
 

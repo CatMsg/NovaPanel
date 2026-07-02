@@ -5,6 +5,17 @@ import (
 	"strings"
 )
 
+func EndpointPortKey(endpointType string) string {
+	switch strings.ToLower(strings.TrimSpace(endpointType)) {
+	case "tailscale":
+		return "relay_server_port"
+	case "masque":
+		return "port"
+	default:
+		return "listen_port"
+	}
+}
+
 type Endpoint struct {
 	Id      uint            `json:"id" form:"id" gorm:"primaryKey;autoIncrement"`
 	Type    string          `json:"type" form:"type"`
