@@ -28,7 +28,7 @@ func newMasqueTun(tag string, peerPrefix netip.Prefix, mtu int) (*masqueTun, err
 		return nil, fmt.Errorf("masque tun only supports IPv4 peer address currently: %s", peerPrefix)
 	}
 	if mtu <= 0 {
-		mtu = 1380
+		mtu = 1280
 	}
 
 	name := masqueTunName(tag)
