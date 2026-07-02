@@ -89,7 +89,7 @@
           </v-row>
         </v-card-text>
         <v-divider></v-divider>
-        <v-card-actions style="padding: 0;">
+        <v-card-actions class="endpoint-actions">
           <v-btn icon="mdi-file-edit" @click="showModal(item.id)">
             <v-icon />
             <v-tooltip activator="parent" location="top" :text="$t('actions.edit')"></v-tooltip>
@@ -120,13 +120,14 @@
               </v-card-actions>
             </v-card>
           </v-overlay>
-          <v-icon
-          class="me-2"
-          v-if="item.type == 'wireguard' && item.peers?.length>0"
-          @click="showQrCode(item.id)"
-        >
-          mdi-qrcode
-        </v-icon>
+          <v-btn
+            v-if="item.type == 'wireguard' && item.peers?.length>0"
+            icon="mdi-qrcode"
+            @click="showQrCode(item.id)"
+          >
+            <v-icon />
+            <v-tooltip activator="parent" location="top" text="WireGuard QR Code"></v-tooltip>
+          </v-btn>
           <v-btn icon="mdi-chart-line" @click="showStats(item.tag)" v-if="Data().enableTraffic">
             <v-icon />
             <v-tooltip activator="parent" location="top" :text="$t('stats.graphTitle')"></v-tooltip>
@@ -229,3 +230,17 @@ const copyMasque = async (item: any) => {
   await navigator.clipboard.writeText(text)
 }
 </script>
+
+<style scoped>
+.endpoint-actions {
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+}
+
+.endpoint-actions :deep(.v-btn) {
+  flex: 0 0 auto;
+}
+</style>

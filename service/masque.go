@@ -46,7 +46,18 @@ type masqueRuntime struct {
 	template    *uritemplate.Template
 	tun         *masqueTun
 	peerPrefix  netip.Prefix
-	connMu      sync.Mutex
+	sessionMu   sync.Mutex
+	active      *masqueSession
+	nextSession uint64
+}
+
+type masqueSession struct {
+	id        uint64
+	startedAt time.Time
+	ctx       context.Context
+	cancel    context.CancelFunc
+	conn      *connectip.Conn
+	closeOnce sync.Once
 }
 
 type MasqueService struct {
@@ -292,8 +303,12 @@ func (s *MasqueService) startEndpoint(endpoint *model.Endpoint) (*masqueRuntime,
 	})
 
 	srv := &mhttp3.Server{
-		Addr:            bindAddr,
-		QUICConfig:      &mquic.Config{EnableDatagrams: true},
+		Addr: bindAddr,
+		QUICConfig: &mquic.Config{
+			EnableDatagrams: true,
+			KeepAlivePeriod: 10 * time.Second,
+			MaxIdleTimeout:  20 * time.Second,
+		},
 		TLSConfig:       mhttp3.ConfigureTLSConfig(&mtls.Config{Certificates: []mtls.Certificate{cert}}),
 		Handler:         mux,
 		EnableDatagrams: true,
@@ -315,6 +330,9 @@ func (r *masqueRuntime) stop() {
 	if r == nil {
 		return
 	}
+	if old := r.swapActiveSession(nil); old != nil {
+		old.close()
+	}
 	if r.server != nil {
 		if err := r.server.Close(); err != nil && !errors.Is(err, mhttp.ErrServerClosed) {
 			logger.Warning("masque server close failed: ", r.tag, " err=", err)
@@ -327,17 +345,69 @@ func (r *masqueRuntime) stop() {
 	}
 }
 
-func (r *masqueRuntime) serveConnectIP(ctx context.Context, w mhttp.ResponseWriter, req *connectip.Request) error {
-	r.connMu.Lock()
-	defer r.connMu.Unlock()
+func (s *masqueSession) close() {
+	if s == nil {
+		return
+	}
+	s.closeOnce.Do(func() {
+		s.cancel()
+		if s.conn != nil {
+			_ = s.conn.Close()
+		}
+	})
+}
 
+func (r *masqueRuntime) swapActiveSession(next *masqueSession) *masqueSession {
+	r.sessionMu.Lock()
+	defer r.sessionMu.Unlock()
+
+	prev := r.active
+	r.active = next
+	return prev
+}
+
+func (r *masqueRuntime) reserveSession() uint64 {
+	r.sessionMu.Lock()
+	defer r.sessionMu.Unlock()
+
+	r.nextSession++
+	return r.nextSession
+}
+
+func (r *masqueRuntime) clearActiveSession(sessionID uint64) {
+	r.sessionMu.Lock()
+	defer r.sessionMu.Unlock()
+
+	if r.active != nil && r.active.id == sessionID {
+		r.active = nil
+	}
+}
+
+func (r *masqueRuntime) serveConnectIP(ctx context.Context, w mhttp.ResponseWriter, req *connectip.Request) error {
 	conn, err := r.proxy.Proxy(w, req)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
 
-	setupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	sessionCtx, sessionCancel := context.WithCancel(ctx)
+	session := &masqueSession{
+		id:        r.reserveSession(),
+		startedAt: time.Now(),
+		ctx:       sessionCtx,
+		cancel:    sessionCancel,
+		conn:      conn,
+	}
+	defer func() {
+		session.close()
+		r.clearActiveSession(session.id)
+	}()
+
+	if prev := r.swapActiveSession(session); prev != nil {
+		logger.Info("masque connect-ip session takeover: ", r.tag, " old=", prev.id, " new=", session.id)
+		prev.close()
+	}
+
+	setupCtx, cancel := context.WithTimeout(sessionCtx, 5*time.Second)
 	if err := conn.AssignAddresses(setupCtx, []netip.Prefix{r.peerPrefix}); err != nil {
 		cancel()
 		return err
@@ -360,10 +430,10 @@ func (r *masqueRuntime) serveConnectIP(ctx context.Context, w mhttp.ResponseWrit
 		}
 	}
 
-	logger.Info("masque connect-ip session started: ", r.tag, " peer=", r.peerPrefix)
+	logger.Info("masque connect-ip session started: ", r.tag, " session=", session.id, " peer=", r.peerPrefix)
 	errc := make(chan error, 2)
 	go func() {
-		for ctx.Err() == nil {
+		for sessionCtx.Err() == nil {
 			packet, err := conn.ReadPacket()
 			if err != nil {
 				errc <- err
@@ -377,12 +447,12 @@ func (r *masqueRuntime) serveConnectIP(ctx context.Context, w mhttp.ResponseWrit
 				return
 			}
 		}
-		errc <- ctx.Err()
+		errc <- sessionCtx.Err()
 	}()
 	go func() {
 		buf := make([]byte, 65535)
-		for ctx.Err() == nil {
-			n, err := r.tun.ReadPacket(ctx, buf)
+		for sessionCtx.Err() == nil {
+			n, err := r.tun.ReadPacket(sessionCtx, buf)
 			if err != nil {
 				errc <- err
 				return
@@ -395,11 +465,11 @@ func (r *masqueRuntime) serveConnectIP(ctx context.Context, w mhttp.ResponseWrit
 				return
 			}
 		}
-		errc <- ctx.Err()
+		errc <- sessionCtx.Err()
 	}()
 
 	err = <-errc
-	logger.Info("masque connect-ip session stopped: ", r.tag, " err=", err)
+	logger.Info("masque connect-ip session stopped: ", r.tag, " session=", session.id, " err=", err)
 	return err
 }
 
