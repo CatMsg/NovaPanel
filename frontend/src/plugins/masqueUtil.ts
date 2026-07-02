@@ -1,6 +1,7 @@
 export function buildMasqueConfig(endpoint: any): string {
   const yamlStr = (value: any) => JSON.stringify(String(value ?? ''))
   const network = String(endpoint.network ?? 'quic')
+  const dnsServers = ['1.1.1.1', '8.8.8.8']
   const fields = [
     `name: ${yamlStr(endpoint.tag ?? 'masque')}`,
     `type: masque`,
@@ -19,5 +20,7 @@ export function buildMasqueConfig(endpoint: any): string {
   if (endpoint.udp !== undefined) {
     fields.push(`udp: ${endpoint.udp ? 'true' : 'false'}`)
   }
+  fields.push(`remote-dns-resolve: true`)
+  fields.push(`dns: [${dnsServers.map(yamlStr).join(', ')}]`)
   return `- { ${fields.join(', ')} }`
 }

@@ -446,7 +446,14 @@ func normalizeMasqueNetwork(network string) string {
 }
 
 func masqueTemplateDescription(config *masqueEndpointConfig) string {
-	return "https://cloudflareaccess.com"
+	if config == nil {
+		return "https://localhost"
+	}
+	host := formatMasqueHost(config.Host)
+	if host == "" {
+		host = "localhost"
+	}
+	return "https://" + host
 }
 
 func parseMasquePeerPrefix(raw string) (netip.Prefix, error) {
