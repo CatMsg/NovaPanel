@@ -60,7 +60,7 @@ func (s *ServicesService) GetAllConfig(db *gorm.DB) ([]json.RawMessage, error) {
 	return servicesJson, nil
 }
 
-func (s *ServicesService) Save(tx *gorm.DB, act string, data json.RawMessage) error {
+func (s *ServicesService) Save(tx *gorm.DB, act string, data json.RawMessage) (func() error, error) {
 	var err error
 
 	switch act {
@@ -68,86 +68,117 @@ func (s *ServicesService) Save(tx *gorm.DB, act string, data json.RawMessage) er
 		var srv model.Service
 		err = srv.UnmarshalJSON(data)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		if srv.TlsId > 0 {
 			err = tx.Model(model.Tls{}).Where("id = ?", srv.TlsId).Find(&srv.Tls).Error
 			if err != nil {
-				return err
+				return nil, err
 			}
 		}
 
+		var oldTag string
+		var configData []byte
 		if corePtr.IsRunning() {
-			configData, err := srv.MarshalJSON()
+			configData, err = srv.MarshalJSON()
 			if err != nil {
-				return err
+				return nil, err
 			}
 			if act == "edit" {
-				var oldTag string
 				err = tx.Model(model.Service{}).Select("tag").Where("id = ?", srv.Id).Find(&oldTag).Error
 				if err != nil {
-					return err
+					return nil, err
 				}
-				err = corePtr.RemoveService(oldTag)
-				if err != nil && err != os.ErrInvalid {
-					return err
-				}
-			}
-			err = corePtr.AddService(configData)
-			if err != nil {
-				return err
 			}
 		}
 
 		err = tx.Save(&srv).Error
 		if err != nil {
-			return err
+			return nil, err
 		}
+		if !corePtr.IsRunning() {
+			return nil, nil
+		}
+		return func() error {
+			if act == "edit" {
+				err = corePtr.RemoveService(oldTag)
+				if err != nil && err != os.ErrInvalid {
+					return err
+				}
+			}
+			return corePtr.AddService(configData)
+		}, nil
 	case "del":
 		var tag string
 		err = json.Unmarshal(data, &tag)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if corePtr.IsRunning() {
+		err = tx.Where("tag = ?", tag).Delete(model.Service{}).Error
+		if err != nil {
+			return nil, err
+		}
+		if !corePtr.IsRunning() {
+			return nil, nil
+		}
+		return func() error {
 			err = corePtr.RemoveService(tag)
 			if err != nil && err != os.ErrInvalid {
 				return err
 			}
-		}
-		err = tx.Where("tag = ?", tag).Delete(model.Service{}).Error
-		if err != nil {
-			return err
-		}
+			return nil
+		}, nil
 	default:
-		return common.NewErrorf("unknown action: %s", act)
+		return nil, common.NewErrorf("unknown action: %s", act)
 	}
-	return nil
+	return nil, nil
 }
 
-func (s *ServicesService) RestartServices(tx *gorm.DB, ids []uint) error {
-	if !corePtr.IsRunning() {
-		return nil
+func (s *ServicesService) BuildRestartServicesAction(tx *gorm.DB, ids []uint) (func() error, error) {
+	if !corePtr.IsRunning() || len(ids) == 0 {
+		return nil, nil
 	}
 	var services []*model.Service
 	err := tx.Model(model.Service{}).Preload("Tls").Where("id in ?", ids).Find(&services).Error
 	if err != nil {
-		return err
+		return nil, err
 	}
+
+	type serviceRestartConfig struct {
+		tag    string
+		config []byte
+	}
+	restartConfigs := make([]serviceRestartConfig, 0, len(services))
 	for _, srv := range services {
-		err = corePtr.RemoveService(srv.Tag)
-		if err != nil && err != os.ErrInvalid {
-			return err
-		}
 		srvConfig, err := srv.MarshalJSON()
 		if err != nil {
-			return err
+			return nil, err
 		}
-		err = corePtr.AddService(srvConfig)
-		if err != nil {
-			return err
-		}
+		restartConfigs = append(restartConfigs, serviceRestartConfig{tag: srv.Tag, config: srvConfig})
 	}
-	return nil
+	return func() error {
+		for _, srv := range restartConfigs {
+			err = corePtr.RemoveService(srv.tag)
+			if err != nil && err != os.ErrInvalid {
+				return err
+			}
+			err = corePtr.AddService(srv.config)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}, nil
+}
+
+func (s *ServicesService) RestartServices(tx *gorm.DB, ids []uint) error {
+	action, err := s.BuildRestartServicesAction(tx, ids)
+	if err != nil {
+		return err
+	}
+	if action == nil {
+		return nil
+	}
+	return action()
 }

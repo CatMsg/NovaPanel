@@ -58,7 +58,7 @@ func (o *OutboundService) GetAllConfig(db *gorm.DB) ([]json.RawMessage, error) {
 	return outboundsJson, nil
 }
 
-func (s *OutboundService) Save(tx *gorm.DB, act string, data json.RawMessage) error {
+func (s *OutboundService) Save(tx *gorm.DB, act string, data json.RawMessage) (func() error, error) {
 	var err error
 
 	switch act {
@@ -66,53 +66,62 @@ func (s *OutboundService) Save(tx *gorm.DB, act string, data json.RawMessage) er
 		var outbound model.Outbound
 		err = outbound.UnmarshalJSON(data)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
+		var oldTag string
+		var configData []byte
 		if corePtr.IsRunning() {
-			configData, err := outbound.MarshalJSON()
+			configData, err = outbound.MarshalJSON()
 			if err != nil {
-				return err
+				return nil, err
 			}
 			if act == "edit" {
-				var oldTag string
 				err = tx.Model(model.Outbound{}).Select("tag").Where("id = ?", outbound.Id).Find(&oldTag).Error
 				if err != nil {
-					return err
+					return nil, err
 				}
-				err = corePtr.RemoveOutbound(oldTag)
-				if err != nil && err != os.ErrInvalid {
-					return err
-				}
-			}
-			err = corePtr.AddOutbound(configData)
-			if err != nil {
-				return err
 			}
 		}
 
 		err = tx.Save(&outbound).Error
 		if err != nil {
-			return err
+			return nil, err
 		}
+		if !corePtr.IsRunning() {
+			return nil, nil
+		}
+		return func() error {
+			if act == "edit" {
+				err = corePtr.RemoveOutbound(oldTag)
+				if err != nil && err != os.ErrInvalid {
+					return err
+				}
+			}
+			return corePtr.AddOutbound(configData)
+		}, nil
 	case "del":
 		var tag string
 		err = json.Unmarshal(data, &tag)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if corePtr.IsRunning() {
+		err = tx.Where("tag = ?", tag).Delete(model.Outbound{}).Error
+		if err != nil {
+			return nil, err
+		}
+		if !corePtr.IsRunning() {
+			return nil, nil
+		}
+		return func() error {
 			err = corePtr.RemoveOutbound(tag)
 			if err != nil && err != os.ErrInvalid {
 				return err
 			}
-		}
-		err = tx.Where("tag = ?", tag).Delete(model.Outbound{}).Error
-		if err != nil {
-			return err
-		}
+			return nil
+		}, nil
 	default:
-		return common.NewErrorf("unknown action: %s", act)
+		return nil, common.NewErrorf("unknown action: %s", act)
 	}
-	return nil
+	return nil, nil
 }

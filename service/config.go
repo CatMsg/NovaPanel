@@ -213,21 +213,21 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 			inboundIds, err = s.ClientService.Save(tx, act, data, hostname)
 			if err == nil && len(inboundIds) > 0 {
 				objs = append(objs, "inbounds")
-				err = s.InboundService.RestartInbounds(tx, inboundIds)
+				postCommit, err = s.InboundService.BuildRestartInboundsAction(tx, inboundIds)
 				if err != nil {
 					return common.NewErrorf("failed to update users for inbounds: %v", err)
 				}
 			}
 		case "tls":
-			err = s.TlsService.Save(tx, act, data, hostname)
+			postCommit, err = s.TlsService.Save(tx, act, data, hostname)
 			objs = append(objs, "clients", "inbounds")
 		case "inbounds":
 			postCommit, err = s.InboundService.Save(tx, act, data, initUsers, hostname)
 			objs = append(objs, "clients")
 		case "outbounds":
-			err = s.OutboundService.Save(tx, act, data)
+			postCommit, err = s.OutboundService.Save(tx, act, data)
 		case "services":
-			err = s.ServicesService.Save(tx, act, data)
+			postCommit, err = s.ServicesService.Save(tx, act, data)
 		case "endpoints":
 			postCommit, err = s.EndpointService.Save(tx, act, data)
 		case "config":

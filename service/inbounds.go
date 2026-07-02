@@ -381,35 +381,59 @@ func (s *InboundService) initUsers(db *gorm.DB, inboundJson []byte, clientIds st
 	return json.Marshal(inbound)
 }
 
-func (s *InboundService) RestartInbounds(tx *gorm.DB, ids []uint) error {
-	if !corePtr.IsRunning() {
-		return nil
+func (s *InboundService) BuildRestartInboundsAction(tx *gorm.DB, ids []uint) (func() error, error) {
+	if !corePtr.IsRunning() || len(ids) == 0 {
+		return nil, nil
 	}
 	var inbounds []*model.Inbound
 	err := tx.Model(model.Inbound{}).Preload("Tls").Where("id in ?", ids).Find(&inbounds).Error
 	if err != nil {
-		return err
+		return nil, err
 	}
-	for _, inbound := range inbounds {
-		err = corePtr.RemoveInbound(inbound.Tag)
-		if err != nil && err != os.ErrInvalid {
-			return err
-		}
-		// Close all existing connections
-		corePtr.GetInstance().ConnTracker().CloseConnByInbound(inbound.Tag)
 
+	type inboundRestartConfig struct {
+		tag    string
+		config []byte
+	}
+	restartConfigs := make([]inboundRestartConfig, 0, len(inbounds))
+	for _, inbound := range inbounds {
 		inboundConfig, err := inbound.MarshalJSON()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		inboundConfig, err = s.addUsers(tx, inboundConfig, inbound.Id, inbound.Type)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		err = corePtr.AddInbound(inboundConfig)
-		if err != nil {
-			return err
-		}
+		restartConfigs = append(restartConfigs, inboundRestartConfig{
+			tag:    inbound.Tag,
+			config: inboundConfig,
+		})
 	}
-	return nil
+
+	return func() error {
+		for _, inbound := range restartConfigs {
+			err = corePtr.RemoveInbound(inbound.tag)
+			if err != nil && err != os.ErrInvalid {
+				return err
+			}
+			corePtr.GetInstance().ConnTracker().CloseConnByInbound(inbound.tag)
+			err = corePtr.AddInbound(inbound.config)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}, nil
+}
+
+func (s *InboundService) RestartInbounds(tx *gorm.DB, ids []uint) error {
+	action, err := s.BuildRestartInboundsAction(tx, ids)
+	if err != nil {
+		return err
+	}
+	if action == nil {
+		return nil
+	}
+	return action()
 }

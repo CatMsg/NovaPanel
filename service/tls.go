@@ -26,7 +26,7 @@ func (s *TlsService) GetAll() ([]model.Tls, error) {
 	return tlsConfig, nil
 }
 
-func (s *TlsService) Save(tx *gorm.DB, action string, data json.RawMessage, hostname string) error {
+func (s *TlsService) Save(tx *gorm.DB, action string, data json.RawMessage, hostname string) (func() error, error) {
 	var err error
 
 	switch action {
@@ -34,22 +34,23 @@ func (s *TlsService) Save(tx *gorm.DB, action string, data json.RawMessage, host
 		var tls model.Tls
 		err = json.Unmarshal(data, &tls)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		err = tx.Save(&tls).Error
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if action == "edit" {
 			var inbounds []model.Inbound
 			err = tx.Model(model.Inbound{}).Preload("Tls").Where("tls_id = ?", tls.Id).Find(&inbounds).Error
 			if err != nil {
-				return err
+				return nil, err
 			}
+			var inboundRestartAction func() error
 			if len(inbounds) > 0 {
 				err = s.ClientService.UpdateLinksByInboundChange(tx, &inbounds, hostname, "")
 				if err != nil {
-					return err
+					return nil, err
 				}
 				var inboundIds []uint
 				for _, inbound := range inbounds {
@@ -57,49 +58,51 @@ func (s *TlsService) Save(tx *gorm.DB, action string, data json.RawMessage, host
 				}
 				err = s.InboundService.UpdateOutJsons(tx, inboundIds, hostname)
 				if err != nil {
-					return common.NewError("unable to update out_json of inbounds: ", err.Error())
+					return nil, common.NewError("unable to update out_json of inbounds: ", err.Error())
 				}
-				err = s.InboundService.RestartInbounds(tx, inboundIds)
+				inboundRestartAction, err = s.InboundService.BuildRestartInboundsAction(tx, inboundIds)
 				if err != nil {
-					return err
+					return nil, err
 				}
 			}
 			var serviceIds []uint
 			err = tx.Model(model.Service{}).Where("tls_id = ?", tls.Id).Scan(&serviceIds).Error
 			if err != nil {
-				return err
+				return nil, err
 			}
+			var serviceRestartAction func() error
 			if len(serviceIds) > 0 {
-				err = s.ServicesService.RestartServices(tx, serviceIds)
+				serviceRestartAction, err = s.ServicesService.BuildRestartServicesAction(tx, serviceIds)
 				if err != nil {
-					return err
+					return nil, err
 				}
 			}
+			return combinePostCommitActions(inboundRestartAction, serviceRestartAction), nil
 		}
 	case "del":
 		var id uint
 		err = json.Unmarshal(data, &id)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		var inboundCount int64
 		err = tx.Model(model.Inbound{}).Where("tls_id = ?", id).Count(&inboundCount).Error
 		if err != nil {
-			return err
+			return nil, err
 		}
 		var serviceCount int64
 		err = tx.Model(model.Service{}).Where("tls_id = ?", id).Count(&serviceCount).Error
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if inboundCount > 0 || serviceCount > 0 {
-			return common.NewError("tls in use")
+			return nil, common.NewError("tls in use")
 		}
 		err = tx.Where("id = ?", id).Delete(model.Tls{}).Error
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	return nil
+	return nil, nil
 }
