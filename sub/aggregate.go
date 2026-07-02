@@ -13,6 +13,8 @@ import (
 	"github.com/CatMsg/NovaPanel/service"
 	"github.com/CatMsg/NovaPanel/util"
 	"github.com/CatMsg/NovaPanel/util/common"
+
+	"gopkg.in/yaml.v3"
 )
 
 type AggregateService struct {
@@ -28,6 +30,13 @@ type aggregateUsage struct {
 	expire   int64
 }
 
+type aggregateSources struct {
+	links        []string
+	outbounds    []map[string]interface{}
+	clashProxies []map[string]interface{}
+	usage        aggregateUsage
+}
+
 func (a *AggregateService) GetAggregate(format string, host string) (*string, []string, error) {
 	mode, err := a.SettingService.GetSubMode()
 	if err != nil {
@@ -37,18 +46,18 @@ func (a *AggregateService) GetAggregate(format string, host string) (*string, []
 		return nil, nil, common.NewError("aggregate subscription is disabled in slave mode")
 	}
 
-	links, usage, err := a.collectAggregateLinks(host)
+	sources, err := a.collectAggregateSources(host)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	switch format {
 	case "json":
-		return a.buildAggregateJson(links, usage)
+		return a.buildAggregateJson(sources)
 	case "clash":
-		return a.buildAggregateClash(links, usage)
+		return a.buildAggregateClash(sources)
 	default:
-		return a.buildAggregatePlain(links, usage)
+		return a.buildAggregatePlain(sources.links, sources.usage)
 	}
 }
 
@@ -58,24 +67,23 @@ func (a *AggregateService) GetClientAggregate(subId string, format string, host 
 		return nil, nil, err
 	}
 
-	remoteLinks, usage, err := a.collectAggregateLinks(host)
+	sources, err := a.collectAggregateSources(host)
 	if err != nil {
 		if strings.Contains(err.Error(), "no subscription links found") {
-			remoteLinks = []string{}
-			usage = aggregateUsage{}
+			sources = &aggregateSources{}
 		} else {
 			return nil, nil, err
 		}
 	}
-	usage.addClient(client.Up, client.Down, client.Volume, client.Expiry)
+	sources.usage.addClient(client.Up, client.Down, client.Volume, client.Expiry)
 
 	switch format {
 	case "json":
-		return a.buildClientAggregateJson(client, inDatas, remoteLinks, usage)
+		return a.buildClientAggregateJson(client, inDatas, sources)
 	case "clash":
-		return a.buildClientAggregateClash(client, inDatas, remoteLinks, usage)
+		return a.buildClientAggregateClash(client, inDatas, sources)
 	default:
-		return a.buildClientAggregatePlain(client, remoteLinks, usage)
+		return a.buildClientAggregatePlain(client, sources.links, sources.usage)
 	}
 }
 
@@ -93,19 +101,29 @@ func (a *AggregateService) buildAggregatePlain(links []string, usage aggregateUs
 	return &result, a.aggregateHeaders(usage), nil
 }
 
-func (a *AggregateService) buildAggregateJson(links []string, usage aggregateUsage) (*string, []string, error) {
+func (a *AggregateService) buildAggregateJson(sources *aggregateSources) (*string, []string, error) {
 	jsonConfig := map[string]interface{}{}
 	if err := json.Unmarshal([]byte(defaultJson), &jsonConfig); err != nil {
 		return nil, nil, err
 	}
 
-	outbounds, outTags, err := a.outboundsFromLinks(links)
-	if err != nil {
-		return nil, nil, err
+	outbounds := make([]map[string]interface{}, 0, len(sources.outbounds))
+	outbounds = append(outbounds, sources.outbounds...)
+	outTags := make([]string, 0, len(outbounds))
+	seenTags := make(map[string]struct{}, len(outbounds))
+	for _, outbound := range outbounds {
+		if tag, _ := outbound["tag"].(string); tag != "" {
+			if _, exists := seenTags[tag]; exists {
+				continue
+			}
+			seenTags[tag] = struct{}{}
+			outTags = append(outTags, tag)
+		}
 	}
+	a.appendConvertedLinks(&outbounds, &outTags, seenTags, sources.links)
 
-	a.JsonService.addDefaultOutbounds(outbounds, outTags)
-	jsonConfig["outbounds"] = outbounds
+	a.JsonService.addDefaultOutbounds(&outbounds, &outTags)
+	jsonConfig["outbounds"] = &outbounds
 	if err := a.JsonService.addOthers(&jsonConfig); err != nil {
 		return nil, nil, err
 	}
@@ -115,26 +133,35 @@ func (a *AggregateService) buildAggregateJson(links []string, usage aggregateUsa
 		return nil, nil, err
 	}
 
-	return a.aggregateFormatResult(string(result), usage)
+	return a.aggregateFormatResult(string(result), sources.usage)
 }
 
-func (a *AggregateService) buildAggregateClash(links []string, usage aggregateUsage) (*string, []string, error) {
-	outbounds, _, err := a.outboundsFromLinks(links)
-	if err != nil {
-		return nil, nil, err
+func (a *AggregateService) buildAggregateClash(sources *aggregateSources) (*string, []string, error) {
+	outbounds := make([]map[string]interface{}, 0, len(sources.outbounds))
+	outbounds = append(outbounds, sources.outbounds...)
+	outTags := make([]string, 0, len(outbounds))
+	seenTags := make(map[string]struct{}, len(outbounds))
+	for _, outbound := range outbounds {
+		if tag, _ := outbound["tag"].(string); tag != "" {
+			if _, exists := seenTags[tag]; exists {
+				continue
+			}
+			seenTags[tag] = struct{}{}
+			outTags = append(outTags, tag)
+		}
 	}
-
+	a.appendConvertedLinks(&outbounds, &outTags, seenTags, sources.links)
 	basicConfig, err := a.ClashService.getClashConfig()
 	if err != nil || len(basicConfig) == 0 {
 		basicConfig = basicClashConfig
 	}
 
-	result, err := a.ClashService.ConvertToClashMeta(outbounds, basicConfig)
+	result, err := a.ClashService.ConvertToClashMetaWithExtraProxies(&outbounds, sources.clashProxies, basicConfig)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	return a.aggregateFormatResult(result, usage)
+	return a.aggregateFormatResult(result, sources.usage)
 }
 
 func (a *AggregateService) buildClientAggregatePlain(client *model.Client, aggregateLinks []string, usage aggregateUsage) (*string, []string, error) {
@@ -151,7 +178,7 @@ func (a *AggregateService) buildClientAggregatePlain(client *model.Client, aggre
 	return a.buildAggregatePlain(links, usage)
 }
 
-func (a *AggregateService) buildClientAggregateJson(client *model.Client, inDatas []*model.Inbound, aggregateLinks []string, usage aggregateUsage) (*string, []string, error) {
+func (a *AggregateService) buildClientAggregateJson(client *model.Client, inDatas []*model.Inbound, sources *aggregateSources) (*string, []string, error) {
 	outbounds, outTags, err := a.JsonService.getOutbounds(client.Config, inDatas)
 	if err != nil {
 		return nil, nil, err
@@ -162,10 +189,23 @@ func (a *AggregateService) buildClientAggregateJson(client *model.Client, inData
 		seenTags[tag] = struct{}{}
 	}
 
+	for _, outbound := range sources.outbounds {
+		tag, _ := outbound["tag"].(string)
+		if tag == "" {
+			continue
+		}
+		if _, exists := seenTags[tag]; exists {
+			continue
+		}
+		seenTags[tag] = struct{}{}
+		*outbounds = append(*outbounds, outbound)
+		*outTags = append(*outTags, tag)
+	}
+
 	remoteLinksSeen := make(map[string]struct{})
 	remoteLinks := make([]string, 0)
 	remoteLinks = appendUniqueLinks(remoteLinks, remoteLinksSeen, a.JsonService.LinkService.GetRemoteLinks(&client.Links, true))
-	remoteLinks = appendUniqueLinks(remoteLinks, remoteLinksSeen, aggregateLinks)
+	remoteLinks = appendUniqueLinks(remoteLinks, remoteLinksSeen, sources.links)
 
 	a.appendConvertedLinks(outbounds, outTags, seenTags, remoteLinks)
 	a.JsonService.addDefaultOutbounds(outbounds, outTags)
@@ -183,10 +223,10 @@ func (a *AggregateService) buildClientAggregateJson(client *model.Client, inData
 	if err != nil {
 		return nil, nil, err
 	}
-	return a.aggregateFormatResult(string(result), usage)
+	return a.aggregateFormatResult(string(result), sources.usage)
 }
 
-func (a *AggregateService) buildClientAggregateClash(client *model.Client, inDatas []*model.Inbound, aggregateLinks []string, usage aggregateUsage) (*string, []string, error) {
+func (a *AggregateService) buildClientAggregateClash(client *model.Client, inDatas []*model.Inbound, sources *aggregateSources) (*string, []string, error) {
 	outbounds, outTags, err := a.JsonService.getOutbounds(client.Config, inDatas)
 	if err != nil {
 		return nil, nil, err
@@ -199,10 +239,23 @@ func (a *AggregateService) buildClientAggregateClash(client *model.Client, inDat
 
 	appendUniqueOutbounds(outbounds, outTags, seenTags, loadMasqueOutbounds(a.JsonService.LinkService.GetAssignedMasqueTags(&client.Links)))
 
+	for _, outbound := range sources.outbounds {
+		tag, _ := outbound["tag"].(string)
+		if tag == "" {
+			continue
+		}
+		if _, exists := seenTags[tag]; exists {
+			continue
+		}
+		seenTags[tag] = struct{}{}
+		*outbounds = append(*outbounds, outbound)
+		*outTags = append(*outTags, tag)
+	}
+
 	remoteLinksSeen := make(map[string]struct{})
 	remoteLinks := make([]string, 0)
 	remoteLinks = appendUniqueLinks(remoteLinks, remoteLinksSeen, a.JsonService.LinkService.GetRemoteLinks(&client.Links, true))
-	remoteLinks = appendUniqueLinks(remoteLinks, remoteLinksSeen, aggregateLinks)
+	remoteLinks = appendUniqueLinks(remoteLinks, remoteLinksSeen, sources.links)
 
 	a.appendConvertedLinks(outbounds, outTags, seenTags, remoteLinks)
 
@@ -211,11 +264,11 @@ func (a *AggregateService) buildClientAggregateClash(client *model.Client, inDat
 		basicConfig = basicClashConfig
 	}
 
-	result, err := a.ClashService.ConvertToClashMeta(outbounds, basicConfig)
+	result, err := a.ClashService.ConvertToClashMetaWithExtraProxies(outbounds, sources.clashProxies, basicConfig)
 	if err != nil {
 		return nil, nil, err
 	}
-	return a.aggregateFormatResult(result, usage)
+	return a.aggregateFormatResult(result, sources.usage)
 }
 
 func (a *AggregateService) aggregateHeaders(usage aggregateUsage) []string {
@@ -237,20 +290,25 @@ func (a *AggregateService) aggregateFormatResult(result string, usage aggregateU
 	return &result, a.aggregateHeaders(usage), nil
 }
 
-func (a *AggregateService) collectAggregateLinks(host string) ([]string, aggregateUsage, error) {
-	seen := make(map[string]struct{})
-	links := make([]string, 0)
-	usage := aggregateUsage{}
+func (a *AggregateService) collectAggregateSources(host string) (*aggregateSources, error) {
+	sources := &aggregateSources{
+		links:        make([]string, 0),
+		outbounds:    make([]map[string]interface{}, 0),
+		clashProxies: make([]map[string]interface{}, 0),
+	}
+	seenLinks := make(map[string]struct{})
+	seenTags := make(map[string]struct{})
+	seenProxyNames := make(map[string]struct{})
 
-	sources, err := a.SettingService.GetSubMasterSources()
+	upstreamSources, err := a.SettingService.GetSubMasterSources()
 	if err != nil {
-		return nil, aggregateUsage{}, err
+		return nil, err
 	}
 	selfAggregateURI, err := a.selfAggregateURI(host)
 	if err != nil {
-		return nil, aggregateUsage{}, err
+		return nil, err
 	}
-	for _, source := range sources {
+	for _, source := range upstreamSources {
 		if sameSubscriptionSource(source, selfAggregateURI) {
 			logger.Warning("aggregate: skip self source:", source)
 			continue
@@ -260,24 +318,44 @@ func (a *AggregateService) collectAggregateLinks(host string) ([]string, aggrega
 			logger.Warning("aggregate: failed to load remote subscription:", source)
 			continue
 		}
-		usage.addHeader(headers.Get("Subscription-Userinfo"))
-		for _, line := range strings.Split(data, "\n") {
-			link := strings.TrimSpace(line)
-			if link == "" || strings.HasPrefix(link, "#") {
+		sources.usage.addHeader(headers.Get("Subscription-Userinfo"))
+
+		sourceLinks, sourceOutbounds, sourceClashProxies := parseAggregateSource(data)
+		for _, link := range sourceLinks {
+			if _, exists := seenLinks[link]; exists {
 				continue
 			}
-			if _, exists := seen[link]; exists {
+			seenLinks[link] = struct{}{}
+			sources.links = append(sources.links, link)
+		}
+		for _, outbound := range sourceOutbounds {
+			tag, _ := outbound["tag"].(string)
+			if tag == "" {
 				continue
 			}
-			seen[link] = struct{}{}
-			links = append(links, link)
+			if _, exists := seenTags[tag]; exists {
+				continue
+			}
+			seenTags[tag] = struct{}{}
+			sources.outbounds = append(sources.outbounds, outbound)
+		}
+		for _, proxy := range sourceClashProxies {
+			name, _ := proxy["name"].(string)
+			if name == "" {
+				continue
+			}
+			if _, exists := seenProxyNames[name]; exists {
+				continue
+			}
+			seenProxyNames[name] = struct{}{}
+			sources.clashProxies = append(sources.clashProxies, proxy)
 		}
 	}
 
-	if len(links) == 0 {
-		return nil, aggregateUsage{}, common.NewError("no subscription links found")
+	if len(sources.links) == 0 && len(sources.outbounds) == 0 && len(sources.clashProxies) == 0 {
+		return nil, common.NewError("no subscription links found")
 	}
-	return links, usage, nil
+	return sources, nil
 }
 
 func (a *AggregateService) selfAggregateURI(host string) (string, error) {
@@ -331,6 +409,88 @@ func (a *AggregateService) appendConvertedLinks(outbounds *[]map[string]interfac
 		*outbounds = append(*outbounds, *outbound)
 		*outTags = append(*outTags, tag)
 	}
+}
+
+func parseAggregateSource(data string) ([]string, []map[string]interface{}, []map[string]interface{}) {
+	trimmed := strings.TrimSpace(data)
+	if trimmed == "" {
+		return nil, nil, nil
+	}
+
+	if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
+		if outbounds := parseAggregateJSONOutbounds(trimmed); len(outbounds) > 0 {
+			return nil, outbounds, nil
+		}
+	}
+
+	if strings.Contains(trimmed, "proxies:") {
+		if proxies := parseAggregateClashProxies(trimmed); len(proxies) > 0 {
+			return nil, nil, proxies
+		}
+	}
+
+	links := make([]string, 0)
+	for _, line := range strings.Split(trimmed, "\n") {
+		link := strings.TrimSpace(line)
+		if link == "" || strings.HasPrefix(link, "#") {
+			continue
+		}
+		links = append(links, link)
+	}
+	return links, nil, nil
+}
+
+func parseAggregateJSONOutbounds(data string) []map[string]interface{} {
+	jsonData := map[string]interface{}{}
+	if err := json.Unmarshal([]byte(data), &jsonData); err != nil {
+		logger.Warning("aggregate: failed to parse json source:", err)
+		return nil
+	}
+
+	items, ok := jsonData["outbounds"].([]interface{})
+	if !ok {
+		return nil
+	}
+
+	result := make([]map[string]interface{}, 0, len(items))
+	for _, item := range items {
+		outbound, ok := item.(map[string]interface{})
+		if !ok || len(outbound) == 0 {
+			continue
+		}
+		switch outbound["type"] {
+		case "urltest", "direct", "selector", "block":
+			continue
+		}
+		result = append(result, outbound)
+	}
+	return result
+}
+
+func parseAggregateClashProxies(data string) []map[string]interface{} {
+	root := map[string]interface{}{}
+	if err := yaml.Unmarshal([]byte(data), &root); err != nil {
+		return nil
+	}
+
+	items, ok := root["proxies"].([]interface{})
+	if !ok {
+		return nil
+	}
+
+	result := make([]map[string]interface{}, 0, len(items))
+	for _, item := range items {
+		proxy, ok := item.(map[string]interface{})
+		if !ok || len(proxy) == 0 {
+			continue
+		}
+		name, _ := proxy["name"].(string)
+		if name == "" {
+			continue
+		}
+		result = append(result, proxy)
+	}
+	return result
 }
 
 func (u *aggregateUsage) addClient(upload, download, total, expire int64) {

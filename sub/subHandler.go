@@ -56,13 +56,13 @@ func (s *SubHandler) aggregateHeaders(c *gin.Context) {
 		c.String(404, "")
 		return
 	}
-	_, usage, err := s.AggregateService.collectAggregateLinks(requestHost(c))
+	sources, err := s.AggregateService.collectAggregateSources(requestHost(c))
 	if err != nil {
 		logger.Error(err)
 		c.String(400, "Error!")
 		return
 	}
-	s.addHeaders(c, s.AggregateService.aggregateHeaders(usage))
+	s.addHeaders(c, s.AggregateService.aggregateHeaders(sources.usage))
 	c.Status(200)
 }
 

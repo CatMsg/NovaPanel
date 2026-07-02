@@ -124,6 +124,10 @@ func (s *ClashService) getClashConfig() (string, error) {
 }
 
 func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, basicConfig string) (string, error) {
+	return s.ConvertToClashMetaWithExtraProxies(outbounds, nil, basicConfig)
+}
+
+func (s *ClashService) ConvertToClashMetaWithExtraProxies(outbounds *[]map[string]interface{}, extraProxies []map[string]interface{}, basicConfig string) (string, error) {
 	var proxies []interface{}
 	proxyTags := make([]string, 0)
 	for _, obMap := range *outbounds {
@@ -396,6 +400,23 @@ func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, b
 
 		proxies = append(proxies, proxy)
 		proxyTags = append(proxyTags, obMap["tag"].(string))
+	}
+
+	seenTags := make(map[string]struct{}, len(proxyTags))
+	for _, tag := range proxyTags {
+		seenTags[tag] = struct{}{}
+	}
+	for _, proxy := range extraProxies {
+		name, _ := proxy["name"].(string)
+		if name == "" {
+			continue
+		}
+		if _, exists := seenTags[name]; exists {
+			continue
+		}
+		seenTags[name] = struct{}{}
+		proxies = append(proxies, proxy)
+		proxyTags = append(proxyTags, name)
 	}
 
 	var proxyGroups []map[string]interface{}
