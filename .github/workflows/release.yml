@@ -102,8 +102,23 @@ jobs:
         run: |
           set -e
           cd ~/cronet-go
-          go run ./cmd/build-naive --target=linux/${{ matrix.arch }} --libc=musl download-toolchain
-          go run ./cmd/build-naive --target=linux/${{ matrix.arch }} --libc=musl env | while IFS= read -r line; do
+          retry_cmd() {
+            local attempt=1
+            local max_attempts=3
+            while true; do
+              if "$@"; then
+                return 0
+              fi
+              if [ "$attempt" -ge "$max_attempts" ]; then
+                return 1
+              fi
+              echo "命令失败，$attempt/$max_attempts 次，15 秒后重试: $*"
+              attempt=$((attempt + 1))
+              sleep 15
+            done
+          }
+          retry_cmd go run ./cmd/build-naive --target=linux/${{ matrix.arch }} --libc=musl download-toolchain
+          retry_cmd go run ./cmd/build-naive --target=linux/${{ matrix.arch }} --libc=musl env | while IFS= read -r line; do
             line="${line#export }"
             [[ -z "$line" ]] && continue
             echo "$line" >> $GITHUB_ENV
