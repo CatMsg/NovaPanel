@@ -169,6 +169,130 @@ func TestPruneHy2InboundServerPortsConflictBySSHPorts(t *testing.T) {
 	}
 }
 
+func TestPruneHy2InboundServerPortsConflictDeduplicatesMixedTokens(t *testing.T) {
+	logger.InitLogger(logging.ERROR)
+
+	dir := t.TempDir()
+	if err := InitDB(filepath.Join(dir, "restore-hy2-dedup.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	bad := model.Inbound{
+		Type: "hysteria2",
+		Tag:  "hy2-dup-conflict",
+		Options: json.RawMessage(`{
+			"listen_port": 2222
+		}`),
+		OutJson: json.RawMessage(`{
+			"server_ports": "22,20-22,22,8443"
+		}`),
+	}
+	good := model.Inbound{
+		Type: "hysteria2",
+		Tag:  "hy2-dup-safe",
+		Options: json.RawMessage(`{
+			"listen_port": 3333
+		}`),
+		OutJson: json.RawMessage(`{
+			"server_ports": "3334,3335-3336"
+		}`),
+	}
+	if err := db.Create(&bad).Error; err != nil {
+		t.Fatalf("create bad inbound: %v", err)
+	}
+	if err := db.Create(&good).Error; err != nil {
+		t.Fatalf("create good inbound: %v", err)
+	}
+
+	if err := pruneInboundConflictsBySSHPorts([]int{22}); err != nil {
+		t.Fatalf("prune conflicted hy2 inbound with duplicate tokens: %v", err)
+	}
+
+	var inbounds []model.Inbound
+	if err := db.Find(&inbounds).Error; err != nil {
+		t.Fatalf("load inbounds: %v", err)
+	}
+	if len(inbounds) != 1 || inbounds[0].Tag != good.Tag {
+		t.Fatalf("unexpected hy2 inbounds after duplicate-token prune: %#v", inbounds)
+	}
+}
+
+func TestPruneInboundAndEndpointConflictsBySSHPortsMixedScenario(t *testing.T) {
+	logger.InitLogger(logging.ERROR)
+
+	dir := t.TempDir()
+	if err := InitDB(filepath.Join(dir, "restore-mixed.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	badInbound := model.Inbound{
+		Type: "hysteria2",
+		Tag:  "mixed-bad-inbound",
+		Options: json.RawMessage(`{
+			"listen_port": 8443
+		}`),
+		OutJson: json.RawMessage(`{
+			"server_ports": "21-22"
+		}`),
+	}
+	goodInbound := model.Inbound{
+		Type: "vless",
+		Tag:  "mixed-good-inbound",
+		Options: json.RawMessage(`{
+			"listen_port": 9443
+		}`),
+	}
+	badEndpoint := model.Endpoint{
+		Type: "masque",
+		Tag:  "mixed-bad-endpoint",
+		Options: json.RawMessage(`{
+			"port": 22
+		}`),
+	}
+	goodEndpoint := model.Endpoint{
+		Type: "tailscale",
+		Tag:  "mixed-good-endpoint",
+		Options: json.RawMessage(`{
+			"relay_server_port": 41641
+		}`),
+	}
+	if err := db.Create(&badInbound).Error; err != nil {
+		t.Fatalf("create bad inbound: %v", err)
+	}
+	if err := db.Create(&goodInbound).Error; err != nil {
+		t.Fatalf("create good inbound: %v", err)
+	}
+	if err := db.Create(&badEndpoint).Error; err != nil {
+		t.Fatalf("create bad endpoint: %v", err)
+	}
+	if err := db.Create(&goodEndpoint).Error; err != nil {
+		t.Fatalf("create good endpoint: %v", err)
+	}
+
+	if err := pruneInboundConflictsBySSHPorts([]int{22}); err != nil {
+		t.Fatalf("prune mixed inbound conflicts: %v", err)
+	}
+	if err := pruneEndpointConflictsBySSHPorts([]int{22}); err != nil {
+		t.Fatalf("prune mixed endpoint conflicts: %v", err)
+	}
+
+	var inbounds []model.Inbound
+	if err := db.Find(&inbounds).Error; err != nil {
+		t.Fatalf("load inbounds: %v", err)
+	}
+	if len(inbounds) != 1 || inbounds[0].Tag != goodInbound.Tag {
+		t.Fatalf("unexpected inbounds after mixed prune: %#v", inbounds)
+	}
+
+	var endpoints []model.Endpoint
+	if err := db.Find(&endpoints).Error; err != nil {
+		t.Fatalf("load endpoints: %v", err)
+	}
+	if len(endpoints) != 1 || endpoints[0].Tag != goodEndpoint.Tag {
+		t.Fatalf("unexpected endpoints after mixed prune: %#v", endpoints)
+	}
+}
+
 func TestPruneEndpointConflictsBySSHPorts(t *testing.T) {
 	logger.InitLogger(logging.ERROR)
 

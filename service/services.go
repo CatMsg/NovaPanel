@@ -2,7 +2,6 @@ package service
 
 import (
 	"encoding/json"
-	"os"
 
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
@@ -100,15 +99,14 @@ func (s *ServicesService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 		if !corePtr.IsRunning() {
 			return nil, nil
 		}
-		return func() error {
-			if act == "edit" {
-				err = corePtr.RemoveService(oldTag)
-				if err != nil && err != os.ErrInvalid {
-					return err
-				}
-			}
-			return corePtr.AddService(configData)
-		}, nil
+		removeTag := ""
+		if act == "edit" {
+			removeTag = oldTag
+		}
+		return buildCoreReplaceAction([]coreReplaceSnapshot{{
+			removeTag: removeTag,
+			config:    configData,
+		}}, corePtr.RemoveService, corePtr.AddService), nil
 	case "del":
 		var tag string
 		err = json.Unmarshal(data, &tag)
@@ -122,13 +120,9 @@ func (s *ServicesService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 		if !corePtr.IsRunning() {
 			return nil, nil
 		}
-		return func() error {
-			err = corePtr.RemoveService(tag)
-			if err != nil && err != os.ErrInvalid {
-				return err
-			}
-			return nil
-		}, nil
+		return buildCoreReplaceAction([]coreReplaceSnapshot{{
+			removeTag: tag,
+		}}, corePtr.RemoveService, corePtr.AddService), nil
 	default:
 		return nil, common.NewErrorf("unknown action: %s", act)
 	}
@@ -157,19 +151,14 @@ func (s *ServicesService) BuildRestartServicesAction(tx *gorm.DB, ids []uint) (f
 		}
 		restartConfigs = append(restartConfigs, serviceRestartConfig{tag: srv.Tag, config: srvConfig})
 	}
-	return func() error {
-		for _, srv := range restartConfigs {
-			err = corePtr.RemoveService(srv.tag)
-			if err != nil && err != os.ErrInvalid {
-				return err
-			}
-			err = corePtr.AddService(srv.config)
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	}, nil
+	snapshots := make([]coreReplaceSnapshot, 0, len(restartConfigs))
+	for _, srv := range restartConfigs {
+		snapshots = append(snapshots, coreReplaceSnapshot{
+			removeTag: srv.tag,
+			config:    srv.config,
+		})
+	}
+	return buildCoreReplaceAction(snapshots, corePtr.RemoveService, corePtr.AddService), nil
 }
 
 func (s *ServicesService) RestartServices(tx *gorm.DB, ids []uint) error {

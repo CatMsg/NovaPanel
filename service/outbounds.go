@@ -2,7 +2,6 @@ package service
 
 import (
 	"encoding/json"
-	"os"
 
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
@@ -91,15 +90,14 @@ func (s *OutboundService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 		if !corePtr.IsRunning() {
 			return nil, nil
 		}
-		return func() error {
-			if act == "edit" {
-				err = corePtr.RemoveOutbound(oldTag)
-				if err != nil && err != os.ErrInvalid {
-					return err
-				}
-			}
-			return corePtr.AddOutbound(configData)
-		}, nil
+		removeTag := ""
+		if act == "edit" {
+			removeTag = oldTag
+		}
+		return buildCoreReplaceAction([]coreReplaceSnapshot{{
+			removeTag: removeTag,
+			config:    configData,
+		}}, corePtr.RemoveOutbound, corePtr.AddOutbound), nil
 	case "del":
 		var tag string
 		err = json.Unmarshal(data, &tag)
@@ -113,13 +111,9 @@ func (s *OutboundService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 		if !corePtr.IsRunning() {
 			return nil, nil
 		}
-		return func() error {
-			err = corePtr.RemoveOutbound(tag)
-			if err != nil && err != os.ErrInvalid {
-				return err
-			}
-			return nil
-		}, nil
+		return buildCoreReplaceAction([]coreReplaceSnapshot{{
+			removeTag: tag,
+		}}, corePtr.RemoveOutbound, corePtr.AddOutbound), nil
 	default:
 		return nil, common.NewErrorf("unknown action: %s", act)
 	}

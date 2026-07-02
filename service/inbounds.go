@@ -410,21 +410,19 @@ func (s *InboundService) BuildRestartInboundsAction(tx *gorm.DB, ids []uint) (fu
 			config: inboundConfig,
 		})
 	}
-
-	return func() error {
-		for _, inbound := range restartConfigs {
-			err = corePtr.RemoveInbound(inbound.tag)
-			if err != nil && err != os.ErrInvalid {
-				return err
-			}
-			corePtr.GetInstance().ConnTracker().CloseConnByInbound(inbound.tag)
-			err = corePtr.AddInbound(inbound.config)
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	}, nil
+	snapshots := make([]coreReplaceSnapshot, 0, len(restartConfigs))
+	for _, inbound := range restartConfigs {
+		tag := inbound.tag
+		snapshots = append(snapshots, coreReplaceSnapshot{
+			removeTag: tag,
+			config:    inbound.config,
+			beforeAdd: func(currentTag string) error {
+				corePtr.GetInstance().ConnTracker().CloseConnByInbound(currentTag)
+				return nil
+			},
+		})
+	}
+	return buildCoreReplaceAction(snapshots, corePtr.RemoveInbound, corePtr.AddInbound), nil
 }
 
 func (s *InboundService) RestartInbounds(tx *gorm.DB, ids []uint) error {
