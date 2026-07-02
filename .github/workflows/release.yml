@@ -44,7 +44,7 @@ jobs:
       - name: 构建前端
         run: |
           cd frontend
-          npm install
+          npm ci
           npm run build
 
       - name: 上传前端构建产物
@@ -54,9 +54,27 @@ jobs:
           path: frontend/dist/
           retention-days: 1
 
+  test-backend:
+    name: 后端测试
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v6.0.2
+
+      - name: 设置 Go
+        uses: actions/setup-go@v6
+        with:
+          cache: false
+          go-version-file: go.mod
+
+      - name: 运行 Go 测试
+        run: go test ./...
+
   build-linux:
     name: 构建-${{ matrix.platform }}
-    needs: build-frontend
+    needs:
+      - build-frontend
+      - test-backend
     strategy:
       fail-fast: false
       matrix:

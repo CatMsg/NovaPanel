@@ -45,6 +45,11 @@ type SingBoxConfig struct {
 	Experimental json.RawMessage   `json:"experimental"`
 }
 
+type postCommitAction struct {
+	name string
+	run  func() error
+}
+
 func NewConfigService(core *core.Core) *ConfigService {
 	corePtr = core
 	return &ConfigService{}
@@ -266,26 +271,45 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 		return nil, err
 	}
 
-	// Try to start core if it is not running.
-	if !corePtr.IsRunning() {
-		s.StartCore()
-	}
-
-	if masquePtr != nil && (obj == "endpoints" || obj == "settings") {
-		if err := masquePtr.SyncFromDB(); err != nil {
-			logger.Warning("sync masque service failed:", err)
-		}
-	}
-
-	if postCommit != nil {
-		if err = postCommit(); err != nil {
-			return nil, err
-		}
-	}
-
 	LastUpdate = time.Now().Unix()
 
+	actions := make([]postCommitAction, 0, 3)
+	if postCommit != nil {
+		actions = append(actions, postCommitAction{
+			name: "apply post-commit changes",
+			run:  postCommit,
+		})
+	}
+	if masquePtr != nil && (obj == "endpoints" || obj == "settings") {
+		actions = append(actions, postCommitAction{
+			name: "sync masque service",
+			run:  masquePtr.SyncFromDB,
+		})
+	}
+	if obj != "config" && corePtr != nil && !corePtr.IsRunning() {
+		actions = append(actions, postCommitAction{
+			name: "start core",
+			run:  s.StartCore,
+		})
+	}
+
+	if err = runPostCommitActions(actions); err != nil {
+		return nil, err
+	}
+
 	return objs, nil
+}
+
+func runPostCommitActions(actions []postCommitAction) error {
+	for _, action := range actions {
+		if action.run == nil {
+			continue
+		}
+		if err := action.run(); err != nil {
+			return common.NewErrorf("%s: %v", action.name, err)
+		}
+	}
+	return nil
 }
 
 func retryOnDatabaseLocked(attempts int, delay time.Duration, fn func() error) error {
@@ -316,32 +340,35 @@ func (s *ConfigService) CheckChanges(lu string) (bool, error) {
 	if lu == "" {
 		return true, nil
 	}
+	intLu, err := strconv.ParseInt(lu, 10, 64)
+	if err != nil {
+		return false, err
+	}
 	if LastUpdate == 0 {
 		db := database.GetDB()
 		var count int64
-		err := db.Model(model.Changes{}).Where("date_time > " + lu).Count(&count).Error
+		err = db.Model(model.Changes{}).Where("date_time > ?", intLu).Count(&count).Error
 		if err == nil {
 			LastUpdate = time.Now().Unix()
 		}
 		return count > 0, err
 	} else {
-		intLu, err := strconv.ParseInt(lu, 10, 64)
 		return LastUpdate > intLu, err
 	}
 }
 
 func (s *ConfigService) GetChanges(actor string, chngKey string, count string) []model.Changes {
 	c, _ := strconv.Atoi(count)
-	whereString := "`id`>0"
-	if len(actor) > 0 {
-		whereString += " and `actor`='" + actor + "'"
-	}
-	if len(chngKey) > 0 {
-		whereString += " and `key`='" + chngKey + "'"
-	}
 	db := database.GetDB()
 	var chngs []model.Changes
-	err := db.Model(model.Changes{}).Where(whereString).Order("`id` desc").Limit(c).Scan(&chngs).Error
+	query := db.Model(model.Changes{})
+	if len(actor) > 0 {
+		query = query.Where("actor = ?", actor)
+	}
+	if len(chngKey) > 0 {
+		query = query.Where("key = ?", chngKey)
+	}
+	err := query.Order("id desc").Limit(c).Scan(&chngs).Error
 	if err != nil {
 		logger.Warning(err)
 	}

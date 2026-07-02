@@ -32,6 +32,8 @@ fi
 
 echo "当前系统发行版为：$release"
 
+readonly SUI_INSTALL_SCRIPT_URL="https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh"
+
 confirm() {
     if [[ $# > 1 ]]; then
         echo && read -p "$1 [默认$2]: " temp
@@ -63,7 +65,7 @@ before_show_menu() {
 }
 
 install() {
-    bash <(curl -Ls https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh)
+    run_install_script
     if [[ $? == 0 ]]; then
         if [[ $# == 0 ]]; then
             start
@@ -90,7 +92,7 @@ update() {
             return 0
         fi
     fi
-    SUI_AUTO_UPGRADE=1 bash <(curl -Ls https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh)
+    SUI_AUTO_UPGRADE=1 run_install_script
     if [[ $? == 0 ]]; then
         LOGI "更新完成，面板已自动重启"
         exit 0
@@ -108,12 +110,38 @@ custom_version() {
 
     [[ "${panel_version}" != v* ]] && panel_version="v${panel_version}"
 
-    download_link="https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh"
-
-    install_command="bash <(curl -Ls $download_link) $panel_version"
-
     echo "正在下载并安装 NovaPanel 版本 $panel_version..."
-    eval $install_command
+    run_install_script "$panel_version"
+}
+
+download_install_script() {
+    local installer_path
+    installer_path=$(mktemp /tmp/novapanel-install.XXXXXX.sh) || return 1
+    if ! curl -fsSL "${SUI_INSTALL_SCRIPT_URL}" -o "${installer_path}"; then
+        rm -f "${installer_path}"
+        return 1
+    fi
+    chmod +x "${installer_path}"
+    printf '%s\n' "${installer_path}"
+}
+
+run_install_script() {
+    local target_version="${1:-}"
+    local installer_path
+    installer_path=$(download_install_script)
+    if [[ -z "${installer_path}" ]]; then
+        LOGE "下载安装脚本失败，请检查当前机器是否可以连接 Github"
+        return 1
+    fi
+
+    if [[ -n "${target_version}" ]]; then
+        bash "${installer_path}" "${target_version}"
+    else
+        bash "${installer_path}"
+    fi
+    local status=$?
+    rm -f "${installer_path}"
+    return ${status}
 }
 
 uninstall() {

@@ -24,6 +24,8 @@ else
 fi
 echo "当前系统发行版为：$release"
 
+github_api_url="https://api.github.com/repos/CatMsg/NovaPanel/releases/latest"
+
 arch() {
     case "$(uname -m)" in
     x86_64 | x64 | amd64) echo 'amd64' ;;
@@ -38,6 +40,29 @@ arch() {
 }
 
 echo "架构：$(arch)"
+
+download_to_file() {
+    local url="$1"
+    local dest="$2"
+
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --retry 3 --retry-delay 2 -o "$dest" "$url"
+        return $?
+    fi
+
+    wget -q --show-progress -O "$dest" "$url"
+}
+
+get_latest_release_tag() {
+    local response
+    if command -v curl >/dev/null 2>&1; then
+        response=$(curl -fsSL --retry 3 --retry-delay 2 "$github_api_url") || return 1
+    else
+        response=$(wget -qO- "$github_api_url") || return 1
+    fi
+
+    printf '%s\n' "$response" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | head -n1
+}
 
 install_base() {
     case "${release}" in
@@ -189,15 +214,16 @@ prepare_services() {
 
 install_s-ui() {
     cd /tmp/
+    local archive_path="/tmp/NovaPanel-linux-$(arch).tar.gz"
 
     if [ $# == 0 ]; then
-        last_version=$(curl -Ls "https://api.github.com/repos/CatMsg/NovaPanel/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        last_version=$(get_latest_release_tag)
         if [[ ! -n "$last_version" ]]; then
             echo -e "${red}获取 NovaPanel 版本失败，可能是 Github API 限制导致，请稍后重试${plain}"
             exit 1
         fi
         echo -e "已获取 NovaPanel 最新版本：${last_version}，开始安装..."
-        wget -N --no-check-certificate -O /tmp/NovaPanel-linux-$(arch).tar.gz https://github.com/CatMsg/NovaPanel/releases/download/${last_version}/NovaPanel-linux-$(arch).tar.gz
+        download_to_file "https://github.com/CatMsg/NovaPanel/releases/download/${last_version}/NovaPanel-linux-$(arch).tar.gz" "${archive_path}"
         if [[ $? -ne 0 ]]; then
             echo -e "${red}下载 NovaPanel 失败，请确认服务器可以访问 Github ${plain}"
             exit 1
@@ -207,7 +233,7 @@ install_s-ui() {
         [[ "${last_version}" != v* ]] && last_version="v${last_version}"
         url="https://github.com/CatMsg/NovaPanel/releases/download/${last_version}/NovaPanel-linux-$(arch).tar.gz"
         echo -e "开始安装 NovaPanel ${last_version}"
-        wget -N --no-check-certificate -O /tmp/NovaPanel-linux-$(arch).tar.gz ${url}
+        download_to_file "${url}" "${archive_path}"
         if [[ $? -ne 0 ]]; then
             echo -e "${red}下载 NovaPanel ${last_version} 失败，请检查该版本是否存在${plain}"
             exit 1
@@ -218,8 +244,8 @@ install_s-ui() {
         systemctl stop s-ui
     fi
 
-    tar zxvf NovaPanel-linux-$(arch).tar.gz
-    rm NovaPanel-linux-$(arch).tar.gz -f
+    tar zxf "${archive_path}"
+    rm -f "${archive_path}"
 
     chmod +x s-ui/sui s-ui/s-ui.sh
     cp s-ui/s-ui.sh /usr/bin/s-ui
