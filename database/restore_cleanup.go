@@ -173,7 +173,15 @@ func collectEndpointPortsForRestore(endpoint *model.Endpoint) ([]int, bool, erro
 		return nil, false, err
 	}
 
-	rawPort, ok := payload["listen_port"]
+	portKey := "listen_port"
+	switch strings.ToLower(strings.TrimSpace(endpoint.Type)) {
+	case "tailscale":
+		portKey = "relay_server_port"
+	case "masque":
+		portKey = "port"
+	}
+
+	rawPort, ok := payload[portKey]
 	if !ok || rawPort == nil {
 		return nil, false, nil
 	}

@@ -132,3 +132,87 @@ func TestPruneEndpointConflictsBySSHPorts(t *testing.T) {
 		t.Fatalf("unexpected endpoints after prune: %#v", endpoints)
 	}
 }
+
+func TestPruneMasqueEndpointConflictsBySSHPorts(t *testing.T) {
+	logger.InitLogger(logging.ERROR)
+
+	dir := t.TempDir()
+	if err := InitDB(filepath.Join(dir, "restore-masque.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	bad := model.Endpoint{
+		Type: "masque",
+		Tag:  "ssh-conflict-masque",
+		Options: json.RawMessage(`{
+			"port": 22
+		}`),
+	}
+	good := model.Endpoint{
+		Type: "masque",
+		Tag:  "safe-masque",
+		Options: json.RawMessage(`{
+			"port": 9443
+		}`),
+	}
+	if err := db.Create(&bad).Error; err != nil {
+		t.Fatalf("create bad endpoint: %v", err)
+	}
+	if err := db.Create(&good).Error; err != nil {
+		t.Fatalf("create good endpoint: %v", err)
+	}
+
+	if err := pruneEndpointConflictsBySSHPorts([]int{22}); err != nil {
+		t.Fatalf("prune conflicted masque endpoints: %v", err)
+	}
+
+	var endpoints []model.Endpoint
+	if err := db.Find(&endpoints).Error; err != nil {
+		t.Fatalf("load endpoints: %v", err)
+	}
+	if len(endpoints) != 1 || endpoints[0].Tag != good.Tag {
+		t.Fatalf("unexpected masque endpoints after prune: %#v", endpoints)
+	}
+}
+
+func TestPruneTailscaleEndpointConflictsBySSHPorts(t *testing.T) {
+	logger.InitLogger(logging.ERROR)
+
+	dir := t.TempDir()
+	if err := InitDB(filepath.Join(dir, "restore-tailscale.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	bad := model.Endpoint{
+		Type: "tailscale",
+		Tag:  "ssh-conflict-tailscale",
+		Options: json.RawMessage(`{
+			"relay_server_port": 22
+		}`),
+	}
+	good := model.Endpoint{
+		Type: "tailscale",
+		Tag:  "safe-tailscale",
+		Options: json.RawMessage(`{
+			"relay_server_port": 41641
+		}`),
+	}
+	if err := db.Create(&bad).Error; err != nil {
+		t.Fatalf("create bad endpoint: %v", err)
+	}
+	if err := db.Create(&good).Error; err != nil {
+		t.Fatalf("create good endpoint: %v", err)
+	}
+
+	if err := pruneEndpointConflictsBySSHPorts([]int{22}); err != nil {
+		t.Fatalf("prune conflicted tailscale endpoints: %v", err)
+	}
+
+	var endpoints []model.Endpoint
+	if err := db.Find(&endpoints).Error; err != nil {
+		t.Fatalf("load endpoints: %v", err)
+	}
+	if len(endpoints) != 1 || endpoints[0].Tag != good.Tag {
+		t.Fatalf("unexpected tailscale endpoints after prune: %#v", endpoints)
+	}
+}
