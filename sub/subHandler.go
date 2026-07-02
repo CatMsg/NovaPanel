@@ -26,8 +26,6 @@ func NewSubHandler(g *gin.RouterGroup) {
 func (s *SubHandler) initRouter(g *gin.RouterGroup) {
 	g.GET("/aggregate", s.aggregate)
 	g.HEAD("/aggregate", s.aggregateHeaders)
-	g.GET("/:subid/aggregate", s.clientAggregate)
-	g.HEAD("/:subid/aggregate", s.clientAggregateHeaders)
 	g.GET("/:subid", s.subs)
 	g.HEAD("/:subid", s.subHeaders)
 }
@@ -56,40 +54,13 @@ func (s *SubHandler) aggregateHeaders(c *gin.Context) {
 		c.String(404, "")
 		return
 	}
-	sources, err := s.AggregateService.collectAggregateSources(requestHost(c))
+	_, usage, err := s.AggregateService.collectAggregateLinks(requestHost(c))
 	if err != nil {
 		logger.Error(err)
 		c.String(400, "Error!")
 		return
 	}
-	s.addHeaders(c, s.AggregateService.aggregateHeaders(sources.usage))
-	c.Status(200)
-}
-
-func (s *SubHandler) clientAggregate(c *gin.Context) {
-	subId := c.Param("subid")
-	format := c.Query("format")
-	result, headers, err := s.AggregateService.GetClientAggregate(subId, format, requestHost(c))
-	if err != nil || result == nil {
-		logger.Error(err)
-		c.String(400, "Error!")
-		return
-	}
-
-	s.addHeaders(c, headers)
-	c.String(200, *result)
-}
-
-func (s *SubHandler) clientAggregateHeaders(c *gin.Context) {
-	subId := c.Param("subid")
-	result, headers, err := s.AggregateService.GetClientAggregate(subId, "clash", requestHost(c))
-	if err != nil || result == nil {
-		logger.Error(err)
-		c.String(400, "Error!")
-		return
-	}
-
-	s.addHeaders(c, headers)
+	s.addHeaders(c, s.AggregateService.aggregateHeaders(usage))
 	c.Status(200)
 }
 

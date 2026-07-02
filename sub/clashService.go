@@ -73,14 +73,6 @@ func (s *ClashService) GetClash(subId string) (*string, []string, error) {
 		return nil, nil, err
 	}
 
-	seenTags := make(map[string]struct{}, len(*outTags))
-	for _, tag := range *outTags {
-		seenTags[tag] = struct{}{}
-	}
-
-	masqueTags := s.LinkService.GetAssignedMasqueTags(&client.Links)
-	appendUniqueOutbounds(outbounds, outTags, seenTags, loadMasqueOutbounds(masqueTags))
-
 	links := s.LinkService.GetLinks(&client.Links, "external", "")
 	tagNumEnable := 0
 	if len(links) > 1 {
@@ -89,10 +81,6 @@ func (s *ClashService) GetClash(subId string) (*string, []string, error) {
 	for index, link := range links {
 		json, tag, err := util.GetOutbound(link, (index+1)*tagNumEnable)
 		if err == nil && len(tag) > 0 {
-			if _, exists := seenTags[tag]; exists {
-				continue
-			}
-			seenTags[tag] = struct{}{}
 			*outbounds = append(*outbounds, *json)
 			*outTags = append(*outTags, tag)
 		}
@@ -124,10 +112,6 @@ func (s *ClashService) getClashConfig() (string, error) {
 }
 
 func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, basicConfig string) (string, error) {
-	return s.ConvertToClashMetaWithExtraProxies(outbounds, nil, basicConfig)
-}
-
-func (s *ClashService) ConvertToClashMetaWithExtraProxies(outbounds *[]map[string]interface{}, extraProxies []map[string]interface{}, basicConfig string) (string, error) {
 	var proxies []interface{}
 	proxyTags := make([]string, 0)
 	for _, obMap := range *outbounds {
@@ -222,35 +206,6 @@ func (s *ClashService) ConvertToClashMetaWithExtraProxies(outbounds *[]map[strin
 			}
 			if uot, ok := obMap["udp_over_tcp"].(bool); ok && uot {
 				proxy["udp-over-tcp"] = true
-			}
-		case "masque":
-			proxy["network"] = obMap["network"]
-			proxy["private-key"] = obMap["private_key"]
-			proxy["public-key"] = obMap["public_key"]
-			if ip, ok := obMap["ip"].(string); ok && ip != "" {
-				proxy["ip"] = ip
-			}
-			if mtu := normalizePort(obMap["mtu"]); mtu > 0 {
-				proxy["mtu"] = mtu
-			}
-			if udp, ok := obMap["udp"].(bool); ok {
-				proxy["udp"] = udp
-			}
-			if remoteDNSResolve, ok := obMap["remote_dns_resolve"].(bool); ok {
-				proxy["remote-dns-resolve"] = remoteDNSResolve
-			}
-			if dns, ok := obMap["dns"].([]string); ok && len(dns) > 0 {
-				proxy["dns"] = dns
-			} else if dnsAny, ok := obMap["dns"].([]interface{}); ok && len(dnsAny) > 0 {
-				dns := make([]string, 0, len(dnsAny))
-				for _, item := range dnsAny {
-					if value, ok := item.(string); ok && value != "" {
-						dns = append(dns, value)
-					}
-				}
-				if len(dns) > 0 {
-					proxy["dns"] = dns
-				}
 			}
 		default:
 			continue
@@ -400,23 +355,6 @@ func (s *ClashService) ConvertToClashMetaWithExtraProxies(outbounds *[]map[strin
 
 		proxies = append(proxies, proxy)
 		proxyTags = append(proxyTags, obMap["tag"].(string))
-	}
-
-	seenTags := make(map[string]struct{}, len(proxyTags))
-	for _, tag := range proxyTags {
-		seenTags[tag] = struct{}{}
-	}
-	for _, proxy := range extraProxies {
-		name, _ := proxy["name"].(string)
-		if name == "" {
-			continue
-		}
-		if _, exists := seenTags[name]; exists {
-			continue
-		}
-		seenTags[name] = struct{}{}
-		proxies = append(proxies, proxy)
-		proxyTags = append(proxyTags, name)
 	}
 
 	var proxyGroups []map[string]interface{}

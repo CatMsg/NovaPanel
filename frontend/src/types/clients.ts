@@ -1,7 +1,7 @@
 import RandomUtil from "@/plugins/randomUtil"
 
 export interface Link {
-  type: "local" | "external" | "sub" | "masque"
+  type: "local" | "external" | "sub"
   remark?: string
   uri: string
 }
