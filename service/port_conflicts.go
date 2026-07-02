@@ -90,7 +90,7 @@ func validateManagedPanelPortConflicts(tx *gorm.DB, webPort int, subPort int) er
 	if len(candidatePorts) == 0 {
 		return nil
 	}
-	return validateManagedPortConflicts(tx, "面板", "web/sub", 0, 0, candidatePorts)
+	return validateManagedPortConflicts(tx, "面板", fmt.Sprintf("web=%d sub=%d", webPort, subPort), 0, 0, candidatePorts)
 }
 
 func collectManagedPortUsages(tx *gorm.DB, skipInboundID uint, skipEndpointID uint) ([]managedPortUsage, error) {

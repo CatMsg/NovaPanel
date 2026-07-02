@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/CatMsg/NovaPanel/database/model"
 	"github.com/CatMsg/NovaPanel/logger"
@@ -53,40 +54,29 @@ func pruneInboundConflictsBySSHPorts(sshPorts []int) error {
 		return nil
 	}
 
-	tx := db.Begin()
-	if tx.Error != nil {
-		return tx.Error
-	}
-
-	var err error
-	defer func() {
-		if err != nil {
-			tx.Rollback()
-		}
-	}()
-
 	var inbounds []model.Inbound
-	if err = tx.Model(model.Inbound{}).Find(&inbounds).Error; err != nil {
-		return err
-	}
-
 	removedTags := make([]string, 0)
-	for _, inbound := range inbounds {
-		ports, ok, err := collectInboundPortsForRestore(&inbound)
-		if err != nil {
-			logger.Warning("skip inbound restore conflict check failed: ", err)
-			continue
-		}
-		if !ok || !hasPortConflict(ports, sshSet) {
-			continue
-		}
-		if err = removeInboundFromRestoreTx(tx, &inbound); err != nil {
+	err := WithRetryTx(5, 150*time.Millisecond, func(tx *gorm.DB) error {
+		if err := tx.Model(model.Inbound{}).Find(&inbounds).Error; err != nil {
 			return err
 		}
-		removedTags = append(removedTags, inbound.Tag)
-	}
-
-	if err = tx.Commit().Error; err != nil {
+		for _, inbound := range inbounds {
+			ports, ok, err := collectInboundPortsForRestore(&inbound)
+			if err != nil {
+				logger.Warning("skip inbound restore conflict check failed: ", err)
+				continue
+			}
+			if !ok || !hasPortConflict(ports, sshSet) {
+				continue
+			}
+			if err := removeInboundFromRestoreTx(tx, &inbound); err != nil {
+				return err
+			}
+			removedTags = append(removedTags, inbound.Tag)
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 
@@ -112,40 +102,29 @@ func pruneEndpointConflictsBySSHPorts(sshPorts []int) error {
 		return nil
 	}
 
-	tx := db.Begin()
-	if tx.Error != nil {
-		return tx.Error
-	}
-
-	var err error
-	defer func() {
-		if err != nil {
-			tx.Rollback()
-		}
-	}()
-
 	var endpoints []model.Endpoint
-	if err = tx.Model(model.Endpoint{}).Find(&endpoints).Error; err != nil {
-		return err
-	}
-
 	removedTags := make([]string, 0)
-	for _, endpoint := range endpoints {
-		ports, ok, err := collectEndpointPortsForRestore(&endpoint)
-		if err != nil {
-			logger.Warning("skip endpoint restore conflict check failed: ", err)
-			continue
-		}
-		if !ok || !hasPortConflict(ports, sshSet) {
-			continue
-		}
-		if err = removeEndpointFromRestoreTx(tx, &endpoint); err != nil {
+	err := WithRetryTx(5, 150*time.Millisecond, func(tx *gorm.DB) error {
+		if err := tx.Model(model.Endpoint{}).Find(&endpoints).Error; err != nil {
 			return err
 		}
-		removedTags = append(removedTags, endpoint.Tag)
-	}
-
-	if err = tx.Commit().Error; err != nil {
+		for _, endpoint := range endpoints {
+			ports, ok, err := collectEndpointPortsForRestore(&endpoint)
+			if err != nil {
+				logger.Warning("skip endpoint restore conflict check failed: ", err)
+				continue
+			}
+			if !ok || !hasPortConflict(ports, sshSet) {
+				continue
+			}
+			if err := removeEndpointFromRestoreTx(tx, &endpoint); err != nil {
+				return err
+			}
+			removedTags = append(removedTags, endpoint.Tag)
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 

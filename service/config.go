@@ -11,6 +11,7 @@ import (
 	"github.com/CatMsg/NovaPanel/database/model"
 	"github.com/CatMsg/NovaPanel/logger"
 	"github.com/CatMsg/NovaPanel/util/common"
+	"gorm.io/gorm"
 )
 
 var (
@@ -115,7 +116,7 @@ func (s *ConfigService) StartCore() error {
 
 	logger.Info("starting core")
 	var rawConfig *[]byte
-	err := retryOnDatabaseLocked(3, 100*time.Millisecond, func() error {
+	err := database.RetryOnLocked(3, 100*time.Millisecond, func() error {
 		var err error
 		rawConfig, err = s.GetConfig("")
 		return err
@@ -164,7 +165,7 @@ func (s *ConfigService) restartCoreWithConfig(config json.RawMessage) error {
 		}
 	}
 	var rawConfig *[]byte
-	err := retryOnDatabaseLocked(3, 100*time.Millisecond, func() error {
+	err := database.RetryOnLocked(3, 100*time.Millisecond, func() error {
 		var err error
 		rawConfig, err = s.GetConfig(string(config))
 		return err
@@ -203,70 +204,59 @@ func (s *ConfigService) CheckOutbound(tag string, link string) core.CheckOutboun
 func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initUsers string, loginUser string, hostname string) ([]string, error) {
 	var objs []string = []string{obj}
 	var postCommit func() error
+	err := retryWriteTx(func(tx *gorm.DB) error {
+		var err error
 
-	db := database.GetDB()
-	tx := db.Begin()
-	if tx.Error != nil {
-		return nil, tx.Error
-	}
-
-	var err error
-
-	switch obj {
-	case "clients":
-		var inboundIds []uint
-		inboundIds, err = s.ClientService.Save(tx, act, data, hostname)
-		if err == nil && len(inboundIds) > 0 {
-			objs = append(objs, "inbounds")
-			err = s.InboundService.RestartInbounds(tx, inboundIds)
-			if err != nil {
-				return nil, common.NewErrorf("failed to update users for inbounds: %v", err)
+		switch obj {
+		case "clients":
+			var inboundIds []uint
+			inboundIds, err = s.ClientService.Save(tx, act, data, hostname)
+			if err == nil && len(inboundIds) > 0 {
+				objs = append(objs, "inbounds")
+				err = s.InboundService.RestartInbounds(tx, inboundIds)
+				if err != nil {
+					return common.NewErrorf("failed to update users for inbounds: %v", err)
+				}
 			}
+		case "tls":
+			err = s.TlsService.Save(tx, act, data, hostname)
+			objs = append(objs, "clients", "inbounds")
+		case "inbounds":
+			postCommit, err = s.InboundService.Save(tx, act, data, initUsers, hostname)
+			objs = append(objs, "clients")
+		case "outbounds":
+			err = s.OutboundService.Save(tx, act, data)
+		case "services":
+			err = s.ServicesService.Save(tx, act, data)
+		case "endpoints":
+			postCommit, err = s.EndpointService.Save(tx, act, data)
+		case "config":
+			err = s.SettingService.SaveConfig(tx, data)
+			if err != nil {
+				return err
+			}
+			configData := make(json.RawMessage, len(data))
+			copy(configData, data)
+			postCommit = func() error { return s.restartCoreWithConfig(configData) }
+		case "settings":
+			err = s.SettingService.Save(tx, data)
+		default:
+			return common.NewError("unknown object: ", obj)
 		}
-	case "tls":
-		err = s.TlsService.Save(tx, act, data, hostname)
-		objs = append(objs, "clients", "inbounds")
-	case "inbounds":
-		postCommit, err = s.InboundService.Save(tx, act, data, initUsers, hostname)
-		objs = append(objs, "clients")
-	case "outbounds":
-		err = s.OutboundService.Save(tx, act, data)
-	case "services":
-		err = s.ServicesService.Save(tx, act, data)
-	case "endpoints":
-		postCommit, err = s.EndpointService.Save(tx, act, data)
-	case "config":
-		err = s.SettingService.SaveConfig(tx, data)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		configData := make(json.RawMessage, len(data))
-		copy(configData, data)
-		postCommit = func() error { return s.restartCoreWithConfig(configData) }
-	case "settings":
-		err = s.SettingService.Save(tx, data)
-	default:
-		return nil, common.NewError("unknown object: ", obj)
-	}
-	if err != nil {
-		tx.Rollback()
-		return nil, err
-	}
 
-	dt := time.Now().Unix()
-	err = tx.Create(&model.Changes{
-		DateTime: dt,
-		Actor:    loginUser,
-		Key:      obj,
-		Action:   act,
-		Obj:      data,
-	}).Error
+		dt := time.Now().Unix()
+		return tx.Create(&model.Changes{
+			DateTime: dt,
+			Actor:    loginUser,
+			Key:      obj,
+			Action:   act,
+			Obj:      data,
+		}).Error
+	})
 	if err != nil {
-		tx.Rollback()
-		return nil, err
-	}
-
-	if err = tx.Commit().Error; err != nil {
 		return nil, err
 	}
 
@@ -309,27 +299,6 @@ func runPostCommitActions(actions []postCommitAction) error {
 		}
 	}
 	return nil
-}
-
-func retryOnDatabaseLocked(attempts int, delay time.Duration, fn func() error) error {
-	if attempts < 1 {
-		attempts = 1
-	}
-	var err error
-	for i := 0; i < attempts; i++ {
-		err = fn()
-		if !isDatabaseLocked(err) {
-			return err
-		}
-		if i < attempts-1 {
-			time.Sleep(delay)
-		}
-	}
-	return err
-}
-
-func isDatabaseLocked(err error) bool {
-	return database.IsLockedError(err)
 }
 
 func (s *ConfigService) CheckChanges(lu string) (bool, error) {
