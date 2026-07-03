@@ -75,6 +75,15 @@ var defaultValueMap = map[string]string{
 type SettingService struct {
 }
 
+type settingPortChange struct {
+	oldWebPort     int
+	oldSubPort     int
+	newWebPort     int
+	newSubPort     int
+	webPortChanged bool
+	subPortChanged bool
+}
+
 func (s *SettingService) GetAllSetting() (*map[string]string, error) {
 	db := database.GetDB()
 	settings := make([]*model.Setting, 0)
@@ -491,90 +500,113 @@ func (s *SettingService) SaveConfig(tx *gorm.DB, config json.RawMessage) error {
 	return tx.Model(model.Setting{}).Where("key = ?", "config").Update("value", string(configs)).Error
 }
 
-func (s *SettingService) Save(tx *gorm.DB, data json.RawMessage) (func() error, error) {
-	var err error
-	var settings map[string]string
-	err = json.Unmarshal(data, &settings)
-	if err != nil {
-		return nil, err
-	}
+func (s *SettingService) preparePortChange(tx *gorm.DB, settings map[string]string) (settingPortChange, error) {
+	change := settingPortChange{}
 
 	oldWebPort, err := s.GetPort()
 	if err != nil {
-		return nil, err
+		return change, err
 	}
 	oldSubPort, err := s.GetSubPort()
 	if err != nil {
-		return nil, err
+		return change, err
 	}
-	newWebPort := oldWebPort
-	newSubPort := oldSubPort
-	webPortChanged := false
-	subPortChanged := false
+
+	change.oldWebPort = oldWebPort
+	change.oldSubPort = oldSubPort
+	change.newWebPort = oldWebPort
+	change.newSubPort = oldSubPort
 
 	if rawWebPort, ok := settings["webPort"]; ok && rawWebPort != "" {
-		newWebPort, err = strconv.Atoi(rawWebPort)
+		change.newWebPort, err = strconv.Atoi(rawWebPort)
 		if err != nil {
-			return nil, err
+			return change, err
 		}
-		webPortChanged = newWebPort != oldWebPort
+		change.webPortChanged = change.newWebPort != change.oldWebPort
 	}
 	if rawSubPort, ok := settings["subPort"]; ok && rawSubPort != "" {
-		newSubPort, err = strconv.Atoi(rawSubPort)
+		change.newSubPort, err = strconv.Atoi(rawSubPort)
 		if err != nil {
+			return change, err
+		}
+		change.subPortChanged = change.newSubPort != change.oldSubPort
+	}
+	if change.webPortChanged || change.subPortChanged {
+		if err := ValidateManagedPanelPortsWithConflicts(tx, change.newWebPort, change.newSubPort); err != nil {
+			return change, err
+		}
+	}
+
+	return change, nil
+}
+
+func (s *SettingService) normalizeSettingValue(key, value string) string {
+	switch key {
+	case "webPath", "subPath":
+		if !strings.HasPrefix(value, "/") {
+			value = "/" + value
+		}
+		if !strings.HasSuffix(value, "/") {
+			value += "/"
+		}
+	}
+	return value
+}
+
+func (s *SettingService) validateSettingValue(key, value string) error {
+	if value == "" {
+		return nil
+	}
+	switch key {
+	case "webCertFile", "webKeyFile", "subCertFile", "subKeyFile":
+		if err := s.fileExists(value); err != nil {
+			return common.NewError(" -> ", value, " is not exists")
+		}
+	}
+	return nil
+}
+
+func (s *SettingService) applySettingSideEffects(tx *gorm.DB, key, value string) error {
+	if key == "trafficAge" && value == "0" {
+		return tx.Where("id > 0").Delete(model.Stats{}).Error
+	}
+	return nil
+}
+
+func (s *SettingService) buildSavePostCommit(change settingPortChange) func() error {
+	if !change.webPortChanged && !change.subPortChanged {
+		return nil
+	}
+	return func() error {
+		return s.SyncManagedPanelPortForwarding(change.oldWebPort, change.newWebPort, change.oldSubPort, change.newSubPort)
+	}
+}
+
+func (s *SettingService) Save(tx *gorm.DB, data json.RawMessage) (func() error, error) {
+	var settings map[string]string
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return nil, err
+	}
+
+	portChange, err := s.preparePortChange(tx, settings)
+	if err != nil {
+		return nil, err
+	}
+
+	for key, value := range settings {
+		value = s.normalizeSettingValue(key, value)
+		if err := s.validateSettingValue(key, value); err != nil {
 			return nil, err
 		}
-		subPortChanged = newSubPort != oldSubPort
-	}
-	if webPortChanged || subPortChanged {
-		if err := ValidateManagedPanelPortsWithConflicts(tx, newWebPort, newSubPort); err != nil {
+		if err := s.applySettingSideEffects(tx, key, value); err != nil {
+			return nil, err
+		}
+		if err := s.saveSettingTx(tx, key, value); err != nil {
 			return nil, err
 		}
 	}
 
-	for key, obj := range settings {
-		// Secure file existence check
-		if obj != "" && (key == "webCertFile" ||
-			key == "webKeyFile" ||
-			key == "subCertFile" ||
-			key == "subKeyFile") {
-			err = s.fileExists(obj)
-			if err != nil {
-				return nil, common.NewError(" -> ", obj, " is not exists")
-			}
-		}
-
-		// Correct Pathes start and ends with `/`
-		if key == "webPath" ||
-			key == "subPath" {
-			if !strings.HasPrefix(obj, "/") {
-				obj = "/" + obj
-			}
-			if !strings.HasSuffix(obj, "/") {
-				obj += "/"
-			}
-		}
-
-		// Delete all stats if it is set to 0
-		if key == "trafficAge" && obj == "0" {
-			err = tx.Where("id > 0").Delete(model.Stats{}).Error
-			if err != nil {
-				return nil, err
-			}
-		}
-		err = s.saveSettingTx(tx, key, obj)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	var postCommit func() error
-	if webPortChanged || subPortChanged {
-		postCommit = func() error {
-			return s.SyncManagedPanelPortForwarding(oldWebPort, newWebPort, oldSubPort, newSubPort)
-		}
-	}
-	return postCommit, nil
+	return s.buildSavePostCommit(portChange), nil
 }
 
 func (s *SettingService) GetSubJsonExt() (string, error) {

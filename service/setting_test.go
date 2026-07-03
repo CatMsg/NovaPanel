@@ -274,3 +274,94 @@ func TestSettingSaveCreatesMissingKeys(t *testing.T) {
 		t.Fatalf("expected upserted setting values, got webPort=%s subPort=%s", webPort, subPort)
 	}
 }
+
+func TestSettingSaveNormalizesPaths(t *testing.T) {
+	workDir := t.TempDir()
+	if err := database.InitDB(filepath.Join(workDir, "normalize-paths.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	svc := &SettingService{}
+	if _, err := svc.GetAllSetting(); err != nil {
+		t.Fatalf("init default settings: %v", err)
+	}
+
+	tx := database.GetDB().Begin()
+	if tx.Error != nil {
+		t.Fatalf("begin tx: %v", tx.Error)
+	}
+
+	postCommit, err := svc.Save(tx, json.RawMessage(`{
+		"webPath":"panel",
+		"subPath":"sub"
+	}`))
+	if err != nil {
+		tx.Rollback()
+		t.Fatalf("save settings: %v", err)
+	}
+	if err := tx.Commit().Error; err != nil {
+		t.Fatalf("commit tx: %v", err)
+	}
+	if postCommit != nil {
+		t.Fatal("did not expect post-commit action for path-only changes")
+	}
+
+	webPath, err := svc.GetWebPath()
+	if err != nil {
+		t.Fatalf("get webPath: %v", err)
+	}
+	subPath, err := svc.GetSubPath()
+	if err != nil {
+		t.Fatalf("get subPath: %v", err)
+	}
+	if webPath != "/panel/" || subPath != "/sub/" {
+		t.Fatalf("expected normalized paths, got webPath=%s subPath=%s", webPath, subPath)
+	}
+}
+
+func TestSettingSaveClearsStatsWhenTrafficAgeZero(t *testing.T) {
+	workDir := t.TempDir()
+	if err := database.InitDB(filepath.Join(workDir, "traffic-age-zero.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	svc := &SettingService{}
+	if _, err := svc.GetAllSetting(); err != nil {
+		t.Fatalf("init default settings: %v", err)
+	}
+
+	stats := []model.Stats{
+		{DateTime: 1, Resource: "client", Tag: "a", Direction: true, Traffic: 1},
+		{DateTime: 2, Resource: "inbound", Tag: "b", Direction: false, Traffic: 2},
+	}
+	if err := database.GetDB().Create(&stats).Error; err != nil {
+		t.Fatalf("seed stats: %v", err)
+	}
+
+	tx := database.GetDB().Begin()
+	if tx.Error != nil {
+		t.Fatalf("begin tx: %v", tx.Error)
+	}
+
+	postCommit, err := svc.Save(tx, json.RawMessage(`{
+		"trafficAge":"0"
+	}`))
+	if err != nil {
+		tx.Rollback()
+		t.Fatalf("save settings: %v", err)
+	}
+	if err := tx.Commit().Error; err != nil {
+		t.Fatalf("commit tx: %v", err)
+	}
+	if postCommit != nil {
+		t.Fatal("did not expect post-commit action for trafficAge change")
+	}
+
+	var count int64
+	if err := database.GetDB().Model(model.Stats{}).Count(&count).Error; err != nil {
+		t.Fatalf("count stats: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected stats to be cleared, got %d rows", count)
+	}
+}
