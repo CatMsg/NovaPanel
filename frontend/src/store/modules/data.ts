@@ -4,6 +4,33 @@ import { push } from 'notivue'
 import { i18n } from '@/locales'
 import { Inbound } from '@/types/inbounds'
 import { Client } from '@/types/clients'
+import { Config } from '@/types/config'
+import { Outbound } from '@/types/outbounds'
+import { Endpoint } from '@/types/endpoints'
+import { Srv } from '@/types/services'
+import { tls } from '@/types/tls'
+
+export interface OnlineState {
+  inbound: string[]
+  outbound: string[]
+  user: string[]
+}
+
+interface LoadDataPayload {
+  onlines?: OnlineState
+  lastLog?: string
+  config?: Config
+  clients?: Client[]
+  tls?: tls[]
+  inbounds?: Inbound[]
+  outbounds?: Outbound[]
+  endpoints?: Endpoint[]
+  services?: Srv[]
+  subURI?: string
+  subMode?: string
+  subAggregateURI?: string
+  enableTraffic?: boolean
+}
 
 export const defaultReloadItems = [
   'g-cpu',
@@ -46,14 +73,14 @@ const Data = defineStore('Data', {
     subMode: "slave",
     subAggregateURI: "",
     enableTraffic: false,
-    onlines: {inbound: <string[]>[], outbound: <string[]>[], user: <string[]>[]},
-    config: <any>{},
-    inbounds: <any[]>[],
-    outbounds: <any[]>[],
-    services: <any[]>[],
-    endpoints: <any[]>[],
-    clients: <any>[],
-    tlsConfigs: <any[]>[],
+    onlines: {inbound: <string[]>[], outbound: <string[]>[], user: <string[]>[]} as OnlineState,
+    config: {} as Config,
+    inbounds: [] as Inbound[],
+    outbounds: [] as Outbound[],
+    services: [] as Srv[],
+    endpoints: [] as Endpoint[],
+    clients: [] as Client[],
+    tlsConfigs: [] as tls[],
   }),
   actions: {
     async loadData() {
@@ -73,14 +100,15 @@ const Data = defineStore('Data', {
         }
       }
     },
-    setNewData(data: any) {
+    setNewData(data: LoadDataPayload) {
       this.lastLoad = Math.floor((new Date()).getTime()/1000)
       if (data.subURI) this.subURI = data.subURI
       if (data.subMode) this.subMode = data.subMode
       if (Object.hasOwn(data, 'subAggregateURI')) this.subAggregateURI = data.subAggregateURI ?? ''
       else if (data.subMode == 'slave') this.subAggregateURI = ''
-      if (data.enableTraffic) this.enableTraffic = data.enableTraffic
+      if (Object.hasOwn(data, 'enableTraffic')) this.enableTraffic = data.enableTraffic ?? false
       if (data.config) this.config = data.config
+      if (data.onlines) this.onlines = data.onlines
       if (Object.hasOwn(data, 'clients')) this.clients = data.clients ?? []
       if (Object.hasOwn(data, 'inbounds')) this.inbounds = data.inbounds ?? []
       if (Object.hasOwn(data, 'outbounds')) this.outbounds = data.outbounds ?? []

@@ -40,23 +40,23 @@ func (s *ServerService) GetStatus(request string) *map[string]interface{} {
 	for _, req := range requests {
 		switch req {
 		case "cpu":
-			status["cpu"] = s.GetCpuPercent()
+			status["cpu"] = getCachedStatusValue("cpu", func() interface{} { return s.GetCpuPercent() })
 		case "mem":
-			status["mem"] = s.GetMemInfo()
+			status["mem"] = getCachedStatusValue("mem", func() interface{} { return s.GetMemInfo() })
 		case "dsk":
-			status["dsk"] = s.GetDiskInfo()
+			status["dsk"] = getCachedStatusValue("dsk", func() interface{} { return s.GetDiskInfo() })
 		case "dio":
-			status["dio"] = s.GetDiskIO()
+			status["dio"] = getCachedStatusValue("dio", func() interface{} { return s.GetDiskIO() })
 		case "swp":
-			status["swp"] = s.GetSwapInfo()
+			status["swp"] = getCachedStatusValue("swp", func() interface{} { return s.GetSwapInfo() })
 		case "net":
-			status["net"] = s.GetNetInfo()
+			status["net"] = getCachedStatusValue("net", func() interface{} { return s.GetNetInfo() })
 		case "sys":
-			status["sys"] = s.GetSystemInfo()
+			status["sys"] = getCachedStatusValue("sys", func() interface{} { return s.GetSystemInfo() })
 		case "sbd":
 			status["sbd"] = s.GetSingboxInfo()
 		case "db":
-			status["db"] = s.GetDatabaseInfo()
+			status["db"] = getCachedStatusValue("db", func() interface{} { return s.GetDatabaseInfo() })
 		}
 	}
 	return &status

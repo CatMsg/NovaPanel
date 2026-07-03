@@ -76,6 +76,7 @@ import LogVue from '@/layouts/modals/Logs.vue'
 import Backup from '@/layouts/modals/Backup.vue'
 import UsageStats from '@/layouts/modals/UsageStats.vue'
 import logoUrl from '@/assets/logo.png'
+import { isPageVisible, onPageVisibilityChange } from '@/utils/pageVisibility'
 
 const loading = ref(false)
 const menu = ref(false)
@@ -109,10 +110,9 @@ const onlines = computed(() => Data().onlines ?? {})
 const reloadItems = computed({
   get() { return Data().reloadItems },
   set(v:string[]) {
-    if (Data().reloadItems.length == 0 && v.length>0) startTimer()
-    if (Data().reloadItems.length > 0 && v.length == 0) stopTimer()
     Data().reloadItems = v
     v.length>0 ? localStorage.setItem(reloadItemsStorageKey,v.join(',')) : localStorage.removeItem(reloadItemsStorageKey)
+    syncPollingState()
   }
 })
 
@@ -151,6 +151,9 @@ const heroStackItems = computed(() => [
 ])
 
 const reloadData = async () => {
+  if (!isPageVisible()) {
+    return
+  }
   let request = [...new Set(reloadItems.value.map(r => r.split('-')[1]))]
   if (tilesData.value?.sys?.appVersion) {
     request = request.filter(r => r != 'sys')
@@ -170,6 +173,7 @@ const reloadSys = async () => {
 
 let timerId: ReturnType<typeof setTimeout> | null = null
 let pollingActive = false
+let stopVisibilityListener: (() => void) | null = null
 
 const scheduleTick = () => {
   timerId = setTimeout(async () => {
@@ -184,7 +188,7 @@ const scheduleTick = () => {
 }
 
 const startTimer = () => {
-  if (pollingActive) return
+  if (pollingActive || reloadItems.value.length === 0 || !isPageVisible()) return
   pollingActive = true
   scheduleTick()
 }
@@ -197,17 +201,38 @@ const stopTimer = () => {
   }
 }
 
+const syncPollingState = () => {
+  if (reloadItems.value.length === 0 || !isPageVisible()) {
+    stopTimer()
+    return
+  }
+  if (!pollingActive) {
+    void reloadData().then(() => {
+      startTimer()
+    })
+  }
+}
+
 onMounted(async () => {
   loading.value = true
   if (Data().reloadItems.length != 0) {
     await reloadData()
     startTimer()
   }
+  stopVisibilityListener = onPageVisibilityChange((visible) => {
+    if (!visible) {
+      stopTimer()
+      return
+    }
+    syncPollingState()
+  })
   loading.value = false
 })
 
 onBeforeUnmount(() => {
   stopTimer()
+  stopVisibilityListener?.()
+  stopVisibilityListener = null
 })
 
 const logModal = ref({ visible: false })
