@@ -210,6 +210,12 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 			if err != nil {
 				return nil, err
 			}
+			if oldEndpoint.Type == endpoint.Type &&
+				oldEndpoint.Tag == endpoint.Tag &&
+				equalJSONBytes(oldEndpoint.Options, endpoint.Options) &&
+				equalJSONBytes(oldEndpoint.Ext, endpoint.Ext) {
+				return nil, ErrNoChanges
+			}
 		}
 
 		if _, ports, _, active, err := collectEndpointForwardPorts(&endpoint); err == nil {

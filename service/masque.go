@@ -25,6 +25,9 @@ import (
 )
 
 var masquePtr *MasqueService
+var masqueStatusCache = newTimedCache()
+
+const masqueStatusCacheTTL = 5 * time.Second
 
 type masqueRuntime struct {
 	tag         string
@@ -93,6 +96,7 @@ func (s *MasqueService) SyncFromDB() error {
 	for _, runtime := range oldRuntimes {
 		runtime.stop()
 	}
+	masqueStatusCache.clear()
 
 	var errs []error
 	for _, endpoint := range endpoints {
@@ -122,6 +126,7 @@ func (s *MasqueService) Stop() error {
 	for _, runtime := range runtimes {
 		runtime.stop()
 	}
+	masqueStatusCache.clear()
 	return nil
 }
 
@@ -133,6 +138,11 @@ func (s *MasqueService) GetStatus(tag string) (map[string]interface{}, error) {
 	tag = strings.TrimSpace(tag)
 	if tag == "" {
 		return nil, common.NewError("missing endpoint tag")
+	}
+	if cached, ok := masqueStatusCache.get(tag, LastUpdate); ok {
+		if status, ok := cached.(map[string]interface{}); ok {
+			return status, nil
+		}
 	}
 
 	db := database.GetDB()
@@ -193,6 +203,7 @@ func (s *MasqueService) GetStatus(tag string) (map[string]interface{}, error) {
 		status["key_file"] = keyFile
 	}
 
+	masqueStatusCache.set(tag, LastUpdate, masqueStatusCacheTTL, status)
 	return status, nil
 }
 

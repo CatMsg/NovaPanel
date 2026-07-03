@@ -54,6 +54,11 @@ func (s *SubHandler) aggregateHeaders(c *gin.Context) {
 		c.String(404, "")
 		return
 	}
+	if _, headers, ok := getCachedSubResult("aggregate::" + strings.TrimSpace(requestHost(c))); ok {
+		s.addHeaders(c, headers)
+		c.Status(200)
+		return
+	}
 	_, usage, err := s.AggregateService.collectAggregateLinks(requestHost(c))
 	if err != nil {
 		logger.Error(err)

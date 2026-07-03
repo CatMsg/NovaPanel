@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	writeRetryAttempts = 5
-	writeRetryDelay    = 150 * time.Millisecond
+	writeRetryAttempts = 8
+	writeRetryDelay    = 200 * time.Millisecond
 )
 
 func retryWrite(fn func(db *gorm.DB) error) error {

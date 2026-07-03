@@ -49,6 +49,11 @@ type JsonService struct {
 }
 
 func (j *JsonService) GetJson(subId string, format string) (*string, []string, error) {
+	cacheKey := "json:" + strings.TrimSpace(subId)
+	if body, headers, ok := getCachedSubResult(cacheKey); ok {
+		return body, headers, nil
+	}
+
 	var jsonConfig map[string]interface{}
 
 	client, inDatas, err := j.getData(subId)
@@ -92,6 +97,7 @@ func (j *JsonService) GetJson(subId string, format string) (*string, []string, e
 	updateInterval, _ := j.SettingService.GetSubUpdates()
 	headers := util.GetHeaders(client, updateInterval)
 
+	storeCachedSubResult(cacheKey, resultStr, headers)
 	return &resultStr, headers, nil
 }
 

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
-	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
@@ -225,16 +224,16 @@ func runPortForwardScript(action string, tag string, listenPort int, ports []int
 		args = append(args, tag, strconv.Itoa(listenPort), joinPorts(ports))
 		args = append(args, strings.Join(protocols, ","))
 	}
-	cmd := exec.Command("bash", append([]string{hy2ForwardScript}, args...)...)
-	output, err := cmd.CombinedOutput()
+	_, err := runCommandOutput(externalCommandTimeout, "bash", append([]string{hy2ForwardScript}, args...)...)
 	if err != nil {
-		trimmed := strings.TrimSpace(string(output))
-		if trimmed != "" {
-			err = fmt.Errorf("%w: %s", err, trimmed)
-		}
-		logger.Warning("port forwarding sync failed: ", err)
-		return err
+		wrapped := formatExternalCommandError("port forwarding sync failed", err)
+		logger.Warning(wrapped)
+		return wrapped
 	}
+	serverStatusCache.mu.Lock()
+	delete(serverStatusCache.entries, "ports")
+	delete(serverStatusCache.entries, "sys")
+	serverStatusCache.mu.Unlock()
 
 	return nil
 }

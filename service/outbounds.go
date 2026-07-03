@@ -69,17 +69,26 @@ func (s *OutboundService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 		}
 
 		var oldTag string
+		var oldOutbound *model.Outbound
 		var configData []byte
+		if act == "edit" {
+			oldOutbound = &model.Outbound{}
+			if err = tx.Model(model.Outbound{}).Where("id = ?", outbound.Id).First(oldOutbound).Error; err != nil {
+				return nil, err
+			}
+			if oldOutbound.Type == outbound.Type &&
+				oldOutbound.Tag == outbound.Tag &&
+				equalJSONBytes(oldOutbound.Options, outbound.Options) {
+				return nil, ErrNoChanges
+			}
+		}
 		if corePtr.IsRunning() {
 			configData, err = outbound.MarshalJSON()
 			if err != nil {
 				return nil, err
 			}
 			if act == "edit" {
-				err = tx.Model(model.Outbound{}).Select("tag").Where("id = ?", outbound.Id).Find(&oldTag).Error
-				if err != nil {
-					return nil, err
-				}
+				oldTag = oldOutbound.Tag
 			}
 		}
 

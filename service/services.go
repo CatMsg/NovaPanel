@@ -78,6 +78,20 @@ func (s *ServicesService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 		}
 
 		var oldTag string
+		var oldService *model.Service
+		if act == "edit" {
+			oldService = &model.Service{}
+			err = tx.Model(model.Service{}).Where("id = ?", srv.Id).First(oldService).Error
+			if err != nil {
+				return nil, err
+			}
+			if oldService.Type == srv.Type &&
+				oldService.Tag == srv.Tag &&
+				oldService.TlsId == srv.TlsId &&
+				equalJSONBytes(oldService.Options, srv.Options) {
+				return nil, ErrNoChanges
+			}
+		}
 		var configData []byte
 		if corePtr.IsRunning() {
 			configData, err = srv.MarshalJSON()
@@ -85,10 +99,7 @@ func (s *ServicesService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 				return nil, err
 			}
 			if act == "edit" {
-				err = tx.Model(model.Service{}).Select("tag").Where("id = ?", srv.Id).Find(&oldTag).Error
-				if err != nil {
-					return nil, err
-				}
+				oldTag = oldService.Tag
 			}
 		}
 

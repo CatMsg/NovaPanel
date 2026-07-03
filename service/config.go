@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"strconv"
 	"sync"
 	"time"
@@ -205,7 +206,7 @@ func (s *ConfigService) CheckOutbound(tag string, link string) core.CheckOutboun
 	return core.CheckOutbound(corePtr.GetCtx(), tag, link)
 }
 
-func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initUsers string, loginUser string, hostname string) ([]string, error) {
+func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initUsers string, loginUser string, hostname string) ([]string, bool, error) {
 	var objs []string = []string{obj}
 	var postCommit func() error
 	err := retryWriteTx(func(tx *gorm.DB) error {
@@ -247,6 +248,9 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 		default:
 			return common.NewError("unknown object: ", obj)
 		}
+		if errors.Is(err, ErrNoChanges) {
+			return ErrNoChanges
+		}
 		if err != nil {
 			return err
 		}
@@ -260,11 +264,12 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 			Obj:      data,
 		}).Error
 	})
-	if err != nil {
-		return nil, err
+	if errors.Is(err, ErrNoChanges) {
+		return objs, false, nil
 	}
-
-	LastUpdate = time.Now().Unix()
+	if err != nil {
+		return nil, false, err
+	}
 
 	actions := make([]postCommitAction, 0, 3)
 	if postCommit != nil {
@@ -287,10 +292,12 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 	}
 
 	if err = runPostCommitActions(actions); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	return objs, nil
+	LastUpdate = time.Now().Unix()
+
+	return objs, true, nil
 }
 
 func runPostCommitActions(actions []postCommitAction) error {

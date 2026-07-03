@@ -36,6 +36,17 @@ func (s *TlsService) Save(tx *gorm.DB, action string, data json.RawMessage, host
 		if err != nil {
 			return nil, err
 		}
+		if action == "edit" {
+			current := &model.Tls{}
+			if err := tx.Model(model.Tls{}).Where("id = ?", tls.Id).First(current).Error; err != nil {
+				return nil, err
+			}
+			if current.Name == tls.Name &&
+				equalJSONBytes(current.Server, tls.Server) &&
+				equalJSONBytes(current.Client, tls.Client) {
+				return nil, ErrNoChanges
+			}
+		}
 		err = tx.Save(&tls).Error
 		if err != nil {
 			return nil, err

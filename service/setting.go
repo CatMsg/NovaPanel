@@ -16,6 +16,7 @@ import (
 	"github.com/CatMsg/NovaPanel/util/common"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var defaultConfig = `{
@@ -196,6 +197,21 @@ func (s *SettingService) getString(key string) (string, error) {
 	return setting.Value, nil
 }
 
+func (s *SettingService) getStringTx(tx *gorm.DB, key string) (string, error) {
+	setting := &model.Setting{}
+	err := tx.Model(model.Setting{}).Where("key = ?", key).First(setting).Error
+	if database.IsNotFound(err) {
+		value, ok := defaultValueMap[key]
+		if !ok {
+			return "", common.NewErrorf("key <%v> not in defaultValueMap", key)
+		}
+		return value, nil
+	} else if err != nil {
+		return "", err
+	}
+	return setting.Value, nil
+}
+
 func (s *SettingService) saveSetting(key string, value string) error {
 	return retryWriteTx(func(tx *gorm.DB) error {
 		return s.saveSettingTx(tx, key, value)
@@ -207,19 +223,13 @@ func (s *SettingService) setString(key string, value string) error {
 }
 
 func (s *SettingService) saveSettingTx(tx *gorm.DB, key string, value string) error {
-	setting := &model.Setting{}
-	err := tx.Model(model.Setting{}).Where("key = ?", key).First(setting).Error
-	if database.IsNotFound(err) {
-		return tx.Create(&model.Setting{
-			Key:   key,
-			Value: value,
-		}).Error
-	} else if err != nil {
-		return err
-	}
-	setting.Key = key
-	setting.Value = value
-	return tx.Save(setting).Error
+	return tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "key"}},
+		DoUpdates: clause.AssignmentColumns([]string{"value"}),
+	}).Create(&model.Setting{
+		Key:   key,
+		Value: value,
+	}).Error
 }
 
 func (s *SettingService) getBool(key string) (bool, error) {
@@ -497,17 +507,32 @@ func (s *SettingService) SaveConfig(tx *gorm.DB, config json.RawMessage) error {
 	if err != nil {
 		return err
 	}
-	return tx.Model(model.Setting{}).Where("key = ?", "config").Update("value", string(configs)).Error
+	current, err := s.getStringTx(tx, "config")
+	if err != nil {
+		return err
+	}
+	if equalTrimmedString(current, string(configs)) {
+		return ErrNoChanges
+	}
+	return s.saveSettingTx(tx, "config", string(configs))
 }
 
 func (s *SettingService) preparePortChange(tx *gorm.DB, settings map[string]string) (settingPortChange, error) {
 	change := settingPortChange{}
 
-	oldWebPort, err := s.GetPort()
+	oldWebPortRaw, err := s.getStringTx(tx, "webPort")
 	if err != nil {
 		return change, err
 	}
-	oldSubPort, err := s.GetSubPort()
+	oldWebPort, err := strconv.Atoi(oldWebPortRaw)
+	if err != nil {
+		return change, err
+	}
+	oldSubPortRaw, err := s.getStringTx(tx, "subPort")
+	if err != nil {
+		return change, err
+	}
+	oldSubPort, err := strconv.Atoi(oldSubPortRaw)
 	if err != nil {
 		return change, err
 	}
@@ -588,16 +613,33 @@ func (s *SettingService) Save(tx *gorm.DB, data json.RawMessage) (func() error, 
 		return nil, err
 	}
 
-	portChange, err := s.preparePortChange(tx, settings)
-	if err != nil {
-		return nil, err
-	}
-
+	changedSettings := make(map[string]string, len(settings))
 	for key, value := range settings {
 		value = s.normalizeSettingValue(key, value)
 		if err := s.validateSettingValue(key, value); err != nil {
 			return nil, err
 		}
+
+		current, err := s.getStringTx(tx, key)
+		if err != nil {
+			return nil, err
+		}
+		if current == value {
+			continue
+		}
+		changedSettings[key] = value
+	}
+
+	if len(changedSettings) == 0 {
+		return nil, ErrNoChanges
+	}
+
+	portChange, err := s.preparePortChange(tx, changedSettings)
+	if err != nil {
+		return nil, err
+	}
+
+	for key, value := range changedSettings {
 		if err := s.applySettingSideEffects(tx, key, value); err != nil {
 			return nil, err
 		}

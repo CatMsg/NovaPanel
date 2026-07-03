@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 func detectFirewallBackend() string {
@@ -42,7 +43,7 @@ func isUFWActive() bool {
 	if !commandExists("ufw") {
 		return false
 	}
-	output, err := exec.Command("ufw", "status").CombinedOutput()
+	output, err := runCommandOutput(5*time.Second, "ufw", "status")
 	if err != nil {
 		return false
 	}
@@ -61,16 +62,8 @@ func installFirewallBackend() error {
 	}
 
 	run := func(name string, args ...string) error {
-		cmd := exec.Command(name, args...)
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			trimmed := strings.TrimSpace(string(output))
-			if trimmed != "" {
-				return fmt.Errorf("%s %s failed: %w: %s", name, strings.Join(args, " "), err, trimmed)
-			}
-			return fmt.Errorf("%s %s failed: %w", name, strings.Join(args, " "), err)
-		}
-		return nil
+		_, err := runCommandOutput(30*time.Second, name, args...)
+		return formatExternalCommandError(fmt.Sprintf("%s %s failed", name, strings.Join(args, " ")), err)
 	}
 
 	switch release {

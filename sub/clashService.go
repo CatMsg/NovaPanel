@@ -62,6 +62,10 @@ const ProxyGroups = `- name: Proxy
 `
 
 func (s *ClashService) GetClash(subId string) (*string, []string, error) {
+	cacheKey := "clash:" + strings.TrimSpace(subId)
+	if body, headers, ok := getCachedSubResult(cacheKey); ok {
+		return body, headers, nil
+	}
 
 	client, inDatas, err := s.getData(subId)
 	if err != nil {
@@ -99,6 +103,7 @@ func (s *ClashService) GetClash(subId string) (*string, []string, error) {
 	updateInterval, _ := s.SettingService.GetSubUpdates()
 	headers := util.GetHeaders(client, updateInterval)
 
+	storeCachedSubResult(cacheKey, resultStr, headers)
 	return &resultStr, headers, nil
 }
 

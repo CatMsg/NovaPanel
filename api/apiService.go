@@ -59,6 +59,15 @@ func (a *ApiService) getData(c *gin.Context) (interface{}, error) {
 		return "", err
 	}
 	if isUpdated {
+		cacheKey := "load:" + getHostname(c)
+		if cached, ok := getCachedLoadData(cacheKey); ok {
+			cached["onlines"] = onlines
+			if _, ok := data["lastLog"]; ok {
+				cached["lastLog"] = data["lastLog"]
+			}
+			return cached, nil
+		}
+
 		config, err := a.SettingService.GetConfig()
 		if err != nil {
 			return "", err
@@ -113,6 +122,7 @@ func (a *ApiService) getData(c *gin.Context) (interface{}, error) {
 		}
 		data["enableTraffic"] = trafficAge > 0
 		data["onlines"] = onlines
+		storeCachedLoadData(cacheKey, data)
 	} else {
 		data["onlines"] = onlines
 	}
@@ -346,12 +356,12 @@ func (a *ApiService) Save(c *gin.Context, loginUser string) {
 	act := c.Request.FormValue("action")
 	data := c.Request.FormValue("data")
 	initUsers := c.Request.FormValue("initUsers")
-	objs, err := a.ConfigService.Save(obj, act, json.RawMessage(data), initUsers, loginUser, hostname)
+	objs, changed, err := a.ConfigService.Save(obj, act, json.RawMessage(data), initUsers, loginUser, hostname)
 	if err != nil {
 		jsonMsg(c, "save", err)
 		return
 	}
-	if obj == "settings" {
+	if obj == "settings" && changed {
 		if restartErr := a.PanelService.RestartPanel(3); restartErr != nil {
 			logger.Warning("schedule panel restart failed:", restartErr)
 		}

@@ -91,19 +91,21 @@ func (a *APP) Start() error {
 		logger.Error(err)
 	}
 
+	go a.runDeferredStartupTasks()
+
+	return nil
+}
+
+func (a *APP) runDeferredStartupTasks() {
 	if a.masqueService != nil {
-		err = a.masqueService.SyncFromDB()
-		if err != nil {
+		if err := a.masqueService.SyncFromDB(); err != nil {
 			logger.Warning("rebuild masque service failed:", err)
 		}
 	}
 
-	err = a.SettingService.RebuildAllManagedPortForwarding(&a.configService.InboundService, &a.configService.EndpointService)
-	if err != nil {
+	if err := a.SettingService.RebuildAllManagedPortForwarding(&a.configService.InboundService, &a.configService.EndpointService); err != nil {
 		logger.Warning("rebuild all managed port forwarding failed:", err)
 	}
-
-	return nil
 }
 
 func (a *APP) Stop() {

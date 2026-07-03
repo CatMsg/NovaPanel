@@ -26,6 +26,11 @@ type aggregateUsage struct {
 }
 
 func (a *AggregateService) GetAggregate(format string, host string) (*string, []string, error) {
+	cacheKey := "aggregate:" + strings.TrimSpace(format) + ":" + strings.TrimSpace(host)
+	if body, headers, ok := getCachedSubResult(cacheKey); ok {
+		return body, headers, nil
+	}
+
 	mode, err := a.SettingService.GetSubMode()
 	if err != nil {
 		return nil, nil, err
@@ -41,11 +46,23 @@ func (a *AggregateService) GetAggregate(format string, host string) (*string, []
 
 	switch format {
 	case "json":
-		return a.buildAggregateJson(links, usage)
+		result, headers, err := a.buildAggregateJson(links, usage)
+		if err == nil && result != nil {
+			storeCachedSubResult(cacheKey, *result, headers)
+		}
+		return result, headers, err
 	case "clash":
-		return a.buildAggregateClash(links, usage)
+		result, headers, err := a.buildAggregateClash(links, usage)
+		if err == nil && result != nil {
+			storeCachedSubResult(cacheKey, *result, headers)
+		}
+		return result, headers, err
 	default:
-		return a.buildAggregatePlain(links, usage)
+		result, headers, err := a.buildAggregatePlain(links, usage)
+		if err == nil && result != nil {
+			storeCachedSubResult(cacheKey, *result, headers)
+		}
+		return result, headers, err
 	}
 }
 

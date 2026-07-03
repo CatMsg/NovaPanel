@@ -54,7 +54,7 @@ func (s *ServerService) GetStatus(request string) *map[string]interface{} {
 		case "sys":
 			status["sys"] = getCachedStatusValue("sys", func() interface{} { return s.GetSystemInfo() })
 		case "sbd":
-			status["sbd"] = s.GetSingboxInfo()
+			status["sbd"] = getCachedStatusValue("sbd", func() interface{} { return s.GetSingboxInfo() })
 		case "db":
 			status["db"] = getCachedStatusValue("db", func() interface{} { return s.GetDatabaseInfo() })
 		}
@@ -63,6 +63,16 @@ func (s *ServerService) GetStatus(request string) *map[string]interface{} {
 }
 
 func (s *ServerService) GetPublicIP() string {
+	now := time.Now()
+	serverStatusCache.mu.RLock()
+	entry, ok := serverStatusCache.entries["publicip"]
+	serverStatusCache.mu.RUnlock()
+	if ok && now.Before(entry.expiresAt) {
+		if ip, ok := entry.value.(string); ok {
+			return ip
+		}
+	}
+
 	apis := []string{
 		"https://api64.ipify.org",
 		"https://ip.sb",
@@ -106,6 +116,12 @@ func (s *ServerService) GetPublicIP() string {
 
 	for res := range ch {
 		if res.err == nil && isIPv4Literal(res.ip) {
+			serverStatusCache.mu.Lock()
+			serverStatusCache.entries["publicip"] = statusCacheEntry{
+				expiresAt: time.Now().Add(statusCacheTTL["publicip"]),
+				value:     res.ip,
+			}
+			serverStatusCache.mu.Unlock()
 			return res.ip
 		}
 	}

@@ -18,6 +18,11 @@ type SubService struct {
 }
 
 func (s *SubService) GetSubs(subId string) (*string, []string, error) {
+	cacheKey := "plain:" + strings.TrimSpace(subId)
+	if body, headers, ok := getCachedSubResult(cacheKey); ok {
+		return body, headers, nil
+	}
+
 	var err error
 
 	client, err := s.getClientBySubId(subId)
@@ -41,6 +46,7 @@ func (s *SubService) GetSubs(subId string) (*string, []string, error) {
 		result = base64.StdEncoding.EncodeToString([]byte(result))
 	}
 
+	storeCachedSubResult(cacheKey, result, headers)
 	return &result, headers, nil
 }
 

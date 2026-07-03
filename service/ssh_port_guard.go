@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/CatMsg/NovaPanel/database/model"
 )
@@ -81,7 +82,7 @@ func detectSSHPortsFromSSHDT() ([]int, error) {
 		return nil, err
 	}
 
-	output, err := exec.Command(bin, "-T").CombinedOutput()
+	output, err := runCommandOutput(6*time.Second, bin, "-T")
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
 	}
@@ -94,7 +95,7 @@ func detectSSHPortsFromSS() ([]int, error) {
 		return nil, err
 	}
 
-	output, err := exec.Command(bin, "-H", "-ltnp").CombinedOutput()
+	output, err := runCommandOutput(6*time.Second, bin, "-H", "-ltnp")
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
 	}

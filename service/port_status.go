@@ -2,7 +2,6 @@ package service
 
 import (
 	"fmt"
-	"os/exec"
 	"regexp"
 	"sort"
 	"strconv"
@@ -31,6 +30,16 @@ type PortNatEntry struct {
 }
 
 func (s *ServerService) GetPortStatus() map[string]interface{} {
+	now := time.Now()
+	serverStatusCache.mu.RLock()
+	entry, ok := serverStatusCache.entries["ports"]
+	serverStatusCache.mu.RUnlock()
+	if ok && now.Before(entry.expiresAt) {
+		if result, ok := entry.value.(map[string]interface{}); ok {
+			return result
+		}
+	}
+
 	listeners, listenErrors := collectListenEntries()
 	natIPv4, natIPv6, natErrors := collectNatEntries()
 
@@ -43,6 +52,12 @@ func (s *ServerService) GetPortStatus() map[string]interface{} {
 		"nat_ipv6":    natIPv6,
 		"errors":      errors,
 	}
+	serverStatusCache.mu.Lock()
+	serverStatusCache.entries["ports"] = statusCacheEntry{
+		expiresAt: time.Now().Add(statusCacheTTL["ports"]),
+		value:     result,
+	}
+	serverStatusCache.mu.Unlock()
 	return result
 }
 
@@ -63,14 +78,9 @@ func collectListenEntries() ([]PortListenEntry, []string) {
 			errors = append(errors, "ss command not found")
 			break
 		}
-		output, err := exec.Command("ss", spec.args...).CombinedOutput()
+		output, err := runCommandOutput(6*time.Second, "ss", spec.args...)
 		if err != nil {
-			trimmed := strings.TrimSpace(string(output))
-			if trimmed != "" {
-				errors = append(errors, fmt.Sprintf("ss %s failed: %s", strings.Join(spec.args, " "), trimmed))
-			} else {
-				errors = append(errors, fmt.Sprintf("ss %s failed: %v", strings.Join(spec.args, " "), err))
-			}
+			errors = append(errors, formatExternalCommandError("ss inspect failed", err).Error())
 			continue
 		}
 		entries = append(entries, parseSSListenOutput(spec.protocol, string(output))...)
@@ -210,13 +220,9 @@ func collectNatEntriesFromIptables(bin, family string) ([]PortNatEntry, error) {
 		return nil, nil
 	}
 
-	output, err := exec.Command(bin, "-t", "nat").CombinedOutput()
+	output, err := runCommandOutput(6*time.Second, bin, "-t", "nat")
 	if err != nil {
-		trimmed := strings.TrimSpace(string(output))
-		if trimmed != "" {
-			return nil, fmt.Errorf("%s -t nat failed: %s", bin, trimmed)
-		}
-		return nil, fmt.Errorf("%s -t nat failed: %w", bin, err)
+		return nil, formatExternalCommandError(bin+" -t nat failed", err)
 	}
 
 	lines := strings.Split(string(output), "\n")
@@ -279,13 +285,9 @@ func collectNatEntriesFromNFT() ([]PortNatEntry, []PortNatEntry, error) {
 		return nil, nil, nil
 	}
 
-	output, err := exec.Command("nft", "list", "ruleset").CombinedOutput()
+	output, err := runCommandOutput(6*time.Second, "nft", "list", "ruleset")
 	if err != nil {
-		trimmed := strings.TrimSpace(string(output))
-		if trimmed != "" {
-			return nil, nil, fmt.Errorf("nft list ruleset failed: %s", trimmed)
-		}
-		return nil, nil, fmt.Errorf("nft list ruleset failed: %w", err)
+		return nil, nil, formatExternalCommandError("nft list ruleset failed", err)
 	}
 
 	lines := strings.Split(string(output), "\n")

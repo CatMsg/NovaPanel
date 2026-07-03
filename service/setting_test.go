@@ -365,3 +365,69 @@ func TestSettingSaveClearsStatsWhenTrafficAgeZero(t *testing.T) {
 		t.Fatalf("expected stats to be cleared, got %d rows", count)
 	}
 }
+
+func TestSettingSaveReturnsNoChangesForIdenticalPayload(t *testing.T) {
+	workDir := t.TempDir()
+	if err := database.InitDB(filepath.Join(workDir, "setting-no-changes.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	svc := &SettingService{}
+	if _, err := svc.GetAllSetting(); err != nil {
+		t.Fatalf("init default settings: %v", err)
+	}
+
+	tx := database.GetDB().Begin()
+	if tx.Error != nil {
+		t.Fatalf("begin tx: %v", tx.Error)
+	}
+
+	postCommit, err := svc.Save(tx, json.RawMessage(`{
+		"webPort":"2095",
+		"subPort":"2096",
+		"webPath":"/app/",
+		"subPath":"/sub/"
+	}`))
+	if err == nil || err != ErrNoChanges {
+		tx.Rollback()
+		t.Fatalf("expected ErrNoChanges, got postCommitNil=%t err=%v", postCommit == nil, err)
+	}
+	_ = tx.Rollback()
+}
+
+func TestSaveConfigReturnsNoChangesForIdenticalPayload(t *testing.T) {
+	workDir := t.TempDir()
+	if err := database.InitDB(filepath.Join(workDir, "config-no-changes.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	svc := &SettingService{}
+	if _, err := svc.GetAllSetting(); err != nil {
+		t.Fatalf("init default settings: %v", err)
+	}
+
+	payload := json.RawMessage(`{"log":{"level":"warn"},"dns":{"servers":[],"rules":[]},"route":{"rules":[]},"experimental":{}}`)
+
+	tx := database.GetDB().Begin()
+	if tx.Error != nil {
+		t.Fatalf("begin tx: %v", tx.Error)
+	}
+	if err := svc.SaveConfig(tx, payload); err != nil {
+		tx.Rollback()
+		t.Fatalf("seed config: %v", err)
+	}
+	if err := tx.Commit().Error; err != nil {
+		t.Fatalf("commit seed config: %v", err)
+	}
+
+	tx = database.GetDB().Begin()
+	if tx.Error != nil {
+		t.Fatalf("begin tx: %v", tx.Error)
+	}
+
+	if err := svc.SaveConfig(tx, payload); err == nil || err != ErrNoChanges {
+		tx.Rollback()
+		t.Fatalf("expected ErrNoChanges, got %v", err)
+	}
+	_ = tx.Rollback()
+}

@@ -141,6 +141,15 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		if err != nil {
 			return nil, err
 		}
+		if act == "edit" && oldInbound != nil &&
+			oldInbound.Type == inbound.Type &&
+			oldInbound.Tag == inbound.Tag &&
+			oldInbound.TlsId == inbound.TlsId &&
+			equalJSONBytes(oldInbound.Addrs, inbound.Addrs) &&
+			equalJSONBytes(oldInbound.OutJson, inbound.OutJson) &&
+			equalJSONBytes(oldInbound.Options, inbound.Options) {
+			return nil, ErrNoChanges
+		}
 
 		err = tx.Save(&inbound).Error
 		if err != nil {

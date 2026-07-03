@@ -66,8 +66,8 @@ func OpenDB(dbPath string) error {
 	if err != nil {
 		return err
 	}
-	sqlDB.SetMaxOpenConns(25)
-	sqlDB.SetMaxIdleConns(5)
+	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
 	if config.IsDebug() {
@@ -107,11 +107,39 @@ func InitDB(dbPath string) error {
 	if err != nil {
 		return err
 	}
+	if err := ensureIndexes(); err != nil {
+		return err
+	}
 	err = initUser()
 	if err != nil {
 		return err
 	}
 
+	return nil
+}
+
+func ensureIndexes() error {
+	indexes := []string{
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_key ON settings(key)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)`,
+		`CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name)`,
+		`CREATE INDEX IF NOT EXISTS idx_clients_enable_name ON clients(enable, name)`,
+		`CREATE INDEX IF NOT EXISTS idx_inbounds_tag ON inbounds(tag)`,
+		`CREATE INDEX IF NOT EXISTS idx_outbounds_tag ON outbounds(tag)`,
+		`CREATE INDEX IF NOT EXISTS idx_endpoints_tag ON endpoints(tag)`,
+		`CREATE INDEX IF NOT EXISTS idx_services_tag ON services(tag)`,
+		`CREATE INDEX IF NOT EXISTS idx_tokens_expiry ON tokens(expiry)`,
+		`CREATE INDEX IF NOT EXISTS idx_tokens_user_id ON tokens(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_changes_date_time ON changes(date_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_changes_actor_key_date_time ON changes(actor, key, date_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_stats_lookup ON stats(resource, tag, date_time)`,
+	}
+
+	for _, stmt := range indexes {
+		if err := db.Exec(stmt).Error; err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

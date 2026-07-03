@@ -18,14 +18,17 @@ var serverStatusCache = struct {
 }
 
 var statusCacheTTL = map[string]time.Duration{
-	"cpu": 2 * time.Second,
-	"mem": 2 * time.Second,
-	"net": 2 * time.Second,
-	"dio": 2 * time.Second,
-	"dsk": 10 * time.Second,
-	"swp": 10 * time.Second,
-	"sys": 15 * time.Second,
-	"db": 15 * time.Second,
+	"cpu":      2 * time.Second,
+	"mem":      2 * time.Second,
+	"net":      2 * time.Second,
+	"dio":      2 * time.Second,
+	"dsk":      10 * time.Second,
+	"swp":      10 * time.Second,
+	"sbd":      2 * time.Second,
+	"sys":      15 * time.Second,
+	"db":       15 * time.Second,
+	"ports":    5 * time.Second,
+	"publicip": 5 * time.Minute,
 }
 
 func getCachedStatusValue(key string, loader func() interface{}) interface{} {
