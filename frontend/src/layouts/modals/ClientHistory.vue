@@ -7,7 +7,7 @@
     @update:model-value="onDialogUpdate"
   >
     <v-card class="rounded-lg history-dialog" :loading="loading">
-      <v-card-title>
+      <v-card-title class="history-dialog__title">
         <v-row>
           <v-col>
             {{ $t('client.history') }}
@@ -96,6 +96,20 @@
           />
         </div>
         <div v-else ref="tableShell" class="history-dialog__table-shell">
+          <div class="history-dialog__desktop-overview">
+            <div class="history-dialog__desktop-stat">
+              <span>{{ $t('client.history') }}</span>
+              <strong>{{ history.length }}</strong>
+            </div>
+            <div class="history-dialog__desktop-stat">
+              <span>{{ $t('search') }}</span>
+              <strong>{{ hasKeyword ? filteredHistory.length : $t('all') }}</strong>
+            </div>
+            <div class="history-dialog__desktop-stat">
+              <span>{{ $t('objects.domain') }}</span>
+              <strong>{{ desktopTopDomain }}</strong>
+            </div>
+          </div>
           <v-data-table
             :headers="headers"
             :items="filteredHistory"
@@ -114,23 +128,45 @@
                 {{ dateFormatted(value) }}
               </v-chip>
             </template>
-            <template v-slot:item.domain="{ value }">
-              <span class="history-dialog__table-text" dir="ltr" :title="value || '-'">{{ value || '-' }}</span>
+            <template v-slot:item.domain="{ item, value }">
+              <div class="history-dialog__primary-cell">
+                <strong class="history-dialog__primary-text" dir="ltr" :title="value || item.destination || '-'">
+                  {{ value || item.destination || '-' }}
+                </strong>
+                <span
+                  v-if="item.destination && item.destination !== value"
+                  class="history-dialog__secondary-text"
+                  dir="ltr"
+                  :title="item.destination"
+                >
+                  {{ item.destination }}
+                </span>
+              </div>
             </template>
             <template v-slot:item.destination="{ value }">
-              <span class="history-dialog__table-text" dir="ltr" :title="value || '-'">{{ value || '-' }}</span>
+              <span class="history-dialog__table-text history-dialog__table-text--muted" dir="ltr" :title="value || '-'">
+                {{ value || '-' }}
+              </span>
             </template>
             <template v-slot:item.inbound="{ value }">
-              <span class="history-dialog__table-text" :title="value || '-'">{{ value || '-' }}</span>
+              <v-chip size="small" variant="tonal" color="primary" class="history-dialog__tag-chip" :title="value || '-'">
+                {{ value || '-' }}
+              </v-chip>
             </template>
             <template v-slot:item.outbound="{ value }">
-              <span class="history-dialog__table-text" :title="value || '-'">{{ value || '-' }}</span>
+              <v-chip size="small" variant="outlined" color="primary" class="history-dialog__tag-chip" :title="value || '-'">
+                {{ value || '-' }}
+              </v-chip>
             </template>
             <template v-slot:item.network="{ value }">
-              <span class="history-dialog__table-text" :title="value || '-'">{{ value || '-' }}</span>
+              <v-chip size="small" variant="flat" color="surface-variant" class="history-dialog__tag-chip" :title="value || '-'">
+                {{ value || '-' }}
+              </v-chip>
             </template>
             <template v-slot:item.protocol="{ value }">
-              <span class="history-dialog__table-text" :title="value || '-'">{{ value || '-' }}</span>
+              <v-chip size="small" variant="flat" color="teal" class="history-dialog__tag-chip" :title="value || '-'">
+                {{ value || '-' }}
+              </v-chip>
             </template>
           </v-data-table>
         </div>
@@ -193,6 +229,19 @@ const filteredHistory = computed(() => {
       .filter(Boolean)
       .some(value => String(value).toLowerCase().includes(query))
   })
+})
+
+const hasKeyword = computed(() => keyword.value.trim().length > 0)
+
+const desktopTopDomain = computed(() => {
+  const counts = new Map<string, number>()
+  for (const item of filteredHistory.value) {
+    const key = item.domain || item.destination || ''
+    if (!key) continue
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1])
+  return sorted[0]?.[0] ?? '-'
 })
 
 const pageCount = computed(() => Math.max(1, Math.ceil(filteredHistory.value.length / itemsPerPage)))
@@ -287,6 +336,10 @@ watch(
   max-height: min(90vh, 900px);
 }
 
+.history-dialog__title {
+  padding-bottom: 10px;
+}
+
 .history-dialog__body {
   display: flex;
   flex-direction: column;
@@ -304,7 +357,47 @@ watch(
   display: flex;
   flex: 1 1 auto;
   min-height: 0;
+  flex-direction: column;
+  gap: 12px;
   overflow: hidden;
+}
+
+.history-dialog__desktop-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  flex: 0 0 auto;
+}
+
+.history-dialog__desktop-stat {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(var(--v-theme-primary), 0.08), rgba(var(--v-theme-surface), 0.96)),
+    rgba(var(--v-theme-surface), 0.94);
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.08);
+  padding: 14px 16px;
+}
+
+.history-dialog__desktop-stat span {
+  color: rgba(var(--v-theme-on-surface), 0.62);
+  font-size: 0.76rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.history-dialog__desktop-stat strong {
+  min-width: 0;
+  overflow: hidden;
+  color: rgb(var(--v-theme-on-surface));
+  font-size: 1rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .history-dialog__table {
@@ -313,6 +406,12 @@ watch(
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+  border-radius: 22px !important;
+  background:
+    linear-gradient(180deg, rgba(var(--v-theme-primary), 0.04), rgba(var(--v-theme-surface), 0.98)),
+    rgba(var(--v-theme-surface), 0.98);
+  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.08);
   overflow: hidden;
 }
 
@@ -329,6 +428,16 @@ watch(
   width: 100%;
 }
 
+.history-dialog__table :deep(thead th) {
+  border-bottom: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+  background: rgba(var(--v-theme-primary), 0.06);
+  color: rgba(var(--v-theme-on-surface), 0.74);
+  font-size: 0.76rem;
+  font-weight: 700 !important;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .history-dialog__table :deep(th),
 .history-dialog__table :deep(td) {
   min-width: 0;
@@ -336,12 +445,50 @@ watch(
   white-space: nowrap;
 }
 
+.history-dialog__table :deep(tbody td) {
+  border-bottom: 1px solid rgba(var(--v-border-color), calc(var(--v-border-opacity) * 0.72));
+}
+
 .history-dialog__table :deep(tbody tr) {
-  height: 44px;
+  height: 58px;
+  transition: background-color 0.18s ease;
+}
+
+.history-dialog__table :deep(tbody tr:hover) {
+  background: rgba(var(--v-theme-primary), 0.045);
 }
 
 .history-dialog__date-chip {
   max-width: 100%;
+  padding-inline: 0;
+}
+
+.history-dialog__primary-cell {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.history-dialog__primary-text {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: rgb(var(--v-theme-on-surface));
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-dialog__secondary-text {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(var(--v-theme-on-surface), 0.58);
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .history-dialog__table-text,
@@ -349,6 +496,20 @@ watch(
   display: block;
   min-width: 0;
   max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-dialog__table-text--muted {
+  color: rgba(var(--v-theme-on-surface), 0.62);
+}
+
+.history-dialog__tag-chip {
+  max-width: 100%;
+}
+
+.history-dialog__tag-chip :deep(.v-chip__content) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -368,6 +529,8 @@ watch(
 
 .history-dialog__table :deep(.v-data-table-footer) {
   flex: 0 0 auto;
+  border-top: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+  background: rgba(var(--v-theme-surface), 0.88);
 }
 
 .history-dialog__table :deep(.v-data-table-footer__items-per-page) {
@@ -479,6 +642,12 @@ watch(
 
   .history-dialog__body {
     padding: 12px;
+  }
+}
+
+@media (max-width: 960px) {
+  .history-dialog__desktop-overview {
+    grid-template-columns: 1fr;
   }
 }
 </style>
