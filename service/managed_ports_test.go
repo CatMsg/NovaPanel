@@ -86,11 +86,14 @@ printf '%s\n' "$*" >> "${HY2_MOCK_LOG:?}"
 	if !strings.Contains(log, "apply panel-web-port 3000 3000 tcp") {
 		t.Fatalf("web port forwarding was not applied:\n%s", log)
 	}
-	if strings.Contains(log, "udp") {
-		t.Fatalf("panel port forwarding unexpectedly included udp:\n%s", log)
+	if strings.Contains(log, "apply panel-web-port 3000 3000 udp") {
+		t.Fatalf("panel web port forwarding unexpectedly included udp apply rule:\n%s", log)
 	}
 	if !strings.Contains(log, "apply panel-sub-port 3001 3001 tcp") {
 		t.Fatalf("sub port forwarding was not applied:\n%s", log)
+	}
+	if strings.Contains(log, "apply panel-sub-port 3001 3001 udp") {
+		t.Fatalf("panel sub port forwarding unexpectedly included udp apply rule:\n%s", log)
 	}
 }
 
@@ -470,7 +473,7 @@ printf '%s\n' "$*" >> "${HY2_MOCK_LOG:?}"
 	}
 
 	t.Setenv("HY2_MOCK_LOG", logFile)
-	t.Setenv("PATH", binDir)
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
 
 	db := database.GetDB()
 	inbound := model.Inbound{

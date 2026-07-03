@@ -401,7 +401,31 @@ func mustRepoRoot(t *testing.T) string {
 }
 
 func runHy2ForwardScriptWithEnv(repoRoot string, env []string, action string, tag string, listenPort int, ports []int) error {
-	args := []string{"bash", filepath.Join(repoRoot, "scripts", "hy2-forward.sh"), action, tag, fmt.Sprint(listenPort), joinPorts(ports)}
+	workDir, err := os.MkdirTemp("", "hy2-forward-test-*")
+	if err != nil {
+		return fmt.Errorf("mktemp script dir: %w", err)
+	}
+	defer os.RemoveAll(workDir)
+
+	etcDir := filepath.Join(workDir, "etc", "ufw")
+	if err := os.MkdirAll(etcDir, 0o755); err != nil {
+		return fmt.Errorf("mkdir ufw dir: %w", err)
+	}
+
+	scriptCopy, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "hy2-forward.sh"))
+	if err != nil {
+		return fmt.Errorf("read script: %w", err)
+	}
+	replaced := strings.NewReplacer(
+		"/etc/ufw/before.rules", filepath.Join(etcDir, "before.rules"),
+		"/etc/ufw/before6.rules", filepath.Join(etcDir, "before6.rules"),
+	).Replace(string(scriptCopy))
+	scriptPath := filepath.Join(workDir, "hy2-forward.sh")
+	if err := os.WriteFile(scriptPath, []byte(replaced), 0o755); err != nil {
+		return fmt.Errorf("write script copy: %w", err)
+	}
+
+	args := []string{scriptPath, action, tag, fmt.Sprint(listenPort), joinPorts(ports)}
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Env = env
 	cmd.Dir = repoRoot
