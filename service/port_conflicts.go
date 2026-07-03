@@ -9,12 +9,6 @@ import (
 	"gorm.io/gorm"
 )
 
-type managedPortUsage struct {
-	kind  string
-	tag   string
-	ports []int
-}
-
 type managedPortConflictError struct {
 	ownerKind string
 	ownerTag  string
@@ -48,19 +42,17 @@ func validateManagedPortConflicts(tx *gorm.DB, ownerKind string, ownerTag string
 		candidateSet[port] = struct{}{}
 	}
 
-	usages, err := collectManagedPortUsages(tx, skipInboundID, skipEndpointID)
+	entries, err := findManagedPortConflictEntries(tx, ports, skipInboundID, skipEndpointID)
 	if err != nil {
 		return err
 	}
 
 	conflictMap := make(map[int][]string)
-	for _, usage := range usages {
-		for _, port := range usage.ports {
-			if _, ok := candidateSet[port]; !ok {
-				continue
-			}
-			conflictMap[port] = appendUniqueUsage(conflictMap[port], fmt.Sprintf("%s %s", usage.kind, usage.tag))
+	for _, entry := range entries {
+		if _, ok := candidateSet[entry.Port]; !ok {
+			continue
 		}
+		conflictMap[entry.Port] = appendUniqueUsage(conflictMap[entry.Port], fmt.Sprintf("%s %s", managedPortEntryKind(entry.Scope), entry.OwnerTag))
 	}
 
 	if len(conflictMap) == 0 {
@@ -93,54 +85,34 @@ func validateManagedPanelPortConflicts(tx *gorm.DB, webPort int, subPort int) er
 	return validateManagedPortConflicts(tx, "面板", fmt.Sprintf("web=%d sub=%d", webPort, subPort), 0, 0, candidatePorts)
 }
 
-func collectManagedPortUsages(tx *gorm.DB, skipInboundID uint, skipEndpointID uint) ([]managedPortUsage, error) {
-	usages := make([]managedPortUsage, 0)
+func findManagedPortConflictEntries(tx *gorm.DB, candidatePorts []int, skipInboundID uint, skipEndpointID uint) ([]model.ManagedPortEntry, error) {
+	ports := normalizeManagedPorts(candidatePorts)
+	if len(ports) == 0 {
+		return nil, nil
+	}
 
-	var inbounds []*model.Inbound
-	if err := tx.Model(model.Inbound{}).Find(&inbounds).Error; err != nil {
+	var entries []model.ManagedPortEntry
+	query := tx.Model(&model.ManagedPortEntry{}).Where("port IN ?", ports)
+	query = query.Where(
+		"(scope <> ? OR owner_id <> ?) AND (scope <> ? OR owner_id <> ?)",
+		managedPortScopeInbound, skipInboundID,
+		managedPortScopeEndpoint, skipEndpointID,
+	)
+	if err := query.Find(&entries).Error; err != nil {
 		return nil, err
 	}
-	for _, inbound := range inbounds {
-		if inbound == nil || inbound.Id == skipInboundID {
-			continue
-		}
-		_, ports, err := collectInboundForwardPorts(inbound)
-		if err != nil {
-			return nil, err
-		}
-		if len(ports) == 0 {
-			continue
-		}
-		usages = append(usages, managedPortUsage{
-			kind:  "入站",
-			tag:   inbound.Tag,
-			ports: normalizeManagedPorts(ports),
-		})
-	}
+	return entries, nil
+}
 
-	var endpoints []*model.Endpoint
-	if err := tx.Model(model.Endpoint{}).Find(&endpoints).Error; err != nil {
-		return nil, err
+func managedPortEntryKind(scope string) string {
+	switch scope {
+	case managedPortScopeInbound:
+		return "入站"
+	case managedPortScopeEndpoint:
+		return "节点"
+	default:
+		return "对象"
 	}
-	for _, endpoint := range endpoints {
-		if endpoint == nil || endpoint.Id == skipEndpointID {
-			continue
-		}
-		ports, err := collectEndpointManagedPorts(endpoint)
-		if err != nil {
-			return nil, err
-		}
-		if len(ports) == 0 {
-			continue
-		}
-		usages = append(usages, managedPortUsage{
-			kind:  "节点",
-			tag:   endpoint.Tag,
-			ports: normalizeManagedPorts(ports),
-		})
-	}
-
-	return usages, nil
 }
 
 func collectEndpointManagedPorts(endpoint *model.Endpoint) ([]int, error) {

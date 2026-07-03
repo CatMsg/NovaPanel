@@ -49,6 +49,9 @@ func TestValidateManagedPortConflicts(t *testing.T) {
 	if err := db.Create(&endpoint).Error; err != nil {
 		t.Fatalf("create endpoint: %v", err)
 	}
+	if err := RebuildManagedPortEntries(); err != nil {
+		t.Fatalf("rebuild managed port entries: %v", err)
+	}
 
 	if err := validateManagedPortConflicts(db, "入站", "inbound-b", 0, 0, []int{4000}); err == nil {
 		t.Fatal("expected inbound port conflict with endpoint")
@@ -89,6 +92,9 @@ func TestValidateManagedPanelPortConflicts(t *testing.T) {
 	}
 	if err := db.Create(&inbound).Error; err != nil {
 		t.Fatalf("create inbound: %v", err)
+	}
+	if err := RebuildManagedPortEntries(); err != nil {
+		t.Fatalf("rebuild managed port entries: %v", err)
 	}
 
 	if err := ValidateManagedPanelPortsWithConflicts(db, 2095, 2096); err == nil {

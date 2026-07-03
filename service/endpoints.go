@@ -263,6 +263,9 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 		if err != nil {
 			return nil, err
 		}
+		if err := syncManagedPortEntriesForEndpointTx(tx, &endpoint); err != nil {
+			return nil, err
+		}
 
 		endpointSnapshot := endpoint
 		oldSnapshot := oldEndpoint
@@ -301,6 +304,9 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 		coreWasRunning := corePtr != nil && corePtr.IsRunning()
 		err = tx.Where("tag = ?", tag).Delete(model.Endpoint{}).Error
 		if err != nil {
+			return nil, err
+		}
+		if err := deleteManagedPortEntriesForEndpointTx(tx, oldEndpoint.Id); err != nil {
 			return nil, err
 		}
 		oldSnapshot := oldEndpoint

@@ -122,7 +122,9 @@ func (a *ApiService) getData(c *gin.Context) (interface{}, error) {
 		}
 		data["enableTraffic"] = trafficAge > 0
 		data["onlines"] = onlines
-		storeCachedLoadData(cacheKey, data)
+		if err := storeCachedLoadData(cacheKey, data); err != nil {
+			logger.Warning("store load cache failed:", err)
+		}
 	} else {
 		data["onlines"] = onlines
 	}

@@ -47,6 +47,10 @@ func (a *APP) Init() error {
 	// Init Setting
 	a.SettingService.GetAllSetting()
 
+	if err := service.RebuildManagedPortEntries(); err != nil {
+		return err
+	}
+
 	a.core = core.NewCore()
 	a.masqueService = service.NewMasqueService()
 	service.SetMasqueService(a.masqueService)

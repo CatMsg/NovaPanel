@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"sync"
 	"time"
 
@@ -12,7 +13,7 @@ const loadDataCacheTTL = 3 * time.Second
 type apiCacheEntry struct {
 	expiresAt time.Time
 	version   int64
-	value     map[string]interface{}
+	payload   []byte
 }
 
 var loadDataCache = struct {
@@ -33,24 +34,25 @@ func getCachedLoadData(key string) (map[string]interface{}, bool) {
 		return nil, false
 	}
 
-	result := make(map[string]interface{}, len(entry.value))
-	for k, v := range entry.value {
-		result[k] = v
+	var result map[string]interface{}
+	if err := json.Unmarshal(entry.payload, &result); err != nil {
+		return nil, false
 	}
 	return result, true
 }
 
-func storeCachedLoadData(key string, value map[string]interface{}) {
-	cloned := make(map[string]interface{}, len(value))
-	for k, v := range value {
-		cloned[k] = v
+func storeCachedLoadData(key string, value map[string]interface{}) error {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return err
 	}
 
 	loadDataCache.mu.Lock()
 	loadDataCache.entries[key] = apiCacheEntry{
 		expiresAt: time.Now().Add(loadDataCacheTTL),
 		version:   service.LastUpdate,
-		value:     cloned,
+		payload:   payload,
 	}
 	loadDataCache.mu.Unlock()
+	return nil
 }

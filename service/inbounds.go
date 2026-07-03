@@ -50,6 +50,10 @@ func (s *InboundService) GetAll() (*[]map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+	inboundUsers, err := loadInboundUsersMap(db)
+	if err != nil {
+		return nil, err
+	}
 	var data []map[string]interface{}
 	for _, inbound := range inbounds {
 		var shadowtls_version uint
@@ -77,17 +81,34 @@ func (s *InboundService) GetAll() (*[]map[string]interface{}, error) {
 		if s.hasUser(inbound.Type) &&
 			!(inbound.Type == "shadowtls" && shadowtls_version < 3) &&
 			!(inbound.Type == "shadowsocks" && ss_managed) {
-			users := []string{}
-			err = db.Raw("SELECT clients.name FROM clients, json_each(clients.inbounds) as je WHERE je.value = ?", inbound.Id).Scan(&users).Error
-			if err != nil {
-				return nil, err
-			}
-			inbData["users"] = users
+			inbData["users"] = append([]string(nil), inboundUsers[inbound.Id]...)
 		}
 
 		data = append(data, inbData)
 	}
 	return &data, nil
+}
+
+type inboundUserRef struct {
+	Name      string `gorm:"column:name"`
+	InboundID uint   `gorm:"column:inbound_id"`
+}
+
+func loadInboundUsersMap(db *gorm.DB) (map[uint][]string, error) {
+	rows := make([]inboundUserRef, 0)
+	err := db.Raw(`
+		SELECT clients.name AS name, CAST(je.value AS INTEGER) AS inbound_id
+		FROM clients, json_each(clients.inbounds) AS je
+	`).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+
+	usersByInbound := make(map[uint][]string)
+	for _, row := range rows {
+		usersByInbound[row.InboundID] = append(usersByInbound[row.InboundID], row.Name)
+	}
+	return usersByInbound, nil
 }
 
 func (s *InboundService) FromIds(ids []uint) ([]*model.Inbound, error) {
@@ -153,6 +174,9 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 
 		err = tx.Save(&inbound).Error
 		if err != nil {
+			return nil, err
+		}
+		if err := syncManagedPortEntriesForInboundTx(tx, &inbound); err != nil {
 			return nil, err
 		}
 		switch act {
@@ -225,6 +249,9 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		if err != nil {
 			return nil, err
 		}
+		if err := deleteManagedPortEntriesForInboundTx(tx, id); err != nil {
+			return nil, err
+		}
 		oldSnapshot := oldInbound
 		postCommit = func() error {
 			if corePtr.IsRunning() {
@@ -256,6 +283,9 @@ func (s *InboundService) removeInboundByTag(tag string) error {
 		}
 
 		if err := s.ClientService.UpdateClientsOnInboundDelete(tx, oldInbound.Id, tag); err != nil {
+			return err
+		}
+		if err := deleteManagedPortEntriesForInboundTx(tx, oldInbound.Id); err != nil {
 			return err
 		}
 

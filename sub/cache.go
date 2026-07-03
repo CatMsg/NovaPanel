@@ -24,13 +24,21 @@ var subResultCache = struct {
 }
 
 func getCachedSubResult(key string) (*string, []string, bool) {
+	return getCachedSubResultWithExpiry(key, true)
+}
+
+func getCachedSubResultStale(key string) (*string, []string, bool) {
+	return getCachedSubResultWithExpiry(key, false)
+}
+
+func getCachedSubResultWithExpiry(key string, enforceTTL bool) (*string, []string, bool) {
 	now := time.Now()
 	version := service.LastUpdate
 
 	subResultCache.mu.RLock()
 	entry, ok := subResultCache.entries[key]
 	subResultCache.mu.RUnlock()
-	if !ok || entry.version != version || now.After(entry.expiresAt) {
+	if !ok || entry.version != version || (enforceTTL && now.After(entry.expiresAt)) {
 		return nil, nil, false
 	}
 

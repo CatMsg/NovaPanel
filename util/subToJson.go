@@ -13,35 +13,20 @@ import (
 )
 
 func GetExternalLink(url string) string {
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-
-	client := &http.Client{Transport: tr, Timeout: 15 * time.Second}
-
-	response, err := client.Get(url)
-	if err != nil {
-		logger.Warning("sub: Error making HTTP request:", err)
-		return ""
-	}
-	defer response.Body.Close()
-
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		logger.Warning("sub: Error reading response body:", err)
-		return ""
-	}
-
-	data := StrOrBase64Encoded(string(body))
+	data, _ := GetExternalLinkWithHeadersTimeout(url, 15*time.Second)
 	return data
 }
 
 func GetExternalLinkWithHeaders(url string) (string, http.Header) {
+	return GetExternalLinkWithHeadersTimeout(url, 15*time.Second)
+}
+
+func GetExternalLinkWithHeadersTimeout(url string, timeout time.Duration) (string, http.Header) {
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 
-	client := &http.Client{Transport: tr, Timeout: 15 * time.Second}
+	client := &http.Client{Transport: tr, Timeout: timeout}
 
 	response, err := client.Get(url)
 	if err != nil {

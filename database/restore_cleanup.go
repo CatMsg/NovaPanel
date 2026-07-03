@@ -387,7 +387,10 @@ func removeInboundFromRestoreTx(tx *gorm.DB, inbound *model.Inbound) error {
 		}
 	}
 
-	return tx.Where("tag = ?", inbound.Tag).Delete(model.Inbound{}).Error
+	if err := tx.Where("tag = ?", inbound.Tag).Delete(model.Inbound{}).Error; err != nil {
+		return err
+	}
+	return tx.Where("scope = ? AND owner_id = ?", "inbound", inbound.Id).Delete(&model.ManagedPortEntry{}).Error
 }
 
 func pruneInboundFromClient(client *model.Client, inboundID uint, inboundTag string) error {
@@ -435,7 +438,10 @@ func detectSSHListenPortsForRestore() ([]int, error) {
 }
 
 func removeEndpointFromRestoreTx(tx *gorm.DB, endpoint *model.Endpoint) error {
-	return tx.Where("tag = ?", endpoint.Tag).Delete(model.Endpoint{}).Error
+	if err := tx.Where("tag = ?", endpoint.Tag).Delete(model.Endpoint{}).Error; err != nil {
+		return err
+	}
+	return tx.Where("scope = ? AND owner_id = ?", "endpoint", endpoint.Id).Delete(&model.ManagedPortEntry{}).Error
 }
 
 func detectSSHPortsFromSSHD() ([]int, error) {
