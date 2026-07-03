@@ -217,6 +217,102 @@ func TestPruneHy2InboundServerPortsConflictDeduplicatesMixedTokens(t *testing.T)
 	}
 }
 
+func TestPruneHy2InboundServerPortsConflictIgnoresInvalidToken(t *testing.T) {
+	logger.InitLogger(logging.ERROR)
+
+	dir := t.TempDir()
+	if err := InitDB(filepath.Join(dir, "restore-hy2-invalid-token.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	bad := model.Inbound{
+		Type: "hysteria2",
+		Tag:  "hy2-invalid-token-conflict",
+		Options: json.RawMessage(`{
+			"listen_port": 8443
+		}`),
+		OutJson: json.RawMessage(`{
+			"server_ports": "abc,22,9443"
+		}`),
+	}
+	good := model.Inbound{
+		Type: "hysteria2",
+		Tag:  "hy2-invalid-token-safe",
+		Options: json.RawMessage(`{
+			"listen_port": 9444
+		}`),
+		OutJson: json.RawMessage(`{
+			"server_ports": "9445,9446"
+		}`),
+	}
+	if err := db.Create(&bad).Error; err != nil {
+		t.Fatalf("create bad inbound: %v", err)
+	}
+	if err := db.Create(&good).Error; err != nil {
+		t.Fatalf("create good inbound: %v", err)
+	}
+
+	if err := pruneInboundConflictsBySSHPorts([]int{22}); err != nil {
+		t.Fatalf("prune conflicted hy2 inbound with invalid token: %v", err)
+	}
+
+	var inbounds []model.Inbound
+	if err := db.Find(&inbounds).Error; err != nil {
+		t.Fatalf("load inbounds: %v", err)
+	}
+	if len(inbounds) != 1 || inbounds[0].Tag != good.Tag {
+		t.Fatalf("unexpected hy2 inbounds after invalid-token prune: %#v", inbounds)
+	}
+}
+
+func TestPruneHy2InboundServerPortsConflictIgnoresInvalidRange(t *testing.T) {
+	logger.InitLogger(logging.ERROR)
+
+	dir := t.TempDir()
+	if err := InitDB(filepath.Join(dir, "restore-hy2-invalid-range.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	bad := model.Inbound{
+		Type: "hysteria2",
+		Tag:  "hy2-invalid-range-conflict",
+		Options: json.RawMessage(`{
+			"listen_port": 8555
+		}`),
+		OutJson: json.RawMessage(`{
+			"server_ports": ["10-1", "22", "9555"]
+		}`),
+	}
+	good := model.Inbound{
+		Type: "hysteria2",
+		Tag:  "hy2-invalid-range-safe",
+		Options: json.RawMessage(`{
+			"listen_port": 9556
+		}`),
+		OutJson: json.RawMessage(`{
+			"server_ports": "9557-9558"
+		}`),
+	}
+	if err := db.Create(&bad).Error; err != nil {
+		t.Fatalf("create bad inbound: %v", err)
+	}
+	if err := db.Create(&good).Error; err != nil {
+		t.Fatalf("create good inbound: %v", err)
+	}
+
+	if err := pruneInboundConflictsBySSHPorts([]int{22}); err != nil {
+		t.Fatalf("prune conflicted hy2 inbound with invalid range: %v", err)
+	}
+
+	var inbounds []model.Inbound
+	if err := db.Find(&inbounds).Error; err != nil {
+		t.Fatalf("load inbounds: %v", err)
+	}
+	if len(inbounds) != 1 || inbounds[0].Tag != good.Tag {
+		t.Fatalf("unexpected hy2 inbounds after invalid-range prune: %#v", inbounds)
+	}
+}
+
 func TestPruneInboundAndEndpointConflictsBySSHPortsMixedScenario(t *testing.T) {
 	logger.InitLogger(logging.ERROR)
 

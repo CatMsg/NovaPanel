@@ -29,6 +29,30 @@ type coreReplaceSnapshot struct {
 	beforeAdd func(string) error
 }
 
+type taggedConfig struct {
+	tag    string
+	config []byte
+}
+
+func buildCoreReplaceSnapshots(
+	configs []taggedConfig,
+	beforeAdd func(string) error,
+) []coreReplaceSnapshot {
+	if len(configs) == 0 {
+		return nil
+	}
+
+	snapshots := make([]coreReplaceSnapshot, 0, len(configs))
+	for _, cfg := range configs {
+		snapshots = append(snapshots, coreReplaceSnapshot{
+			removeTag: cfg.tag,
+			config:    cfg.config,
+			beforeAdd: beforeAdd,
+		})
+	}
+	return snapshots
+}
+
 func buildCoreReplaceAction(
 	snapshots []coreReplaceSnapshot,
 	remove func(string) error,

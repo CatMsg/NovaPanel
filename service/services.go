@@ -139,25 +139,15 @@ func (s *ServicesService) BuildRestartServicesAction(tx *gorm.DB, ids []uint) (f
 		return nil, err
 	}
 
-	type serviceRestartConfig struct {
-		tag    string
-		config []byte
-	}
-	restartConfigs := make([]serviceRestartConfig, 0, len(services))
+	restartConfigs := make([]taggedConfig, 0, len(services))
 	for _, srv := range services {
 		srvConfig, err := srv.MarshalJSON()
 		if err != nil {
 			return nil, err
 		}
-		restartConfigs = append(restartConfigs, serviceRestartConfig{tag: srv.Tag, config: srvConfig})
+		restartConfigs = append(restartConfigs, taggedConfig{tag: srv.Tag, config: srvConfig})
 	}
-	snapshots := make([]coreReplaceSnapshot, 0, len(restartConfigs))
-	for _, srv := range restartConfigs {
-		snapshots = append(snapshots, coreReplaceSnapshot{
-			removeTag: srv.tag,
-			config:    srv.config,
-		})
-	}
+	snapshots := buildCoreReplaceSnapshots(restartConfigs, nil)
 	return buildCoreReplaceAction(snapshots, corePtr.RemoveService, corePtr.AddService), nil
 }
 

@@ -270,27 +270,26 @@ func parseRestoreHy2ServerPorts(outJson json.RawMessage) ([]int, error) {
 		seen[port] = struct{}{}
 		ports = append(ports, port)
 	}
-	appendToken := func(raw string) error {
+	appendToken := func(raw string) {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
-			return nil
+			return
 		}
 		if strings.Count(raw, "-") == 1 {
 			start, end, err := parseRestorePortRange(raw)
 			if err != nil {
-				return err
+				return
 			}
 			for port := start; port <= end; port++ {
 				appendPort(port)
 			}
-			return nil
+			return
 		}
 		port, err := strconv.Atoi(raw)
 		if err != nil {
-			return fmt.Errorf("invalid server_ports token: %s", raw)
+			return
 		}
 		appendPort(port)
-		return nil
 	}
 
 	switch typed := rawPorts.(type) {
@@ -299,21 +298,15 @@ func parseRestoreHy2ServerPorts(outJson json.RawMessage) ([]int, error) {
 			if item == nil {
 				continue
 			}
-			if err := appendToken(fmt.Sprint(item)); err != nil {
-				return nil, err
-			}
+			appendToken(fmt.Sprint(item))
 		}
 	case []string:
 		for _, item := range typed {
-			if err := appendToken(item); err != nil {
-				return nil, err
-			}
+			appendToken(item)
 		}
 	case string:
 		for _, item := range strings.Split(typed, ",") {
-			if err := appendToken(item); err != nil {
-				return nil, err
-			}
+			appendToken(item)
 		}
 	default:
 		return nil, fmt.Errorf("unsupported server_ports format")

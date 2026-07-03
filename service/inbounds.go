@@ -391,11 +391,7 @@ func (s *InboundService) BuildRestartInboundsAction(tx *gorm.DB, ids []uint) (fu
 		return nil, err
 	}
 
-	type inboundRestartConfig struct {
-		tag    string
-		config []byte
-	}
-	restartConfigs := make([]inboundRestartConfig, 0, len(inbounds))
+	restartConfigs := make([]taggedConfig, 0, len(inbounds))
 	for _, inbound := range inbounds {
 		inboundConfig, err := inbound.MarshalJSON()
 		if err != nil {
@@ -405,23 +401,15 @@ func (s *InboundService) BuildRestartInboundsAction(tx *gorm.DB, ids []uint) (fu
 		if err != nil {
 			return nil, err
 		}
-		restartConfigs = append(restartConfigs, inboundRestartConfig{
+		restartConfigs = append(restartConfigs, taggedConfig{
 			tag:    inbound.Tag,
 			config: inboundConfig,
 		})
 	}
-	snapshots := make([]coreReplaceSnapshot, 0, len(restartConfigs))
-	for _, inbound := range restartConfigs {
-		tag := inbound.tag
-		snapshots = append(snapshots, coreReplaceSnapshot{
-			removeTag: tag,
-			config:    inbound.config,
-			beforeAdd: func(currentTag string) error {
-				corePtr.GetInstance().ConnTracker().CloseConnByInbound(currentTag)
-				return nil
-			},
-		})
-	}
+	snapshots := buildCoreReplaceSnapshots(restartConfigs, func(currentTag string) error {
+		corePtr.GetInstance().ConnTracker().CloseConnByInbound(currentTag)
+		return nil
+	})
 	return buildCoreReplaceAction(snapshots, corePtr.RemoveInbound, corePtr.AddInbound), nil
 }
 
