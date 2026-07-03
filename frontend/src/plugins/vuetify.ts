@@ -5,7 +5,7 @@
  */
 
 // Styles
-import '@mdi/font/css/materialdesignicons.css'
+import '@/styles/materialdesignicons.css'
 import 'vuetify/styles/main.css'
 
 import { fa, en, vi, zhHans, zhHant, ru } from 'vuetify/locale'

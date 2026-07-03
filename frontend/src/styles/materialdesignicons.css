@@ -1,0 +1,322 @@
+/* MaterialDesignIcons.com */
+@font-face {
+  font-family: "Material Design Icons";
+  src: url("@mdi/font/fonts/materialdesignicons-webfont.woff2?v=7.4.47") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+}
+
+.mdi:before,
+.mdi-set {
+  display: inline-block;
+  font: normal normal normal 24px/1 "Material Design Icons";
+  font-size: inherit;
+  text-rendering: auto;
+  line-height: inherit;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.mdi-account-arrow-right-outline::before {
+  content: "\F0B54";
+}
+
+.mdi-account-edit::before {
+  content: "\F06BC";
+}
+
+.mdi-account-multiple::before {
+  content: "\F000E";
+}
+
+.mdi-account-multiple-check::before {
+  content: "\F08C5";
+}
+
+.mdi-account-multiple-outline::before {
+  content: "\F000F";
+}
+
+.mdi-account-multiple-plus::before {
+  content: "\F0010";
+}
+
+.mdi-account-plus::before {
+  content: "\F0014";
+}
+
+.mdi-account-tie::before {
+  content: "\F0CE3";
+}
+
+.mdi-alert-circle-outline::before {
+  content: "\F05D6";
+}
+
+.mdi-application-cog::before {
+  content: "\F0675";
+}
+
+.mdi-arrow-expand::before {
+  content: "\F0616";
+}
+
+.mdi-backup-restore::before {
+  content: "\F006F";
+}
+
+.mdi-calendar::before {
+  content: "\F00ED";
+}
+
+.mdi-certificate::before {
+  content: "\F0124";
+}
+
+.mdi-chart-box::before {
+  content: "\F154D";
+}
+
+.mdi-chart-box-outline::before {
+  content: "\F154E";
+}
+
+.mdi-chart-line::before {
+  content: "\F012A";
+}
+
+.mdi-check::before {
+  content: "\F012C";
+}
+
+.mdi-chevron-left::before {
+  content: "\F0141";
+}
+
+.mdi-chevron-right::before {
+  content: "\F0142";
+}
+
+.mdi-close::before {
+  content: "\F0156";
+}
+
+.mdi-close-box::before {
+  content: "\F0157";
+}
+
+.mdi-close-circle::before {
+  content: "\F0159";
+}
+
+.mdi-cloud-download::before {
+  content: "\F0162";
+}
+
+.mdi-cloud-tags::before {
+  content: "\F07B6";
+}
+
+.mdi-cloud-upload::before {
+  content: "\F0167";
+}
+
+.mdi-cog::before {
+  content: "\F0493";
+}
+
+.mdi-content-copy::before {
+  content: "\F018F";
+}
+
+.mdi-content-duplicate::before {
+  content: "\F0191";
+}
+
+.mdi-delete::before {
+  content: "\F01B4";
+}
+
+.mdi-delete-outline::before {
+  content: "\F09E7";
+}
+
+.mdi-dns::before {
+  content: "\F01D6";
+}
+
+.mdi-download::before {
+  content: "\F01DA";
+}
+
+.mdi-download-multiple::before {
+  content: "\F09E9";
+}
+
+.mdi-file-code::before {
+  content: "\F022E";
+}
+
+.mdi-file-document::before {
+  content: "\F0219";
+}
+
+.mdi-file-edit::before {
+  content: "\F11E7";
+}
+
+.mdi-file-remove::before {
+  content: "\F0B98";
+}
+
+.mdi-filter-check-outline::before {
+  content: "\F18ED";
+}
+
+.mdi-filter-menu-outline::before {
+  content: "\F10E6";
+}
+
+.mdi-help::before {
+  content: "\F02D6";
+}
+
+.mdi-history::before {
+  content: "\F02DA";
+}
+
+.mdi-home::before {
+  content: "\F02DC";
+}
+
+.mdi-information::before {
+  content: "\F02FC";
+}
+
+.mdi-information-outline::before {
+  content: "\F02FD";
+}
+
+.mdi-key-star::before {
+  content: "\F119E";
+}
+
+.mdi-lan::before {
+  content: "\F0317";
+}
+
+.mdi-laptop::before {
+  content: "\F0322";
+}
+
+.mdi-list-box-outline::before {
+  content: "\F1B7C";
+}
+
+.mdi-logout::before {
+  content: "\F0343";
+}
+
+.mdi-magnify::before {
+  content: "\F0349";
+}
+
+.mdi-menu::before {
+  content: "\F035C";
+}
+
+.mdi-moon-waning-crescent::before {
+  content: "\F0F65";
+}
+
+.mdi-pencil::before {
+  content: "\F03EB";
+}
+
+.mdi-plus::before {
+  content: "\F0415";
+}
+
+.mdi-qrcode::before {
+  content: "\F0432";
+}
+
+.mdi-refresh::before {
+  content: "\F0450";
+}
+
+.mdi-restart::before {
+  content: "\F0709";
+}
+
+.mdi-restore::before {
+  content: "\F099B";
+}
+
+.mdi-rocket-launch-outline::before {
+  content: "\F14DF";
+}
+
+.mdi-routes::before {
+  content: "\F046A";
+}
+
+.mdi-server::before {
+  content: "\F048B";
+}
+
+.mdi-server-network::before {
+  content: "\F048D";
+}
+
+.mdi-set-all::before {
+  content: "\F0778";
+}
+
+.mdi-shield-lock-outline::before {
+  content: "\F0CCC";
+}
+
+.mdi-speedometer::before {
+  content: "\F04C5";
+}
+
+.mdi-star-plus::before {
+  content: "\F1563";
+}
+
+.mdi-tag-outline::before {
+  content: "\F04FC";
+}
+
+.mdi-theme-light-dark::before {
+  content: "\F050E";
+}
+
+.mdi-timer-outline::before {
+  content: "\F051B";
+}
+
+.mdi-tools::before {
+  content: "\F1064";
+}
+
+.mdi-translate::before {
+  content: "\F05CA";
+}
+
+.mdi-tune-variant::before {
+  content: "\F1542";
+}
+
+.mdi-update::before {
+  content: "\F06B0";
+}
+
+.mdi-upload::before {
+  content: "\F0552";
+}
+
+.mdi-white-balance-sunny::before {
+  content: "\F05A8";
+}

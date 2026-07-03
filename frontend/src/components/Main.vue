@@ -44,7 +44,15 @@
               </v-card-title>
               <v-card-text class="main-tile__content" align="center" justify="center">
                 <Gauge :tilesData="tilesData" :type="i" v-if="i.charAt(0) == 'g'" />
-                <History :tilesData="tilesData" :type="i" v-if="i.charAt(0) == 'h'" />
+                <DeferredRender v-if="i.charAt(0) == 'h'">
+                  <History :tilesData="tilesData" :type="i" />
+                  <template #placeholder>
+                    <div class="main-tile__placeholder">
+                      <v-icon icon="mdi-chart-line" size="26" color="primary" />
+                      <span>{{ $t('loading') }}</span>
+                    </div>
+                  </template>
+                </DeferredRender>
                 <template v-if="i == 'i-sys'">
                   <MainSystemCard :tiles-data="tilesData" />
                 </template>
@@ -65,7 +73,7 @@ import HttpUtils from '@/plugins/httputil'
 import { HumanReadable } from '@/plugins/utils'
 import Data, { reloadItemsStorageKey } from '@/store/modules/data'
 import Gauge from '@/components/tiles/Gauge.vue'
-import History from '@/components/tiles/History.vue'
+import DeferredRender from '@/components/dashboard/DeferredRender.vue'
 import MainHero from '@/components/dashboard/MainHero.vue'
 import MainToolbar from '@/components/dashboard/MainToolbar.vue'
 import MainSystemCard from '@/components/dashboard/MainSystemCard.vue'
@@ -78,6 +86,7 @@ import { isPageVisible, onPageVisibilityChange } from '@/utils/pageVisibility'
 const LogVue = defineAsyncComponent(() => import('@/layouts/modals/Logs.vue'))
 const Backup = defineAsyncComponent(() => import('@/layouts/modals/Backup.vue'))
 const UsageStats = defineAsyncComponent(() => import('@/layouts/modals/UsageStats.vue'))
+const History = defineAsyncComponent(() => import('@/components/tiles/History.vue'))
 
 const loading = ref(false)
 const menu = ref(false)
@@ -373,6 +382,16 @@ const restartSingbox = async () => {
 
 .main-tile__content {
   padding: 0 16px 18px;
+}
+
+.main-tile__placeholder {
+  min-height: 158px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: rgba(var(--v-theme-on-surface), 0.62);
+  font-size: 0.92rem;
 }
 
 :global(.v-theme--dark) .main-shell__glow--one {
