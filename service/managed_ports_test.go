@@ -94,6 +94,116 @@ printf '%s\n' "$*" >> "${HY2_MOCK_LOG:?}"
 	}
 }
 
+func TestSyncManagedPanelPortForwardingSkipsUnchangedPorts(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("panel port forwarding is only exercised on linux")
+	}
+
+	originalPorts := getSSHListenPorts()
+	t.Cleanup(func() {
+		_ = storeSSHListenPorts(originalPorts, nil)
+	})
+	if err := storeSSHListenPorts([]int{2222}, nil); err != nil {
+		t.Fatalf("store ssh listen ports: %v", err)
+	}
+
+	workDir := t.TempDir()
+	scriptsDir := filepath.Join(workDir, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatalf("mkdir scripts dir: %v", err)
+	}
+
+	logFile := filepath.Join(workDir, "panel-forward-noop.log")
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${HY2_MOCK_LOG:?}"
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "hy2-forward.sh"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get wd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	if err := os.Chdir(workDir); err != nil {
+		t.Fatalf("chdir workdir: %v", err)
+	}
+
+	t.Setenv("HY2_MOCK_LOG", logFile)
+
+	svc := &SettingService{}
+	if err := svc.SyncManagedPanelPortForwarding(2095, 2095, 2096, 2096); err != nil {
+		t.Fatalf("sync unchanged managed panel ports failed: %v", err)
+	}
+
+	data, err := os.ReadFile(logFile)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read log file: %v", err)
+	}
+	if len(strings.TrimSpace(string(data))) > 0 {
+		t.Fatalf("unchanged panel ports should not invoke forwarding script:\n%s", string(data))
+	}
+}
+
+func TestSyncManagedPanelPortForwardingRemovesLegacyUDPOnChange(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("panel port forwarding is only exercised on linux")
+	}
+
+	originalPorts := getSSHListenPorts()
+	t.Cleanup(func() {
+		_ = storeSSHListenPorts(originalPorts, nil)
+	})
+	if err := storeSSHListenPorts([]int{2222}, nil); err != nil {
+		t.Fatalf("store ssh listen ports: %v", err)
+	}
+
+	workDir := t.TempDir()
+	scriptsDir := filepath.Join(workDir, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatalf("mkdir scripts dir: %v", err)
+	}
+
+	logFile := filepath.Join(workDir, "panel-forward-cleanup.log")
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${HY2_MOCK_LOG:?}"
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "hy2-forward.sh"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get wd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	if err := os.Chdir(workDir); err != nil {
+		t.Fatalf("chdir workdir: %v", err)
+	}
+
+	t.Setenv("HY2_MOCK_LOG", logFile)
+
+	svc := &SettingService{}
+	if err := svc.SyncManagedPanelPortForwarding(2095, 3000, 2096, 3001); err != nil {
+		t.Fatalf("sync managed panel ports failed: %v", err)
+	}
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	log := string(data)
+	if !strings.Contains(log, "remove panel-web-port 2095 2095 tcp,udp") {
+		t.Fatalf("panel web port cleanup did not include udp residue removal:\n%s", log)
+	}
+	if !strings.Contains(log, "remove panel-sub-port 2096 2096 tcp,udp") {
+		t.Fatalf("panel sub port cleanup did not include udp residue removal:\n%s", log)
+	}
+}
+
 func TestSyncManagedEndpointPortForwardingInvokesScript(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("endpoint port forwarding is only exercised on linux")

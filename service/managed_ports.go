@@ -26,6 +26,139 @@ var managedPanelApplyProtocols = []string{"tcp"}
 var managedPanelCleanupProtocols = []string{"tcp", "udp"}
 var managedForwardProtocols = []string{"tcp", "udp"}
 
+type managedForwardSpec struct {
+	tag             string
+	listenPort      int
+	ports           []int
+	protocols       []string
+	removeProtocols []string
+	active          bool
+}
+
+func (s managedForwardSpec) normalized() managedForwardSpec {
+	s.ports = normalizeManagedPorts(s.ports)
+	s.protocols = normalizeManagedProtocols(s.protocols)
+	s.removeProtocols = normalizeManagedProtocols(s.removeProtocols)
+	if len(s.removeProtocols) == 0 {
+		s.removeProtocols = append([]string(nil), s.protocols...)
+	}
+	if s.listenPort < 1 || s.listenPort > 65535 || len(s.ports) == 0 || len(s.protocols) == 0 {
+		s.active = false
+	}
+	return s
+}
+
+func managedForwardSpecsEqual(a, b managedForwardSpec) bool {
+	a = a.normalized()
+	b = b.normalized()
+	if a.active != b.active || a.tag != b.tag || a.listenPort != b.listenPort {
+		return false
+	}
+	if len(a.ports) != len(b.ports) || len(a.protocols) != len(b.protocols) {
+		return false
+	}
+	for i := range a.ports {
+		if a.ports[i] != b.ports[i] {
+			return false
+		}
+	}
+	for i := range a.protocols {
+		if a.protocols[i] != b.protocols[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeManagedProtocols(protocols []string) []string {
+	if len(protocols) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, len(protocols))
+	normalized := make([]string, 0, len(protocols))
+	for _, protocol := range protocols {
+		protocol = strings.ToLower(strings.TrimSpace(protocol))
+		if protocol == "" {
+			continue
+		}
+		switch protocol {
+		case "tcp", "udp":
+		default:
+			continue
+		}
+		if _, ok := seen[protocol]; ok {
+			continue
+		}
+		seen[protocol] = struct{}{}
+		normalized = append(normalized, protocol)
+	}
+	return normalized
+}
+
+func validateManagedForwardSpecPorts(spec managedForwardSpec) error {
+	spec = spec.normalized()
+	if !spec.active {
+		return nil
+	}
+	return validateInboundPortsAgainstSSH(nil, spec.ports)
+}
+
+func applyManagedForwardSpec(spec managedForwardSpec) error {
+	spec = spec.normalized()
+	if !spec.active {
+		return nil
+	}
+	return runPortForwardScript("apply", spec.tag, spec.listenPort, spec.ports, spec.protocols)
+}
+
+func removeManagedForwardSpec(spec managedForwardSpec) error {
+	spec = spec.normalized()
+	if !spec.active {
+		return nil
+	}
+	return runPortForwardScript("remove", spec.tag, spec.listenPort, spec.ports, spec.removeProtocols)
+}
+
+func syncManagedForwardSpecs(oldSpec, newSpec managedForwardSpec) error {
+	oldSpec = oldSpec.normalized()
+	newSpec = newSpec.normalized()
+
+	if err := validateManagedForwardSpecPorts(newSpec); err != nil {
+		return err
+	}
+	if managedForwardSpecsEqual(oldSpec, newSpec) {
+		return nil
+	}
+
+	if oldSpec.active {
+		if err := removeManagedForwardSpec(oldSpec); err != nil {
+			return err
+		}
+	}
+
+	if !newSpec.active {
+		return nil
+	}
+
+	if err := applyManagedForwardSpec(newSpec); err != nil {
+		if oldSpec.active {
+			rollbackErr := applyManagedForwardSpec(oldSpec)
+			if rollbackErr != nil {
+				return errors.Join(err, fmt.Errorf("rollback managed port forwarding for %s failed: %w", newSpec.tag, rollbackErr))
+			}
+		} else {
+			rollbackErr := removeManagedForwardSpec(newSpec)
+			if rollbackErr != nil {
+				return errors.Join(err, fmt.Errorf("cleanup managed port forwarding for %s failed: %w", newSpec.tag, rollbackErr))
+			}
+		}
+		return err
+	}
+
+	return nil
+}
+
 func ValidateManagedPanelPorts(webPort, subPort int) error {
 	if webPort < 1 || webPort > 65535 {
 		return fmt.Errorf("invalid panel port: %d", webPort)
@@ -56,29 +189,23 @@ func syncManagedPortForwarding(tag string, oldPort, newPort int) error {
 	if newPort < 1 || newPort > 65535 {
 		return fmt.Errorf("invalid port: %d", newPort)
 	}
-	if err := validateInboundPortsAgainstSSH(nil, []int{newPort}); err != nil {
-		return err
+	oldSpec := managedForwardSpec{
+		tag:             tag,
+		listenPort:      oldPort,
+		ports:           []int{oldPort},
+		protocols:       managedPanelApplyProtocols,
+		removeProtocols: managedPanelCleanupProtocols,
+		active:          oldPort > 0,
 	}
-	if oldPort == newPort {
-		return nil
+	newSpec := managedForwardSpec{
+		tag:             tag,
+		listenPort:      newPort,
+		ports:           []int{newPort},
+		protocols:       managedPanelApplyProtocols,
+		removeProtocols: managedPanelCleanupProtocols,
+		active:          newPort > 0,
 	}
-
-	if err := runPortForwardScript("apply", tag, newPort, []int{newPort}, managedPanelApplyProtocols); err != nil {
-		if oldPort > 0 {
-			rollbackErr := runPortForwardScript("apply", tag, oldPort, []int{oldPort}, managedPanelApplyProtocols)
-			if rollbackErr != nil {
-				return errors.Join(err, fmt.Errorf("rollback managed port forwarding for %s failed: %w", tag, rollbackErr))
-			}
-		} else {
-			rollbackErr := runPortForwardScript("remove", tag, newPort, []int{newPort}, managedPanelCleanupProtocols)
-			if rollbackErr != nil {
-				return errors.Join(err, fmt.Errorf("cleanup managed port forwarding for %s failed: %w", tag, rollbackErr))
-			}
-		}
-		return err
-	}
-
-	return nil
+	return syncManagedForwardSpecs(oldSpec, newSpec)
 }
 
 func runPortForwardScript(action string, tag string, listenPort int, ports []int, protocols []string) error {
@@ -241,6 +368,25 @@ func collectEndpointForwardPorts(endpoint *model.Endpoint) (int, []int, []string
 	return listenPort, []int{listenPort}, protocols, true, nil
 }
 
+func collectEndpointForwardSpec(endpoint *model.Endpoint) (managedForwardSpec, error) {
+	if endpoint == nil {
+		return managedForwardSpec{}, nil
+	}
+
+	listenPort, ports, protocols, active, err := collectEndpointForwardPorts(endpoint)
+	if err != nil {
+		return managedForwardSpec{}, err
+	}
+	return managedForwardSpec{
+		tag:             endpoint.Tag,
+		listenPort:      listenPort,
+		ports:           ports,
+		protocols:       protocols,
+		removeProtocols: protocols,
+		active:          active,
+	}.normalized(), nil
+}
+
 func normalizeManagedPort(raw interface{}) (int, error) {
 	switch v := raw.(type) {
 	case float64:
@@ -274,68 +420,24 @@ func syncManagedEndpointPortForwarding(oldEndpoint, newEndpoint *model.Endpoint)
 		return nil
 	}
 
-	var oldTag string
-	var oldListenPort int
-	var oldPorts []int
-	var oldProtocols []string
-	var oldActive bool
+	var oldSpec managedForwardSpec
 	var err error
 	if oldEndpoint != nil {
-		oldTag = oldEndpoint.Tag
-		oldListenPort, oldPorts, oldProtocols, oldActive, err = collectEndpointForwardPorts(oldEndpoint)
+		oldSpec, err = collectEndpointForwardSpec(oldEndpoint)
 		if err != nil {
 			return err
 		}
 	}
 
-	var newTag string
-	var newListenPort int
-	var newPorts []int
-	var newProtocols []string
-	var newActive bool
+	var newSpec managedForwardSpec
 	if newEndpoint != nil {
-		newTag = newEndpoint.Tag
-		newListenPort, newPorts, newProtocols, newActive, err = collectEndpointForwardPorts(newEndpoint)
+		newSpec, err = collectEndpointForwardSpec(newEndpoint)
 		if err != nil {
 			return err
 		}
-		if newActive {
-			if err := validateInboundPortsAgainstSSH(nil, newPorts); err != nil {
-				return err
-			}
-		}
 	}
 
-	if oldActive && newActive && oldTag == newTag && oldListenPort == newListenPort {
-		return nil
-	}
-
-	if oldActive {
-		if err := runPortForwardScript("remove", oldTag, oldListenPort, oldPorts, oldProtocols); err != nil {
-			return err
-		}
-	}
-
-	if !newActive {
-		return nil
-	}
-
-	if err := runPortForwardScript("apply", newTag, newListenPort, newPorts, newProtocols); err != nil {
-		if oldActive {
-			rollbackErr := runPortForwardScript("apply", oldTag, oldListenPort, oldPorts, oldProtocols)
-			if rollbackErr != nil {
-				return errors.Join(err, fmt.Errorf("rollback managed endpoint port forwarding for %s failed: %w", newTag, rollbackErr))
-			}
-		} else {
-			rollbackErr := runPortForwardScript("remove", newTag, newListenPort, newPorts, newProtocols)
-			if rollbackErr != nil {
-				return errors.Join(err, fmt.Errorf("cleanup managed endpoint port forwarding for %s failed: %w", newTag, rollbackErr))
-			}
-		}
-		return err
-	}
-
-	return nil
+	return syncManagedForwardSpecs(oldSpec, newSpec)
 }
 
 func (s *EndpointService) SyncManagedEndpointPortForwarding(oldEndpoint, newEndpoint *model.Endpoint) error {

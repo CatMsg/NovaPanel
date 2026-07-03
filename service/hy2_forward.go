@@ -74,39 +74,27 @@ func (s *InboundService) RebuildHy2PortForwarding() error {
 }
 
 func (s *InboundService) syncInboundPortForwarding(oldInbound *model.Inbound, inbound *model.Inbound) error {
-	var listenPort int
-	var ports []int
-	if inbound != nil {
-		var err error
-		listenPort, ports, err = collectInboundForwardPorts(inbound)
-		if err != nil {
-			return err
-		}
-
-		if err := validateInboundPortsAgainstSSH(inbound, ports); err != nil {
-			return err
-		}
-	}
-
+	var oldSpec managedForwardSpec
+	var err error
 	if oldInbound != nil {
-		oldListenPort, oldPorts, err := collectInboundForwardPorts(oldInbound)
+		oldSpec, err = collectInboundForwardSpec(oldInbound)
 		if err != nil {
 			return err
 		}
-		if err := runInboundForwardScript("remove", oldInbound.Tag, oldListenPort, oldPorts); err != nil {
+	}
+
+	var newSpec managedForwardSpec
+	if inbound != nil {
+		newSpec, err = collectInboundForwardSpec(inbound)
+		if err != nil {
+			return err
+		}
+		if err := validateInboundPortsAgainstSSH(inbound, newSpec.ports); err != nil {
 			return err
 		}
 	}
 
-	if inbound == nil {
-		return nil
-	}
-
-	if err := runInboundForwardScript("apply", inbound.Tag, listenPort, ports); err != nil {
-		return err
-	}
-
-	return nil
+	return syncManagedForwardSpecs(oldSpec, newSpec)
 }
 
 func (s *InboundService) syncHy2PortForwarding(oldInbound *model.Inbound, inbound *model.Inbound) error {
@@ -129,6 +117,25 @@ func collectInboundForwardPorts(inbound *model.Inbound) (int, []int, error) {
 	}
 
 	return listenPort, ports, nil
+}
+
+func collectInboundForwardSpec(inbound *model.Inbound) (managedForwardSpec, error) {
+	if inbound == nil {
+		return managedForwardSpec{}, nil
+	}
+
+	listenPort, ports, err := collectInboundForwardPorts(inbound)
+	if err != nil {
+		return managedForwardSpec{}, err
+	}
+	return managedForwardSpec{
+		tag:             inbound.Tag,
+		listenPort:      listenPort,
+		ports:           ports,
+		protocols:       []string{"tcp", "udp"},
+		removeProtocols: []string{"tcp", "udp"},
+		active:          true,
+	}.normalized(), nil
 }
 
 func runInboundForwardScript(action string, tag string, listenPort int, ports []int) error {
