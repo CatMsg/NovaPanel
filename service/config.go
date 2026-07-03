@@ -239,7 +239,7 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 			copy(configData, data)
 			postCommit = func() error { return s.restartCoreWithConfig(configData) }
 		case "settings":
-			err = s.SettingService.Save(tx, data)
+			postCommit, err = s.SettingService.Save(tx, data)
 		default:
 			return common.NewError("unknown object: ", obj)
 		}

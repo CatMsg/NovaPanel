@@ -477,21 +477,21 @@ func (s *SettingService) SaveConfig(tx *gorm.DB, config json.RawMessage) error {
 	return tx.Model(model.Setting{}).Where("key = ?", "config").Update("value", string(configs)).Error
 }
 
-func (s *SettingService) Save(tx *gorm.DB, data json.RawMessage) error {
+func (s *SettingService) Save(tx *gorm.DB, data json.RawMessage) (func() error, error) {
 	var err error
 	var settings map[string]string
 	err = json.Unmarshal(data, &settings)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	oldWebPort, err := s.GetPort()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	oldSubPort, err := s.GetSubPort()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	newWebPort := oldWebPort
 	newSubPort := oldSubPort
@@ -501,20 +501,20 @@ func (s *SettingService) Save(tx *gorm.DB, data json.RawMessage) error {
 	if rawWebPort, ok := settings["webPort"]; ok && rawWebPort != "" {
 		newWebPort, err = strconv.Atoi(rawWebPort)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		webPortChanged = newWebPort != oldWebPort
 	}
 	if rawSubPort, ok := settings["subPort"]; ok && rawSubPort != "" {
 		newSubPort, err = strconv.Atoi(rawSubPort)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		subPortChanged = newSubPort != oldSubPort
 	}
 	if webPortChanged || subPortChanged {
 		if err := ValidateManagedPanelPortsWithConflicts(tx, newWebPort, newSubPort); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
@@ -526,7 +526,7 @@ func (s *SettingService) Save(tx *gorm.DB, data json.RawMessage) error {
 			key == "subKeyFile") {
 			err = s.fileExists(obj)
 			if err != nil {
-				return common.NewError(" -> ", obj, " is not exists")
+				return nil, common.NewError(" -> ", obj, " is not exists")
 			}
 		}
 
@@ -545,20 +545,22 @@ func (s *SettingService) Save(tx *gorm.DB, data json.RawMessage) error {
 		if key == "trafficAge" && obj == "0" {
 			err = tx.Where("id > 0").Delete(model.Stats{}).Error
 			if err != nil {
-				return err
+				return nil, err
 			}
 		}
 		err = tx.Model(model.Setting{}).Where("key = ?", key).Update("value", obj).Error
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
+
+	var postCommit func() error
 	if webPortChanged || subPortChanged {
-		if err := s.SyncManagedPanelPortForwarding(oldWebPort, newWebPort, oldSubPort, newSubPort); err != nil {
-			return err
+		postCommit = func() error {
+			return s.SyncManagedPanelPortForwarding(oldWebPort, newWebPort, oldSubPort, newSubPort)
 		}
 	}
-	return err
+	return postCommit, nil
 }
 
 func (s *SettingService) GetSubJsonExt() (string, error) {

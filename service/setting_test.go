@@ -1,9 +1,14 @@
 package service
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
+
+	"github.com/CatMsg/NovaPanel/database"
 )
 
 func TestSettingServiceFileExistsStrict(t *testing.T) {
@@ -103,5 +108,96 @@ func TestFillSubCertFilesUsesSubDomainFirst(t *testing.T) {
 
 	if allSetting["subCertFile"] != subCert || allSetting["subKeyFile"] != subKey {
 		t.Fatalf("expected sub cert fields to be filled: %#v", allSetting)
+	}
+}
+
+func TestSettingSaveDefersManagedPanelForwardingToPostCommit(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("panel port forwarding is only exercised on linux")
+	}
+
+	originalPorts := getSSHListenPorts()
+	t.Cleanup(func() {
+		_ = storeSSHListenPorts(originalPorts, nil)
+	})
+	if err := storeSSHListenPorts([]int{2222}, nil); err != nil {
+		t.Fatalf("store ssh listen ports: %v", err)
+	}
+
+	workDir := t.TempDir()
+	if err := database.InitDB(filepath.Join(workDir, "settings.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	scriptsDir := filepath.Join(workDir, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatalf("mkdir scripts dir: %v", err)
+	}
+
+	logFile := filepath.Join(workDir, "panel-forward.log")
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${HY2_MOCK_LOG:?}"
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "hy2-forward.sh"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get wd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	if err := os.Chdir(workDir); err != nil {
+		t.Fatalf("chdir workdir: %v", err)
+	}
+
+	t.Setenv("HY2_MOCK_LOG", logFile)
+
+	svc := &SettingService{}
+	if _, err := svc.GetAllSetting(); err != nil {
+		t.Fatalf("init default settings: %v", err)
+	}
+
+	tx := database.GetDB().Begin()
+	if tx.Error != nil {
+		t.Fatalf("begin tx: %v", tx.Error)
+	}
+
+	postCommit, err := svc.Save(tx, json.RawMessage(`{
+		"webPort":"3000",
+		"subPort":"3001"
+	}`))
+	if err != nil {
+		tx.Rollback()
+		t.Fatalf("save settings: %v", err)
+	}
+	if postCommit == nil {
+		tx.Rollback()
+		t.Fatal("expected post-commit action for panel port change")
+	}
+
+	if data, readErr := os.ReadFile(logFile); readErr == nil && len(strings.TrimSpace(string(data))) > 0 {
+		tx.Rollback()
+		t.Fatalf("forwarding script should not run before commit:\n%s", string(data))
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		t.Fatalf("commit tx: %v", err)
+	}
+	if err := postCommit(); err != nil {
+		t.Fatalf("run post-commit: %v", err)
+	}
+
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	log := string(data)
+	if !strings.Contains(log, "apply panel-web-port 3000 3000 tcp") {
+		t.Fatalf("web port forwarding was not applied post-commit:\n%s", log)
+	}
+	if !strings.Contains(log, "apply panel-sub-port 3001 3001 tcp") {
+		t.Fatalf("sub port forwarding was not applied post-commit:\n%s", log)
 	}
 }
