@@ -39,6 +39,17 @@ func decodeClientLinks(raw json.RawMessage) ([]map[string]string, error) {
 	return links, nil
 }
 
+func encodeClientInboundIDs(inboundIDs []uint) (json.RawMessage, error) {
+	if len(inboundIDs) == 0 {
+		return json.RawMessage("[]"), nil
+	}
+	data, err := json.MarshalIndent(inboundIDs, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
 func encodeClientLinks(links []map[string]string) (json.RawMessage, error) {
 	if len(links) == 0 {
 		return json.RawMessage("[]"), nil
@@ -48,6 +59,28 @@ func encodeClientLinks(links []map[string]string) (json.RawMessage, error) {
 		return nil, err
 	}
 	return data, nil
+}
+
+func filterClientLinks(links []map[string]string, keep func(map[string]string) bool) []map[string]string {
+	if len(links) == 0 {
+		return nil
+	}
+	filtered := make([]map[string]string, 0, len(links))
+	for _, link := range links {
+		if keep(link) {
+			filtered = append(filtered, link)
+		}
+	}
+	return filtered
+}
+
+func (s *ClientService) collectClientIDsByInboundID(tx *gorm.DB, inboundID uint) ([]uint, error) {
+	var clientIDs []uint
+	err := tx.Raw("SELECT clients.id FROM clients, json_each(clients.inbounds) AS je WHERE je.value = ?", inboundID).Scan(&clientIDs).Error
+	if err != nil {
+		return nil, err
+	}
+	return clientIDs, nil
 }
 
 func (s *ClientService) Get(id string) (*[]model.Client, error) {
@@ -303,42 +336,22 @@ func (s *ClientService) UpdateClientsOnInboundAdd(tx *gorm.DB, initIds string, i
 	if err != nil {
 		return err
 	}
-	var inbound model.Inbound
-	err = tx.Model(model.Inbound{}).Preload("Tls").Where("id = ?", inboundId).Find(&inbound).Error
-	if err != nil {
+	for index := range clients {
+		clientInbounds, err := decodeClientInboundIDs(clients[index].Inbounds)
+		if err != nil {
+			return err
+		}
+		clientInbounds = append(clientInbounds, inboundId)
+		clients[index].Inbounds, err = encodeClientInboundIDs(clientInbounds)
+		if err != nil {
+			return err
+		}
+	}
+	if err := s.updateLinksWithFixedInbounds(tx, sliceClientPointers(clients), hostname); err != nil {
 		return err
 	}
-	for _, client := range clients {
-		// Add inbounds
-		var clientInbounds []uint
-		json.Unmarshal(client.Inbounds, &clientInbounds)
-		clientInbounds = append(clientInbounds, inboundId)
-		client.Inbounds, err = json.MarshalIndent(clientInbounds, "", "  ")
-		if err != nil {
-			return err
-		}
-		// Add links
-		var clientLinks, newClientLinks []map[string]string
-		json.Unmarshal(client.Links, &clientLinks)
-		newLinks := util.LinkGenerator(client.Config, &inbound, hostname)
-		for _, newLink := range newLinks {
-			newClientLinks = append(newClientLinks, map[string]string{
-				"remark": inbound.Tag,
-				"type":   "local",
-				"uri":    newLink,
-			})
-		}
-		for _, clientLink := range clientLinks {
-			if clientLink["remark"] != inbound.Tag {
-				newClientLinks = append(newClientLinks, clientLink)
-			}
-		}
-
-		client.Links, err = json.MarshalIndent(newClientLinks, "", "  ")
-		if err != nil {
-			return err
-		}
-		err = tx.Save(&client).Error
+	for index := range clients {
+		err = tx.Save(&clients[index]).Error
 		if err != nil {
 			return err
 		}
@@ -347,8 +360,7 @@ func (s *ClientService) UpdateClientsOnInboundAdd(tx *gorm.DB, initIds string, i
 }
 
 func (s *ClientService) UpdateClientsOnInboundDelete(tx *gorm.DB, id uint, tag string) error {
-	var clientIds []uint
-	err := tx.Raw("SELECT clients.id FROM clients, json_each(clients.inbounds) AS je WHERE je.value = ?", id).Scan(&clientIds).Error
+	clientIds, err := s.collectClientIDsByInboundID(tx, id)
 	if err != nil {
 		return err
 	}
@@ -360,32 +372,36 @@ func (s *ClientService) UpdateClientsOnInboundDelete(tx *gorm.DB, id uint, tag s
 	if err != nil {
 		return err
 	}
-	for _, client := range clients {
-		// Delete inbounds
-		var clientInbounds, newClientInbounds []uint
-		json.Unmarshal(client.Inbounds, &clientInbounds)
+	for index := range clients {
+		clientInbounds, err := decodeClientInboundIDs(clients[index].Inbounds)
+		if err != nil {
+			return err
+		}
+		newClientInbounds := make([]uint, 0, len(clientInbounds))
 		for _, clientInbound := range clientInbounds {
 			if clientInbound != id {
 				newClientInbounds = append(newClientInbounds, clientInbound)
 			}
 		}
-		client.Inbounds, err = json.MarshalIndent(newClientInbounds, "", "  ")
+		clients[index].Inbounds, err = encodeClientInboundIDs(newClientInbounds)
 		if err != nil {
 			return err
 		}
-		// Delete links
-		var clientLinks, newClientLinks []map[string]string
-		json.Unmarshal(client.Links, &clientLinks)
-		for _, clientLink := range clientLinks {
-			if clientLink["remark"] != tag {
-				newClientLinks = append(newClientLinks, clientLink)
-			}
-		}
-		client.Links, err = json.MarshalIndent(newClientLinks, "", "  ")
+	}
+	for index := range clients {
+		clientLinks, err := decodeClientLinks(clients[index].Links)
 		if err != nil {
 			return err
 		}
-		err = tx.Save(&client).Error
+		clients[index].Links, err = encodeClientLinks(filterClientLinks(clientLinks, func(link map[string]string) bool {
+			return link["type"] != "local" || link["remark"] != tag
+		}))
+		if err != nil {
+			return err
+		}
+	}
+	for index := range clients {
+		err = tx.Save(&clients[index]).Error
 		if err != nil {
 			return err
 		}
@@ -394,10 +410,8 @@ func (s *ClientService) UpdateClientsOnInboundDelete(tx *gorm.DB, id uint, tag s
 }
 
 func (s *ClientService) UpdateLinksByInboundChange(tx *gorm.DB, inbounds *[]model.Inbound, hostname string, oldTag string) error {
-	var err error
 	for _, inbound := range *inbounds {
-		var clientIds []uint
-		err = tx.Raw("SELECT clients.id FROM clients, json_each(clients.inbounds) AS je WHERE je.value = ?", inbound.Id).Scan(&clientIds).Error
+		clientIds, err := s.collectClientIDsByInboundID(tx, inbound.Id)
 		if err != nil {
 			return err
 		}
@@ -409,34 +423,28 @@ func (s *ClientService) UpdateLinksByInboundChange(tx *gorm.DB, inbounds *[]mode
 		if err != nil {
 			return err
 		}
-		for _, client := range clients {
-			var clientLinks, newClientLinks []map[string]string
-			json.Unmarshal(client.Links, &clientLinks)
-			newLinks := util.LinkGenerator(client.Config, &inbound, hostname)
-			for _, newLink := range newLinks {
-				newClientLinks = append(newClientLinks, map[string]string{
-					"remark": inbound.Tag,
-					"type":   "local",
-					"uri":    newLink,
-				})
-			}
-			for _, clientLink := range clientLinks {
-				if clientLink["type"] != "local" || (clientLink["remark"] != inbound.Tag && clientLink["remark"] != oldTag) {
-					newClientLinks = append(newClientLinks, clientLink)
-				}
-			}
-
-			client.Links, err = json.MarshalIndent(newClientLinks, "", "  ")
-			if err != nil {
-				return err
-			}
-			err = tx.Save(&client).Error
+		if err := s.updateLinksWithFixedInbounds(tx, sliceClientPointers(clients), hostname); err != nil {
+			return err
+		}
+		for index := range clients {
+			err = tx.Save(&clients[index]).Error
 			if err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+func sliceClientPointers(clients []model.Client) []*model.Client {
+	if len(clients) == 0 {
+		return nil
+	}
+	items := make([]*model.Client, 0, len(clients))
+	for index := range clients {
+		items = append(items, &clients[index])
+	}
+	return items
 }
 
 func (s *ClientService) DepleteClients() ([]uint, error) {

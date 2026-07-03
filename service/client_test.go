@@ -128,6 +128,159 @@ func TestUpdateLinksWithFixedInboundsKeepsOnlyNonLocalWhenNoInbounds(t *testing.
 	}
 }
 
+func TestUpdateClientsOnInboundAddRebuildsAllLocalLinksPerClient(t *testing.T) {
+	workDir := t.TempDir()
+	if err := database.InitDB(filepath.Join(workDir, "client-inbound-add.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	db := database.GetDB()
+	inboundA := model.Inbound{
+		Type:  "socks",
+		Tag:   "socks-a",
+		Addrs: json.RawMessage(`[]`),
+		Options: json.RawMessage(`{
+			"listen_port": 1080
+		}`),
+	}
+	inboundB := model.Inbound{
+		Type:  "socks",
+		Tag:   "socks-b",
+		Addrs: json.RawMessage(`[]`),
+		Options: json.RawMessage(`{
+			"listen_port": 2080
+		}`),
+	}
+	if err := db.Create(&inboundA).Error; err != nil {
+		t.Fatalf("create inboundA: %v", err)
+	}
+	if err := db.Create(&inboundB).Error; err != nil {
+		t.Fatalf("create inboundB: %v", err)
+	}
+	clientInboundIDs, err := encodeClientInboundIDs([]uint{inboundA.Id})
+	if err != nil {
+		t.Fatalf("encode client inbound ids: %v", err)
+	}
+
+	client := model.Client{
+		Name: "client-a",
+		Config: json.RawMessage(`{
+			"socks": {
+				"username": "user-a",
+				"password": "pass-a"
+			}
+		}`),
+		Inbounds: clientInboundIDs,
+		Links: json.RawMessage(`[
+			{"remark":"remote-a","type":"remote","uri":"remote://a"}
+		]`),
+	}
+	if err := db.Create(&client).Error; err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+
+	svc := &ClientService{}
+	if err := svc.UpdateClientsOnInboundAdd(db, "1", inboundB.Id, "panel.example.com"); err != nil {
+		t.Fatalf("update clients on inbound add: %v", err)
+	}
+
+	var updated model.Client
+	if err := db.First(&updated, client.Id).Error; err != nil {
+		t.Fatalf("load updated client: %v", err)
+	}
+	links, err := decodeClientLinks(updated.Links)
+	if err != nil {
+		t.Fatalf("decode links: %v", err)
+	}
+	if !hasLinkRemark(links, "socks-a") || !hasLinkRemark(links, "socks-b") {
+		t.Fatalf("expected both local links after inbound add: %#v", links)
+	}
+	if !hasLinkRemarkAndURI(links, "remote-a", "remote://a") {
+		t.Fatalf("expected remote links preserved after inbound add: %#v", links)
+	}
+}
+
+func TestUpdateClientsOnInboundDeleteRebuildsRemainingLocalLinks(t *testing.T) {
+	workDir := t.TempDir()
+	if err := database.InitDB(filepath.Join(workDir, "client-inbound-delete.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	db := database.GetDB()
+	inboundA := model.Inbound{
+		Type:  "socks",
+		Tag:   "socks-a",
+		Addrs: json.RawMessage(`[]`),
+		Options: json.RawMessage(`{
+			"listen_port": 1080
+		}`),
+	}
+	inboundB := model.Inbound{
+		Type:  "socks",
+		Tag:   "socks-b",
+		Addrs: json.RawMessage(`[]`),
+		Options: json.RawMessage(`{
+			"listen_port": 2080
+		}`),
+	}
+	if err := db.Create(&inboundA).Error; err != nil {
+		t.Fatalf("create inboundA: %v", err)
+	}
+	if err := db.Create(&inboundB).Error; err != nil {
+		t.Fatalf("create inboundB: %v", err)
+	}
+	clientInboundIDs, err := encodeClientInboundIDs([]uint{inboundA.Id, inboundB.Id})
+	if err != nil {
+		t.Fatalf("encode client inbound ids: %v", err)
+	}
+
+	client := model.Client{
+		Name: "client-a",
+		Config: json.RawMessage(`{
+			"socks": {
+				"username": "user-a",
+				"password": "pass-a"
+			}
+		}`),
+		Inbounds: clientInboundIDs,
+		Links: json.RawMessage(`[
+			{"remark":"remote-a","type":"remote","uri":"remote://a"}
+		]`),
+	}
+	if err := db.Create(&client).Error; err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	if err := (&ClientService{}).updateLinksWithFixedInbounds(db, []*model.Client{&client}, "panel.example.com"); err != nil {
+		t.Fatalf("prime local links: %v", err)
+	}
+	if err := db.Save(&client).Error; err != nil {
+		t.Fatalf("persist primed client: %v", err)
+	}
+
+	svc := &ClientService{}
+	if err := svc.UpdateClientsOnInboundDelete(db, inboundA.Id, inboundA.Tag); err != nil {
+		t.Fatalf("update clients on inbound delete: %v", err)
+	}
+
+	var updated model.Client
+	if err := db.First(&updated, client.Id).Error; err != nil {
+		t.Fatalf("load updated client: %v", err)
+	}
+	links, err := decodeClientLinks(updated.Links)
+	if err != nil {
+		t.Fatalf("decode links: %v", err)
+	}
+	if hasLinkRemark(links, "socks-a") {
+		t.Fatalf("expected deleted inbound local links removed: %#v", links)
+	}
+	if !hasLinkRemark(links, "socks-b") {
+		t.Fatalf("expected remaining inbound local links preserved: %#v", links)
+	}
+	if !hasLinkRemarkAndURI(links, "remote-a", "remote://a") {
+		t.Fatalf("expected remote links preserved after inbound delete: %#v", links)
+	}
+}
+
 func hasLinkRemark(links []map[string]string, remark string) bool {
 	for _, link := range links {
 		if link["remark"] == remark {
