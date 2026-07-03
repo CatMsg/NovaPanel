@@ -84,48 +84,16 @@ func (t *masqueTun) configure(mtu int) error {
 	if err := t.configureKernelForwarding(); err != nil {
 		return err
 	}
-
-	if err := ensureMasqueTunIptablesRule(
-		[]string{"iptables", "-C", "FORWARD", "-i", t.name, "-j", "ACCEPT"},
-		[]string{"iptables", "-I", "FORWARD", "1", "-i", t.name, "-j", "ACCEPT"},
-	); err != nil {
-		return err
-	}
-	if err := ensureMasqueTunIptablesRule(
-		[]string{"iptables", "-C", "FORWARD", "-o", t.name, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
-		[]string{"iptables", "-I", "FORWARD", "2", "-o", t.name, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
-	); err != nil {
-		return err
-	}
-
-	if err := runMasqueTunCommand("iptables", "-t", "nat", "-C", "POSTROUTING", "-s", t.peerPrefix.String(), "!", "-o", t.name, "-j", "MASQUERADE"); err != nil {
-		if err := runMasqueTunCommand("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", t.peerPrefix.String(), "!", "-o", t.name, "-j", "MASQUERADE"); err != nil {
-			return err
-		}
-	}
-	return nil
+	return applyMasqueTunRules(runMasqueTunCommand, buildMasqueTunIptablesRules(t.name, t.peerPrefix))
 }
 
 func (t *masqueTun) configureKernelForwarding() error {
-	settings := map[string]string{
-		"/proc/sys/net/ipv4/ip_forward":                    "1\n",
-		"/proc/sys/net/ipv4/conf/all/rp_filter":            "0\n",
-		"/proc/sys/net/ipv4/conf/default/rp_filter":        "0\n",
-		"/proc/sys/net/ipv4/conf/" + t.name + "/rp_filter": "0\n",
-	}
-	for path, value := range settings {
+	for path, value := range masqueTunKernelForwardSettings(t.name) {
 		if err := os.WriteFile(path, []byte(value), 0o644); err != nil {
 			return fmt.Errorf("write %s failed: %w", path, err)
 		}
 	}
 	return nil
-}
-
-func ensureMasqueTunIptablesRule(checkArgs []string, addArgs []string) error {
-	if err := runMasqueTunCommand(checkArgs...); err == nil {
-		return nil
-	}
-	return runMasqueTunCommand(addArgs...)
 }
 
 func masqueTunLocalAddr(name string) string {
@@ -177,24 +145,7 @@ func (t *masqueTun) WritePacket(packet []byte) error {
 }
 
 func (t *masqueTun) Close() error {
-	for {
-		err := runMasqueTunCommand("iptables", "-D", "FORWARD", "-i", t.name, "-j", "ACCEPT")
-		if err != nil {
-			break
-		}
-	}
-	for {
-		err := runMasqueTunCommand("iptables", "-D", "FORWARD", "-o", t.name, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT")
-		if err != nil {
-			break
-		}
-	}
-	for {
-		err := runMasqueTunCommand("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", t.peerPrefix.String(), "!", "-o", t.name, "-j", "MASQUERADE")
-		if err != nil {
-			break
-		}
-	}
+	cleanupMasqueTunRules(runMasqueTunCommand, buildMasqueTunIptablesRules(t.name, t.peerPrefix))
 	if err := runMasqueTunCommand("ip", "route", "del", t.peerPrefix.String(), "dev", t.name); err != nil {
 		logger.Debug("masque tun route cleanup skipped: ", err)
 	}
