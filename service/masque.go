@@ -2,14 +2,8 @@ package service
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/rand"
-	"crypto/x509"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"net"
 	"net/netip"
 	"net/url"
@@ -473,70 +467,6 @@ func (r *masqueRuntime) serveConnectIP(ctx context.Context, w mhttp.ResponseWrit
 	return err
 }
 
-type masqueEndpointConfig struct {
-	Host       string
-	Port       int
-	Network    string
-	PrivateKey string
-	IP         string
-	MTU        int
-}
-
-func parseMasqueEndpoint(endpoint *model.Endpoint) (*masqueEndpointConfig, error) {
-	var payload struct {
-		Server     string `json:"server"`
-		Port       int    `json:"port"`
-		Network    string `json:"network"`
-		PrivateKey string `json:"private_key"`
-		IP         string `json:"ip"`
-		MTU        int    `json:"mtu"`
-	}
-	if endpoint.Options != nil {
-		if err := json.Unmarshal(endpoint.Options, &payload); err != nil {
-			return nil, err
-		}
-	}
-
-	return &masqueEndpointConfig{
-		Host:       strings.TrimSpace(payload.Server),
-		Port:       payload.Port,
-		Network:    normalizeMasqueNetwork(payload.Network),
-		PrivateKey: strings.TrimSpace(payload.PrivateKey),
-		IP:         strings.TrimSpace(payload.IP),
-		MTU:        payload.MTU,
-	}, nil
-}
-
-func normalizeMasqueNetwork(network string) string {
-	network = strings.TrimSpace(network)
-	if network == "" {
-		return "quic"
-	}
-	return network
-}
-
-func masqueTemplateDescription(config *masqueEndpointConfig) string {
-	return "https://cloudflareaccess.com"
-}
-
-func parseMasquePeerPrefix(raw string) (netip.Prefix, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return netip.Prefix{}, common.NewError("masque client ip is required")
-	}
-	if !strings.Contains(raw, "/") {
-		raw += "/32"
-	}
-	prefix, err := netip.ParsePrefix(raw)
-	if err != nil {
-		return netip.Prefix{}, fmt.Errorf("invalid masque client ip: %w", err)
-	}
-	if !prefix.Addr().Is4() {
-		return netip.Prefix{}, common.NewError("masque client ip must be IPv4")
-	}
-	return prefix.Masked(), nil
-}
-
 func parseMasqueConnectIPRequest(r *mhttp.Request, template *uritemplate.Template) (*connectip.Request, error) {
 	req, err := connectip.ParseRequest(r, template)
 	if err == nil {
@@ -565,123 +495,4 @@ func parseMasqueConnectIPRequest(r *mhttp.Request, template *uritemplate.Templat
 		}
 	}
 	return &connectip.Request{}, nil
-}
-
-func (s *MasqueService) loadMasqueTLSCertificate(config *masqueEndpointConfig) (mtls.Certificate, string, string, string, error) {
-	if config != nil && strings.TrimSpace(config.PrivateKey) != "" {
-		cert, err := generateMasqueTLSCertificate(config.PrivateKey)
-		if err != nil {
-			return mtls.Certificate{}, "", "", "", err
-		}
-		return cert, "", "", "endpoint-key", nil
-	}
-
-	certFile, keyFile, err := s.resolveMasqueCertFiles(config.Host)
-	if err != nil {
-		return mtls.Certificate{}, "", "", "", err
-	}
-	cert, err := mtls.LoadX509KeyPair(certFile, keyFile)
-	if err != nil {
-		return mtls.Certificate{}, "", "", "", err
-	}
-	return cert, certFile, keyFile, "file", nil
-}
-
-func generateMasqueTLSCertificate(rawPrivateKey string) (mtls.Certificate, error) {
-	priv, err := parseMasquePrivateKey(rawPrivateKey)
-	if err != nil {
-		return mtls.Certificate{}, err
-	}
-
-	now := time.Now()
-	tpl := &x509.Certificate{
-		SerialNumber: big.NewInt(now.UnixNano()),
-		NotBefore:    now.Add(-time.Hour),
-		NotAfter:     now.AddDate(10, 0, 0),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
-	}
-	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &priv.PublicKey, priv)
-	if err != nil {
-		return mtls.Certificate{}, err
-	}
-	return mtls.Certificate{
-		Certificate: [][]byte{der},
-		PrivateKey:  priv,
-	}, nil
-}
-
-func parseMasquePrivateKey(raw string) (*ecdsa.PrivateKey, error) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return nil, common.NewError("empty masque private key")
-	}
-	data, err := base64.StdEncoding.DecodeString(trimmed)
-	if err != nil {
-		return nil, err
-	}
-	return x509.ParseECPrivateKey(data)
-}
-
-func formatMasqueHost(host string) string {
-	host = strings.TrimSpace(host)
-	if host == "" {
-		return ""
-	}
-	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
-		return host
-	}
-	if strings.Count(host, ":") > 1 {
-		return "[" + host + "]"
-	}
-	return host
-}
-
-func (s *MasqueService) resolveMasqueCertFiles(host string) (string, string, error) {
-	host = strings.TrimSpace(host)
-	if host != "" {
-		if certFile, keyFile, ok := resolveAcmeCertFiles(host); ok {
-			return certFile, keyFile, nil
-		}
-	}
-
-	allSetting, err := s.GetAllSetting()
-	if err != nil {
-		return "", "", err
-	}
-
-	candidates := [][2]string{
-		{(*allSetting)["subCertFile"], (*allSetting)["subKeyFile"]},
-		{(*allSetting)["webCertFile"], (*allSetting)["webKeyFile"]},
-	}
-
-	for _, candidate := range candidates {
-		certFile := strings.TrimSpace(candidate[0])
-		keyFile := strings.TrimSpace(candidate[1])
-		if certFile == "" || keyFile == "" {
-			continue
-		}
-		if err := fileMustExist(certFile); err != nil {
-			continue
-		}
-		if err := fileMustExist(keyFile); err != nil {
-			continue
-		}
-		return certFile, keyFile, nil
-	}
-
-	if host != "" {
-		if webDomain := strings.TrimSpace((*allSetting)["webDomain"]); webDomain != "" && webDomain != host {
-			if certFile, keyFile, ok := resolveAcmeCertFiles(webDomain); ok {
-				return certFile, keyFile, nil
-			}
-		}
-		if subDomain := strings.TrimSpace((*allSetting)["subDomain"]); subDomain != "" && subDomain != host {
-			if certFile, keyFile, ok := resolveAcmeCertFiles(subDomain); ok {
-				return certFile, keyFile, nil
-			}
-		}
-	}
-
-	return "", "", common.NewError("masque certificate and key are not configured")
 }
