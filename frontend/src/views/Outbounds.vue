@@ -149,11 +149,12 @@
 <script lang="ts" setup>
 import Data from '@/store/modules/data'
 import HttpUtils from '@/plugins/httputil'
-import OutboundVue from '@/layouts/modals/Outbound.vue'
-import OutboundBulk from '@/layouts/modals/OutboundBulk.vue'
-import Stats from '@/layouts/modals/Stats.vue'
 import { Outbound } from '@/types/outbounds'
-import { computed, ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
+
+const OutboundVue = defineAsyncComponent(() => import('@/layouts/modals/Outbound.vue'))
+const OutboundBulk = defineAsyncComponent(() => import('@/layouts/modals/OutboundBulk.vue'))
+const Stats = defineAsyncComponent(() => import('@/layouts/modals/Stats.vue'))
 
 interface CheckResult {
   loading?: boolean

@@ -231,10 +231,11 @@
 
 <script lang="ts" setup>
 import Data from '@/store/modules/data'
-import Dial from '@/components/Dial.vue'
-import { computed, ref, onBeforeMount } from 'vue'
+import { computed, defineAsyncComponent, ref, onBeforeMount } from 'vue'
 import { Config, Ntp } from '@/types/config'
 import { FindDiff } from '@/plugins/utils'
+
+const Dial = defineAsyncComponent(() => import('@/components/Dial.vue'))
 
 const oldConfig = ref({})
 const loading = ref(false)

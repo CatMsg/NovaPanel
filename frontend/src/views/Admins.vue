@@ -67,12 +67,13 @@
 </template>
 
 <script lang="ts" setup>
-import AdminModal from '@/layouts/modals/Admin.vue'
-import ChangeModal  from '@/layouts/modals/Changes.vue'
-import TokenModal from '@/layouts/modals/Token.vue'
 import { i18n } from '@/locales'
 import HttpUtils from '@/plugins/httputil'
-import { Ref, ref, inject, onMounted } from 'vue'
+import { Ref, defineAsyncComponent, ref, inject, onMounted } from 'vue'
+
+const AdminModal = defineAsyncComponent(() => import('@/layouts/modals/Admin.vue'))
+const ChangeModal = defineAsyncComponent(() => import('@/layouts/modals/Changes.vue'))
+const TokenModal = defineAsyncComponent(() => import('@/layouts/modals/Token.vue'))
 
 const loading:Ref = inject('loading')?? ref(false)
 

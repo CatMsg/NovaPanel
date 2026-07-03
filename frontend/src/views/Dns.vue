@@ -210,12 +210,13 @@
 
 <script lang="ts" setup>
 import Data from '@/store/modules/data'
-import { computed, ref, onBeforeMount } from 'vue'
-import DnsVue from '@/layouts/modals/Dns.vue'
-import DnsRuleVue from '@/layouts/modals/DnsRule.vue'
+import { computed, defineAsyncComponent, ref, onBeforeMount } from 'vue'
 import { Config } from '@/types/config'
 import { actionDnsRuleKeys, dnsRule } from '@/types/dns'
 import { FindDiff } from '@/plugins/utils'
+
+const DnsVue = defineAsyncComponent(() => import('@/layouts/modals/Dns.vue'))
+const DnsRuleVue = defineAsyncComponent(() => import('@/layouts/modals/DnsRule.vue'))
 
 const oldConfig = ref(<any>{})
 const loading = ref(false)

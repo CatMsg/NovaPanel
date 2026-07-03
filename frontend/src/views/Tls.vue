@@ -85,11 +85,12 @@
 </template>
 
 <script lang="ts" setup>
-import TlsVue from '@/layouts/modals/Tls.vue'
 import Data from '@/store/modules/data'
-import { computed, ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import { Inbound } from '@/types/inbounds'
 import { tls } from '@/types/tls'
+
+const TlsVue = defineAsyncComponent(() => import('@/layouts/modals/Tls.vue'))
 
 const tlsConfigs = computed((): any[] => {
   return Data().tlsConfigs

@@ -140,13 +140,14 @@
 
 <script lang="ts" setup>
 import Data from '@/store/modules/data'
-import EndpointVue from '@/layouts/modals/Endpoint.vue'
-import Stats from '@/layouts/modals/Stats.vue'
-import MasqueStatus from '@/layouts/modals/MasqueStatus.vue'
-import QrCode from '@/layouts/modals/WgQrCode.vue'
 import { Endpoint } from '@/types/endpoints'
 import { buildMasqueConfig } from '@/plugins/masqueUtil'
-import { computed, ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
+
+const EndpointVue = defineAsyncComponent(() => import('@/layouts/modals/Endpoint.vue'))
+const Stats = defineAsyncComponent(() => import('@/layouts/modals/Stats.vue'))
+const MasqueStatus = defineAsyncComponent(() => import('@/layouts/modals/MasqueStatus.vue'))
+const QrCode = defineAsyncComponent(() => import('@/layouts/modals/WgQrCode.vue'))
 
 const endpoints = computed((): Endpoint[] => {
   return <Endpoint[]> Data().endpoints

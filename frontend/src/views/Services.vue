@@ -76,8 +76,9 @@
 <script lang="ts" setup>
 import Data from '@/store/modules/data'
 import { Srv } from '@/types/services'
-import { computed, ref } from 'vue'
-import ServiceVue from '@/layouts/modals/Service.vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
+
+const ServiceVue = defineAsyncComponent(() => import('@/layouts/modals/Service.vue'))
 
 const services = computed((): Srv[] => {
   return <Srv[]> Data().services

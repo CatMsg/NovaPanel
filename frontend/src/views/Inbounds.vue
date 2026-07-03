@@ -108,12 +108,13 @@
 
 <script lang="ts" setup>
 import Data from '@/store/modules/data'
-import InboundVue from '@/layouts/modals/Inbound.vue'
-import Stats from '@/layouts/modals/Stats.vue'
 import { Config } from '@/types/config'
-import { computed, ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import { createInbound, Inbound } from '@/types/inbounds'
 import RandomUtil from '@/plugins/randomUtil'
+
+const InboundVue = defineAsyncComponent(() => import('@/layouts/modals/Inbound.vue'))
+const Stats = defineAsyncComponent(() => import('@/layouts/modals/Stats.vue'))
 
 const appConfig = computed((): Config => {
   return <Config> Data().config

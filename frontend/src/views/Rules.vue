@@ -163,14 +163,15 @@
 
 <script lang="ts" setup>
 import Data from '@/store/modules/data'
-import { computed, ref, onBeforeMount } from 'vue'
-import RuleVue from '@/layouts/modals/Rule.vue'
-import RulesetVue from '@/layouts/modals/Ruleset.vue'
-import RulesetImport from '@/layouts/modals/RulesetImport.vue'
-import RuleImport from '@/layouts/modals/RuleImport.vue'
+import { computed, defineAsyncComponent, ref, onBeforeMount } from 'vue'
 import { Config } from '@/types/config'
 import { actionKeys, ruleset } from '@/types/rules'
 import { FindDiff } from '@/plugins/utils'
+
+const RuleVue = defineAsyncComponent(() => import('@/layouts/modals/Rule.vue'))
+const RulesetVue = defineAsyncComponent(() => import('@/layouts/modals/Ruleset.vue'))
+const RulesetImport = defineAsyncComponent(() => import('@/layouts/modals/RulesetImport.vue'))
+const RuleImport = defineAsyncComponent(() => import('@/layouts/modals/RuleImport.vue'))
 
 const oldConfig = ref({})
 const loading = ref(false)

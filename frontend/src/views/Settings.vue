@@ -175,12 +175,13 @@
 
 <script lang="ts" setup>
 import { i18n } from '@/locales'
-import { Ref, computed, inject, onMounted, ref } from 'vue'
+import { Ref, computed, defineAsyncComponent, inject, onMounted, ref } from 'vue'
 import HttpUtils from '@/plugins/httputil'
 import { FindDiff } from '@/plugins/utils'
-import SubJsonExtVue from '@/components/SubJsonExt.vue'
-import SubClashExtVue from '@/components/SubClashExt.vue'
 import { push } from 'notivue'
+
+const SubJsonExtVue = defineAsyncComponent(() => import('@/components/SubJsonExt.vue'))
+const SubClashExtVue = defineAsyncComponent(() => import('@/components/SubClashExt.vue'))
 const tab = ref("t1")
 const loading:Ref = inject('loading')?? ref(false)
 const oldSettings = ref({})
