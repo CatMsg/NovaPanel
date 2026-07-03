@@ -149,6 +149,7 @@ func (s *StatsService) GetOnlines() (onlines, error) {
 }
 func (s *StatsService) DelOldStats(days int) error {
 	oldTime := time.Now().AddDate(0, 0, -(days)).Unix()
-	db := database.GetDB()
-	return db.Where("date_time < ?", oldTime).Delete(model.Stats{}).Error
+	return retryWrite(func(db *gorm.DB) error {
+		return db.Where("date_time < ?", oldTime).Delete(model.Stats{}).Error
+	})
 }

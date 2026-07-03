@@ -88,13 +88,23 @@ func (s *SettingService) GetAllSetting() (*map[string]string, error) {
 		allSetting[setting.Key] = setting.Value
 	}
 
+	missingDefaults := make(map[string]string)
 	for key, defaultValue := range defaultValueMap {
 		if _, exists := allSetting[key]; !exists {
-			err = s.saveSetting(key, defaultValue)
-			if err != nil {
-				return nil, err
-			}
+			missingDefaults[key] = defaultValue
 			allSetting[key] = defaultValue
+		}
+	}
+	if len(missingDefaults) > 0 {
+		if err := retryWriteTx(func(tx *gorm.DB) error {
+			for key, value := range missingDefaults {
+				if err := s.saveSettingTx(tx, key, value); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			return nil, err
 		}
 	}
 
@@ -178,25 +188,29 @@ func (s *SettingService) getString(key string) (string, error) {
 }
 
 func (s *SettingService) saveSetting(key string, value string) error {
-	return retryWrite(func(db *gorm.DB) error {
-		setting := &model.Setting{}
-		err := db.Model(model.Setting{}).Where("key = ?", key).First(setting).Error
-		if database.IsNotFound(err) {
-			return db.Create(&model.Setting{
-				Key:   key,
-				Value: value,
-			}).Error
-		} else if err != nil {
-			return err
-		}
-		setting.Key = key
-		setting.Value = value
-		return db.Save(setting).Error
+	return retryWriteTx(func(tx *gorm.DB) error {
+		return s.saveSettingTx(tx, key, value)
 	})
 }
 
 func (s *SettingService) setString(key string, value string) error {
 	return s.saveSetting(key, value)
+}
+
+func (s *SettingService) saveSettingTx(tx *gorm.DB, key string, value string) error {
+	setting := &model.Setting{}
+	err := tx.Model(model.Setting{}).Where("key = ?", key).First(setting).Error
+	if database.IsNotFound(err) {
+		return tx.Create(&model.Setting{
+			Key:   key,
+			Value: value,
+		}).Error
+	} else if err != nil {
+		return err
+	}
+	setting.Key = key
+	setting.Value = value
+	return tx.Save(setting).Error
 }
 
 func (s *SettingService) getBool(key string) (bool, error) {
@@ -548,7 +562,7 @@ func (s *SettingService) Save(tx *gorm.DB, data json.RawMessage) (func() error, 
 				return nil, err
 			}
 		}
-		err = tx.Model(model.Setting{}).Where("key = ?", key).Update("value", obj).Error
+		err = s.saveSettingTx(tx, key, obj)
 		if err != nil {
 			return nil, err
 		}

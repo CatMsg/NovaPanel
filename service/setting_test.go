@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/CatMsg/NovaPanel/database"
+	"github.com/CatMsg/NovaPanel/database/model"
 )
 
 func TestSettingServiceFileExistsStrict(t *testing.T) {
@@ -199,5 +200,77 @@ printf '%s\n' "$*" >> "${HY2_MOCK_LOG:?}"
 	}
 	if !strings.Contains(log, "apply panel-sub-port 3001 3001 tcp") {
 		t.Fatalf("sub port forwarding was not applied post-commit:\n%s", log)
+	}
+}
+
+func TestGetAllSettingPersistsMissingDefaults(t *testing.T) {
+	workDir := t.TempDir()
+	if err := database.InitDB(filepath.Join(workDir, "defaults.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	svc := &SettingService{}
+	if err := svc.ResetSettings(); err != nil {
+		t.Fatalf("reset settings: %v", err)
+	}
+
+	allSetting, err := svc.GetAllSetting()
+	if err != nil {
+		t.Fatalf("get all settings: %v", err)
+	}
+	if (*allSetting)["webPort"] != "2095" || (*allSetting)["subPort"] != "2096" {
+		t.Fatalf("missing default settings in response: %#v", *allSetting)
+	}
+
+	var count int64
+	if err := database.GetDB().Model(model.Setting{}).Count(&count).Error; err != nil {
+		t.Fatalf("count settings: %v", err)
+	}
+	if count == 0 {
+		t.Fatal("expected missing defaults to be persisted")
+	}
+}
+
+func TestSettingSaveCreatesMissingKeys(t *testing.T) {
+	workDir := t.TempDir()
+	if err := database.InitDB(filepath.Join(workDir, "missing-keys.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	svc := &SettingService{}
+	if err := svc.ResetSettings(); err != nil {
+		t.Fatalf("reset settings: %v", err)
+	}
+
+	tx := database.GetDB().Begin()
+	if tx.Error != nil {
+		t.Fatalf("begin tx: %v", tx.Error)
+	}
+
+	postCommit, err := svc.Save(tx, json.RawMessage(`{
+		"webPort":"4000",
+		"subPort":"4001"
+	}`))
+	if err != nil {
+		tx.Rollback()
+		t.Fatalf("save settings with missing keys: %v", err)
+	}
+	if err := tx.Commit().Error; err != nil {
+		t.Fatalf("commit tx: %v", err)
+	}
+	if postCommit != nil {
+		_ = postCommit
+	}
+
+	webPort, err := svc.getString("webPort")
+	if err != nil {
+		t.Fatalf("load webPort: %v", err)
+	}
+	subPort, err := svc.getString("subPort")
+	if err != nil {
+		t.Fatalf("load subPort: %v", err)
+	}
+	if webPort != "4000" || subPort != "4001" {
+		t.Fatalf("expected upserted setting values, got webPort=%s subPort=%s", webPort, subPort)
 	}
 }
