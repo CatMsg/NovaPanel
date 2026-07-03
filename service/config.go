@@ -102,7 +102,11 @@ func (s *ConfigService) StartCore() error {
 		return nil
 	}
 	if time.Since(lastStartFailTime) < startCooldown {
-		logger.Info("start core cooldown ", startCooldown/time.Second, " seconds")
+		remaining := time.Until(lastStartFailTime.Add(startCooldown))
+		if remaining < 0 {
+			remaining = 0
+		}
+		logger.Info("start core cooldown ", remaining.Round(time.Second))
 		startCoreMu.Unlock()
 		return nil
 	}
