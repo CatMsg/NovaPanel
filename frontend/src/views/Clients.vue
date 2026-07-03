@@ -250,17 +250,18 @@
 </style>
 <script lang="ts" setup>
 import Data from '@/store/modules/data'
-import ClientModal from '@/layouts/modals/Client.vue'
-import ClientAddBulk from '@/layouts/modals/ClientAddBulk.vue'
-import ClientEditBulk from '@/layouts/modals/ClientEditBulk.vue'
-import ClientHistory from '@/layouts/modals/ClientHistory.vue'
-import QrCode from '@/layouts/modals/QrCode.vue'
-import Stats from '@/layouts/modals/Stats.vue'
 import { Client } from '@/types/clients'
-import { computed, ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import { HumanReadable } from '@/plugins/utils'
 import { i18n, locale } from '@/locales'
 import { useDisplay } from 'vuetify'
+
+const ClientModal = defineAsyncComponent(() => import('@/layouts/modals/Client.vue'))
+const ClientAddBulk = defineAsyncComponent(() => import('@/layouts/modals/ClientAddBulk.vue'))
+const ClientEditBulk = defineAsyncComponent(() => import('@/layouts/modals/ClientEditBulk.vue'))
+const ClientHistory = defineAsyncComponent(() => import('@/layouts/modals/ClientHistory.vue'))
+const QrCode = defineAsyncComponent(() => import('@/layouts/modals/QrCode.vue'))
+const Stats = defineAsyncComponent(() => import('@/layouts/modals/Stats.vue'))
 
 const { smAndDown } = useDisplay()
 

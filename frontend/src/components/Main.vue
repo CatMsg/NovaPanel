@@ -70,13 +70,14 @@ import MainHero from '@/components/dashboard/MainHero.vue'
 import MainToolbar from '@/components/dashboard/MainToolbar.vue'
 import MainSystemCard from '@/components/dashboard/MainSystemCard.vue'
 import MainRuntimeCard from '@/components/dashboard/MainRuntimeCard.vue'
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref } from 'vue'
 import { i18n } from '@/locales'
-import LogVue from '@/layouts/modals/Logs.vue'
-import Backup from '@/layouts/modals/Backup.vue'
-import UsageStats from '@/layouts/modals/UsageStats.vue'
 import logoUrl from '@/assets/logo.png'
 import { isPageVisible, onPageVisibilityChange } from '@/utils/pageVisibility'
+
+const LogVue = defineAsyncComponent(() => import('@/layouts/modals/Logs.vue'))
+const Backup = defineAsyncComponent(() => import('@/layouts/modals/Backup.vue'))
+const UsageStats = defineAsyncComponent(() => import('@/layouts/modals/UsageStats.vue'))
 
 const loading = ref(false)
 const menu = ref(false)

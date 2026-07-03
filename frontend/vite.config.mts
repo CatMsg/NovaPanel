@@ -25,10 +25,32 @@ export default defineConfig({
     chunkSizeWarningLimit: 2000,
     rollupOptions: {
       output: {
-        codeSplitting: false,
         entryFileNames: 'assets/[name]-[hash].js',
         chunkFileNames: 'assets/[name]-[hash].js',
         assetFileNames: 'assets/[name]-[hash][extname]',
+        manualChunks(id) {
+          if (!id.includes('node_modules')) {
+            return undefined
+          }
+
+          if (id.includes('vue/') || id.includes('vue-router') || id.includes('pinia')) {
+            return 'framework'
+          }
+          if (id.includes('vuetify') || id.includes('@mdi/font') || id.includes('roboto-fontface')) {
+            return 'ui'
+          }
+          if (id.includes('chart.js') || id.includes('vue-chartjs')) {
+            return 'charts'
+          }
+          if (id.includes('vue3-persian-datetime-picker') || id.includes('moment')) {
+            return 'datetime'
+          }
+          if (id.includes('notivue') || id.includes('axios') || id.includes('yaml') || id.includes('qrcode.vue')) {
+            return 'vendor'
+          }
+
+          return 'vendor'
+        },
       },
     }
   },
