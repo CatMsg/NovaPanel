@@ -14,6 +14,25 @@ import (
 type UserService struct {
 }
 
+func (s *UserService) saveUserTx(tx *gorm.DB, user *model.User) error {
+	if user == nil {
+		return common.NewError("user can not be nil")
+	}
+	if user.Id > 0 {
+		return tx.Save(user).Error
+	}
+	return tx.Model(model.User{}).Create(user).Error
+}
+
+func (s *UserService) resolveUserIDTx(tx *gorm.DB, username string) (uint, error) {
+	user := &model.User{}
+	err := tx.Model(model.User{}).Select("id").Where("username = ?", username).First(user).Error
+	if err != nil {
+		return 0, err
+	}
+	return user.Id, nil
+}
+
 func (s *UserService) GetFirstUser() (*model.User, error) {
 	db := database.GetDB()
 
@@ -33,19 +52,19 @@ func (s *UserService) UpdateFirstUser(username string, password string) error {
 	} else if password == "" {
 		return common.NewError("password can not be empty")
 	}
-	return retryWrite(func(db *gorm.DB) error {
+	return retryWriteTx(func(tx *gorm.DB) error {
 		user := &model.User{}
-		err := db.Model(model.User{}).First(user).Error
+		err := tx.Model(model.User{}).First(user).Error
 		if database.IsNotFound(err) {
 			user.Username = username
 			user.Password = password
-			return db.Model(model.User{}).Create(user).Error
+			return s.saveUserTx(tx, user)
 		} else if err != nil {
 			return err
 		}
 		user.Username = username
 		user.Password = password
-		return db.Save(user).Error
+		return s.saveUserTx(tx, user)
 	})
 }
 
@@ -95,15 +114,15 @@ func (s *UserService) GetUsers() (*[]model.User, error) {
 }
 
 func (s *UserService) ChangePass(id string, oldPass string, newUser string, newPass string) error {
-	return retryWrite(func(db *gorm.DB) error {
+	return retryWriteTx(func(tx *gorm.DB) error {
 		user := &model.User{}
-		err := db.Model(model.User{}).Where("id = ? AND password = ?", id, oldPass).First(user).Error
+		err := tx.Model(model.User{}).Where("id = ? AND password = ?", id, oldPass).First(user).Error
 		if err != nil || database.IsNotFound(err) {
 			return err
 		}
 		user.Username = newUser
 		user.Password = newPass
-		return db.Save(user).Error
+		return s.saveUserTx(tx, user)
 	})
 }
 
@@ -148,8 +167,8 @@ func (s *UserService) AddToken(username string, expiry int64, desc string) (stri
 	}
 
 	err := retryWrite(func(db *gorm.DB) error {
-		var userId uint
-		if err := db.Model(model.User{}).Where("username = ?", username).Select("id").Scan(&userId).Error; err != nil {
+		userId, err := s.resolveUserIDTx(db, username)
+		if err != nil {
 			return err
 		}
 		token.UserId = userId
