@@ -22,6 +22,10 @@
       </v-col>
       <v-col cols="12" sm="10" md="8" lg="4" class="login-shell__right">
         <v-card class="login-card" rounded="xl" variant="flat">
+          <div class="login-card__topline">
+            <span class="login-card__badge">{{ $t('login.title') }}</span>
+            <span class="login-card__badge login-card__badge--soft">{{ $t('version') }} v{{ version }}</span>
+          </div>
           <v-card-title class="login-card__title" v-text="$t('login.title')"></v-card-title>
           <v-card-text>
             <v-form @submit.prevent="login" ref="form" class="login-form">
@@ -31,6 +35,7 @@
             </v-form>
             <div class="login-actions">
               <v-select
+                class="login-actions__select"
                 density="compact"
                 hide-details
                 variant="solo-filled"
@@ -40,7 +45,7 @@
                 <template v-slot:append>
                   <v-menu>
                     <template v-slot:activator="{ props }">
-                      <v-btn icon v-bind="props" variant="text">
+                      <v-btn icon v-bind="props" variant="text" class="login-actions__theme">
                         <v-icon>mdi-theme-light-dark</v-icon>
                       </v-btn>
                     </template>
@@ -232,12 +237,38 @@ const isActiveTheme = (th: string) => {
   backdrop-filter: blur(18px) saturate(1.04);
 }
 
+.login-card__topline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px 18px 0;
+}
+
+.login-card__badge {
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--np-accent);
+  background: rgba(10, 132, 255, 0.08);
+}
+
+.login-card__badge--soft {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--np-text-muted);
+  background: rgba(148, 163, 184, 0.12);
+}
+
 .login-card__title {
+  padding-inline: 18px;
   font-size: 1.15rem;
   font-weight: 800;
 }
 
 .login-form {
+  padding-inline: 12px;
   display: grid;
   gap: 14px;
 }
@@ -252,6 +283,23 @@ const isActiveTheme = (th: string) => {
 
 .login-actions {
   margin-top: 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.login-actions__select,
+.login-actions__theme {
+  width: 100%;
+}
+
+.login-actions__theme {
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+}
+
+:global(.v-theme--dark) .login-card__badge--soft {
+  color: rgba(237, 244, 255, 0.76);
 }
 
 :global(.v-theme--dark) .login-brand__subtitle {

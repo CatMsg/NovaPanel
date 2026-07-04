@@ -1,7 +1,15 @@
 <template>
   <v-dialog transition="dialog-bottom-transition" width="800" @after-enter="updateData(id)">
-    <v-card class="rounded-lg" :loading="loading">
-      <v-card-title>
+    <v-card class="rounded-lg modal-shell" :loading="loading">
+      <v-card-title class="modal-shell__title">
+        <div class="modal-shell__topline">
+          <v-chip size="small" variant="tonal" color="primary" class="modal-shell__badge">
+            {{ $t('objects.inbound') }}
+          </v-chip>
+          <v-chip size="small" variant="tonal" color="secondary" class="modal-shell__badge modal-shell__badge--soft">
+            {{ $t('actions.' + title) }}
+          </v-chip>
+        </div>
         {{ $t('actions.' + title) + " " + $t('objects.inbound') }}
       </v-card-title>
       <v-divider></v-divider>
@@ -75,7 +83,7 @@
           </v-window>
         </v-container>
       </v-card-text>
-      <v-card-actions>
+      <v-card-actions class="modal-shell__actions">
         <v-spacer></v-spacer>
         <v-btn
           color="primary"
@@ -285,3 +293,46 @@ export default {
   }
 }
 </script>
+
+<style scoped lang="scss">
+.modal-shell {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(243, 248, 255, 0.96));
+  backdrop-filter: blur(24px) saturate(150%);
+  border: 1px solid rgba(102, 153, 255, 0.18);
+  box-shadow: 0 18px 48px rgba(51, 87, 168, 0.16);
+}
+
+.modal-shell__topline {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.modal-shell__badge {
+  letter-spacing: 0.04em;
+  font-weight: 700;
+}
+
+.modal-shell__badge--soft {
+  opacity: 0.88;
+}
+
+.modal-shell__title {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding-bottom: 14px;
+}
+
+.modal-shell__actions {
+  padding: 16px 20px 20px;
+}
+
+:global(.v-theme--dark) .modal-shell {
+  background: linear-gradient(180deg, rgba(18, 23, 37, 0.98), rgba(14, 17, 28, 0.96));
+  border-color: rgba(120, 146, 255, 0.16);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.36);
+}
+</style>

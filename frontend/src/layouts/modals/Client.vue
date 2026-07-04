@@ -1,7 +1,11 @@
 <template>
   <v-dialog transition="dialog-bottom-transition" width="800">
-    <v-card class="rounded-lg" :loading="loading">
-      <v-card-title>
+    <v-card class="rounded-lg modal-shell" :loading="loading">
+      <div class="modal-shell__topline">
+        <span class="modal-shell__badge">{{ $t('objects.client') }}</span>
+        <span class="modal-shell__badge modal-shell__badge--soft">{{ $t('client.basics') }}</span>
+      </div>
+      <v-card-title class="modal-shell__title">
         {{ $t('actions.' + title) + " " + $t('objects.client') }}
       </v-card-title>
       <v-divider></v-divider>
@@ -200,7 +204,7 @@
           </v-window>
         </v-container>
       </v-card-text>
-      <v-card-actions>
+      <v-card-actions class="modal-shell__actions">
         <v-spacer></v-spacer>
         <v-btn
           color="primary"
@@ -368,3 +372,55 @@ export default {
 }
 
 </script>
+
+<style scoped lang="scss">
+.modal-shell {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.22), transparent 28%),
+    var(--np-surface);
+  border: 1px solid var(--np-border);
+  box-shadow: var(--np-shadow);
+  backdrop-filter: blur(28px) saturate(1.12);
+}
+
+.modal-shell__topline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px 18px 0;
+}
+
+.modal-shell__badge {
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--np-accent);
+  background: rgba(10, 132, 255, 0.08);
+}
+
+.modal-shell__badge--soft {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--np-text-muted);
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.modal-shell__title {
+  padding-inline: 18px;
+  font-weight: 800;
+}
+
+.modal-shell__actions {
+  padding-inline: 18px 18px;
+}
+
+:global(.v-theme--dark) .modal-shell {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 24%),
+    rgba(11, 18, 31, 0.78);
+  border-color: rgba(148, 163, 184, 0.16);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
+}
+</style>
