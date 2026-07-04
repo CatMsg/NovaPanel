@@ -154,6 +154,11 @@ body::after {
 .page-shell {
   width: min(1500px, 100%);
   margin: 0 auto;
+  padding-bottom: 8px;
+}
+
+.page-shell > * + * {
+  margin-top: 16px;
 }
 
 .page-shell > .v-row:first-of-type,
@@ -444,6 +449,7 @@ body::after {
 .v-data-table {
   background: var(--np-surface);
   box-shadow: var(--np-shadow);
+  scrollbar-gutter: stable both-edges;
 }
 
 .v-table thead th,
@@ -452,6 +458,18 @@ body::after {
   font-weight: 700;
   color: var(--np-text-main);
   white-space: nowrap;
+}
+
+.v-data-table thead th,
+.v-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.v-data-table tbody td,
+.v-table tbody td {
+  color: var(--np-text-main);
 }
 
 .v-table tbody tr:hover,
@@ -493,6 +511,17 @@ body::after {
 .v-theme--dark .v-overlay__content .v-card {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
+}
+
+.v-theme--dark .v-table thead th,
+.v-theme--dark .v-data-table thead th {
+  background: rgba(125, 211, 252, 0.08);
+  color: rgba(237, 244, 255, 0.92);
+}
+
+.v-theme--dark .v-table tbody td,
+.v-theme--dark .v-data-table tbody td {
+  color: rgba(237, 244, 255, 0.94);
 }
 
 .v-overlay .v-list-item,
@@ -551,6 +580,10 @@ body::after {
   .page-shell > .v-card:first-of-type,
   .page-shell > .v-sheet:first-of-type {
     margin-top: 8px;
+  }
+
+  .page-shell > * + * {
+    margin-top: 12px;
   }
 
   .app-bar__title {
