@@ -99,7 +99,7 @@
           </v-row>
         </v-card-text>
         <v-divider></v-divider>
-        <v-card-actions style="padding: 0;">
+        <v-card-actions class="resource-card__actions">
           <v-btn icon="mdi-file-edit" @click="showModal(item.id)">
             <v-icon />
             <v-tooltip activator="parent" location="top" :text="$t('actions.edit')"></v-tooltip>
@@ -316,6 +316,30 @@ const closeStats = () => {
 .resource-card {
   overflow: hidden;
   min-height: 100%;
+}
+
+.resource-card :deep(.v-card-title) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resource-card :deep(.v-card-text .v-col) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.resource-card__actions {
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+}
+
+.resource-card__actions :deep(.v-btn) {
+  flex: 0 0 auto;
 }
 
 .v-theme--dark .resource-hero,

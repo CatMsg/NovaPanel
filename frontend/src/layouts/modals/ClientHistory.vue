@@ -529,6 +529,9 @@ watch(
 
 .history-dialog__table :deep(.v-data-table-footer) {
   flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 52px;
   border-top: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
   background: rgba(var(--v-theme-surface), 0.88);
 }

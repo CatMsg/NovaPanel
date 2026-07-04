@@ -360,6 +360,18 @@ const copyMasque = async (item: any) => {
   min-height: 100%;
 }
 
+.resource-card :deep(.v-card-title) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resource-card :deep(.v-card-text .v-col) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .endpoint-actions {
   padding: 0;
   display: flex;

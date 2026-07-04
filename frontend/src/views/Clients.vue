@@ -224,49 +224,48 @@
           </div>
         </template>
         <template v-slot:item.actions="{ item }">
-        <v-icon
-          class="me-2"
-          @click="showModal(item.id)"
-        >
-          mdi-pencil
-        </v-icon>
-        <v-menu
-          v-model="delOverlay[clients.findIndex(c => c.id == item.id)]"
-          :close-on-content-click="false"
-          location="top center"
-        >
-          <template v-slot:activator="{ props }">
-            <v-icon
-              class="me-2"
-              color="error"
-              v-bind="props"
-            >
-              mdi-delete
+        <div class="clients-table__actions">
+          <v-icon
+            @click="showModal(item.id)"
+          >
+            mdi-pencil
+          </v-icon>
+          <v-menu
+            v-model="delOverlay[clients.findIndex(c => c.id == item.id)]"
+            :close-on-content-click="false"
+            location="top center"
+          >
+            <template v-slot:activator="{ props }">
+              <v-icon
+                color="error"
+                v-bind="props"
+              >
+                mdi-delete
+              </v-icon>
+            </template>
+            <v-card :title="$t('actions.del')" rounded="lg">
+              <v-divider></v-divider>
+              <v-card-text>{{ $t('confirm') }}</v-card-text>
+              <v-card-actions>
+                <v-btn color="error" variant="outlined" @click="delClient(item.id)">{{ $t('yes') }}</v-btn>
+                <v-btn color="success" variant="outlined" @click="delOverlay[clients.findIndex(c => c.id == item.id)] = false">{{ $t('no') }}</v-btn>
+              </v-card-actions>
+            </v-card>
+          </v-menu>
+          <v-icon
+            @click="showQrCode(item.id)"
+          >
+            mdi-qrcode
+          </v-icon>
+          <template v-if="Data().enableTraffic">
+            <v-icon icon="mdi-chart-line" @click="showStats(item.name)">
+              <v-tooltip activator="parent" location="top" :text="$t('stats.graphTitle')"></v-tooltip>
+            </v-icon>
+            <v-icon icon="mdi-history" @click="showHistory(item.id)">
+              <v-tooltip activator="parent" location="top" :text="$t('client.history')"></v-tooltip>
             </v-icon>
           </template>
-          <v-card :title="$t('actions.del')" rounded="lg">
-            <v-divider></v-divider>
-            <v-card-text>{{ $t('confirm') }}</v-card-text>
-            <v-card-actions>
-              <v-btn color="error" variant="outlined" @click="delClient(item.id)">{{ $t('yes') }}</v-btn>
-              <v-btn color="success" variant="outlined" @click="delOverlay[clients.findIndex(c => c.id == item.id)] = false">{{ $t('no') }}</v-btn>
-            </v-card-actions>
-          </v-card>
-        </v-menu>
-        <v-icon
-          class="me-2"
-          @click="showQrCode(item.id)"
-        >
-          mdi-qrcode
-        </v-icon>
-        <template v-if="Data().enableTraffic">
-          <v-icon icon="mdi-chart-line" @click="showStats(item.name)">
-            <v-tooltip activator="parent" location="top" :text="$t('stats.graphTitle')"></v-tooltip>
-          </v-icon>
-          <v-icon icon="mdi-history" @click="showHistory(item.id)">
-            <v-tooltip activator="parent" location="top" :text="$t('client.history')"></v-tooltip>
-          </v-icon>
-        </template>
+        </div>
       </template>
       </v-data-table>
   </v-card>
@@ -277,7 +276,10 @@
   min-height: 36px !important;
 }
 .v-data-table__tr--mobile td div {
-  width:max-content;
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .clients-hero,
@@ -422,7 +424,12 @@
 }
 
 .clients-table .v-table__wrapper {
+  overflow-x: auto;
   scrollbar-gutter: stable both-edges;
+}
+
+.clients-table .v-table__wrapper table {
+  min-width: 980px;
 }
 
 .clients-table thead th {
@@ -437,6 +444,23 @@
 
 .clients-table tbody tr:hover {
   background: rgba(10, 132, 255, 0.04);
+}
+
+.clients-table__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.clients-table__actions .v-icon {
+  flex: 0 0 auto;
+}
+
+.clients-table .v-data-table-footer {
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 52px;
 }
 
 .v-theme--dark .clients-hero,
@@ -489,6 +513,19 @@
 
   .clients-table-card__head {
     flex-direction: column;
+  }
+
+  .clients-table .v-table__wrapper table {
+    min-width: 0;
+  }
+
+  .clients-table__actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .clients-table .v-data-table-footer__items-per-page {
+    display: none;
   }
 }
 </style>
