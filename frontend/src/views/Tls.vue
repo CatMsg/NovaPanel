@@ -7,14 +7,44 @@
     @close="closeModal"
     @save="saveModal"
   />
-  <v-row>
-    <v-col cols="12" justify="center" align="center">
-      <v-btn color="primary" @click="showModal(0)">{{ $t('actions.add') }}</v-btn>
-    </v-col>
-  </v-row>
-  <v-row>
-    <v-col cols="12" sm="4" md="3" lg="2" v-for="(item, index) in <any[]>tlsConfigs" :key="item.id">
-      <v-card rounded="xl" elevation="5" min-width="200" :title="item.name">
+  <v-card class="resource-hero resource-hero--tls" rounded="xl" variant="flat">
+    <div class="resource-hero__topline">
+      <span class="resource-hero__badge">{{ $t('objects.tls') }}</span>
+      <span class="resource-hero__badge resource-hero__badge--soft">{{ tlsConfigs.length }} items</span>
+    </div>
+    <v-row class="resource-hero__content" align="center">
+      <v-col cols="12" lg="8">
+        <div class="resource-hero__title-row">
+          <div class="resource-hero__icon">
+            <v-icon icon="mdi-certificate-outline" size="32" />
+          </div>
+          <div>
+            <h1 class="resource-hero__title">{{ $t('objects.tls') }}</h1>
+            <p class="resource-hero__subtitle">
+              集中管理证书配置、ACME、ECH 与 Reality 选项，减少在多个弹窗里来回切换。
+            </p>
+          </div>
+        </div>
+        <div class="resource-hero__meta">
+          <span>总数 {{ tlsConfigs.length }}</span>
+          <span>•</span>
+          <span>已绑定入站 {{ tlsConfigs.filter(t => tlsInbounds(t.id).length > 0).length }}</span>
+          <span>•</span>
+          <span>可复制 {{ tlsConfigs.length }}</span>
+        </div>
+      </v-col>
+      <v-col cols="12" lg="4" class="resource-hero__actions">
+        <v-btn color="primary" size="large" @click="showModal(0)">
+          <v-icon icon="mdi-plus" start />
+          {{ $t('actions.add') }}
+        </v-btn>
+      </v-col>
+    </v-row>
+  </v-card>
+
+  <v-row class="resource-grid">
+    <v-col cols="12" sm="6" md="4" lg="3" v-for="(item, index) in <any[]>tlsConfigs" :key="item.id">
+      <v-card class="resource-card" rounded="xl" variant="flat" :title="item.name">
         <v-card-subtitle style="margin-top: -15px;">
           {{ item.server?.server_name?.length>0 ? item.server.server_name : "-" }}
         </v-card-subtitle>
@@ -140,3 +170,132 @@ const delTls = async (id: number) => {
 }
 
 </script>
+
+<style scoped lang="scss">
+.resource-hero,
+.resource-card {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.22), transparent 28%),
+    var(--np-surface);
+  border: 1px solid var(--np-border);
+  box-shadow: var(--np-shadow);
+  backdrop-filter: blur(28px) saturate(1.12);
+}
+
+.resource-hero {
+  padding: 20px;
+  margin-bottom: 18px;
+  overflow: hidden;
+}
+
+.resource-hero__topline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.resource-hero__badge {
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--np-accent);
+  background: rgba(10, 132, 255, 0.08);
+}
+
+.resource-hero__badge--soft {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--np-text-muted);
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.resource-hero__content {
+  min-height: 120px;
+}
+
+.resource-hero__title-row {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.resource-hero__icon {
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  color: var(--np-accent);
+  background: linear-gradient(145deg, rgba(59, 130, 246, 0.16), rgba(14, 165, 233, 0.08));
+}
+
+.resource-hero__title {
+  margin: 0;
+  font-size: clamp(28px, 3vw, 40px);
+  line-height: 1.1;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.resource-hero__subtitle {
+  margin: 12px 0 0;
+  color: var(--np-text-muted);
+  line-height: 1.7;
+}
+
+.resource-hero__meta {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--np-text-muted);
+  font-size: 13px;
+}
+
+.resource-hero__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.resource-grid {
+  margin-top: 0;
+}
+
+.resource-card {
+  overflow: hidden;
+  min-height: 100%;
+}
+
+.v-theme--dark .resource-hero,
+.v-theme--dark .resource-card {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 24%),
+    rgba(11, 18, 31, 0.78);
+  border-color: rgba(148, 163, 184, 0.16);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
+}
+
+@media (max-width: 960px) {
+  .resource-hero {
+    padding: 16px;
+  }
+
+  .resource-hero__actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 600px) {
+  .resource-hero__icon {
+    width: 46px;
+    height: 46px;
+  }
+
+  .resource-hero__title {
+    font-size: 24px;
+  }
+}
+</style>

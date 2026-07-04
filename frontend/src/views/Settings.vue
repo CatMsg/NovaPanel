@@ -1,32 +1,57 @@
 <template>
-  <v-card :loading="loading">
-    <v-tabs
-    v-model="tab"
-    color="primary"
-    align-tabs="center"
-    show-arrows
-  >
-    <v-tab value="t1">{{ $t('setting.interface') }}</v-tab>
-    <v-tab value="t2">{{ $t('setting.sub') }}</v-tab>
-    <v-tab value="t3">{{ $t('setting.jsonSub') }}</v-tab>
-    <v-tab value="t4">{{ $t('setting.clashSub') }}</v-tab>
-  </v-tabs>
-  <v-card-text>
-    <v-row align="center" justify="center" style="margin-bottom: 10px;">
-      <v-col cols="auto">
-        <v-btn color="primary" @click="save" :loading="loading" :disabled="!stateChange">
+  <v-card class="settings-hero" rounded="xl" variant="flat">
+    <div class="settings-hero__topline">
+      <span class="settings-hero__badge">{{ $t('pages.settings') }}</span>
+      <span class="settings-hero__badge settings-hero__badge--soft">{{ stateChange ? '未保存' : '已同步' }}</span>
+    </div>
+    <v-row class="settings-hero__content" align="center">
+      <v-col cols="12" lg="8">
+        <div class="settings-hero__title-row">
+          <div class="settings-hero__icon">
+            <v-icon icon="mdi-cog-outline" size="32" />
+          </div>
+          <div>
+            <h1 class="settings-hero__title">{{ $t('pages.settings') }}</h1>
+            <p class="settings-hero__subtitle">
+              管理面板界面、订阅输出和路径设置，所有配置集中在一页里，便于检查和回退。
+            </p>
+          </div>
+        </div>
+        <div class="settings-hero__meta">
+          <span>当前标签 {{ tab }}</span>
+          <span>•</span>
+          <span>{{ stateChange ? '未保存更改' : '配置已同步' }}</span>
+        </div>
+      </v-col>
+      <v-col cols="12" lg="4" class="settings-hero__actions">
+        <v-btn color="primary" size="large" @click="save" :loading="loading" :disabled="!stateChange">
+          <v-icon icon="mdi-content-save-outline" start />
           {{ $t('actions.save') }}
         </v-btn>
-      </v-col>
-      <v-col cols="auto">
         <v-btn variant="outlined" color="warning" @click="restartApp" :loading="loading" :disabled="stateChange">
+          <v-icon icon="mdi-restart" start />
           {{ $t('actions.restartApp') }}
         </v-btn>
       </v-col>
     </v-row>
-    <v-window v-model="tab">
-      <v-window-item value="t1">
-        <v-row>
+  </v-card>
+
+  <v-card class="settings-panel" rounded="xl" variant="flat" :loading="loading">
+    <v-tabs
+      v-model="tab"
+      color="primary"
+      align-tabs="center"
+      show-arrows
+    >
+      <v-tab value="t1">{{ $t('setting.interface') }}</v-tab>
+      <v-tab value="t2">{{ $t('setting.sub') }}</v-tab>
+      <v-tab value="t3">{{ $t('setting.jsonSub') }}</v-tab>
+      <v-tab value="t4">{{ $t('setting.clashSub') }}</v-tab>
+    </v-tabs>
+    <v-card-text>
+      <v-window v-model="tab">
+        <v-window-item value="t1">
+          <v-row>
           <v-col cols="12" sm="6" md="4">
             <v-text-field v-model="settings.webListen" :label="$t('setting.addr')" hide-details></v-text-field>
           </v-col>
@@ -72,10 +97,10 @@
             <v-text-field v-model="settings.timeLocation" :label="$t('setting.timeLoc')" hide-details></v-text-field>
           </v-col>
         </v-row>
-      </v-window-item>
+        </v-window-item>
 
-      <v-window-item value="t2">
-        <v-row>
+        <v-window-item value="t2">
+          <v-row>
           <v-col cols="12" sm="6" md="4">
             <v-switch color="primary" v-model="subEncode" :label="$t('setting.subEncode')" hide-details />
           </v-col>
@@ -159,18 +184,18 @@
             ></v-text-field>
           </v-col>
         </v-row>
-      </v-window-item>
+        </v-window-item>
 
-      <v-window-item value="t3">
-        <SubJsonExtVue :settings="settings" />
-      </v-window-item>
+        <v-window-item value="t3">
+          <SubJsonExtVue :settings="settings" />
+        </v-window-item>
 
-      <v-window-item value="t4">
-        <SubClashExtVue :settings="settings" />
-      </v-window-item>
-    </v-window>
-  </v-card-text>
-</v-card>
+        <v-window-item value="t4">
+          <SubClashExtVue :settings="settings" />
+        </v-window-item>
+      </v-window>
+    </v-card-text>
+  </v-card>
 </template>
 
 <script lang="ts" setup>
@@ -357,3 +382,130 @@ const stateChange = computed(() => {
   return !FindDiff.deepCompare(settings.value,oldSettings.value)
 })
 </script>
+
+<style scoped lang="scss">
+.settings-hero,
+.settings-panel {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.22), transparent 28%),
+    var(--np-surface);
+  border: 1px solid var(--np-border);
+  box-shadow: var(--np-shadow);
+  backdrop-filter: blur(28px) saturate(1.12);
+}
+
+.settings-hero {
+  padding: 20px;
+  margin-bottom: 18px;
+  overflow: hidden;
+}
+
+.settings-hero__topline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.settings-hero__badge {
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--np-accent);
+  background: rgba(10, 132, 255, 0.08);
+}
+
+.settings-hero__badge--soft {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--np-text-muted);
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.settings-hero__content {
+  min-height: 120px;
+}
+
+.settings-hero__title-row {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.settings-hero__icon {
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  color: var(--np-accent);
+  background: linear-gradient(145deg, rgba(59, 130, 246, 0.16), rgba(14, 165, 233, 0.08));
+}
+
+.settings-hero__title {
+  margin: 0;
+  font-size: clamp(28px, 3vw, 40px);
+  line-height: 1.1;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.settings-hero__subtitle {
+  margin: 12px 0 0;
+  color: var(--np-text-muted);
+  line-height: 1.7;
+}
+
+.settings-hero__meta {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--np-text-muted);
+  font-size: 13px;
+}
+
+.settings-hero__actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.settings-panel {
+  overflow: hidden;
+}
+
+.v-theme--dark .settings-hero,
+.v-theme--dark .settings-panel {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 24%),
+    rgba(11, 18, 31, 0.78);
+  border-color: rgba(148, 163, 184, 0.16);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
+}
+
+@media (max-width: 960px) {
+  .settings-hero {
+    padding: 16px;
+  }
+
+  .settings-hero__actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 600px) {
+  .settings-hero__icon {
+    width: 46px;
+    height: 46px;
+  }
+
+  .settings-hero__title {
+    font-size: 24px;
+  }
+}
+</style>
