@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -449,9 +450,9 @@ func detectSSHPortsFromSSHD() ([]int, error) {
 	if err != nil {
 		return nil, err
 	}
-	output, err := exec.Command(bin, "-T").CombinedOutput()
+	output, err := runRestoreCommand(6*time.Second, bin, "-T")
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
+		return nil, err
 	}
 	return parseSSHPortLines(string(output)), nil
 }
@@ -461,11 +462,33 @@ func detectSSHPortsFromSS() ([]int, error) {
 	if err != nil {
 		return nil, err
 	}
-	output, err := exec.Command(bin, "-H", "-ltnp").CombinedOutput()
+	output, err := runRestoreCommand(6*time.Second, bin, "-H", "-ltnp")
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
+		return nil, err
 	}
 	return parseSSHListenPorts(string(output)), nil
+}
+
+func runRestoreCommand(timeout time.Duration, name string, args ...string) ([]byte, error) {
+	if timeout <= 0 {
+		timeout = 6 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, name, args...)
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		return output, nil
+	}
+
+	trimmed := strings.TrimSpace(string(output))
+	command := strings.TrimSpace(strings.Join(append([]string{name}, args...), " "))
+	reason := "failed"
+	if ctx.Err() == context.DeadlineExceeded {
+		reason = "timed out"
+	}
+	return output, fmt.Errorf("%s: %s: %w: %s", command, reason, err, trimmed)
 }
 
 func detectSSHPortsFromConfigFile() ([]int, error) {

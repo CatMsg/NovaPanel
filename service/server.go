@@ -398,6 +398,12 @@ func masquePublicKeyFromPrivate(raw string) (string, error) {
 }
 
 func (s *ServerService) GetDatabaseInfo() map[string]int64 {
+	if cached, ok := databaseInfoCache.get("database", 0); ok {
+		if info, ok := cached.(map[string]int64); ok {
+			return cloneDatabaseInfo(info)
+		}
+	}
+
 	info := make(map[string]int64, 0)
 	db := database.GetDB()
 	if db == nil {
@@ -422,5 +428,6 @@ func (s *ServerService) GetDatabaseInfo() map[string]int64 {
 	info["clientUp"] = clientUp
 	info["clientDown"] = clientDown
 
+	databaseInfoCache.set("database", 0, databaseInfoCacheTTL, cloneDatabaseInfo(info))
 	return info
 }

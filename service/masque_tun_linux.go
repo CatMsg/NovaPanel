@@ -8,8 +8,8 @@ import (
 	"hash/fnv"
 	"net/netip"
 	"os"
-	"os/exec"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/CatMsg/NovaPanel/logger"
@@ -107,8 +107,7 @@ func runMasqueTunCommand(args ...string) error {
 	if len(args) == 0 {
 		return nil
 	}
-	cmd := exec.Command(args[0], args[1:]...)
-	out, err := cmd.CombinedOutput()
+	out, err := runCommandOutput(5*time.Second, args[0], args[1:]...)
 	if err != nil {
 		return fmt.Errorf("%s failed: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}

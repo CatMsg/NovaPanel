@@ -50,6 +50,7 @@ func GetDb(exclude string) ([]byte, error) {
 		&model.Inbound{},
 		&model.Outbound{},
 		&model.Endpoint{},
+		&model.ManagedPortEntry{},
 		&model.User{},
 		&model.Stats{},
 		&model.Client{},
