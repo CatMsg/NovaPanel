@@ -46,6 +46,10 @@
   content: "\F0010";
 }
 
+.mdi-account-group-outline::before {
+  content: "\F0B58";
+}
+
 .mdi-account-plus::before {
   content: "\F0014";
 }
@@ -76,6 +80,10 @@
 
 .mdi-certificate::before {
   content: "\F0124";
+}
+
+.mdi-certificate-outline::before {
+  content: "\F1188";
 }
 
 .mdi-chart-box::before {
@@ -118,6 +126,10 @@
   content: "\F0162";
 }
 
+.mdi-cloud-download-outline::before {
+  content: "\F0B7D";
+}
+
 .mdi-cloud-tags::before {
   content: "\F07B6";
 }
@@ -126,8 +138,16 @@
   content: "\F0167";
 }
 
+.mdi-cloud-upload-outline::before {
+  content: "\F0B7E";
+}
+
 .mdi-cog::before {
   content: "\F0493";
+}
+
+.mdi-cog-outline::before {
+  content: "\F08BB";
 }
 
 .mdi-content-copy::before {
@@ -136,6 +156,10 @@
 
 .mdi-content-duplicate::before {
   content: "\F0191";
+}
+
+.mdi-content-save-outline::before {
+  content: "\F0818";
 }
 
 .mdi-delete::before {
@@ -242,6 +266,10 @@
   content: "\F0415";
 }
 
+.mdi-playlist-plus::before {
+  content: "\F0412";
+}
+
 .mdi-qrcode::before {
   content: "\F0432";
 }
@@ -268,6 +296,10 @@
 
 .mdi-server::before {
   content: "\F048B";
+}
+
+.mdi-server-outline::before {
+  content: "\F1C9A";
 }
 
 .mdi-server-network::before {
