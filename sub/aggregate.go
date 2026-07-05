@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/CatMsg/NovaPanel/logger"
 	"github.com/CatMsg/NovaPanel/service"
@@ -27,25 +25,7 @@ type aggregateUsage struct {
 	expire   int64
 }
 
-const (
-	aggregateSourceConcurrency = 4
-	aggregateSourceTimeout     = 8 * time.Second
-)
-
-type aggregateSourceResult struct {
-	index  int
-	source string
-	links  []string
-	usage  aggregateUsage
-}
-
 func (a *AggregateService) GetAggregate(format string, host string) (*string, []string, error) {
-	cacheKey := "aggregate:" + strings.TrimSpace(format) + ":" + strings.TrimSpace(host)
-	if body, headers, ok := getCachedSubResult(cacheKey); ok {
-		return body, headers, nil
-	}
-	staleBody, staleHeaders, hasStale := getCachedSubResultStale(cacheKey)
-
 	mode, err := a.SettingService.GetSubMode()
 	if err != nil {
 		return nil, nil, err
@@ -56,41 +36,16 @@ func (a *AggregateService) GetAggregate(format string, host string) (*string, []
 
 	links, usage, err := a.collectAggregateLinks(host)
 	if err != nil {
-		if hasStale {
-			logger.Warning("aggregate: fallback to stale cache after collect failure:", err)
-			return staleBody, staleHeaders, nil
-		}
 		return nil, nil, err
 	}
 
 	switch format {
 	case "json":
-		result, headers, err := a.buildAggregateJson(links, usage)
-		if err == nil && result != nil {
-			storeCachedSubResult(cacheKey, *result, headers)
-		} else if hasStale {
-			logger.Warning("aggregate: fallback to stale cache after json build failure:", err)
-			return staleBody, staleHeaders, nil
-		}
-		return result, headers, err
+		return a.buildAggregateJson(links, usage)
 	case "clash":
-		result, headers, err := a.buildAggregateClash(links, usage)
-		if err == nil && result != nil {
-			storeCachedSubResult(cacheKey, *result, headers)
-		} else if hasStale {
-			logger.Warning("aggregate: fallback to stale cache after clash build failure:", err)
-			return staleBody, staleHeaders, nil
-		}
-		return result, headers, err
+		return a.buildAggregateClash(links, usage)
 	default:
-		result, headers, err := a.buildAggregatePlain(links, usage)
-		if err == nil && result != nil {
-			storeCachedSubResult(cacheKey, *result, headers)
-		} else if hasStale {
-			logger.Warning("aggregate: fallback to stale cache after plain build failure:", err)
-			return staleBody, staleHeaders, nil
-		}
-		return result, headers, err
+		return a.buildAggregatePlain(links, usage)
 	}
 }
 
@@ -181,49 +136,27 @@ func (a *AggregateService) collectAggregateLinks(host string) ([]string, aggrega
 		return nil, aggregateUsage{}, err
 	}
 
-	results := make([]aggregateSourceResult, len(sources))
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, aggregateSourceConcurrency)
-	for index, source := range sources {
+	seen := make(map[string]struct{})
+	links := make([]string, 0)
+	usage := aggregateUsage{}
+	for _, source := range sources {
 		if sameSubscriptionSource(source, selfAggregateURI) {
 			logger.Warning("aggregate: skip self source:", source)
 			continue
 		}
-		wg.Add(1)
-		go func(index int, source string) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
 
-			data, headers := util.GetExternalLinkWithHeadersTimeout(source, aggregateSourceTimeout)
-			if len(data) == 0 {
-				logger.Warning("aggregate: failed to load remote subscription:", source)
-				return
-			}
-
-			result := aggregateSourceResult{
-				index:  index,
-				source: source,
-				links:  splitAggregateLinks(data),
-			}
-			result.usage.addHeader(headers.Get("Subscription-Userinfo"))
-			results[index] = result
-		}(index, source)
-	}
-	wg.Wait()
-
-	seen := make(map[string]struct{})
-	links := make([]string, 0)
-	usage := aggregateUsage{}
-	for _, result := range results {
-		if len(result.links) == 0 {
+		data, headers := util.GetExternalLinkWithHeaders(source)
+		if len(data) == 0 {
+			logger.Warning("aggregate: failed to load remote subscription:", source)
 			continue
 		}
-		usage.upload += result.usage.upload
-		usage.download += result.usage.download
-		usage.total += result.usage.total
-		usage.addExpire(result.usage.expire)
-		for _, link := range result.links {
+
+		usage.addHeader(headers.Get("Subscription-Userinfo"))
+		for _, line := range strings.Split(data, "\n") {
+			link := strings.TrimSpace(line)
+			if link == "" || strings.HasPrefix(link, "#") {
+				continue
+			}
 			if _, exists := seen[link]; exists {
 				continue
 			}
@@ -236,18 +169,6 @@ func (a *AggregateService) collectAggregateLinks(host string) ([]string, aggrega
 		return nil, aggregateUsage{}, common.NewError("no subscription links found")
 	}
 	return links, usage, nil
-}
-
-func splitAggregateLinks(data string) []string {
-	links := make([]string, 0)
-	for _, line := range strings.Split(data, "\n") {
-		link := strings.TrimSpace(line)
-		if link == "" || strings.HasPrefix(link, "#") {
-			continue
-		}
-		links = append(links, link)
-	}
-	return links
 }
 
 func (a *AggregateService) selfAggregateURI(host string) (string, error) {
