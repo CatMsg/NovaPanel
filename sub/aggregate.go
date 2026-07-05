@@ -314,35 +314,9 @@ func (a *AggregateService) buildEndpointAggregateClash(outbounds []map[string]in
 }
 
 func (a *AggregateService) collectEndpointSourceOutbounds(host string) ([]map[string]interface{}, error) {
-	endpoints, err := a.EndpointService.GetAll()
+	outbounds, err := a.collectLocalEndpointOutbounds(host)
 	if err != nil {
 		return nil, err
-	}
-
-	outbounds := make([]map[string]interface{}, 0)
-	for _, rawEndpoint := range *endpoints {
-		endpoint, err := normalizeEndpointAggregateMap(rawEndpoint)
-		if err != nil {
-			logger.Warning("aggregate: skip invalid endpoint while building node aggregate:", err)
-			continue
-		}
-
-		switch strings.ToLower(strings.TrimSpace(asString(endpoint["type"]))) {
-		case "wireguard":
-			outbounds = append(outbounds, buildWireguardAggregateOutbounds(endpoint, host)...)
-		case "warp":
-			if ob := buildWarpAggregateOutbound(endpoint); ob != nil {
-				outbounds = append(outbounds, *ob)
-			}
-		case "masque":
-			if ob := buildMasqueAggregateOutbound(endpoint); ob != nil {
-				outbounds = append(outbounds, *ob)
-			}
-		case "tailscale":
-			if ob := buildTailscaleAggregateOutbound(endpoint); ob != nil {
-				outbounds = append(outbounds, *ob)
-			}
-		}
 	}
 
 	if len(outbounds) == 0 {
@@ -353,6 +327,11 @@ func (a *AggregateService) collectEndpointSourceOutbounds(host string) ([]map[st
 }
 
 func (a *AggregateService) collectEndpointAggregateOutbounds(host string) ([]map[string]interface{}, error) {
+	localOutbounds, err := a.collectLocalEndpointOutbounds(host)
+	if err != nil {
+		return nil, err
+	}
+
 	sources, err := a.SettingService.GetEndpointSources()
 	if err != nil {
 		return nil, err
@@ -367,7 +346,19 @@ func (a *AggregateService) collectEndpointAggregateOutbounds(host string) ([]map
 	}
 
 	seen := make(map[string]struct{})
-	outbounds := make([]map[string]interface{}, 0)
+	outbounds := make([]map[string]interface{}, 0, len(localOutbounds))
+	for _, node := range localOutbounds {
+		tag := endpointNodeTag(node)
+		if tag == "" {
+			continue
+		}
+		if _, exists := seen[tag]; exists {
+			continue
+		}
+		seen[tag] = struct{}{}
+		outbounds = append(outbounds, node)
+	}
+
 	for _, source := range sources {
 		if sameSubscriptionSource(source, selfSourceURI) || sameSubscriptionSource(source, selfAggregateURI) {
 			logger.Warning("endpoint aggregate: skip self source:", source)
@@ -400,6 +391,41 @@ func (a *AggregateService) collectEndpointAggregateOutbounds(host string) ([]map
 	if len(outbounds) == 0 {
 		return nil, common.NewError("no endpoint nodes found")
 	}
+	return outbounds, nil
+}
+
+func (a *AggregateService) collectLocalEndpointOutbounds(host string) ([]map[string]interface{}, error) {
+	endpoints, err := a.EndpointService.GetAll()
+	if err != nil {
+		return nil, err
+	}
+
+	outbounds := make([]map[string]interface{}, 0)
+	for _, rawEndpoint := range *endpoints {
+		endpoint, err := normalizeEndpointAggregateMap(rawEndpoint)
+		if err != nil {
+			logger.Warning("aggregate: skip invalid endpoint while building node aggregate:", err)
+			continue
+		}
+
+		switch strings.ToLower(strings.TrimSpace(asString(endpoint["type"]))) {
+		case "wireguard":
+			outbounds = append(outbounds, buildWireguardAggregateOutbounds(endpoint, host)...)
+		case "warp":
+			if ob := buildWarpAggregateOutbound(endpoint); ob != nil {
+				outbounds = append(outbounds, *ob)
+			}
+		case "masque":
+			if ob := buildMasqueAggregateOutbound(endpoint); ob != nil {
+				outbounds = append(outbounds, *ob)
+			}
+		case "tailscale":
+			if ob := buildTailscaleAggregateOutbound(endpoint); ob != nil {
+				outbounds = append(outbounds, *ob)
+			}
+		}
+	}
+
 	return outbounds, nil
 }
 
