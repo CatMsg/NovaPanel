@@ -134,9 +134,15 @@ func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, b
 		if len(server) > 0 && strings.Contains(server, ":") && !strings.Contains(server, ".") && !(strings.HasPrefix(server, "[") && strings.HasSuffix(server, "]")) {
 			server = "'[" + server + "]'"
 		}
-		proxy["server"] = server
+		if len(server) > 0 {
+			proxy["server"] = server
+		}
 
-		proxy["port"] = obMap["server_port"]
+		if port, ok := obMap["server_port"]; ok && port != nil {
+			proxy["port"] = port
+		} else if port, ok := obMap["port"]; ok && port != nil {
+			proxy["port"] = port
+		}
 
 		switch t {
 		case "vmess", "vless", "tuic":
@@ -212,6 +218,35 @@ func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, b
 			if uot, ok := obMap["udp_over_tcp"].(bool); ok && uot {
 				proxy["udp-over-tcp"] = true
 			}
+		case "wireguard", "warp":
+			proxy["type"] = "wireguard"
+			copyClashFields(proxy, obMap, "private-key", "public-key", "ip", "ipv6", "mtu", "dns", "remote-dns-resolve", "udp", "reserved", "pre-shared-key", "persistent-keepalive")
+		case "masque":
+			proxy["type"] = "masque"
+			copyClashFields(proxy, obMap, "network", "private-key", "public-key", "ip", "mtu", "udp", "remote-dns-resolve", "dns")
+		case "tailscale":
+			proxy["type"] = "tailscale"
+			copyClashFields(proxy, obMap,
+				"state-dir",
+				"auth-key",
+				"control-url",
+				"hostname",
+				"ephemeral",
+				"accept-routes",
+				"exit-node",
+				"exit-node-allow-lan-access",
+				"advertise-routes",
+				"advertise-exit-node",
+				"relay-server-port",
+				"relay-server-static-endpoints",
+				"system-interface",
+				"system-interface-name",
+				"system-interface-mtu",
+				"udp-timeout",
+				"routing-mark",
+				"ip-version",
+				"udp",
+			)
 		default:
 			continue
 		}
@@ -395,4 +430,12 @@ func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, b
 		return "", err
 	}
 	return string(result), nil
+}
+
+func copyClashFields(dst map[string]interface{}, src map[string]interface{}, keys ...string) {
+	for _, key := range keys {
+		if value, ok := src[key]; ok && value != nil {
+			dst[key] = value
+		}
+	}
 }

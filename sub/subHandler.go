@@ -26,6 +26,10 @@ func NewSubHandler(g *gin.RouterGroup) {
 func (s *SubHandler) initRouter(g *gin.RouterGroup) {
 	g.GET("/aggregate", s.aggregate)
 	g.HEAD("/aggregate", s.aggregateHeaders)
+	g.GET("/endpoints/aggregate", s.endpointAggregate)
+	g.HEAD("/endpoints/aggregate", s.endpointAggregateHeaders)
+	g.GET("/endpoints", s.endpointSource)
+	g.HEAD("/endpoints", s.endpointSourceHeaders)
 	g.GET("/:subid", s.subs)
 	g.HEAD("/:subid", s.subHeaders)
 }
@@ -61,6 +65,52 @@ func (s *SubHandler) aggregateHeaders(c *gin.Context) {
 		return
 	}
 	s.addHeaders(c, s.AggregateService.aggregateHeaders(usage))
+	c.Status(200)
+}
+
+func (s *SubHandler) endpointAggregate(c *gin.Context) {
+	format := c.Query("format")
+	result, headers, err := s.AggregateService.GetEndpointAggregate(format, requestHost(c))
+	if err != nil || result == nil {
+		logger.Error(err)
+		c.String(400, "Error!")
+		return
+	}
+
+	s.addHeaders(c, headers)
+	c.String(200, *result)
+}
+
+func (s *SubHandler) endpointAggregateHeaders(c *gin.Context) {
+	mode, err := s.SettingService.GetEndpointMode()
+	if err != nil {
+		logger.Error(err)
+		c.String(400, "Error!")
+		return
+	}
+	if mode != "master" {
+		c.String(404, "")
+		return
+	}
+	s.addHeaders(c, s.AggregateService.endpointAggregateHeaders())
+	c.Status(200)
+}
+
+func (s *SubHandler) endpointSource(c *gin.Context) {
+	format := c.Query("format")
+	result, headers, err := s.AggregateService.GetEndpointSource(format, requestHost(c))
+	if err != nil || result == nil {
+		logger.Error(err)
+		c.String(400, "Error!")
+		return
+	}
+
+	s.addHeaders(c, headers)
+	c.String(200, *result)
+}
+
+func (s *SubHandler) endpointSourceHeaders(c *gin.Context) {
+	s.addHeaders(c, s.AggregateService.endpointSourceHeaders())
 	c.Status(200)
 }
 

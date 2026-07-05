@@ -67,6 +67,8 @@ var defaultValueMap = map[string]string{
 	"subURI":           "",
 	"subMode":          "slave",
 	"subMasterSources": "",
+	"endpointMode":     "slave",
+	"endpointSources":  "",
 	"subJsonExt":       "",
 	"subClashExt":      "",
 	"config":           defaultConfig,
@@ -440,13 +442,21 @@ func (s *SettingService) GetSubURI() (string, error) {
 }
 
 func (s *SettingService) GetSubMode() (string, error) {
-	subMode, err := s.getString("subMode")
+	return s.getMode("subMode")
+}
+
+func (s *SettingService) GetEndpointMode() (string, error) {
+	return s.getMode("endpointMode")
+}
+
+func (s *SettingService) getMode(key string) (string, error) {
+	mode, err := s.getString(key)
 	if err != nil {
 		return "", err
 	}
-	switch subMode {
+	switch mode {
 	case "master", "slave":
-		return subMode, nil
+		return mode, nil
 	default:
 		return "slave", nil
 	}
@@ -457,6 +467,18 @@ func (s *SettingService) GetSubMasterSources() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parseSettingSources(rawSources), nil
+}
+
+func (s *SettingService) GetEndpointSources() ([]string, error) {
+	rawSources, err := s.getString("endpointSources")
+	if err != nil {
+		return nil, err
+	}
+	return parseSettingSources(rawSources), nil
+}
+
+func parseSettingSources(rawSources string) []string {
 	rawSources = strings.ReplaceAll(rawSources, "\r\n", "\n")
 	rawSources = strings.ReplaceAll(rawSources, "\r", "\n")
 
@@ -468,7 +490,7 @@ func (s *SettingService) GetSubMasterSources() ([]string, error) {
 		}
 		sources = append(sources, source)
 	}
-	return sources, nil
+	return sources
 }
 
 func (s *SettingService) GetFinalSubURI(host string) (string, error) {

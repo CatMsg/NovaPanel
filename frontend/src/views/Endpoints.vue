@@ -51,6 +51,61 @@
           <span>•</span>
           <span>MASQUE {{ endpoints.filter(e => e.type == 'masque').length }}</span>
         </div>
+        <div class="endpoint-aggregate">
+          <div class="endpoint-aggregate__header">
+            <div>
+              <div class="endpoint-aggregate__title">节点聚合</div>
+              <div class="endpoint-aggregate__desc">每台 VPS 暴露本机节点源，主节点填写上游源后输出聚合出口。</div>
+            </div>
+            <v-select
+              v-model="endpointAggregateConfig.endpointMode"
+              :items="endpointModeItems"
+              label="节点模式"
+              density="compact"
+              variant="outlined"
+              hide-details
+              class="endpoint-aggregate__mode"
+            />
+          </div>
+          <v-text-field
+            :model-value="endpointSourceURI"
+            label="本机节点源"
+            readonly
+            density="comfortable"
+            variant="outlined"
+            hide-details
+            append-inner-icon="mdi-content-copy"
+            @click:append-inner="copyEndpointSourceURI"
+          />
+          <v-textarea
+            v-if="endpointAggregateConfig.endpointMode == 'master'"
+            v-model="endpointAggregateConfig.endpointSources"
+            label="节点上游源"
+            hint="每行填写一个 VPS 的本机节点源链接，推荐使用 format=json。"
+            persistent-hint
+            rows="3"
+            auto-grow
+            density="comfortable"
+            variant="outlined"
+          />
+          <v-text-field
+            v-if="endpointAggregateConfig.endpointMode == 'master'"
+            :model-value="endpointAggregateURI"
+            label="节点聚合出口"
+            readonly
+            density="comfortable"
+            variant="outlined"
+            hide-details
+            append-inner-icon="mdi-content-copy"
+            @click:append-inner="copyEndpointAggregateURI"
+          />
+          <div class="endpoint-aggregate__actions">
+            <v-btn size="small" color="primary" variant="flat" :loading="endpointAggregateSaving" @click="saveEndpointAggregateConfig">
+              <v-icon icon="mdi-content-save-outline" start />
+              保存节点聚合
+            </v-btn>
+          </div>
+        </div>
       </v-col>
       <v-col cols="12" lg="4" class="resource-hero__actions">
         <v-btn color="primary" size="large" @click="showModal(0)">
@@ -172,7 +227,9 @@
 import Data from '@/store/modules/data'
 import { Endpoint } from '@/types/endpoints'
 import { buildMasqueConfig } from '@/plugins/masqueUtil'
-import { computed, defineAsyncComponent, ref } from 'vue'
+import HttpUtils from '@/plugins/httputil'
+import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
+import { push } from 'notivue'
 
 const EndpointVue = defineAsyncComponent(() => import('@/layouts/modals/Endpoint.vue'))
 const Stats = defineAsyncComponent(() => import('@/layouts/modals/Stats.vue'))
@@ -189,6 +246,38 @@ const endpointTags = computed((): any[] => {
 
 const onlines = computed(() => {
   return [...Data().onlines.inbound?? [], ...Data().onlines.outbound??[] ]
+})
+
+const endpointModeItems = [
+  { title: '主模式', value: 'master' },
+  { title: '从模式', value: 'slave' },
+]
+
+const endpointAggregateConfig = ref({
+  endpointMode: 'slave',
+  endpointSources: '',
+})
+
+const endpointAggregateSaving = ref(false)
+
+const endpointSubBaseURI = computed(() => {
+  const base = String(Data().subURI ?? '').trim()
+  if (!base) return ''
+  return base.replace(/\/$/, '')
+})
+
+const endpointSourceURI = computed(() => {
+  if (!endpointSubBaseURI.value) return ''
+  return endpointSubBaseURI.value + '/endpoints?format=json'
+})
+
+const endpointAggregateURI = computed(() => {
+  if (!endpointSubBaseURI.value) return ''
+  return endpointSubBaseURI.value + '/endpoints/aggregate?format=clash'
+})
+
+onMounted(() => {
+  loadEndpointAggregateConfig()
 })
 
 const modal = ref({
@@ -254,6 +343,81 @@ const showMasqueStatus = (id: number) => {
 
 const closeMasqueStatus = () => {
   masqueStatus.value.visible = false
+}
+
+const loadEndpointAggregateConfig = async () => {
+  const msg = await HttpUtils.get('api/settings')
+  if (!msg.success || !msg.obj) return
+  endpointAggregateConfig.value = {
+    endpointMode: msg.obj.endpointMode == 'master' ? 'master' : 'slave',
+    endpointSources: String(msg.obj.endpointSources ?? ''),
+  }
+}
+
+const saveEndpointAggregateConfig = async () => {
+  endpointAggregateSaving.value = true
+  const msg = await HttpUtils.post('api/save', {
+    object: 'settings',
+    action: 'set',
+    data: JSON.stringify(endpointAggregateConfig.value),
+  })
+  endpointAggregateSaving.value = false
+  if (msg.success) {
+    push.success({ message: '节点聚合设置已保存' })
+    return
+  }
+  if (String(msg.msg ?? '').includes('no changes')) {
+    push.success({ message: '节点聚合设置没有变化' })
+    return
+  }
+  push.error({ message: '节点聚合设置保存失败' })
+}
+
+const copyEndpointSourceURI = async () => {
+  await copyEndpointLink(endpointSourceURI.value, '本机节点源')
+}
+
+const copyEndpointAggregateURI = async () => {
+  await copyEndpointLink(endpointAggregateURI.value, '节点聚合出口')
+}
+
+const copyEndpointLink = async (text: string, label: string) => {
+  if (!text) {
+    push.error({ message: `当前没有可用的${label}` })
+    return
+  }
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      textarea.setAttribute('readonly', 'true')
+      textarea.style.position = 'fixed'
+      textarea.style.left = '-9999px'
+      document.body.appendChild(textarea)
+      textarea.select()
+      const ok = document.execCommand('copy')
+      document.body.removeChild(textarea)
+      if (!ok) throw new Error('copy failed')
+    }
+    push.success({ message: `已复制${label}` })
+  } catch {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.setAttribute('readonly', 'true')
+    textarea.style.position = 'fixed'
+    textarea.style.left = '-9999px'
+    document.body.appendChild(textarea)
+    textarea.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(textarea)
+    if (ok) {
+      push.success({ message: `已复制${label}` })
+      return
+    }
+    push.error({ message: `复制${label}失败` })
+  }
 }
 
 const copyMasque = async (item: any) => {
@@ -346,6 +510,45 @@ const copyMasque = async (item: any) => {
   font-size: 13px;
 }
 
+.endpoint-aggregate {
+  margin-top: 16px;
+  max-width: 720px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.48);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.endpoint-aggregate__header {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.endpoint-aggregate__title {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.endpoint-aggregate__desc {
+  margin-top: 4px;
+  color: var(--np-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.endpoint-aggregate__mode {
+  max-width: 150px;
+}
+
+.endpoint-aggregate__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .resource-hero__actions {
   display: flex;
   justify-content: flex-end;
@@ -393,6 +596,11 @@ const copyMasque = async (item: any) => {
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
 }
 
+.v-theme--dark .endpoint-aggregate {
+  background: rgba(15, 23, 42, 0.54);
+  border-color: rgba(148, 163, 184, 0.18);
+}
+
 @media (max-width: 960px) {
   .resource-hero {
     padding: 16px;
@@ -400,6 +608,15 @@ const copyMasque = async (item: any) => {
 
   .resource-hero__actions {
     justify-content: flex-start;
+  }
+
+  .endpoint-aggregate__header {
+    flex-direction: column;
+  }
+
+  .endpoint-aggregate__mode {
+    max-width: none;
+    width: 100%;
   }
 }
 
