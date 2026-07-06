@@ -579,10 +579,11 @@ func buildWireguardAggregateOutbounds(endpoint map[string]interface{}, host stri
 		if keepAlive := asInt(peer["persistent_keepalive_interval"]); keepAlive > 0 {
 			node["persistent-keepalive"] = keepAlive
 		}
+		node["pre-shared-key"] = ""
 		if psk, ok := normalizeWireguardPreSharedKey(peer["pre_shared_key"]); ok {
 			node["pre-shared-key"] = psk
 		} else if psk := asString(peer["pre_shared_key"]); psk != "" {
-			logger.Warning("aggregate: skip invalid wireguard pre-shared-key while building endpoint aggregate: ", tag)
+			logger.Warning("aggregate: normalize invalid wireguard pre-shared-key as empty while building endpoint aggregate: ", tag)
 		}
 		if reserved := asIntSlice(peer["reserved"]); len(reserved) > 0 {
 			node["reserved"] = reserved
@@ -638,10 +639,11 @@ func buildWarpAggregateOutbound(endpoint map[string]interface{}) *map[string]int
 	if keepAlive := asInt(peer["persistent_keepalive_interval"]); keepAlive > 0 {
 		node["persistent-keepalive"] = keepAlive
 	}
+	node["pre-shared-key"] = ""
 	if psk, ok := normalizeWireguardPreSharedKey(peer["pre_shared_key"]); ok {
 		node["pre-shared-key"] = psk
 	} else if psk := asString(peer["pre_shared_key"]); psk != "" {
-		logger.Warning("aggregate: skip invalid wireguard pre-shared-key while building warp aggregate: ", tag)
+		logger.Warning("aggregate: normalize invalid wireguard pre-shared-key as empty while building warp aggregate: ", tag)
 	}
 	if reserved := asIntSlice(peer["reserved"]); len(reserved) > 0 {
 		node["reserved"] = reserved
@@ -801,6 +803,9 @@ func findPrivateKeyForPeer(keys []interface{}, publicKey string) string {
 }
 
 func asString(value interface{}) string {
+	if value == nil {
+		return ""
+	}
 	switch v := value.(type) {
 	case string:
 		return strings.TrimSpace(v)

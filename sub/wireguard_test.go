@@ -69,7 +69,11 @@ func TestConvertToClashMetaSkipsInvalidWireguardPreSharedKey(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected proxy map, got %#v", proxies[0])
 	}
-	if _, ok := proxy["pre-shared-key"]; ok {
-		t.Fatalf("expected invalid pre-shared-key to be omitted from clash output")
+	psk, ok := proxy["pre-shared-key"]
+	if !ok {
+		t.Fatalf("expected pre-shared-key to remain present in clash output")
+	}
+	if psk != "" {
+		t.Fatalf("expected invalid pre-shared-key to be normalized as empty string, got %#v", psk)
 	}
 }
