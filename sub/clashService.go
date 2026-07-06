@@ -220,7 +220,12 @@ func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, b
 			}
 		case "wireguard", "warp":
 			proxy["type"] = "wireguard"
-			copyClashFields(proxy, obMap, "private-key", "public-key", "ip", "ipv6", "mtu", "dns", "remote-dns-resolve", "udp", "reserved", "pre-shared-key", "persistent-keepalive")
+			copyClashFields(proxy, obMap, "private-key", "public-key", "ip", "ipv6", "mtu", "dns", "remote-dns-resolve", "udp", "reserved", "persistent-keepalive")
+			if psk, ok := normalizeWireguardPreSharedKey(obMap["pre-shared-key"]); ok {
+				proxy["pre-shared-key"] = psk
+			} else if raw, ok := obMap["pre-shared-key"]; ok && raw != nil {
+				logger.Warning("clash: skip invalid wireguard pre-shared-key while building subscription")
+			}
 		case "masque":
 			proxy["type"] = "masque"
 			copyClashFields(proxy, obMap, "network", "private-key", "public-key", "ip", "mtu", "udp", "remote-dns-resolve", "dns")
