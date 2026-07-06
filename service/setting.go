@@ -136,39 +136,40 @@ func (s *SettingService) fillSubCertFiles(allSetting map[string]string) {
 	if allSetting == nil {
 		return
 	}
-	if allSetting["subCertFile"] != "" && allSetting["subKeyFile"] != "" {
+	if strings.TrimSpace(allSetting["subMode"]) != "master" {
 		return
 	}
-
-	seen := map[string]struct{}{}
-	tryDomains := func(domain string) bool {
+	currentCert := strings.TrimSpace(allSetting["subCertFile"])
+	currentKey := strings.TrimSpace(allSetting["subKeyFile"])
+	domain := strings.TrimSpace(allSetting["subDomain"])
+	if domain == "" {
+		return
+	}
+	currentMatches := func(domain string) bool {
 		domain = strings.TrimSpace(domain)
-		if domain == "" {
+		if domain == "" || currentCert == "" || currentKey == "" {
 			return false
 		}
-		if _, ok := seen[domain]; ok {
+		if err := fileMustExist(currentCert); err != nil {
 			return false
 		}
-		seen[domain] = struct{}{}
-
-		certFile, keyFile, ok := resolveAcmeCertFiles(domain)
-		if !ok {
+		if err := fileMustExist(currentKey); err != nil {
 			return false
 		}
-
-		if allSetting["subCertFile"] == "" {
-			allSetting["subCertFile"] = certFile
-		}
-		if allSetting["subKeyFile"] == "" {
-			allSetting["subKeyFile"] = keyFile
-		}
-		return true
+		return certificateMatchesDomain(currentCert, domain)
 	}
 
-	if tryDomains(allSetting["subDomain"]) {
+	if currentMatches(domain) {
 		return
 	}
-	tryDomains(allSetting["webDomain"])
+
+	certFile, keyFile, ok := resolveAcmeCertFiles(domain)
+	if !ok {
+		return
+	}
+
+	allSetting["subCertFile"] = certFile
+	allSetting["subKeyFile"] = keyFile
 }
 
 func (s *SettingService) ResetSettings() error {

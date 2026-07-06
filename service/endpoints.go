@@ -82,7 +82,7 @@ func marshalEndpointConfigForCore(endpoint *model.Endpoint) ([]byte, error) {
 		return nil, err
 	}
 
-	if endpoint.Type != "wireguard" && endpoint.Type != "warp" {
+	if endpoint.Type != "warp" {
 		return endpointJson, nil
 	}
 
@@ -124,7 +124,7 @@ func marshalEndpointConfigForCore(endpoint *model.Endpoint) ([]byte, error) {
 		return nil, err
 	}
 
-	logger.Warning("skip wireguard peers without endpoint while building core config: ", endpoint.Tag, " dropped=", droppedPeers)
+	logger.Warning("skip warp peers without endpoint while building core config: ", endpoint.Tag, " dropped=", droppedPeers)
 	return sanitized, nil
 }
 

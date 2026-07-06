@@ -261,6 +261,7 @@ const loadData = async () => {
   loading.value = false
   if (msg.success) {
     setData(msg.obj)
+    autoFillSubDomain()
   }
 }
 
@@ -271,6 +272,7 @@ const setData = (data: any) => {
 
 const save = async () => {
   loading.value = true
+  autoFillSubDomain()
   const msg = await HttpUtils.post('api/save', { object: 'settings', action: 'set', data: JSON.stringify(settings.value) })
   if (msg.success) {
     push.success({
@@ -341,6 +343,18 @@ const buildSubBaseURI = () => {
   if (!path.endsWith("/")) path += "/"
 
   return `${protocol}//${host}${port}${path}`
+}
+
+const isIpLiteral = (host: string) => {
+  if (!host) return false
+  return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host) || host.startsWith('[')
+}
+
+const autoFillSubDomain = () => {
+  if (settings.value.subMode !== 'master') return
+  if (settings.value.subDomain) return
+  if (isIpLiteral(window.location.hostname)) return
+  settings.value.subDomain = window.location.hostname
 }
 
 const subEncode = computed({

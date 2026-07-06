@@ -155,6 +155,7 @@ func TestFillSubCertFilesUsesSubDomainFirst(t *testing.T) {
 	allSetting := map[string]string{
 		"subDomain":   subDomain,
 		"webDomain":   webDomain,
+		"subMode":     "master",
 		"subCertFile": "",
 		"subKeyFile":  "",
 	}
@@ -177,6 +178,52 @@ func TestFillSubCertFilesUsesSubDomainFirst(t *testing.T) {
 
 	if allSetting["subCertFile"] != subCert || allSetting["subKeyFile"] != subKey {
 		t.Fatalf("expected sub cert fields to be filled: %#v", allSetting)
+	}
+}
+
+func TestFillSubCertFilesReplacesMismatchedSubDomainCert(t *testing.T) {
+	homeDir := t.TempDir()
+	subDomain := "sub.example.com"
+	webDomain := "web.example.com"
+
+	subDir := filepath.Join(homeDir, ".acme.sh", subDomain+"_ecc")
+	webDir := filepath.Join(homeDir, ".acme.sh", webDomain+"_ecc")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatalf("mkdir sub cert dir: %v", err)
+	}
+	if err := os.MkdirAll(webDir, 0o755); err != nil {
+		t.Fatalf("mkdir web cert dir: %v", err)
+	}
+
+	subCert := filepath.Join(subDir, "fullchain.cer")
+	subKey := filepath.Join(subDir, subDomain+".key")
+	webCert := filepath.Join(webDir, "fullchain.cer")
+	webKey := filepath.Join(webDir, webDomain+".key")
+	if err := writeSelfSignedCert(subCert, subKey, subDomain); err != nil {
+		t.Fatalf("write sub cert files: %v", err)
+	}
+	if err := writeSelfSignedCert(webCert, webKey, webDomain); err != nil {
+		t.Fatalf("write web cert files: %v", err)
+	}
+
+	allSetting := map[string]string{
+		"subDomain":   subDomain,
+		"webDomain":   webDomain,
+		"subMode":     "master",
+		"subCertFile": webCert,
+		"subKeyFile":  webKey,
+	}
+
+	oldHome := os.Getenv("HOME")
+	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) })
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		t.Fatalf("set home: %v", err)
+	}
+
+	(&SettingService{}).fillSubCertFiles(allSetting)
+
+	if allSetting["subCertFile"] != subCert || allSetting["subKeyFile"] != subKey {
+		t.Fatalf("expected mismatched sub cert fields to be replaced: %#v", allSetting)
 	}
 }
 
