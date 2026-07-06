@@ -1,6 +1,7 @@
 package sub
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/CatMsg/NovaPanel/logger"
@@ -75,5 +76,47 @@ func TestConvertToClashMetaSkipsInvalidWireguardPreSharedKey(t *testing.T) {
 	}
 	if psk != "" {
 		t.Fatalf("expected invalid pre-shared-key to be normalized as empty string, got %#v", psk)
+	}
+}
+
+func TestBuildWireguardAggregateOutboundsSetsUdpTrue(t *testing.T) {
+	endpoint := map[string]interface{}{
+		"tag":         "wg-test",
+		"listen_port": 505,
+		"ext": map[string]interface{}{
+			"public_key": "server-key",
+			"dns":        []interface{}{"1.1.1.1", "9.9.9.9"},
+			"keys": []interface{}{
+				map[string]interface{}{
+					"public_key":  "peer-key",
+					"private_key": "peer-private",
+				},
+			},
+		},
+		"peers": []interface{}{
+			map[string]interface{}{
+				"public_key":  "peer-key",
+				"allowed_ips": []interface{}{"10.0.0.2/32"},
+			},
+		},
+	}
+
+	outbounds := buildWireguardAggregateOutbounds(endpoint, "cn2.mile.news")
+	if len(outbounds) != 1 {
+		t.Fatalf("expected one outbound, got %#v", outbounds)
+	}
+
+	node := outbounds[0]
+	if udp, ok := node["udp"].(bool); !ok || !udp {
+		t.Fatalf("expected wireguard outbound udp=true, got %#v", node["udp"])
+	}
+	if server, _ := node["server"].(string); server != "cn2.mile.news" {
+		t.Fatalf("unexpected server: %#v", server)
+	}
+	if psk, _ := node["pre-shared-key"].(string); psk != "" {
+		t.Fatalf("expected empty pre-shared-key, got %#v", psk)
+	}
+	if key, _ := node["private-key"].(string); !strings.HasPrefix(key, "peer-private") {
+		t.Fatalf("unexpected private key: %#v", node["private-key"])
 	}
 }

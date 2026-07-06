@@ -566,6 +566,7 @@ func buildWireguardAggregateOutbounds(endpoint map[string]interface{}, host stri
 			"public-key":         serverKey,
 			"dns":                dnsServers,
 			"remote-dns-resolve": true,
+			"udp":                true,
 		}
 		if len(ipv4) > 0 {
 			node["ip"] = ipv4
@@ -626,6 +627,7 @@ func buildWarpAggregateOutbound(endpoint map[string]interface{}) *map[string]int
 		"public-key":         serverKey,
 		"dns":                dnsServers,
 		"remote-dns-resolve": true,
+		"udp":                true,
 	}
 	if len(ipv4) > 0 {
 		node["ip"] = ipv4
