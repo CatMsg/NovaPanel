@@ -99,6 +99,9 @@ func (s *MasqueService) resolveMasqueCertFiles(host string) (string, string, err
 		if err := fileMustExist(keyFile); err != nil {
 			continue
 		}
+		if host != "" && !certificateMatchesDomain(certFile, host) {
+			continue
+		}
 		return certFile, keyFile, nil
 	}
 

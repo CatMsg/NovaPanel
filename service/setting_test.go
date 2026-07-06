@@ -1,12 +1,20 @@
 package service
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
+	"math/big"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
@@ -50,11 +58,8 @@ func TestResolveAcmeCertFilesFromHome(t *testing.T) {
 	}
 	certFile := filepath.Join(certDir, "fullchain.cer")
 	keyFile := filepath.Join(certDir, domain+".key")
-	if err := os.WriteFile(certFile, []byte("cert"), 0o644); err != nil {
-		t.Fatalf("write cert file: %v", err)
-	}
-	if err := os.WriteFile(keyFile, []byte("key"), 0o644); err != nil {
-		t.Fatalf("write key file: %v", err)
+	if err := writeSelfSignedCert(certFile, keyFile, domain); err != nil {
+		t.Fatalf("write cert files: %v", err)
 	}
 
 	gotCert, gotKey, ok := resolveAcmeCertFilesFromHome(homeDir, domain)
@@ -64,6 +69,72 @@ func TestResolveAcmeCertFilesFromHome(t *testing.T) {
 	if gotCert != certFile || gotKey != keyFile {
 		t.Fatalf("unexpected resolved files: got %s and %s", gotCert, gotKey)
 	}
+}
+
+func TestResolveAcmeCertFilesRejectsDomainMismatch(t *testing.T) {
+	homeDir := t.TempDir()
+	certDomain := "tk.mile.news"
+	requestDomain := "la.mile.news"
+	certDir := filepath.Join(homeDir, ".acme.sh", certDomain+"_ecc")
+	if err := os.MkdirAll(certDir, 0o755); err != nil {
+		t.Fatalf("mkdir cert dir: %v", err)
+	}
+
+	certFile := filepath.Join(certDir, "fullchain.cer")
+	keyFile := filepath.Join(certDir, certDomain+".key")
+	if err := writeSelfSignedCert(certFile, keyFile, certDomain); err != nil {
+		t.Fatalf("write self-signed cert: %v", err)
+	}
+
+	if _, _, ok := resolveAcmeCertFilesFromHome(homeDir, requestDomain); ok {
+		t.Fatal("expected mismatched certificate to be rejected")
+	}
+}
+
+func writeSelfSignedCert(certFile string, keyFile string, domain string) error {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return err
+	}
+
+	tpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			CommonName: domain,
+		},
+		DNSNames:  []string{domain},
+		NotBefore: time.Now().Add(-time.Hour),
+		NotAfter:  time.Now().Add(time.Hour),
+		KeyUsage:  x509.KeyUsageDigitalSignature,
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &priv.PublicKey, priv)
+	if err != nil {
+		return err
+	}
+
+	certOut, err := os.Create(certFile)
+	if err != nil {
+		return err
+	}
+	defer certOut.Close()
+	if err := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: der}); err != nil {
+		return err
+	}
+
+	keyDER, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		return err
+	}
+	keyOut, err := os.Create(keyFile)
+	if err != nil {
+		return err
+	}
+	defer keyOut.Close()
+	if err := pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}); err != nil {
+		return err
+	}
+	return nil
 }
 
 func TestFillSubCertFilesUsesSubDomainFirst(t *testing.T) {
@@ -76,11 +147,8 @@ func TestFillSubCertFilesUsesSubDomainFirst(t *testing.T) {
 	}
 	subCert := filepath.Join(subDir, "fullchain.cer")
 	subKey := filepath.Join(subDir, subDomain+".key")
-	if err := os.WriteFile(subCert, []byte("cert"), 0o644); err != nil {
-		t.Fatalf("write cert file: %v", err)
-	}
-	if err := os.WriteFile(subKey, []byte("key"), 0o644); err != nil {
-		t.Fatalf("write key file: %v", err)
+	if err := writeSelfSignedCert(subCert, subKey, subDomain); err != nil {
+		t.Fatalf("write cert files: %v", err)
 	}
 
 	// exercise the helper directly with a map shaped like GetAllSetting output

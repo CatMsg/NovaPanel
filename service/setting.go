@@ -1,7 +1,9 @@
 package service
 
 import (
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -723,10 +725,44 @@ func resolveAcmeCertFilesFromHome(homeDir, domain string) (string, string, bool)
 		if err := fileMustExist(keyFile); err != nil {
 			continue
 		}
+		if !certificateMatchesDomain(certFile, domain) {
+			continue
+		}
 		return certFile, keyFile, true
 	}
 
 	return "", "", false
+}
+
+func certificateMatchesDomain(certFile string, domain string) bool {
+	domain = strings.TrimSpace(domain)
+	if domain == "" {
+		return false
+	}
+
+	data, err := os.ReadFile(certFile)
+	if err != nil {
+		return false
+	}
+
+	for len(data) > 0 {
+		var block *pem.Block
+		block, data = pem.Decode(data)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			continue
+		}
+		if err := cert.VerifyHostname(domain); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func fileMustExist(path string) error {
