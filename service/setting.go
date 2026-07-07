@@ -623,13 +623,39 @@ func (s *SettingService) applySettingSideEffects(tx *gorm.DB, key, value string)
 	return nil
 }
 
-func (s *SettingService) buildSavePostCommit(change settingPortChange) func() error {
-	if !change.webPortChanged && !change.subPortChanged {
-		return nil
+func (s *SettingService) buildSavePostCommit(change settingPortChange, changedSettings map[string]string) func() error {
+	actions := make([]func() error, 0, 2)
+
+	if change.webPortChanged || change.subPortChanged {
+		actions = append(actions, func() error {
+			return s.SyncManagedPanelPortForwarding(change.oldWebPort, change.newWebPort, change.oldSubPort, change.newSubPort)
+		})
 	}
-	return func() error {
-		return s.SyncManagedPanelPortForwarding(change.oldWebPort, change.newWebPort, change.oldSubPort, change.newSubPort)
+
+	if requiresSubServerRestart(changedSettings) {
+		actions = append(actions, restartSubServer)
 	}
+
+	return combinePostCommitActions(actions...)
+}
+
+func requiresSubServerRestart(changedSettings map[string]string) bool {
+	if len(changedSettings) == 0 {
+		return false
+	}
+	for _, key := range []string{
+		"subListen",
+		"subPort",
+		"subPath",
+		"subDomain",
+		"subCertFile",
+		"subKeyFile",
+	} {
+		if _, ok := changedSettings[key]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *SettingService) Save(tx *gorm.DB, data json.RawMessage) (func() error, error) {
@@ -637,6 +663,7 @@ func (s *SettingService) Save(tx *gorm.DB, data json.RawMessage) (func() error, 
 	if err := json.Unmarshal(data, &settings); err != nil {
 		return nil, err
 	}
+	s.fillSubCertFiles(settings)
 
 	changedSettings := make(map[string]string, len(settings))
 	for key, value := range settings {
@@ -673,7 +700,7 @@ func (s *SettingService) Save(tx *gorm.DB, data json.RawMessage) (func() error, 
 		}
 	}
 
-	return s.buildSavePostCommit(portChange), nil
+	return s.buildSavePostCommit(portChange, changedSettings), nil
 }
 
 func (s *SettingService) GetSubJsonExt() (string, error) {

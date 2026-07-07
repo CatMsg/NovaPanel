@@ -226,6 +226,13 @@ func (s *Server) Stop() error {
 	return nil
 }
 
+func (s *Server) Restart() error {
+	if err := s.Stop(); err != nil {
+		return err
+	}
+	return s.Start()
+}
+
 func (s *Server) GetCtx() context.Context {
 	return s.ctx
 }

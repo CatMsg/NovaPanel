@@ -510,6 +510,77 @@ func TestSettingSaveReturnsNoChangesForIdenticalPayload(t *testing.T) {
 	_ = tx.Rollback()
 }
 
+func TestSettingSaveTriggersSubServerRestartForSubDomainChange(t *testing.T) {
+	workDir := t.TempDir()
+	if err := database.InitDB(filepath.Join(workDir, "setting-sub-restart.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	homeDir := t.TempDir()
+	certDir := filepath.Join(homeDir, ".acme.sh", "cn2.example.com_ecc")
+	if err := os.MkdirAll(certDir, 0o755); err != nil {
+		t.Fatalf("mkdir cert dir: %v", err)
+	}
+	certFile := filepath.Join(certDir, "fullchain.cer")
+	keyFile := filepath.Join(certDir, "cn2.example.com.key")
+	if err := writeSelfSignedCert(certFile, keyFile, "cn2.example.com"); err != nil {
+		t.Fatalf("write cert files: %v", err)
+	}
+	oldHome := os.Getenv("HOME")
+	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) })
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		t.Fatalf("set home: %v", err)
+	}
+
+	svc := &SettingService{}
+	if _, err := svc.GetAllSetting(); err != nil {
+		t.Fatalf("init default settings: %v", err)
+	}
+
+	restartCount := 0
+	oldRestart := subServerRestartFunc
+	subServerRestartFunc = func() error {
+		restartCount++
+		return nil
+	}
+	t.Cleanup(func() { subServerRestartFunc = oldRestart })
+
+	tx := database.GetDB().Begin()
+	if tx.Error != nil {
+		t.Fatalf("begin tx: %v", tx.Error)
+	}
+
+	postCommit, err := svc.Save(tx, json.RawMessage(`{
+		"subMode":"master",
+		"subDomain":"cn2.example.com"
+	}`))
+	if err != nil {
+		tx.Rollback()
+		t.Fatalf("save settings: %v", err)
+	}
+	if postCommit == nil {
+		tx.Rollback()
+		t.Fatal("expected post-commit action for subDomain change")
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		t.Fatalf("commit tx: %v", err)
+	}
+	if err := postCommit(); err != nil {
+		t.Fatalf("run post-commit: %v", err)
+	}
+	if restartCount != 1 {
+		t.Fatalf("expected sub server restart once, got %d", restartCount)
+	}
+
+	if got, err := svc.GetSubCertFile(); err != nil || got != certFile {
+		t.Fatalf("expected sub cert to be auto-filled, got %q err=%v", got, err)
+	}
+	if got, err := svc.GetSubKeyFile(); err != nil || got != keyFile {
+		t.Fatalf("expected sub key to be auto-filled, got %q err=%v", got, err)
+	}
+}
+
 func TestSaveConfigReturnsNoChangesForIdenticalPayload(t *testing.T) {
 	workDir := t.TempDir()
 	if err := database.InitDB(filepath.Join(workDir, "config-no-changes.db")); err != nil {

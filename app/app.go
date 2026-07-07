@@ -60,6 +60,7 @@ func (a *APP) Init() error {
 	a.subServer = sub.NewServer()
 
 	a.configService = service.NewConfigService(a.core)
+	service.SetSubServerRestartFunc(a.subServer.Restart)
 
 	return nil
 }
