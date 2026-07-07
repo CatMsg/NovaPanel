@@ -229,7 +229,7 @@ func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, b
 			}
 		case "masque":
 			proxy["type"] = "masque"
-			copyClashFields(proxy, obMap, "network", "private-key", "public-key", "ip", "mtu", "udp", "remote-dns-resolve", "dns")
+			copyClashFields(proxy, obMap, "network", "private-key", "public-key", "ip", "mtu", "udp", "remote-dns-resolve", "dns", "congestion-controller", "cwnd", "bbr-profile")
 		case "tailscale":
 			proxy["type"] = "tailscale"
 			copyClashFields(proxy, obMap,

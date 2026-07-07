@@ -666,15 +666,18 @@ func buildMasqueAggregateOutbound(endpoint map[string]interface{}) *map[string]i
 	}
 
 	node := map[string]interface{}{
-		"type":               "masque",
-		"tag":                asString(endpoint["tag"]),
-		"server":             server,
-		"server_port":        port,
-		"network":            network,
-		"private-key":        privateKey,
-		"public-key":         publicKey,
-		"remote-dns-resolve": true,
-		"dns":                []string{"1.1.1.1", "8.8.8.8"},
+		"type":                  "masque",
+		"tag":                   asString(endpoint["tag"]),
+		"server":                server,
+		"server_port":           port,
+		"network":               network,
+		"private-key":           privateKey,
+		"public-key":            publicKey,
+		"remote-dns-resolve":    true,
+		"dns":                   []string{"1.1.1.1", "8.8.8.8"},
+		"congestion-controller": "bbr",
+		"cwnd":                  32,
+		"bbr-profile":           "standard",
 	}
 	if len(ip) > 0 {
 		node["ip"] = ip
