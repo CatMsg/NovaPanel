@@ -681,8 +681,6 @@ func buildMasqueAggregateOutbound(endpoint map[string]interface{}) *map[string]i
 		"remote-dns-resolve":    true,
 		"dns":                   []string{"1.1.1.1", "8.8.8.8"},
 		"congestion-controller": "bbr",
-		"cwnd":                  8,
-		"bbr-profile":           "standard",
 		"handshake-timeout":     handshakeTimeout,
 	}
 	if len(ip) > 0 {

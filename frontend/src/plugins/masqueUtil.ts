@@ -14,8 +14,6 @@ export function buildMasqueConfig(endpoint: any): string {
     `private-key: ${yamlStr(endpoint.private_key ?? '')}`,
     `public-key: ${yamlStr(endpoint.public_key ?? '')}`,
     `congestion-controller: ${yamlStr(endpoint.congestion_controller ?? 'bbr')}`,
-    `cwnd: ${Number(endpoint.cwnd ?? 8)}`,
-    `bbr-profile: ${yamlStr(endpoint.bbr_profile ?? 'standard')}`,
   ]
   if (endpoint.ip) {
     fields.push(`ip: ${yamlStr(endpoint.ip)}`)
