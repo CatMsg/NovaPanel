@@ -65,6 +65,8 @@ export interface Masque extends EndpointBasics {
   network: 'quic' | 'h2'
   private_key: string
   public_key: string
+  sni?: string
+  handshake_timeout?: number
   ip: string
   mtu?: number
   udp?: boolean
@@ -86,7 +88,7 @@ const defaultValues: Record<EpType, Endpoint> = {
   wireguard: { type: EpTypes.Wireguard, address: ['10.0.0.2/32','fe80::2/128'], private_key: '', listen_port: 0 },
   warp: { type: EpTypes.Warp, address: [], private_key: '', listen_port: 0, mtu: 1420, peers: [{ address: '', port: 0, public_key: ''}] },
   tailscale: { type: EpTypes.Tailscale, domain_resolver: 'local' },
-  masque: { type: EpTypes.Masque, server: '', port: 443, network: 'quic', private_key: '', public_key: '', ip: '', mtu: 1280, udp: true },
+  masque: { type: EpTypes.Masque, server: '', port: 443, network: 'quic', private_key: '', public_key: '', sni: '', handshake_timeout: 30, ip: '', mtu: 1280, udp: true },
 }
 
 export function createEndpoint<T extends Endpoint>(type: string,json?: Partial<T>): Endpoint {

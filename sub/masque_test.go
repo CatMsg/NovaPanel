@@ -35,6 +35,12 @@ func TestBuildMasqueAggregateOutboundAddsPerformanceDefaults(t *testing.T) {
 	if got, ok := (*node)["bbr-profile"].(string); !ok || got != "standard" {
 		t.Fatalf("unexpected bbr-profile: %#v", (*node)["bbr-profile"])
 	}
+	if got, ok := (*node)["sni"].(string); !ok || got != "example.com" {
+		t.Fatalf("unexpected sni: %#v", (*node)["sni"])
+	}
+	if got, ok := (*node)["handshake-timeout"].(int); !ok || got != 30 {
+		t.Fatalf("unexpected handshake-timeout: %#v", (*node)["handshake-timeout"])
+	}
 }
 
 func TestConvertToClashMetaPreservesMasquePerformanceDefaults(t *testing.T) {
@@ -53,6 +59,8 @@ func TestConvertToClashMetaPreservesMasquePerformanceDefaults(t *testing.T) {
 			"congestion-controller": "bbr",
 			"cwnd":                  8,
 			"bbr-profile":           "standard",
+			"sni":                   "example.com",
+			"handshake-timeout":     30,
 		},
 	}
 
@@ -83,5 +91,11 @@ func TestConvertToClashMetaPreservesMasquePerformanceDefaults(t *testing.T) {
 	}
 	if got, ok := proxy["bbr-profile"].(string); !ok || got != "standard" {
 		t.Fatalf("unexpected bbr-profile: %#v", proxy["bbr-profile"])
+	}
+	if got, ok := proxy["sni"].(string); !ok || got != "example.com" {
+		t.Fatalf("unexpected sni: %#v", proxy["sni"])
+	}
+	if got, ok := proxy["handshake-timeout"].(int); !ok || got != 30 {
+		t.Fatalf("unexpected handshake-timeout: %#v", proxy["handshake-timeout"])
 	}
 }

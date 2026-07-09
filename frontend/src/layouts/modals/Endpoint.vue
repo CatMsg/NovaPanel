@@ -142,6 +142,8 @@ export default {
             network: 'quic',
             private_key: masqueKeys.private_key,
             public_key: masqueKeys.public_key,
+            sni: server,
+            handshake_timeout: 30,
             ip: '172.16.0.' + RandomUtil.randomIntRange(2, 254).toString() + '/32',
             mtu: 1280,
             udp: true,
@@ -176,6 +178,7 @@ export default {
           }
           this.endpoint.server = preferredHost
         }
+        const resolvedHost = String(this.endpoint.server ?? '').trim()
         if (!String(this.endpoint.ip ?? '').trim()) {
           push.error({
             message: 'MASQUE 需要填写客户端 IPv4，例如 172.16.0.2/32',
@@ -183,6 +186,10 @@ export default {
           })
           this.loading = false
           return
+        }
+        const sni = String((this.endpoint as any).sni ?? '').trim()
+        if (!sni && !this.isIpLiteral(resolvedHost)) {
+          (this.endpoint as any).sni = resolvedHost
         }
         delete (this.endpoint as any).ipv6
       }

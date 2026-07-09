@@ -230,6 +230,16 @@ func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, b
 		case "masque":
 			proxy["type"] = "masque"
 			copyClashFields(proxy, obMap, "network", "private-key", "public-key", "ip", "mtu", "udp", "remote-dns-resolve", "dns", "congestion-controller", "cwnd", "bbr-profile")
+			if sni := asString(obMap["sni"]); sni != "" {
+				proxy["sni"] = sni
+			} else if server := asString(obMap["server"]); server != "" && !isIPLiteral(server) {
+				proxy["sni"] = server
+			}
+			handshakeTimeout := asInt(obMap["handshake_timeout"])
+			if handshakeTimeout <= 0 {
+				handshakeTimeout = 30
+			}
+			proxy["handshake-timeout"] = handshakeTimeout
 		case "tailscale":
 			proxy["type"] = "tailscale"
 			copyClashFields(proxy, obMap,

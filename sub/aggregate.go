@@ -658,11 +658,16 @@ func buildMasqueAggregateOutbound(endpoint map[string]interface{}) *map[string]i
 	port := asInt(endpoint["port"])
 	privateKey := asString(endpoint["private_key"])
 	publicKey := asString(endpoint["public_key"])
+	sni := normalizeMasqueSNI(server, asString(endpoint["sni"]))
 	ip := asString(endpoint["ip"])
 	network := normalizeEndpointMasqueNetwork(asString(endpoint["network"]))
+	handshakeTimeout := asInt(endpoint["handshake_timeout"])
 
 	if len(server) == 0 || port <= 0 || len(privateKey) == 0 || len(publicKey) == 0 {
 		return nil
+	}
+	if handshakeTimeout <= 0 {
+		handshakeTimeout = 30
 	}
 
 	node := map[string]interface{}{
@@ -678,9 +683,13 @@ func buildMasqueAggregateOutbound(endpoint map[string]interface{}) *map[string]i
 		"congestion-controller": "bbr",
 		"cwnd":                  8,
 		"bbr-profile":           "standard",
+		"handshake-timeout":     handshakeTimeout,
 	}
 	if len(ip) > 0 {
 		node["ip"] = ip
+	}
+	if len(sni) > 0 {
+		node["sni"] = sni
 	}
 	if mtu := asInt(endpoint["mtu"]); mtu > 0 {
 		node["mtu"] = mtu
@@ -699,6 +708,28 @@ func normalizeEndpointMasqueNetwork(network string) string {
 		return "quic"
 	}
 	return network
+}
+
+func normalizeMasqueSNI(server, sni string) string {
+	sni = strings.TrimSpace(sni)
+	if sni != "" {
+		return sni
+	}
+	server = strings.TrimSpace(server)
+	if server == "" {
+		return ""
+	}
+	if isIPLiteral(server) {
+		return ""
+	}
+	return server
+}
+
+func isIPLiteral(host string) bool {
+	host = strings.TrimSpace(host)
+	host = strings.TrimPrefix(host, "[")
+	host = strings.TrimSuffix(host, "]")
+	return net.ParseIP(host) != nil
 }
 
 func buildTailscaleAggregateOutbound(endpoint map[string]interface{}) *map[string]interface{} {
