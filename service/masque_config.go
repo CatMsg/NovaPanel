@@ -17,6 +17,7 @@ type masqueEndpointConfig struct {
 	PrivateKey string
 	IP         string
 	MTU        int
+	KeepAlive  int
 }
 
 func parseMasqueEndpoint(endpoint *model.Endpoint) (*masqueEndpointConfig, error) {
@@ -27,6 +28,7 @@ func parseMasqueEndpoint(endpoint *model.Endpoint) (*masqueEndpointConfig, error
 		PrivateKey string `json:"private_key"`
 		IP         string `json:"ip"`
 		MTU        int    `json:"mtu"`
+		KeepAlive  int    `json:"keepalive"`
 	}
 	if endpoint != nil && endpoint.Options != nil {
 		if err := json.Unmarshal(endpoint.Options, &payload); err != nil {
@@ -41,6 +43,7 @@ func parseMasqueEndpoint(endpoint *model.Endpoint) (*masqueEndpointConfig, error
 		PrivateKey: strings.TrimSpace(payload.PrivateKey),
 		IP:         strings.TrimSpace(payload.IP),
 		MTU:        payload.MTU,
+		KeepAlive:  payload.KeepAlive,
 	}, nil
 }
 

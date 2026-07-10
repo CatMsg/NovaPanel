@@ -38,6 +38,19 @@
             hide-details="auto"
           ></v-text-field>
         </v-col>
+        <v-col cols="12" sm="6" md="4">
+          <v-text-field
+            v-model.number="data.keepalive"
+            label="Keepalive (s)"
+            type="number"
+            min="1"
+            max="300"
+            step="1"
+            hint="建议 15~30 秒，过低会增加开销，过高容易断链"
+            persistent-hint
+            hide-details="auto"
+          ></v-text-field>
+        </v-col>
       </v-row>
 
       <v-divider class="my-4"></v-divider>

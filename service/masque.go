@@ -251,6 +251,15 @@ func (s *MasqueService) startEndpoint(endpoint *model.Endpoint) (*masqueRuntime,
 		return nil, fmt.Errorf("load masque certificate failed: %w", err)
 	}
 
+	keepAlive := config.KeepAlive
+	if keepAlive <= 0 {
+		keepAlive = 25
+	}
+	idleTimeout := time.Duration(keepAlive*4) * time.Second
+	if minIdleTimeout := 2 * time.Minute; idleTimeout < minIdleTimeout {
+		idleTimeout = minIdleTimeout
+	}
+
 	bindAddr := net.JoinHostPort("0.0.0.0", strconv.Itoa(config.Port))
 	templateStr := masqueTemplateDescription(config)
 	template, err := uritemplate.New(templateStr)
@@ -311,8 +320,8 @@ func (s *MasqueService) startEndpoint(endpoint *model.Endpoint) (*masqueRuntime,
 		Addr: bindAddr,
 		QUICConfig: &mquic.Config{
 			EnableDatagrams: true,
-			KeepAlivePeriod: 10 * time.Second,
-			MaxIdleTimeout:  20 * time.Second,
+			KeepAlivePeriod: time.Duration(keepAlive) * time.Second,
+			MaxIdleTimeout:  idleTimeout,
 		},
 		TLSConfig:       mhttp3.ConfigureTLSConfig(&mtls.Config{Certificates: []mtls.Certificate{cert}}),
 		Handler:         mux,

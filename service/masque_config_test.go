@@ -23,7 +23,8 @@ func TestParseMasqueEndpointNormalizesFields(t *testing.T) {
 			"network":"",
 			"private_key":"  key  ",
 			"ip":" 172.16.0.9/32 ",
-			"mtu":1380
+			"mtu":1380,
+			"keepalive":25
 		}`),
 	}
 
@@ -31,7 +32,7 @@ func TestParseMasqueEndpointNormalizesFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse endpoint: %v", err)
 	}
-	if config.Host != "tk.mile.news" || config.Port != 8443 || config.Network != "quic" || config.PrivateKey != "key" || config.IP != "172.16.0.9/32" || config.MTU != 1380 {
+	if config.Host != "tk.mile.news" || config.Port != 8443 || config.Network != "quic" || config.PrivateKey != "key" || config.IP != "172.16.0.9/32" || config.MTU != 1380 || config.KeepAlive != 25 {
 		t.Fatalf("unexpected config: %#v", config)
 	}
 }

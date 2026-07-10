@@ -38,6 +38,9 @@ func TestBuildMasqueAggregateOutboundAddsPerformanceDefaults(t *testing.T) {
 	if got, ok := (*node)["handshake-timeout"].(int); !ok || got != 30 {
 		t.Fatalf("unexpected handshake-timeout: %#v", (*node)["handshake-timeout"])
 	}
+	if got, ok := (*node)["keepalive"].(int); !ok || got != 25 {
+		t.Fatalf("unexpected keepalive: %#v", (*node)["keepalive"])
+	}
 }
 
 func TestConvertToClashMetaPreservesMasquePerformanceDefaults(t *testing.T) {
@@ -57,6 +60,7 @@ func TestConvertToClashMetaPreservesMasquePerformanceDefaults(t *testing.T) {
 			"congestion-controller": "bbr",
 			"sni":                   "example.com",
 			"handshake-timeout":     30,
+			"keepalive":             25,
 		},
 	}
 
@@ -90,5 +94,8 @@ func TestConvertToClashMetaPreservesMasquePerformanceDefaults(t *testing.T) {
 	}
 	if got, ok := proxy["handshake-timeout"].(int); !ok || got != 30 {
 		t.Fatalf("unexpected handshake-timeout: %#v", proxy["handshake-timeout"])
+	}
+	if got, ok := proxy["keepalive"].(int); !ok || got != 25 {
+		t.Fatalf("unexpected keepalive: %#v", proxy["keepalive"])
 	}
 }

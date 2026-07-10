@@ -144,6 +144,7 @@ export default {
             public_key: masqueKeys.public_key,
             sni: server,
             handshake_timeout: 30,
+            keepalive: 25,
             ip: '172.16.0.' + RandomUtil.randomIntRange(2, 254).toString() + '/32',
             mtu: 1280,
             udp: true,
