@@ -3,7 +3,6 @@ export function buildMasqueConfig(endpoint: any): string {
   const network = String(endpoint.network ?? 'quic')
   const server = String(endpoint.server ?? '').trim()
   const sni = String(endpoint.sni ?? '').trim() || (isIpLiteral(server) ? '' : server)
-  const handshakeTimeout = Number(endpoint.handshake_timeout ?? 30)
   const keepalive = Number(endpoint.keepalive ?? 25)
   const dnsServers = ['1.1.1.1', '8.8.8.8']
   const fields = [
@@ -29,16 +28,13 @@ export function buildMasqueConfig(endpoint: any): string {
   if (sni) {
     fields.push(`sni: ${yamlStr(sni)}`)
   }
-  if (Number.isFinite(handshakeTimeout) && handshakeTimeout > 0) {
-    fields.push(`handshake-timeout: ${handshakeTimeout}`)
-  }
   if (Number.isFinite(keepalive) && keepalive > 0) {
     fields.push(`keepalive: ${keepalive}`)
   }
   if (endpoint.remote_dns_resolve) {
     fields.push(`remote-dns-resolve: true`)
+    fields.push(`dns: [${dnsServers.map(yamlStr).join(', ')}]`)
   }
-  fields.push(`dns: [${dnsServers.map(yamlStr).join(', ')}]`)
   return `- { ${fields.join(', ')} }`
 }
 

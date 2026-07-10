@@ -661,14 +661,10 @@ func buildMasqueAggregateOutbound(endpoint map[string]interface{}) *map[string]i
 	sni := normalizeMasqueSNI(server, asString(endpoint["sni"]))
 	ip := asString(endpoint["ip"])
 	network := normalizeEndpointMasqueNetwork(asString(endpoint["network"]))
-	handshakeTimeout := asInt(endpoint["handshake_timeout"])
 	keepAlive := asInt(endpoint["keepalive"])
 
 	if len(server) == 0 || port <= 0 || len(privateKey) == 0 || len(publicKey) == 0 {
 		return nil
-	}
-	if handshakeTimeout <= 0 {
-		handshakeTimeout = 30
 	}
 	if keepAlive <= 0 {
 		keepAlive = 25
@@ -682,14 +678,13 @@ func buildMasqueAggregateOutbound(endpoint map[string]interface{}) *map[string]i
 		"network":               network,
 		"private-key":           privateKey,
 		"public-key":            publicKey,
-		"dns":                   []string{"1.1.1.1", "8.8.8.8"},
 		"proto":                 "bbr",
 		"congestion-controller": "bbr",
-		"handshake-timeout":     handshakeTimeout,
 		"keepalive":             keepAlive,
 	}
 	if remoteDNSResolve, ok := endpoint["remote_dns_resolve"].(bool); ok && remoteDNSResolve {
 		node["remote-dns-resolve"] = true
+		node["dns"] = []string{"1.1.1.1", "8.8.8.8"}
 	}
 	if len(ip) > 0 {
 		node["ip"] = ip

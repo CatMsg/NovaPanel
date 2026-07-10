@@ -38,18 +38,6 @@
         </v-col>
         <v-col cols="12" sm="6" md="4">
           <v-text-field
-            v-model.number="data.handshake_timeout"
-            label="Handshake Timeout (s)"
-            type="number"
-            min="0"
-            step="1"
-            hint="0 uses the outer connection timeout"
-            persistent-hint
-            hide-details="auto"
-          ></v-text-field>
-        </v-col>
-        <v-col cols="12" sm="6" md="4">
-          <v-text-field
             v-model.number="data.keepalive"
             label="Keepalive (s)"
             type="number"

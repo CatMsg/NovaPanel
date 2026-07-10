@@ -35,14 +35,14 @@ func TestBuildMasqueAggregateOutboundAddsPerformanceDefaults(t *testing.T) {
 	if got, ok := (*node)["sni"].(string); !ok || got != "example.com" {
 		t.Fatalf("unexpected sni: %#v", (*node)["sni"])
 	}
-	if got, ok := (*node)["handshake-timeout"].(int); !ok || got != 30 {
-		t.Fatalf("unexpected handshake-timeout: %#v", (*node)["handshake-timeout"])
-	}
 	if got, ok := (*node)["keepalive"].(int); !ok || got != 25 {
 		t.Fatalf("unexpected keepalive: %#v", (*node)["keepalive"])
 	}
 	if _, ok := (*node)["remote-dns-resolve"]; ok {
 		t.Fatalf("did not expect remote-dns-resolve by default: %#v", (*node)["remote-dns-resolve"])
+	}
+	if _, ok := (*node)["dns"]; ok {
+		t.Fatalf("did not expect dns by default: %#v", (*node)["dns"])
 	}
 }
 
@@ -64,6 +64,9 @@ func TestBuildMasqueAggregateOutboundCanEnableRemoteDNSResolve(t *testing.T) {
 	if got, ok := (*node)["remote-dns-resolve"].(bool); !ok || !got {
 		t.Fatalf("unexpected remote-dns-resolve: %#v", (*node)["remote-dns-resolve"])
 	}
+	if dns, ok := (*node)["dns"].([]string); !ok || len(dns) != 2 {
+		t.Fatalf("unexpected dns: %#v", (*node)["dns"])
+	}
 }
 
 func TestConvertToClashMetaPreservesMasquePerformanceDefaults(t *testing.T) {
@@ -78,11 +81,10 @@ func TestConvertToClashMetaPreservesMasquePerformanceDefaults(t *testing.T) {
 			"private-key":           "private",
 			"public-key":            "public",
 			"remote-dns-resolve":    true,
-			"dns":                   []string{"1.1.1.1"},
+			"dns":                   []string{"1.1.1.1", "8.8.8.8"},
 			"proto":                 "bbr",
 			"congestion-controller": "bbr",
 			"sni":                   "example.com",
-			"handshake-timeout":     30,
 			"keepalive":             25,
 		},
 	}
@@ -115,10 +117,10 @@ func TestConvertToClashMetaPreservesMasquePerformanceDefaults(t *testing.T) {
 	if got, ok := proxy["sni"].(string); !ok || got != "example.com" {
 		t.Fatalf("unexpected sni: %#v", proxy["sni"])
 	}
-	if got, ok := proxy["handshake-timeout"].(int); !ok || got != 30 {
-		t.Fatalf("unexpected handshake-timeout: %#v", proxy["handshake-timeout"])
-	}
 	if got, ok := proxy["keepalive"].(int); !ok || got != 25 {
 		t.Fatalf("unexpected keepalive: %#v", proxy["keepalive"])
+	}
+	if dns, ok := proxy["dns"].([]interface{}); !ok || len(dns) != 2 {
+		t.Fatalf("expected dns to be preserved when remote-dns-resolve is enabled: %#v", proxy["dns"])
 	}
 }

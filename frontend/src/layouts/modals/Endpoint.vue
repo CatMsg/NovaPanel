@@ -143,7 +143,6 @@ export default {
             private_key: masqueKeys.private_key,
             public_key: masqueKeys.public_key,
             sni: server,
-            handshake_timeout: 30,
             keepalive: 25,
             remote_dns_resolve: false,
             ip: '172.16.0.' + RandomUtil.randomIntRange(2, 254).toString() + '/32',
