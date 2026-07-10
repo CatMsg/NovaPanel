@@ -35,7 +35,9 @@ export function buildMasqueConfig(endpoint: any): string {
   if (Number.isFinite(keepalive) && keepalive > 0) {
     fields.push(`keepalive: ${keepalive}`)
   }
-  fields.push(`remote-dns-resolve: true`)
+  if (endpoint.remote_dns_resolve) {
+    fields.push(`remote-dns-resolve: true`)
+  }
   fields.push(`dns: [${dnsServers.map(yamlStr).join(', ')}]`)
   return `- { ${fields.join(', ')} }`
 }

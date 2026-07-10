@@ -682,12 +682,14 @@ func buildMasqueAggregateOutbound(endpoint map[string]interface{}) *map[string]i
 		"network":               network,
 		"private-key":           privateKey,
 		"public-key":            publicKey,
-		"remote-dns-resolve":    true,
 		"dns":                   []string{"1.1.1.1", "8.8.8.8"},
 		"proto":                 "bbr",
 		"congestion-controller": "bbr",
 		"handshake-timeout":     handshakeTimeout,
 		"keepalive":             keepAlive,
+	}
+	if remoteDNSResolve, ok := endpoint["remote_dns_resolve"].(bool); ok && remoteDNSResolve {
+		node["remote-dns-resolve"] = true
 	}
 	if len(ip) > 0 {
 		node["ip"] = ip

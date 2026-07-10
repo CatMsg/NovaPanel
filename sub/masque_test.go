@@ -41,6 +41,29 @@ func TestBuildMasqueAggregateOutboundAddsPerformanceDefaults(t *testing.T) {
 	if got, ok := (*node)["keepalive"].(int); !ok || got != 25 {
 		t.Fatalf("unexpected keepalive: %#v", (*node)["keepalive"])
 	}
+	if _, ok := (*node)["remote-dns-resolve"]; ok {
+		t.Fatalf("did not expect remote-dns-resolve by default: %#v", (*node)["remote-dns-resolve"])
+	}
+}
+
+func TestBuildMasqueAggregateOutboundCanEnableRemoteDNSResolve(t *testing.T) {
+	endpoint := map[string]interface{}{
+		"tag":                "masque-1",
+		"server":             "example.com",
+		"port":               443,
+		"private_key":        "private",
+		"public_key":         "public",
+		"remote_dns_resolve": true,
+	}
+
+	node := buildMasqueAggregateOutbound(endpoint)
+	if node == nil {
+		t.Fatal("expected masque outbound to be built")
+	}
+
+	if got, ok := (*node)["remote-dns-resolve"].(bool); !ok || !got {
+		t.Fatalf("unexpected remote-dns-resolve: %#v", (*node)["remote-dns-resolve"])
+	}
 }
 
 func TestConvertToClashMetaPreservesMasquePerformanceDefaults(t *testing.T) {

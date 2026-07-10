@@ -18,6 +18,16 @@
           <v-switch v-model="data.udp" color="primary" label="UDP" hide-details></v-switch>
         </v-col>
         <v-col cols="12" sm="6" md="4">
+          <v-switch
+            v-model="data.remote_dns_resolve"
+            color="primary"
+            label="Remote DNS Resolve"
+            hint="开启后会让客户端优先做远程 DNS 解析"
+            persistent-hint
+            hide-details="auto"
+          ></v-switch>
+        </v-col>
+        <v-col cols="12" sm="6" md="4">
           <v-text-field
             v-model="data.sni"
             label="SNI"

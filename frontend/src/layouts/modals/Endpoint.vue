@@ -145,6 +145,7 @@ export default {
             sni: server,
             handshake_timeout: 30,
             keepalive: 25,
+            remote_dns_resolve: false,
             ip: '172.16.0.' + RandomUtil.randomIntRange(2, 254).toString() + '/32',
             mtu: 1280,
             udp: true,
