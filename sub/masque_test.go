@@ -29,6 +29,9 @@ func TestBuildMasqueAggregateOutboundAddsPerformanceDefaults(t *testing.T) {
 	if got, ok := (*node)["congestion-controller"].(string); !ok || got != "bbr" {
 		t.Fatalf("unexpected congestion-controller: %#v", (*node)["congestion-controller"])
 	}
+	if got, ok := (*node)["proto"].(string); !ok || got != "bbr" {
+		t.Fatalf("unexpected proto: %#v", (*node)["proto"])
+	}
 	if got, ok := (*node)["sni"].(string); !ok || got != "example.com" {
 		t.Fatalf("unexpected sni: %#v", (*node)["sni"])
 	}
@@ -50,6 +53,7 @@ func TestConvertToClashMetaPreservesMasquePerformanceDefaults(t *testing.T) {
 			"public-key":            "public",
 			"remote-dns-resolve":    true,
 			"dns":                   []string{"1.1.1.1"},
+			"proto":                 "bbr",
 			"congestion-controller": "bbr",
 			"sni":                   "example.com",
 			"handshake-timeout":     30,
@@ -77,6 +81,9 @@ func TestConvertToClashMetaPreservesMasquePerformanceDefaults(t *testing.T) {
 	}
 	if got, ok := proxy["congestion-controller"].(string); !ok || got != "bbr" {
 		t.Fatalf("unexpected congestion-controller: %#v", proxy["congestion-controller"])
+	}
+	if got, ok := proxy["proto"].(string); !ok || got != "bbr" {
+		t.Fatalf("unexpected proto: %#v", proxy["proto"])
 	}
 	if got, ok := proxy["sni"].(string); !ok || got != "example.com" {
 		t.Fatalf("unexpected sni: %#v", proxy["sni"])

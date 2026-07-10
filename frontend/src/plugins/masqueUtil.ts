@@ -13,6 +13,7 @@ export function buildMasqueConfig(endpoint: any): string {
     `network: ${yamlStr(network)}`,
     `private-key: ${yamlStr(endpoint.private_key ?? '')}`,
     `public-key: ${yamlStr(endpoint.public_key ?? '')}`,
+    `proto: ${yamlStr(endpoint.proto ?? 'bbr')}`,
     `congestion-controller: ${yamlStr(endpoint.congestion_controller ?? 'bbr')}`,
   ]
   if (endpoint.ip) {
