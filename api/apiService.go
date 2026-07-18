@@ -243,6 +243,11 @@ func (a *ApiService) GetPorts(c *gin.Context) {
 	jsonObj(c, result, nil)
 }
 
+func (a *ApiService) GetFleetStatus(c *gin.Context) {
+	result := a.FleetService.GetFleetStatus()
+	jsonObj(c, result, nil)
+}
+
 func (a *ApiService) GetMasqueStatus(c *gin.Context) {
 	tag := c.Query("tag")
 	masqueService := service.GetMasqueService()

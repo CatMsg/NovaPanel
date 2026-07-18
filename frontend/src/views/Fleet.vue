@@ -68,6 +68,18 @@
             <div class="fleet-summary__value">{{ errorCount }}</div>
           </v-card>
         </v-col>
+        <v-col cols="6" sm="3">
+          <v-card class="fleet-summary__card fleet-summary__card--five" rounded="xl" variant="flat">
+            <div class="fleet-summary__label">在线用户</div>
+            <div class="fleet-summary__value">{{ onlineUsersTotal }}</div>
+          </v-card>
+        </v-col>
+        <v-col cols="6" sm="3">
+          <v-card class="fleet-summary__card fleet-summary__card--six" rounded="xl" variant="flat">
+            <div class="fleet-summary__label">节点总数</div>
+            <div class="fleet-summary__value">{{ endpointTotal }}</div>
+          </v-card>
+        </v-col>
       </v-row>
 
       <v-alert v-if="servers.length === 1" type="info" variant="tonal" rounded="xl" class="fleet-empty">
@@ -104,12 +116,32 @@
                 <strong>{{ server.id === 'local' ? '本机' : server.reachable ? `${server.latencyMs} ms` : '-' }}</strong>
               </div>
               <div class="fleet-metric">
+                <span>公网 IP</span>
+                <strong>{{ server.PublicIP || '-' }}</strong>
+              </div>
+              <div class="fleet-metric">
+                <span>运行时间</span>
+                <strong>{{ formatUptime(server.Uptime) }}</strong>
+              </div>
+              <div class="fleet-metric">
                 <span>防火墙</span>
                 <strong>{{ server.portBackend || '-' }}</strong>
               </div>
               <div class="fleet-metric">
                 <span>监听 / NAT</span>
                 <strong>{{ server.reachable ? `${server.listeners} / ${server.natRules}` : '-' }}</strong>
+              </div>
+              <div class="fleet-metric">
+                <span>用户在线</span>
+                <strong>{{ server.OnlineUsers }} / {{ server.Clients }}</strong>
+              </div>
+              <div class="fleet-metric">
+                <span>入站 / 出站</span>
+                <strong>{{ server.Inbounds }} / {{ server.Outbounds }}</strong>
+              </div>
+              <div class="fleet-metric">
+                <span>节点 / MASQUE</span>
+                <strong>{{ server.Endpoints }} / {{ server.MasqueRunning }} / {{ server.MasqueTotal }}</strong>
               </div>
             </div>
 
@@ -182,6 +214,17 @@ type FleetServer = {
   Core?: Record<string, any>
   system?: Record<string, any>
   core?: Record<string, any>
+  PublicIP: string
+  Uptime: number
+  OnlineUsers: number
+  OnlineInbounds: number
+  OnlineOutbounds: number
+  Clients: number
+  Inbounds: number
+  Outbounds: number
+  Endpoints: number
+  MasqueTotal: number
+  MasqueRunning: number
   portBackend?: string
   listeners: number
   natRules: number
@@ -207,6 +250,17 @@ const normalizeServer = (server: any): FleetServer => ({
   ...server,
   System: server.system ?? server.System ?? {},
   Core: server.core ?? server.Core ?? {},
+  PublicIP: server.publicIp ?? server.PublicIP ?? '',
+  Uptime: server.uptime ?? server.Uptime ?? 0,
+  OnlineUsers: server.onlineUsers ?? server.OnlineUsers ?? 0,
+  OnlineInbounds: server.onlineInbounds ?? server.OnlineInbounds ?? 0,
+  OnlineOutbounds: server.onlineOutbounds ?? server.OnlineOutbounds ?? 0,
+  Clients: server.clients ?? server.Clients ?? 0,
+  Inbounds: server.inbounds ?? server.Inbounds ?? 0,
+  Outbounds: server.outbounds ?? server.Outbounds ?? 0,
+  Endpoints: server.endpoints ?? server.Endpoints ?? 0,
+  MasqueTotal: server.masqueTotal ?? server.MasqueTotal ?? 0,
+  MasqueRunning: server.masqueRunning ?? server.MasqueRunning ?? 0,
   listeners: server.listeners ?? 0,
   natRules: server.natRules ?? 0,
 })
@@ -216,11 +270,23 @@ const reachableCount = computed(() => servers.value.filter((server) => server.re
 const runningCount = computed(() => servers.value.filter((server) => server.Core?.running).length)
 const errorCount = computed(() => servers.value.filter((server) => server.error || !server.reachable).length)
 const remoteCount = computed(() => remoteServers.value.length)
+const onlineUsersTotal = computed(() => servers.value.reduce((total, server) => total + server.OnlineUsers, 0))
+const endpointTotal = computed(() => servers.value.reduce((total, server) => total + server.Endpoints, 0))
 const formattedCheckedAt = computed(() => {
   if (!checkedAt.value) return '-'
   const date = new Date(checkedAt.value)
   return Number.isNaN(date.getTime()) ? checkedAt.value : date.toLocaleString()
 })
+
+const formatUptime = (seconds: number) => {
+  if (!seconds || seconds < 1) return '-'
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  if (days > 0) return `${days}天 ${hours}时`
+  if (hours > 0) return `${hours}时 ${minutes}分`
+  return `${Math.max(minutes, 1)}分`
+}
 
 const loadFleet = async () => {
   loading.value = true
@@ -327,6 +393,8 @@ onMounted(loadFleet)
 .fleet-summary__card--two { border-top: 3px solid #22c55e; }
 .fleet-summary__card--three { border-top: 3px solid #a78bfa; }
 .fleet-summary__card--four { border-top: 3px solid #fb7185; }
+.fleet-summary__card--five { border-top: 3px solid #f59e0b; }
+.fleet-summary__card--six { border-top: 3px solid #14b8a6; }
 .fleet-empty { border: 1px solid var(--np-border); }
 
 .fleet-card { padding: 18px; height: 100%; }

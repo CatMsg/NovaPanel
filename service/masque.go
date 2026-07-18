@@ -78,6 +78,26 @@ func GetMasqueService() *MasqueService {
 	return masquePtr
 }
 
+func (s *MasqueService) GetSummary() map[string]int {
+	result := map[string]int{"total": 0, "running": 0}
+	if s == nil {
+		return result
+	}
+	endpoints, err := s.loadMasqueEndpoints()
+	if err != nil {
+		return result
+	}
+	result["total"] = len(endpoints)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, endpoint := range endpoints {
+		if endpoint != nil && s.runtimes[endpoint.Tag] != nil {
+			result["running"]++
+		}
+	}
+	return result
+}
+
 func (s *MasqueService) SyncFromDB() error {
 	if s == nil {
 		return nil

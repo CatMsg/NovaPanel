@@ -41,20 +41,31 @@ type FleetServerInput struct {
 }
 
 type FleetServerView struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	URL         string                 `json:"url"`
-	Enabled     bool                   `json:"enabled"`
-	TokenSet    bool                   `json:"tokenSet"`
-	Reachable   bool                   `json:"reachable"`
-	LatencyMs   int64                  `json:"latencyMs"`
-	CheckedAt   time.Time              `json:"checkedAt"`
-	Error       string                 `json:"error,omitempty"`
-	System      map[string]interface{} `json:"system,omitempty"`
-	Core        map[string]interface{} `json:"core,omitempty"`
-	PortBackend string                 `json:"portBackend,omitempty"`
-	Listeners   int                    `json:"listeners,omitempty"`
-	NatRules    int                    `json:"natRules,omitempty"`
+	ID              string                 `json:"id"`
+	Name            string                 `json:"name"`
+	URL             string                 `json:"url"`
+	Enabled         bool                   `json:"enabled"`
+	TokenSet        bool                   `json:"tokenSet"`
+	Reachable       bool                   `json:"reachable"`
+	LatencyMs       int64                  `json:"latencyMs"`
+	CheckedAt       time.Time              `json:"checkedAt"`
+	Error           string                 `json:"error,omitempty"`
+	System          map[string]interface{} `json:"system,omitempty"`
+	Core            map[string]interface{} `json:"core,omitempty"`
+	PublicIP        string                 `json:"publicIp,omitempty"`
+	Uptime          int64                  `json:"uptime,omitempty"`
+	OnlineUsers     int                    `json:"onlineUsers,omitempty"`
+	OnlineInbounds  int                    `json:"onlineInbounds,omitempty"`
+	OnlineOutbounds int                    `json:"onlineOutbounds,omitempty"`
+	Clients         int                    `json:"clients,omitempty"`
+	Inbounds        int                    `json:"inbounds,omitempty"`
+	Outbounds       int                    `json:"outbounds,omitempty"`
+	Endpoints       int                    `json:"endpoints,omitempty"`
+	MasqueTotal     int                    `json:"masqueTotal,omitempty"`
+	MasqueRunning   int                    `json:"masqueRunning,omitempty"`
+	PortBackend     string                 `json:"portBackend,omitempty"`
+	Listeners       int                    `json:"listeners,omitempty"`
+	NatRules        int                    `json:"natRules,omitempty"`
 }
 
 type FleetSnapshot struct {
@@ -70,6 +81,31 @@ type fleetAPIResponse struct {
 
 type FleetService struct {
 	SettingService
+}
+
+func (s *FleetService) GetFleetStatus() map[string]interface{} {
+	serverService := &ServerService{}
+	status := serverService.GetStatus("sys,sbd,db")
+	result := map[string]interface{}{
+		"system":   (*status)["sys"],
+		"core":     (*status)["sbd"],
+		"database": (*status)["db"],
+		"publicIp": serverService.GetPublicIP(),
+		"ports":    serverService.GetPortStatus(),
+	}
+
+	online, err := (&StatsService{}).GetOnlines()
+	if err == nil {
+		result["online"] = map[string]interface{}{
+			"users":     len(online.User),
+			"inbounds":  len(online.Inbound),
+			"outbounds": len(online.Outbound),
+		}
+	}
+	if masque := GetMasqueService(); masque != nil {
+		result["masque"] = masque.GetSummary()
+	}
+	return result
 }
 
 func (s *FleetService) GetFleet() (*FleetSnapshot, error) {
@@ -185,28 +221,18 @@ func (s *FleetService) loadFleetServers() ([]FleetServer, error) {
 }
 
 func (s *FleetService) localFleetView() FleetServerView {
-	serverService := &ServerService{}
-	system := serverService.GetSystemInfo()
-	core := map[string]interface{}{"running": false}
-	if corePtr != nil {
-		core = serverService.GetSingboxInfo()
+	view := FleetServerView{
+		ID:        "local",
+		Name:      "本机",
+		URL:       "本机",
+		Enabled:   true,
+		TokenSet:  true,
+		Reachable: true,
+		LatencyMs: 0,
+		CheckedAt: time.Now(),
 	}
-	ports := serverService.GetPortStatus()
-	return FleetServerView{
-		ID:          "local",
-		Name:        "本机",
-		URL:         "本机",
-		Enabled:     true,
-		TokenSet:    true,
-		Reachable:   true,
-		LatencyMs:   0,
-		CheckedAt:   time.Now(),
-		System:      system,
-		Core:        core,
-		PortBackend: fmt.Sprint(ports["backend"]),
-		Listeners:   fleetSliceLength(ports["listeners"]),
-		NatRules:    fleetSliceLength(ports["nat_ipv4"]) + fleetSliceLength(ports["nat_ipv6"]),
-	}
+	s.applyFleetStatus(&view, s.GetFleetStatus())
+	return view
 }
 
 func (s *FleetService) fetchFleetServer(config FleetServer) FleetServerView {
@@ -225,7 +251,7 @@ func (s *FleetService) fetchFleetServer(config FleetServer) FleetServerView {
 	}
 
 	started := time.Now()
-	status, statusErr := s.fetchFleetAPI(config.URL, token, "status", "r=sys,sbd")
+	status, statusErr := s.fetchFleetAPI(config.URL, token, "fleet-status", "")
 	if statusErr != nil {
 		view.Error = statusErr.Error()
 		view.LatencyMs = time.Since(started).Milliseconds()
@@ -233,24 +259,43 @@ func (s *FleetService) fetchFleetServer(config FleetServer) FleetServerView {
 	}
 	view.LatencyMs = time.Since(started).Milliseconds()
 	view.Reachable = true
-	if system, ok := status.Obj["sys"].(map[string]interface{}); ok {
+	s.applyFleetStatus(&view, status.Obj)
+	return view
+}
+
+func (s *FleetService) applyFleetStatus(view *FleetServerView, payload map[string]interface{}) {
+	if system, ok := payload["system"].(map[string]interface{}); ok {
 		view.System = system
 	}
-	if core, ok := status.Obj["sbd"].(map[string]interface{}); ok {
+	if core, ok := payload["core"].(map[string]interface{}); ok {
 		view.Core = core
-	}
-
-	ports, portsErr := s.fetchFleetAPI(config.URL, token, "ports", "")
-	if portsErr == nil {
-		if backend, ok := ports.Obj["backend"].(string); ok {
-			view.PortBackend = backend
+		if stats, ok := core["stats"].(map[string]interface{}); ok {
+			view.Uptime = fleetInt64(stats["Uptime"])
 		}
-		view.Listeners = fleetSliceLength(ports.Obj["listeners"])
-		view.NatRules = fleetSliceLength(ports.Obj["nat_ipv4"]) + fleetSliceLength(ports.Obj["nat_ipv6"])
-	} else {
-		view.Error = "状态正常，端口信息获取失败: " + portsErr.Error()
 	}
-	return view
+	if publicIP, ok := payload["publicIp"].(string); ok {
+		view.PublicIP = publicIP
+	}
+	if databaseInfo, ok := payload["database"].(map[string]interface{}); ok {
+		view.Clients = fleetInt(databaseInfo["clients"])
+		view.Inbounds = fleetInt(databaseInfo["inbounds"])
+		view.Outbounds = fleetInt(databaseInfo["outbounds"])
+		view.Endpoints = fleetInt(databaseInfo["endpoints"])
+	}
+	if online, ok := payload["online"].(map[string]interface{}); ok {
+		view.OnlineUsers = fleetInt(online["users"])
+		view.OnlineInbounds = fleetInt(online["inbounds"])
+		view.OnlineOutbounds = fleetInt(online["outbounds"])
+	}
+	if masque, ok := payload["masque"].(map[string]interface{}); ok {
+		view.MasqueTotal = fleetInt(masque["total"])
+		view.MasqueRunning = fleetInt(masque["running"])
+	}
+	if ports, ok := payload["ports"].(map[string]interface{}); ok {
+		view.PortBackend, _ = ports["backend"].(string)
+		view.Listeners = fleetSliceLength(ports["listeners"])
+		view.NatRules = fleetSliceLength(ports["nat_ipv4"]) + fleetSliceLength(ports["nat_ipv6"])
+	}
 }
 
 func (s *FleetService) fetchFleetAPI(baseURL, token, action, query string) (fleetAPIResponse, error) {
@@ -358,6 +403,30 @@ func fleetSliceLength(value interface{}) int {
 		return len(typed)
 	case []PortNatEntry:
 		return len(typed)
+	default:
+		return 0
+	}
+}
+
+func fleetInt(value interface{}) int {
+	return int(fleetInt64(value))
+}
+
+func fleetInt64(value interface{}) int64 {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed)
+	case int64:
+		return typed
+	case uint32:
+		return int64(typed)
+	case uint64:
+		return int64(typed)
+	case float64:
+		return int64(typed)
+	case json.Number:
+		parsed, _ := typed.Int64()
+		return parsed
 	default:
 		return 0
 	}
