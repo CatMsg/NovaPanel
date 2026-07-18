@@ -41,6 +41,7 @@ export default {
     login: "Login",
     home: "Home",
     ports: "Port Management",
+    fleet: "Server Fleet",
     inbounds: "Inbounds",
     outbounds: "Outbounds",
     services: "Services",

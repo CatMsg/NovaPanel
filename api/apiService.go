@@ -23,6 +23,7 @@ type ApiService struct {
 	service.InboundService
 	service.OutboundService
 	service.EndpointService
+	service.FleetService
 	service.ServicesService
 	service.PanelService
 	service.StatsService
@@ -255,6 +256,25 @@ func (a *ApiService) GetMasqueStatus(c *gin.Context) {
 		return
 	}
 	jsonObj(c, result, nil)
+}
+
+func (a *ApiService) GetFleet(c *gin.Context) {
+	result, err := a.FleetService.GetFleet()
+	jsonObj(c, result, err)
+}
+
+func (a *ApiService) SaveFleet(c *gin.Context) {
+	var inputs []service.FleetServerInput
+	data := c.Request.FormValue("data")
+	if err := json.Unmarshal([]byte(data), &inputs); err != nil {
+		jsonMsg(c, "save", err)
+		return
+	}
+	if err := a.FleetService.SaveFleet(inputs); err != nil {
+		jsonMsg(c, "save", err)
+		return
+	}
+	jsonMsg(c, "save", nil)
 }
 
 func (a *ApiService) GetOnlines(c *gin.Context) {

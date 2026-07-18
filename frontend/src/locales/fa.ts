@@ -41,6 +41,7 @@ export default {
     login: "ورود",
     home: "خانه",
     ports: "مدیریت پورت‌ها",
+    fleet: "مجموعه سرورها",
     inbounds: "ورودی‌ها",
     outbounds: "خروجی‌ها",
     endpoints: "درگاه‌ها",

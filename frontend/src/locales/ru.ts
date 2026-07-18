@@ -41,6 +41,7 @@ export default {
     login: "Вход",
     home: "Главная",
     ports: "Управление портами",
+    fleet: "Группа серверов",
     inbounds: "Входящие",
     outbounds: "Исходящие",
     services: "Устройства",

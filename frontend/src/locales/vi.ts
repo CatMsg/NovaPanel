@@ -41,6 +41,7 @@ export default {
     login: "Đăng nhập",
     home: "Trang chủ",
     ports: "Quản lý cổng",
+    fleet: "Cụm máy chủ",
     inbounds: "Đầu Vào",
     outbounds: "Đầu ra",
     services: "Thiết bị",

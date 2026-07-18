@@ -41,6 +41,7 @@ export default {
     login: "登录",
     home: "主页",
     ports: "端口管理",
+    fleet: "服务器集合",
     inbounds: "入站管理",
     outbounds: "出站管理",
     services: "服务管理",
