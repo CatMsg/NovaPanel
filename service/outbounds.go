@@ -126,5 +126,4 @@ func (s *OutboundService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 	default:
 		return nil, common.NewErrorf("unknown action: %s", act)
 	}
-	return nil, nil
 }

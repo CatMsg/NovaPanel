@@ -57,7 +57,7 @@ export default {
     config() {
       window.location.href = 'api/singbox-config'
     },
-    restore() {
+      async restore() {
       const fileInput = document.createElement('input')
       fileInput.type = 'file'
       fileInput.accept = '.db'
@@ -69,6 +69,27 @@ export default {
         if (dbFile) {
           const formData = new FormData()
           formData.append('db', dbFile)
+
+          const checkForm = new FormData()
+          checkForm.append('db', dbFile)
+          const checkMsg = await HttpUtils.post('api/validateBackup', checkForm, {
+            headers: {
+              'Content-Type': 'multipart/form-data',
+            },
+          })
+          if (!checkMsg.success) return
+
+          const counts = checkMsg.obj || {}
+          const summary = [
+            `用户：${counts.users ?? 0}`,
+            `入站：${counts.inbounds ?? 0}`,
+            `出站：${counts.outbounds ?? 0}`,
+            `节点：${counts.endpoints ?? 0}`,
+            `服务：${counts.services ?? 0}`,
+            `受管端口：${counts.managed_port_entries ?? 0}`,
+            `服务器集合：${counts.fleet_servers ?? 0}`,
+          ].join('\n')
+          if (!window.confirm(`备份校验通过，将恢复以下数据：\n\n${summary}\n\n继续恢复吗？`)) return
 
           this.control.visible = false
 

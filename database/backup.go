@@ -52,7 +52,9 @@ func GetDb(exclude string) ([]byte, error) {
 		&model.Outbound{},
 		&model.Endpoint{},
 		&model.ManagedPortEntry{},
+		&model.Service{},
 		&model.User{},
+		&model.Tokens{},
 		&model.Stats{},
 		&model.Client{},
 		&model.Changes{},
@@ -66,7 +68,10 @@ func GetDb(exclude string) ([]byte, error) {
 	var inbound []model.Inbound
 	var outbound []model.Outbound
 	var endpoint []model.Endpoint
+	var managedPorts []model.ManagedPortEntry
+	var services []model.Service
 	var users []model.User
+	var tokens []model.Tokens
 	var clients []model.Client
 	var stats []model.Stats
 	var changes []model.Changes
@@ -107,10 +112,31 @@ func GetDb(exclude string) ([]byte, error) {
 			return nil, err
 		}
 	}
+	if err := db.Model(&model.ManagedPortEntry{}).Scan(&managedPorts).Error; err != nil {
+		return nil, err
+	} else if len(managedPorts) > 0 {
+		if err := backupDb.Save(managedPorts).Error; err != nil {
+			return nil, err
+		}
+	}
+	if err := db.Model(&model.Service{}).Scan(&services).Error; err != nil {
+		return nil, err
+	} else if len(services) > 0 {
+		if err := backupDb.Save(services).Error; err != nil {
+			return nil, err
+		}
+	}
 	if err := db.Model(&model.User{}).Scan(&users).Error; err != nil {
 		return nil, err
 	} else if len(users) > 0 {
 		if err := backupDb.Save(users).Error; err != nil {
+			return nil, err
+		}
+	}
+	if err := db.Model(&model.Tokens{}).Scan(&tokens).Error; err != nil {
+		return nil, err
+	} else if len(tokens) > 0 {
+		if err := backupDb.Save(tokens).Error; err != nil {
 			return nil, err
 		}
 	}
@@ -204,10 +230,6 @@ func ImportDB(file multipart.File) error {
 	// Remove temp file before returning
 	defer os.Remove(tempPath)
 
-	// Close old DB
-	old_db, _ := db.DB()
-	old_db.Close()
-
 	// Save uploaded file to temporary file
 	_, err = io.Copy(tempFile, file)
 	if err != nil {
@@ -231,6 +253,15 @@ func ImportDB(file multipart.File) error {
 	}
 	newDb_db, _ := newDb.DB()
 	newDb_db.Close()
+
+	// Close the live DB only after the replacement has passed all validation.
+	oldDB, oldDBErr := db.DB()
+	if oldDBErr != nil {
+		return common.NewErrorf("Error opening current db: %v", oldDBErr)
+	}
+	if err := oldDB.Close(); err != nil {
+		return common.NewErrorf("Error closing current db: %v", err)
+	}
 
 	// Backup the current database for fallback
 	fallbackPath := fmt.Sprintf("%s.backup", config.GetDBPath())
@@ -373,6 +404,65 @@ func validateAndSanitizeRestoreDB(path string) error {
 		}
 		return nil
 	})
+}
+
+// ValidateDB copies and validates a backup without touching the live database.
+// It is used by the restore preview so the user can inspect the backup first.
+func ValidateDB(file multipart.File) (map[string]interface{}, error) {
+	if valid, err := IsSQLiteDB(file); err != nil {
+		return nil, common.NewErrorf("Error checking db file format: %v", err)
+	} else if !valid {
+		return nil, common.NewError("Invalid db file format")
+	}
+	if _, err := file.Seek(0, 0); err != nil {
+		return nil, common.NewErrorf("Error resetting file reader: %v", err)
+	}
+	tempFile, err := os.CreateTemp(filepath.Dir(config.GetDBPath()), ".sui-restore-validate-*.db")
+	if err != nil {
+		return nil, err
+	}
+	tempPath := tempFile.Name()
+	defer os.Remove(tempPath)
+	if _, err := io.Copy(tempFile, file); err != nil {
+		_ = tempFile.Close()
+		return nil, err
+	}
+	if err := tempFile.Sync(); err != nil {
+		_ = tempFile.Close()
+		return nil, err
+	}
+	if err := tempFile.Close(); err != nil {
+		return nil, err
+	}
+	if err := validateAndSanitizeRestoreDB(tempPath); err != nil {
+		return nil, common.NewErrorf("备份校验失败: %v", err)
+	}
+
+	conn, err := gorm.Open(sqlite.Open(tempPath), &gorm.Config{})
+	if err != nil {
+		return nil, err
+	}
+	sqlDB, err := conn.DB()
+	if err != nil {
+		return nil, err
+	}
+	defer sqlDB.Close()
+	report := map[string]interface{}{"valid": true}
+	for _, table := range []string{"settings", "tls", "inbounds", "outbounds", "endpoints", "managed_port_entries", "services", "users", "tokens", "clients", "stats", "changes"} {
+		var count int64
+		if err := conn.Table(table).Count(&count).Error; err != nil {
+			continue
+		}
+		report[table] = count
+	}
+	var fleetSetting model.Setting
+	if err := conn.Where("key = ?", "fleetServers").First(&fleetSetting).Error; err == nil {
+		var fleet []interface{}
+		if json.Unmarshal([]byte(fleetSetting.Value), &fleet) == nil {
+			report["fleet_servers"] = len(fleet)
+		}
+	}
+	return report, nil
 }
 
 func IsSQLiteDB(file io.Reader) (bool, error) {

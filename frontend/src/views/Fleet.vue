@@ -100,7 +100,7 @@
                 </div>
               </div>
               <v-chip size="small" :color="server.reachable ? 'success' : server.enabled ? 'error' : 'secondary'" variant="flat">
-                {{ server.reachable ? '在线' : server.enabled ? '失联' : '已停用' }}
+                {{ server.reachable ? '在线' : server.lastKnown ? '上次状态' : server.enabled ? '失联' : '已停用' }}
               </v-chip>
             </div>
 
@@ -162,6 +162,12 @@
               <v-btn size="small" variant="text" color="warning" :disabled="!server.reachable" @click.stop="restartServer(server)">
                 <v-icon icon="mdi-restart" start />重启
               </v-btn>
+              <v-btn size="small" variant="text" color="primary" :loading="updateLoadingId === server.id" :disabled="!server.reachable" @click.stop="updateServer(server)">
+                <v-icon icon="mdi-download-outline" start />更新
+              </v-btn>
+              <v-btn size="small" variant="text" :loading="refreshLoadingId === server.id" @click.stop="refreshServer(server)">
+                <v-icon icon="mdi-refresh" start />刷新
+              </v-btn>
             </div>
           </v-card>
         </v-col>
@@ -175,7 +181,7 @@
           <v-btn icon="mdi-close" variant="text" @click="showConfig = false" />
         </v-card-title>
         <v-card-subtitle>
-          远端地址填写面板根地址，例如 https://example.com:9999。令牌只用于读取状态，不会显示原值。
+          远端地址填写面板根地址，例如 https://example.com:9999。令牌用于状态读取和远程运维，留空保持已保存令牌不变。
         </v-card-subtitle>
         <v-card-text>
           <div v-for="(item, index) in configs" :key="item.id || index" class="fleet-config-row">
@@ -219,6 +225,10 @@
             <span>检查时间：{{ selectedServer.checkedAt ? new Date(selectedServer.checkedAt).toLocaleString() : '-' }}</span>
             <span>延迟：{{ selectedServer.id === 'local' ? '本机' : `${selectedServer.latencyMs} ms` }}</span>
           </div>
+          <v-alert v-if="updateStates[selectedServer.id]" class="mt-4" variant="tonal" :type="updateAlertType(selectedServer)">
+            <strong>更新状态：</strong>{{ updateStateLabel(selectedServer) }}
+            <span v-if="updateStates[selectedServer.id]?.message"> · {{ updateStates[selectedServer.id].message }}</span>
+          </v-alert>
           <div class="fleet-detail__grid">
             <div><span>地址</span><strong>{{ selectedServer.url }}</strong></div>
             <div><span>公网 IP</span><strong>{{ selectedServer.PublicIP || '-' }}</strong></div>
@@ -243,6 +253,9 @@
           <v-btn color="warning" :loading="actionLoading" :disabled="!selectedServer.reachable" @click="restartServer(selectedServer)">
             <v-icon icon="mdi-restart" start />重启面板
           </v-btn>
+          <v-btn color="primary" :loading="updateLoadingId === selectedServer.id" :disabled="!selectedServer.reachable" @click="updateServer(selectedServer)">
+            <v-icon icon="mdi-download-outline" start />后台更新
+          </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -263,6 +276,8 @@ type FleetServer = {
   latencyMs: number
   checkedAt?: string
   error?: string
+  lastKnown?: boolean
+  lastSuccessAt?: string
   System?: Record<string, any>
   Core?: Record<string, any>
   system?: Record<string, any>
@@ -303,6 +318,9 @@ const selectedServer = ref<FleetServer | null>(null)
 const logLines = ref<string[]>([])
 const logsLoading = ref(false)
 const actionLoading = ref(false)
+const updateLoadingId = ref('')
+const refreshLoadingId = ref('')
+const updateStates = ref<Record<string, any>>({})
 
 const normalizeServer = (server: any): FleetServer => ({
   ...server,
@@ -388,6 +406,25 @@ const openDetails = (server: FleetServer) => {
   selectedServer.value = server
   logLines.value = []
   showDetails.value = true
+  void loadUpdateStatus(server)
+}
+
+const loadUpdateStatus = async (server: FleetServer) => {
+  const response = await HttpUtils.post('api/fleetAction', { id: server.id, action: 'update-status' })
+  if (response.success) {
+    updateStates.value = { ...updateStates.value, [server.id]: response.obj ?? {} }
+  }
+}
+
+const refreshServer = async (server: FleetServer) => {
+  refreshLoadingId.value = server.id
+  const response = await HttpUtils.post('api/fleetRefresh', { id: server.id })
+  if (response.success && response.obj) {
+    const refreshed = normalizeServer(response.obj)
+    servers.value = servers.value.map((item) => item.id === refreshed.id ? refreshed : item)
+    if (selectedServer.value?.id === refreshed.id) selectedServer.value = refreshed
+  }
+  refreshLoadingId.value = ''
 }
 
 const loadLogs = async (server: FleetServer) => {
@@ -412,6 +449,29 @@ const restartServer = async (server: FleetServer) => {
     window.setTimeout(loadFleet, 4500)
   }
   actionLoading.value = false
+}
+
+const updateServer = async (server: FleetServer) => {
+  updateLoadingId.value = server.id
+  const response = await HttpUtils.post('api/fleetAction', { id: server.id, action: 'update' })
+  if (response.success) {
+    updateStates.value = { ...updateStates.value, [server.id]: response.obj ?? { state: 'queued' } }
+    window.setTimeout(() => loadUpdateStatus(server), 1500)
+    window.setTimeout(loadFleet, 4500)
+  }
+  updateLoadingId.value = ''
+}
+
+const updateStateLabel = (server: FleetServer) => {
+  const state = updateStates.value[server.id]?.state
+  return ({ queued: '排队中', running: '更新中', success: '已完成', failed: '失败', never: '未执行' } as Record<string, string>)[state] ?? state ?? '未知'
+}
+
+const updateAlertType = (server: FleetServer) => {
+  const state = updateStates.value[server.id]?.state
+  if (state === 'failed') return 'error'
+  if (state === 'success') return 'success'
+  return 'info'
 }
 
 const statusClass = (server: FleetServer) => {

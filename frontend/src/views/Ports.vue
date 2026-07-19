@@ -19,7 +19,7 @@
               <div>
                 <h1 class="ports-hero__title">{{ $t('pages.ports') }}</h1>
                 <p class="ports-hero__subtitle">
-                  当前机器上可见的监听端口与 NAT 规则，只读展示，不修改配置。
+                  当前机器上的监听端口、NAT 规则和面板受管端口；发现漂移时可一键重建受管规则。
                 </p>
               </div>
             </div>
@@ -27,9 +27,15 @@
               <span>更新时间：{{ formattedCapturedAt }}</span>
               <span>•</span>
               <span>错误：{{ errors.length }}</span>
+              <span>•</span>
+              <span>受管端口：{{ status.managed_count ?? 0 }}</span>
             </div>
           </v-col>
           <v-col cols="12" lg="4" class="ports-hero__actions">
+            <v-btn variant="outlined" :loading="repairing" @click="repairPorts">
+              <v-icon icon="mdi-wrench-outline" start />
+              修复端口规则
+            </v-btn>
             <v-btn class="ports-hero__refresh" variant="flat" color="primary" :loading="loading" @click="loadPorts">
               <v-icon icon="mdi-refresh" start />
               刷新
@@ -223,9 +229,11 @@ type PortStatus = {
   nat_ipv4?: PortNatEntry[]
   nat_ipv6?: PortNatEntry[]
   errors?: string[]
+  managed_count?: number
 }
 
 const loading = ref(false)
+const repairing = ref(false)
 const natTab = ref<'ipv4' | 'ipv6'>('ipv4')
 const status = ref<PortStatus>({})
 
@@ -251,6 +259,18 @@ const loadPorts = async () => {
     }
   } finally {
     loading.value = false
+  }
+}
+
+const repairPorts = async () => {
+  repairing.value = true
+  try {
+    const resp = await HttpUtils.post('api/reconcilePorts', {})
+    if (resp.success) {
+      await loadPorts()
+    }
+  } finally {
+    repairing.value = false
   }
 }
 
@@ -384,10 +404,22 @@ onMounted(() => {
 .ports-hero__actions {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .ports-hero__refresh {
   min-width: 160px;
+}
+
+@media (max-width: 959px) {
+  .ports-hero__actions {
+    justify-content: stretch;
+  }
+
+  .ports-hero__actions .v-btn {
+    flex: 1 1 180px;
+  }
 }
 
 .ports-summary {

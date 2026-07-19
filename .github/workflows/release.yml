@@ -226,13 +226,15 @@ jobs:
           cp scripts/hy2-forward.sh s-ui/scripts/
 
       - name: 打包
-        run: tar -zcvf NovaPanel-linux-${{ matrix.platform }}.tar.gz s-ui
+        run: |
+          tar -zcvf NovaPanel-linux-${{ matrix.platform }}.tar.gz s-ui
+          sha256sum NovaPanel-linux-${{ matrix.platform }}.tar.gz > NovaPanel-linux-${{ matrix.platform }}.tar.gz.sha256
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v7
         with:
           name: NovaPanel-linux-${{ matrix.platform }}
-          path: ./NovaPanel-linux-${{ matrix.platform }}.tar.gz
+          path: ./NovaPanel-linux-${{ matrix.platform }}.tar.gz*
           retention-days: 1
 
   publish-release:

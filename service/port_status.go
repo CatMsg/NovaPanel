@@ -7,6 +7,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/CatMsg/NovaPanel/database"
+	"github.com/CatMsg/NovaPanel/database/model"
 )
 
 type PortListenEntry struct {
@@ -42,15 +45,23 @@ func (s *ServerService) GetPortStatus() map[string]interface{} {
 
 	listeners, listenErrors := collectListenEntries()
 	natIPv4, natIPv6, natErrors := collectNatEntries()
+	managed := make([]model.ManagedPortEntry, 0)
+	if database.GetDB() != nil {
+		if err := database.GetDB().Order("scope, owner_id, port").Find(&managed).Error; err != nil {
+			listenErrors = append(listenErrors, fmt.Sprintf("managed port query failed: %v", err))
+		}
+	}
 
 	errors := append(listenErrors, natErrors...)
 	result := map[string]interface{}{
-		"backend":     detectFirewallBackend(),
-		"captured_at": time.Now().Format(time.RFC3339),
-		"listeners":   listeners,
-		"nat_ipv4":    natIPv4,
-		"nat_ipv6":    natIPv6,
-		"errors":      errors,
+		"backend":       detectFirewallBackend(),
+		"captured_at":   time.Now().Format(time.RFC3339),
+		"listeners":     listeners,
+		"nat_ipv4":      natIPv4,
+		"nat_ipv6":      natIPv6,
+		"managed":       managed,
+		"managed_count": len(managed),
+		"errors":        errors,
 	}
 	serverStatusCache.mu.Lock()
 	serverStatusCache.entries["ports"] = statusCacheEntry{

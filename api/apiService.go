@@ -290,6 +290,22 @@ func (a *ApiService) FleetAction(c *gin.Context) {
 	jsonObj(c, obj, err)
 }
 
+func (a *ApiService) FleetRefresh(c *gin.Context) {
+	id := strings.TrimSpace(c.Request.FormValue("id"))
+	server, err := a.FleetService.GetFleetServer(id)
+	jsonObj(c, server, err)
+}
+
+func (a *ApiService) GetUpdateStatus(c *gin.Context) {
+	status, err := service.GetUpdateStatus()
+	jsonObj(c, status, err)
+}
+
+func (a *ApiService) ReconcilePorts(c *gin.Context) {
+	err := a.ConfigService.SettingService.RebuildAllManagedPortForwarding(&a.ConfigService.InboundService, &a.ConfigService.EndpointService)
+	jsonMsg(c, "reconcilePorts", err)
+}
+
 func (a *ApiService) GetOnlines(c *gin.Context) {
 	onlines, err := a.StatsService.GetOnlines()
 	jsonObj(c, onlines, err)
@@ -438,6 +454,17 @@ func (a *ApiService) ImportDb(c *gin.Context) {
 	defer file.Close()
 	err = database.ImportDB(file)
 	jsonMsg(c, "", err)
+}
+
+func (a *ApiService) ValidateDb(c *gin.Context) {
+	file, _, err := c.Request.FormFile("db")
+	if err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
+	defer file.Close()
+	report, err := database.ValidateDB(file)
+	jsonObj(c, report, err)
 }
 
 func (a *ApiService) Logout(c *gin.Context) {

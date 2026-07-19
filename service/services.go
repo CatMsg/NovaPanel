@@ -137,7 +137,6 @@ func (s *ServicesService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 	default:
 		return nil, common.NewErrorf("unknown action: %s", act)
 	}
-	return nil, nil
 }
 
 func (s *ServicesService) BuildRestartServicesAction(tx *gorm.DB, ids []uint) (func() error, error) {

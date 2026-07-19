@@ -37,6 +37,7 @@ readonly SUI_UPDATE_STATE_DIR="/var/lib/s-ui"
 readonly SUI_UPDATE_LOG="${SUI_UPDATE_STATE_DIR}/update.log"
 readonly SUI_UPDATE_STATUS="${SUI_UPDATE_STATE_DIR}/update.status"
 readonly SUI_UPDATE_PID="${SUI_UPDATE_STATE_DIR}/update.pid"
+readonly SUI_UPDATE_LOCK_DIR="${SUI_UPDATE_STATE_DIR}/update.lock"
 
 confirm() {
     if [[ $# > 1 ]]; then
@@ -116,34 +117,48 @@ write_update_status() {
 }
 
 run_update_worker() {
-    write_update_status "running" "正在后台更新"
-    SUI_AUTO_UPGRADE=1 update
+	trap 'rm -rf "${SUI_UPDATE_LOCK_DIR}"; rm -f "${SUI_UPDATE_PID}"' EXIT
+	write_update_status "running" "正在后台更新"
+	SUI_AUTO_UPGRADE=1 update
     local status=$?
     if [[ ${status} -eq 0 ]]; then
         write_update_status "success" "更新完成，面板已重启"
     else
         write_update_status "failed" "更新失败，详见 ${SUI_UPDATE_LOG}"
     fi
-    rm -f "${SUI_UPDATE_PID}"
-    return ${status}
+	return ${status}
 }
 
 start_background_update() {
-    mkdir -p "${SUI_UPDATE_STATE_DIR}"
-    if [[ -f "${SUI_UPDATE_PID}" ]]; then
-        local pid
-        pid=$(cat "${SUI_UPDATE_PID}")
-        if [[ "${pid}" =~ ^[0-9]+$ ]] && kill -0 "${pid}" 2>/dev/null; then
-            LOGI "已有更新任务运行中，PID=${pid}"
-            return 0
-        fi
-        rm -f "${SUI_UPDATE_PID}"
-    fi
-    : > "${SUI_UPDATE_LOG}"
-    write_update_status "queued" "已提交后台更新任务"
-    nohup setsid bash "$0" update --worker >> "${SUI_UPDATE_LOG}" 2>&1 < /dev/null &
-    local pid=$!
-    printf '%s\n' "${pid}" > "${SUI_UPDATE_PID}"
+	mkdir -p "${SUI_UPDATE_STATE_DIR}"
+	if [[ -d "${SUI_UPDATE_LOCK_DIR}" ]]; then
+		local pid
+		pid=$(cat "${SUI_UPDATE_PID}" 2>/dev/null || true)
+		if [[ "${pid}" =~ ^[0-9]+$ ]] && kill -0 "${pid}" 2>/dev/null; then
+			LOGI "已有更新任务运行中，PID=${pid}"
+			return 0
+		fi
+		rm -rf "${SUI_UPDATE_LOCK_DIR}"
+		rm -f "${SUI_UPDATE_PID}"
+	fi
+	if ! mkdir "${SUI_UPDATE_LOCK_DIR}" 2>/dev/null; then
+		LOGI "已有更新任务正在启动，请稍后查看状态"
+		return 0
+	fi
+	if [[ -f "${SUI_UPDATE_PID}" ]]; then
+		local pid
+		pid=$(cat "${SUI_UPDATE_PID}")
+		if [[ "${pid}" =~ ^[0-9]+$ ]] && kill -0 "${pid}" 2>/dev/null; then
+			LOGI "已有更新任务运行中，PID=${pid}"
+			return 0
+		fi
+		rm -f "${SUI_UPDATE_PID}"
+	fi
+	: > "${SUI_UPDATE_LOG}"
+	write_update_status "queued" "已提交后台更新任务"
+	nohup setsid bash "$0" update --worker >> "${SUI_UPDATE_LOG}" 2>&1 < /dev/null &
+	local pid=$!
+	printf '%s\n' "${pid}" > "${SUI_UPDATE_PID}"
     LOGI "后台更新已启动，PID=${pid}"
     LOGI "日志：${SUI_UPDATE_LOG}"
 }

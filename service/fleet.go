@@ -50,6 +50,8 @@ type FleetServerView struct {
 	LatencyMs       int64                  `json:"latencyMs"`
 	CheckedAt       time.Time              `json:"checkedAt"`
 	Error           string                 `json:"error,omitempty"`
+	LastKnown       bool                   `json:"lastKnown,omitempty"`
+	LastSuccessAt   string                 `json:"lastSuccessAt,omitempty"`
 	System          map[string]interface{} `json:"system,omitempty"`
 	Core            map[string]interface{} `json:"core,omitempty"`
 	PublicIP        string                 `json:"publicIp,omitempty"`
@@ -82,6 +84,11 @@ type fleetAPIResponse struct {
 type FleetService struct {
 	SettingService
 }
+
+var fleetLastKnown = struct {
+	sync.RWMutex
+	views map[string]FleetServerView
+}{views: make(map[string]FleetServerView)}
 
 func (s *FleetService) GetFleetStatus() map[string]interface{} {
 	serverService := &ServerService{}
@@ -140,6 +147,25 @@ func (s *FleetService) GetFleet() (*FleetSnapshot, error) {
 	servers = append(servers, remoteViews...)
 
 	return &FleetSnapshot{Servers: servers, CheckedAt: time.Now()}, nil
+}
+
+func (s *FleetService) GetFleetServer(id string) (*FleetServerView, error) {
+	id = strings.TrimSpace(id)
+	if id == "local" {
+		view := s.localFleetView()
+		return &view, nil
+	}
+	configs, err := s.loadFleetServers()
+	if err != nil {
+		return nil, err
+	}
+	for _, config := range configs {
+		if config.ID == id {
+			view := s.fetchFleetServer(config)
+			return &view, nil
+		}
+	}
+	return nil, fmt.Errorf("服务器不存在: %s", id)
 }
 
 func (s *FleetService) SaveFleet(inputs []FleetServerInput) error {
@@ -251,31 +277,70 @@ func (s *FleetService) fetchFleetServer(config FleetServer) FleetServerView {
 	}
 
 	started := time.Now()
-	status, statusErr := s.fetchFleetAPI(config.URL, token, "fleet-status", "")
+	var status fleetAPIResponse
+	var statusErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		status, statusErr = s.fetchFleetAPI(config.URL, token, "fleet-status", "")
+		if statusErr == nil {
+			break
+		}
+		if attempt == 0 {
+			time.Sleep(250 * time.Millisecond)
+		}
+	}
 	if statusErr != nil {
 		view.Error = statusErr.Error()
 		view.LatencyMs = time.Since(started).Milliseconds()
+		fleetLastKnown.RLock()
+		previous, ok := fleetLastKnown.views[config.ID]
+		fleetLastKnown.RUnlock()
+		if ok {
+			previous.ID = config.ID
+			previous.Name = config.Name
+			previous.URL = config.URL
+			previous.Enabled = config.Enabled
+			previous.TokenSet = config.TokenEnc != ""
+			previous.Reachable = false
+			previous.LastKnown = true
+			previous.CheckedAt = view.CheckedAt
+			previous.LatencyMs = view.LatencyMs
+			previous.Error = view.Error
+			return previous
+		}
 		return view
 	}
 	view.LatencyMs = time.Since(started).Milliseconds()
 	view.Reachable = true
+	view.LastSuccessAt = time.Now().Format(time.RFC3339)
 	if payload, ok := status.Obj.(map[string]interface{}); ok {
 		s.applyFleetStatus(&view, payload)
 	}
+	fleetLastKnown.Lock()
+	fleetLastKnown.views[config.ID] = view
+	fleetLastKnown.Unlock()
 	return view
 }
 
 // FleetAction executes a safe operational action for a local or configured
-// remote panel. Mutating actions are deliberately limited to a restart.
+// remote panel. Updates are delegated to the existing detached s-ui updater.
 func (s *FleetService) FleetAction(id, action string) (interface{}, error) {
 	id = strings.TrimSpace(id)
 	action = strings.TrimSpace(action)
-	if action != "logs" && action != "restart" {
+	if action != "logs" && action != "restart" && action != "update" && action != "update-status" {
 		return nil, fmt.Errorf("不支持的服务器操作: %s", action)
 	}
 	if id == "local" {
 		if action == "logs" {
 			return (&ServerService{}).GetLogs("100", "info"), nil
+		}
+		if action == "update-status" {
+			return GetUpdateStatus()
+		}
+		if action == "update" {
+			if err := StartBackgroundUpdate(); err != nil {
+				return nil, err
+			}
+			return map[string]interface{}{"scheduled": true, "state": "queued"}, nil
 		}
 		if err := (&PanelService{}).RestartPanel(3 * time.Second); err != nil {
 			return nil, err
@@ -299,6 +364,17 @@ func (s *FleetService) FleetAction(id, action string) (interface{}, error) {
 		}
 		if action == "logs" {
 			result, err := s.fetchFleetAPI(config.URL, token, "logs", "c=100&l=info")
+			return result.Obj, err
+		}
+		if action == "update-status" {
+			result, err := s.fetchFleetAPI(config.URL, token, "update-status", "")
+			return result.Obj, err
+		}
+		form := url.Values{}
+		form.Set("id", "local")
+		form.Set("action", "update")
+		if action == "update" {
+			result, err := s.fetchFleetAPIRequest(http.MethodPost, config.URL, token, "fleet-action", "", strings.NewReader(form.Encode()))
 			return result.Obj, err
 		}
 		result, err := s.fetchFleetAPIRequest(http.MethodPost, config.URL, token, "restartApp", "", nil)
@@ -360,6 +436,9 @@ func (s *FleetService) fetchFleetAPIRequest(method, baseURL, token, action, quer
 	}
 	req.Header.Set("Token", token)
 	req.Header.Set("Accept", "application/json")
+	if requestBody != nil {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {

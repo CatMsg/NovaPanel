@@ -52,6 +52,10 @@ func (a *APIHandler) postHandler(c *gin.Context) {
 		a.ApiService.SubConvert(c)
 	case "importdb":
 		a.ApiService.ImportDb(c)
+	case "validateBackup":
+		a.ApiService.ValidateDb(c)
+	case "reconcilePorts":
+		a.ApiService.ReconcilePorts(c)
 	case "addToken":
 		a.ApiService.AddToken(c)
 		a.apiv2.ReloadTokens()
@@ -62,6 +66,8 @@ func (a *APIHandler) postHandler(c *gin.Context) {
 		a.ApiService.SaveFleet(c)
 	case "fleetAction":
 		a.ApiService.FleetAction(c)
+	case "fleetRefresh":
+		a.ApiService.FleetRefresh(c)
 	default:
 		jsonMsg(c, "failed", common.NewError("unknown action: ", action))
 	}
@@ -115,6 +121,8 @@ func (a *APIHandler) getHandler(c *gin.Context) {
 		a.ApiService.GetCheckOutbound(c)
 	case "fleet":
 		a.ApiService.GetFleet(c)
+	case "update-status":
+		a.ApiService.GetUpdateStatus(c)
 	default:
 		jsonMsg(c, "failed", common.NewError("unknown action: ", action))
 	}

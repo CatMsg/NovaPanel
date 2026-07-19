@@ -53,6 +53,30 @@ download_to_file() {
     wget -q --show-progress -O "$dest" "$url"
 }
 
+verify_archive_checksum() {
+    local version="$1"
+    local archive_path="$2"
+    local checksum_path="${archive_path}.sha256"
+    local checksum_url="https://github.com/CatMsg/NovaPanel/releases/download/${version}/NovaPanel-linux-$(arch).tar.gz.sha256"
+
+    if ! download_to_file "${checksum_url}" "${checksum_path}"; then
+        rm -f "${checksum_path}"
+        echo -e "${yellow}当前发布未提供 SHA-256 校验文件，跳过完整性校验。${plain}"
+        return 0
+    fi
+
+    local expected actual
+    expected=$(awk 'NF {print $1; exit}' "${checksum_path}")
+    actual=$(sha256sum "${archive_path}" | awk '{print $1}')
+    rm -f "${checksum_path}"
+    if [[ -z "${expected}" || "${expected}" != "${actual}" ]]; then
+        echo -e "${red}NovaPanel 下载包 SHA-256 校验失败，已停止安装。${plain}"
+        return 1
+    fi
+    echo -e "${green}NovaPanel 下载包 SHA-256 校验通过。${plain}"
+    return 0
+}
+
 get_latest_release_tag() {
     local response
     if command -v curl >/dev/null 2>&1; then
@@ -212,9 +236,38 @@ prepare_services() {
     systemctl daemon-reload
 }
 
+save_install_rollback() {
+    local backup_dir="$1"
+    if [[ ! -d "/usr/local/s-ui" ]]; then
+        return 1
+    fi
+    rm -rf "${backup_dir}"
+    mkdir -p "${backup_dir}" || return 1
+    [[ -f "/usr/local/s-ui/sui" ]] && cp -a "/usr/local/s-ui/sui" "${backup_dir}/sui" || true
+    [[ -f "/usr/local/s-ui/s-ui.sh" ]] && cp -a "/usr/local/s-ui/s-ui.sh" "${backup_dir}/s-ui.sh" || true
+    [[ -d "/usr/local/s-ui/scripts" ]] && cp -a "/usr/local/s-ui/scripts" "${backup_dir}/scripts" || true
+    [[ -f "/etc/systemd/system/s-ui.service" ]] && cp -a "/etc/systemd/system/s-ui.service" "${backup_dir}/s-ui.service" || true
+    [[ -f "${backup_dir}/sui" || -f "${backup_dir}/s-ui.sh" ]]
+}
+
+restore_install_rollback() {
+    local backup_dir="$1"
+    LOGE "安装失败，正在回滚上一版核心文件..."
+    systemctl stop s-ui 2>/dev/null || true
+    [[ -f "${backup_dir}/sui" ]] && cp -f "${backup_dir}/sui" "/usr/local/s-ui/sui"
+    [[ -f "${backup_dir}/s-ui.sh" ]] && cp -f "${backup_dir}/s-ui.sh" "/usr/local/s-ui/s-ui.sh"
+    [[ -d "${backup_dir}/scripts" ]] && cp -rf "${backup_dir}/scripts" "/usr/local/s-ui/"
+    [[ -f "${backup_dir}/s-ui.service" ]] && cp -f "${backup_dir}/s-ui.service" "/etc/systemd/system/s-ui.service"
+    chmod +x "/usr/local/s-ui/sui" "/usr/local/s-ui/s-ui.sh" 2>/dev/null || true
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl enable s-ui --now 2>/dev/null || true
+}
+
 install_s-ui() {
     cd /tmp/
     local archive_path="/tmp/NovaPanel-linux-$(arch).tar.gz"
+    local staging_dir=""
+    local rollback_dir="/var/lib/s-ui/update-backup/$(date +%Y%m%d-%H%M%S)"
 
     if [ $# == 0 ]; then
         last_version=$(get_latest_release_tag)
@@ -240,23 +293,52 @@ install_s-ui() {
         fi
     fi
 
-    if [[ -e /usr/local/s-ui/ ]]; then
+    if ! verify_archive_checksum "${last_version}" "${archive_path}"; then
+        rm -f "${archive_path}"
+        exit 1
+    fi
+
+    if [[ -d /usr/local/s-ui/ ]]; then
+        if ! save_install_rollback "${rollback_dir}"; then
+            echo -e "${red}无法创建安装回滚副本，已停止更新。${plain}"
+            rm -f "${archive_path}"
+            exit 1
+        fi
         systemctl stop s-ui
     fi
 
-    tar zxf "${archive_path}"
+    staging_dir=$(mktemp -d /tmp/novapanel-install.XXXXXX)
+    if ! tar zxf "${archive_path}" -C "${staging_dir}" || [[ ! -x "${staging_dir}/s-ui/sui" ]]; then
+        echo -e "${red}NovaPanel 安装包解压失败。${plain}"
+        [[ -n "${rollback_dir}" && -d "${rollback_dir}" ]] && restore_install_rollback "${rollback_dir}"
+        rm -rf "${staging_dir}" "${archive_path}"
+        exit 1
+    fi
     rm -f "${archive_path}"
 
-    chmod +x s-ui/sui s-ui/s-ui.sh
-    cp s-ui/s-ui.sh /usr/bin/s-ui
-    cp -rf s-ui /usr/local/
-    cp -f s-ui/*.service /etc/systemd/system/
-    rm -rf s-ui
+    chmod +x "${staging_dir}/s-ui/sui" "${staging_dir}/s-ui/s-ui.sh"
+    if ! cp -f "${staging_dir}/s-ui/s-ui.sh" /usr/bin/s-ui || \
+       ! cp -rf "${staging_dir}/s-ui" /usr/local/ || \
+       ! cp -f "${staging_dir}/s-ui"/*.service /etc/systemd/system/; then
+        [[ -d "${rollback_dir}" ]] && restore_install_rollback "${rollback_dir}"
+        rm -rf "${staging_dir}"
+        exit 1
+    fi
+    rm -rf "${staging_dir}"
 
-    config_after_install
-    prepare_services
+    if ! config_after_install || ! prepare_services; then
+        [[ -d "${rollback_dir}" ]] && restore_install_rollback "${rollback_dir}"
+        exit 1
+    fi
 
-    systemctl enable s-ui --now
+    if ! systemctl enable s-ui --now; then
+        [[ -d "${rollback_dir}" ]] && restore_install_rollback "${rollback_dir}"
+        exit 1
+    fi
+
+    if [[ -d "/var/lib/s-ui/update-backup" ]]; then
+        find /var/lib/s-ui/update-backup -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null | sort -nr | tail -n +4 | cut -d' ' -f2- | xargs -r rm -rf
+    fi
 
     echo -e "${green}NovaPanel ${last_version}${plain} 安装完成，现已启动并运行..."
     echo -e "你可以通过以下 URL 访问面板：${green}"
