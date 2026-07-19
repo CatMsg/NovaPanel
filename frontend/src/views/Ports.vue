@@ -85,6 +85,29 @@
         </ul>
       </v-alert>
 
+      <v-alert
+        v-if="status.drift && (drift.status === 'drift' || drift.status === 'unknown')"
+        class="ports-alert"
+        :color="drift.status === 'drift' ? 'error' : 'warning'"
+        variant="tonal"
+        rounded="xl"
+        density="comfortable"
+      >
+        <div class="ports-alert__title">
+          {{ drift.status === 'drift' ? '端口规则发现漂移' : '端口规则暂时无法确认' }}
+        </div>
+        <div class="ports-drift__summary">
+          期望 {{ drift.desired_rules }} 条，实际受管 {{ drift.actual_managed_rules }} 条；
+          缺失 {{ drift.missing_count }}，重复 {{ drift.duplicate_count }}，残留 {{ drift.orphan_count }}。
+        </div>
+        <ul class="ports-alert__list">
+          <li v-for="(issue, index) in drift.issues.slice(0, 8)" :key="`${issue.type}-${issue.chain}-${issue.protocol}-${issue.port}-${index}`">
+            {{ issue.detail }}<span v-if="issue.owner_tag">（{{ issue.owner_tag }}）</span>
+          </li>
+        </ul>
+        <div v-if="drift.issues.length > 8" class="ports-drift__more">还有 {{ drift.issues.length - 8 }} 项，请点击“修复端口规则”重建。</div>
+      </v-alert>
+
       <v-row class="ports-panels" dense>
         <v-col cols="12" lg="6">
           <v-card class="ports-panel" rounded="xl" variant="flat">
@@ -230,6 +253,28 @@ type PortStatus = {
   nat_ipv6?: PortNatEntry[]
   errors?: string[]
   managed_count?: number
+  drift?: PortDriftReport
+}
+
+type PortDriftIssue = {
+  type: string
+  severity: string
+  detail: string
+  owner_tag?: string
+  chain?: string
+  protocol?: string
+  port?: string
+}
+
+type PortDriftReport = {
+  status: string
+  desired_rules: number
+  actual_managed_rules: number
+  issue_count: number
+  missing_count: number
+  duplicate_count: number
+  orphan_count: number
+  issues: PortDriftIssue[]
 }
 
 const loading = ref(false)
@@ -241,6 +286,16 @@ const listeners = computed(() => status.value.listeners ?? [])
 const natIpv4 = computed(() => status.value.nat_ipv4 ?? [])
 const natIpv6 = computed(() => status.value.nat_ipv6 ?? [])
 const errors = computed(() => status.value.errors ?? [])
+const drift = computed<PortDriftReport>(() => status.value.drift ?? {
+  status: 'unknown',
+  desired_rules: 0,
+  actual_managed_rules: 0,
+  issue_count: 0,
+  missing_count: 0,
+  duplicate_count: 0,
+  orphan_count: 0,
+  issues: [],
+})
 const formattedCapturedAt = computed(() => {
   if (!status.value.captured_at) return '-'
   const date = new Date(status.value.captured_at)
@@ -490,6 +545,17 @@ onMounted(() => {
 .ports-alert__list {
   margin: 0;
   padding-left: 18px;
+}
+
+.ports-drift__summary,
+.ports-drift__more {
+  color: rgba(var(--v-theme-on-surface), 0.72);
+  line-height: 1.6;
+}
+
+.ports-drift__more {
+  margin-top: 6px;
+  font-size: 12px;
 }
 
 .ports-panels {

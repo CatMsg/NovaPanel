@@ -52,7 +52,8 @@ func (s *ServerService) GetPortStatus() map[string]interface{} {
 		}
 	}
 
-	errors := append(listenErrors, natErrors...)
+	errors := append(append([]string(nil), listenErrors...), natErrors...)
+	drift := detectPortDrift(natIPv4, natIPv6, detectFirewallBackend(), errors)
 	result := map[string]interface{}{
 		"backend":       detectFirewallBackend(),
 		"captured_at":   time.Now().Format(time.RFC3339),
@@ -61,6 +62,7 @@ func (s *ServerService) GetPortStatus() map[string]interface{} {
 		"nat_ipv6":      natIPv6,
 		"managed":       managed,
 		"managed_count": len(managed),
+		"drift":         drift,
 		"errors":        errors,
 	}
 	serverStatusCache.mu.Lock()
@@ -343,6 +345,10 @@ func collectNatEntriesFromNFT() ([]PortNatEntry, []PortNatEntry, error) {
 				Table:  table,
 				Chain:  chain,
 				Raw:    line,
+			}
+			entry.Protocol, entry.DPort, entry.ToPorts = parseNftRedirectRule(line)
+			if strings.Contains(line, "redirect") {
+				entry.Target = "REDIRECT"
 			}
 			if family == "ip6" {
 				ipv6 = append(ipv6, entry)
