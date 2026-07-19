@@ -31,6 +31,25 @@
             </div>
           </v-col>
           <v-col cols="12" lg="4" class="fleet-hero__actions">
+            <v-btn
+              variant="outlined"
+              color="warning"
+              :loading="batchAction === 'restart'"
+              :disabled="loading || batchAction !== ''"
+              @click="runBatchAction('restart')"
+            >
+              <v-icon icon="mdi-restart" start />
+              一键重启
+            </v-btn>
+            <v-btn
+              color="primary"
+              :loading="batchAction === 'update'"
+              :disabled="loading || batchAction !== ''"
+              @click="runBatchAction('update')"
+            >
+              <v-icon icon="mdi-download-outline" start />
+              一键更新
+            </v-btn>
             <v-btn variant="outlined" :disabled="loading" @click="showConfig = true">
               <v-icon icon="mdi-server-plus" start />
               管理服务器
@@ -41,6 +60,9 @@
             </v-btn>
           </v-col>
         </v-row>
+        <v-alert v-if="batchMessage" class="fleet-batch-alert" variant="tonal" :type="batchMessageType">
+          {{ batchMessage }}
+        </v-alert>
       </v-card>
 
       <v-row class="fleet-summary" dense>
@@ -159,10 +181,10 @@
               <v-btn size="small" variant="text" @click.stop="openLogs(server)">
                 <v-icon icon="mdi-text-box-outline" start />日志
               </v-btn>
-              <v-btn size="small" variant="text" color="warning" :disabled="!server.reachable" @click.stop="restartServer(server)">
+              <v-btn size="small" variant="text" color="warning" :disabled="batchAction !== '' || !server.reachable" @click.stop="restartServer(server)">
                 <v-icon icon="mdi-restart" start />重启
               </v-btn>
-              <v-btn size="small" variant="text" color="primary" :loading="updateLoadingId === server.id" :disabled="!server.reachable" @click.stop="updateServer(server)">
+              <v-btn size="small" variant="text" color="primary" :loading="updateLoadingId === server.id" :disabled="batchAction !== '' || !server.reachable" @click.stop="updateServer(server)">
                 <v-icon icon="mdi-download-outline" start />更新
               </v-btn>
               <v-btn size="small" variant="text" :loading="refreshLoadingId === server.id" @click.stop="refreshServer(server)">
@@ -250,10 +272,10 @@
         <v-card-actions>
           <v-spacer />
           <v-btn variant="text" @click="showDetails = false">关闭</v-btn>
-          <v-btn color="warning" :loading="actionLoading" :disabled="!selectedServer.reachable" @click="restartServer(selectedServer)">
+          <v-btn color="warning" :loading="actionLoading" :disabled="batchAction !== '' || !selectedServer.reachable" @click="restartServer(selectedServer)">
             <v-icon icon="mdi-restart" start />重启面板
           </v-btn>
-          <v-btn color="primary" :loading="updateLoadingId === selectedServer.id" :disabled="!selectedServer.reachable" @click="updateServer(selectedServer)">
+          <v-btn color="primary" :loading="updateLoadingId === selectedServer.id" :disabled="batchAction !== '' || !selectedServer.reachable" @click="updateServer(selectedServer)">
             <v-icon icon="mdi-download-outline" start />后台更新
           </v-btn>
         </v-card-actions>
@@ -318,6 +340,9 @@ const selectedServer = ref<FleetServer | null>(null)
 const logLines = ref<string[]>([])
 const logsLoading = ref(false)
 const actionLoading = ref(false)
+const batchAction = ref<'' | 'update' | 'restart'>('')
+const batchMessage = ref('')
+const batchMessageType = ref<'info' | 'success' | 'warning' | 'error'>('info')
 const updateLoadingId = ref('')
 const refreshLoadingId = ref('')
 const updateStates = ref<Record<string, any>>({})
@@ -441,6 +466,67 @@ const openLogs = async (server: FleetServer) => {
   await loadLogs(server)
 }
 
+const runBatchAction = async (action: 'update' | 'restart') => {
+  if (batchAction.value) return
+  const remoteTargets = remoteServers.value.filter((server) => server.reachable && server.enabled)
+  const localTarget = servers.value.find((server) => server.id === 'local' && server.reachable)
+  const targets = [...remoteTargets, ...(localTarget ? [localTarget] : [])]
+  if (!targets.length) {
+    batchMessageType.value = 'warning'
+    batchMessage.value = '没有可执行操作的在线服务器'
+    return
+  }
+  const actionLabel = action === 'update' ? '更新' : '重启'
+  const targetNames = targets.map((server) => server.name).join('、')
+  if (!window.confirm(`将按远端服务器优先、本机最后的顺序${actionLabel}：${targetNames}\n\n是否继续？`)) return
+
+  batchAction.value = action
+  batchMessageType.value = 'info'
+  batchMessage.value = `准备${actionLabel} ${targets.length} 台服务器，远端服务器优先`
+  let remoteFailed = false
+  let localFailed = false
+  const failedRemoteNames: string[] = []
+
+  for (let index = 0; index < targets.length; index += 1) {
+    const server = targets[index]
+    if (server.id === 'local' && remoteFailed) break
+    batchMessage.value = `${actionLabel}中：${server.name}（${index + 1}/${targets.length}）`
+    const response = await HttpUtils.post('api/fleetAction', { id: server.id, action })
+    if (!response.success) {
+      if (server.id !== 'local') {
+        remoteFailed = true
+        failedRemoteNames.push(server.name)
+      }
+      else localFailed = true
+      batchMessageType.value = 'error'
+      batchMessage.value = `${server.name}${actionLabel}失败：${response.msg}`
+      if (server.id !== 'local') continue
+      break
+    }
+  }
+
+  if (remoteFailed) {
+    batchAction.value = ''
+    batchMessageType.value = 'warning'
+    batchMessage.value = `远端${failedRemoteNames.join('、')}${actionLabel}失败，本机未执行`
+    return
+  }
+
+  if (localFailed) {
+    batchAction.value = ''
+    return
+  }
+
+  batchAction.value = ''
+  batchMessageType.value = 'success'
+  batchMessage.value = localTarget
+    ? `远端服务器已优先${action === 'update' ? '提交更新' : '完成重启'}，本机已最后执行`
+    : `远端服务器已${action === 'update' ? '提交更新' : '完成重启'}`
+  if (localTarget) {
+    window.setTimeout(loadFleet, 4500)
+  }
+}
+
 const restartServer = async (server: FleetServer) => {
   actionLoading.value = true
   const response = await HttpUtils.post('api/fleetAction', { id: server.id, action: 'restart' })
@@ -533,6 +619,7 @@ onMounted(loadFleet)
 .fleet-hero__subtitle { margin: 6px 0 0; color: var(--np-text-muted); }
 .fleet-hero__meta { display: flex; gap: 10px; margin-top: 18px; color: var(--np-text-muted); font-size: 0.8rem; }
 .fleet-hero__actions { display: flex; justify-content: flex-end; gap: 10px; }
+.fleet-batch-alert { margin-top: 16px; }
 
 .fleet-summary__card { padding: 16px 18px; min-height: 92px; }
 .fleet-summary__label { color: var(--np-text-muted); font-size: 0.78rem; }
