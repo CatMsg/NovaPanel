@@ -38,6 +38,7 @@ readonly SUI_UPDATE_LOG="${SUI_UPDATE_STATE_DIR}/update.log"
 readonly SUI_UPDATE_STATUS="${SUI_UPDATE_STATE_DIR}/update.status"
 readonly SUI_UPDATE_PID="${SUI_UPDATE_STATE_DIR}/update.pid"
 readonly SUI_UPDATE_LOCK_DIR="${SUI_UPDATE_STATE_DIR}/update.lock"
+readonly SUI_UPDATE_UNIT_FILE="${SUI_UPDATE_STATE_DIR}/update.unit"
 
 confirm() {
     if [[ $# > 1 ]]; then
@@ -117,7 +118,7 @@ write_update_status() {
 }
 
 run_update_worker() {
-	trap 'rm -rf "${SUI_UPDATE_LOCK_DIR}"; rm -f "${SUI_UPDATE_PID}"' EXIT
+	trap 'rm -rf "${SUI_UPDATE_LOCK_DIR}"; rm -f "${SUI_UPDATE_PID}" "${SUI_UPDATE_UNIT_FILE}"' EXIT
 	write_update_status "running" "正在后台更新"
 	SUI_AUTO_UPGRADE=1 update
     local status=$?
@@ -129,12 +130,22 @@ run_update_worker() {
 	return ${status}
 }
 
+is_update_running() {
+	local value="$(cat "${SUI_UPDATE_PID}" 2>/dev/null || true)"
+	if [[ "${value}" == systemd:* ]]; then
+		local unit="${value#systemd:}"
+		[[ -n "${unit}" ]] && systemctl is-active --quiet "${unit}"
+		return $?
+	fi
+	[[ "${value}" =~ ^[0-9]+$ ]] && kill -0 "${value}" 2>/dev/null
+}
+
 start_background_update() {
 	mkdir -p "${SUI_UPDATE_STATE_DIR}"
 	if [[ -d "${SUI_UPDATE_LOCK_DIR}" ]]; then
-		local pid
-		pid=$(cat "${SUI_UPDATE_PID}" 2>/dev/null || true)
-		if [[ "${pid}" =~ ^[0-9]+$ ]] && kill -0 "${pid}" 2>/dev/null; then
+		if is_update_running; then
+			local pid
+			pid=$(cat "${SUI_UPDATE_PID}" 2>/dev/null || true)
 			LOGI "已有更新任务运行中，PID=${pid}"
 			return 0
 		fi
@@ -148,7 +159,7 @@ start_background_update() {
 	if [[ -f "${SUI_UPDATE_PID}" ]]; then
 		local pid
 		pid=$(cat "${SUI_UPDATE_PID}")
-		if [[ "${pid}" =~ ^[0-9]+$ ]] && kill -0 "${pid}" 2>/dev/null; then
+		if is_update_running; then
 			LOGI "已有更新任务运行中，PID=${pid}"
 			return 0
 		fi
@@ -156,10 +167,21 @@ start_background_update() {
 	fi
 	: > "${SUI_UPDATE_LOG}"
 	write_update_status "queued" "已提交后台更新任务"
-	nohup setsid bash "$0" update --worker >> "${SUI_UPDATE_LOG}" 2>&1 < /dev/null &
-	local pid=$!
-	printf '%s\n' "${pid}" > "${SUI_UPDATE_PID}"
-    LOGI "后台更新已启动，PID=${pid}"
+	local worker_unit="s-ui-update"
+	local worker_command
+	printf -v worker_command 'exec >>%q 2>&1; exec /bin/bash %q update --worker' "${SUI_UPDATE_LOG}" "$0"
+	if command -v systemd-run >/dev/null 2>&1 && systemd-run --unit="${worker_unit}" --collect --no-block /bin/bash -c "${worker_command}" >/dev/null; then
+		printf '%s\n' "systemd:${worker_unit}" > "${SUI_UPDATE_PID}"
+		printf '%s\n' "${worker_unit}" > "${SUI_UPDATE_UNIT_FILE}"
+		local display_pid="systemd:${worker_unit}"
+	else
+		nohup setsid bash "$0" update --worker >> "${SUI_UPDATE_LOG}" 2>&1 < /dev/null &
+		local pid=$!
+		printf '%s\n' "${pid}" > "${SUI_UPDATE_PID}"
+		rm -f "${SUI_UPDATE_UNIT_FILE}"
+		local display_pid="${pid}"
+	fi
+	LOGI "后台更新已启动，PID=${display_pid}"
     LOGI "日志：${SUI_UPDATE_LOG}"
 }
 

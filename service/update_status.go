@@ -70,8 +70,15 @@ func GetUpdateStatus() (map[string]interface{}, error) {
 		}
 	}
 	if raw, err := os.ReadFile(updatePID); err == nil {
-		pid, parseErr := strconv.Atoi(strings.TrimSpace(string(raw)))
-		if parseErr == nil && pid > 0 {
+		pidValue := strings.TrimSpace(string(raw))
+		if strings.HasPrefix(pidValue, "systemd:") {
+			unit := strings.TrimPrefix(pidValue, "systemd:")
+			result["unit"] = unit
+			if unit != "" {
+				command := exec.Command("systemctl", "is-active", "--quiet", unit)
+				result["running"] = command.Run() == nil
+			}
+		} else if pid, parseErr := strconv.Atoi(pidValue); parseErr == nil && pid > 0 {
 			result["pid"] = pid
 			if process, processErr := os.FindProcess(pid); processErr == nil && process.Signal(syscall.Signal(0)) == nil {
 				result["running"] = true
