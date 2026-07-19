@@ -2,6 +2,7 @@ package service
 
 import (
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/CatMsg/NovaPanel/database"
@@ -17,6 +18,7 @@ type onlines struct {
 }
 
 var onlineResources = &onlines{}
+var onlineResourcesMu sync.RWMutex
 
 type StatsService struct {
 }
@@ -35,16 +37,19 @@ func (s *StatsService) SaveStats(enableTraffic bool) error {
 	}
 	stats := st.GetStats()
 
-	// Reset onlines
+	// Reset the sampled fallback. GetOnlines prefers the live connection tracker.
+	onlineResourcesMu.Lock()
 	onlineResources.Inbound = nil
 	onlineResources.Outbound = nil
 	onlineResources.User = nil
+	onlineResourcesMu.Unlock()
 
 	if len(*stats) == 0 {
 		return nil
 	}
 
-	return retryWriteTx(func(tx *gorm.DB) error {
+	sampled := onlines{}
+	err := retryWriteTx(func(tx *gorm.DB) error {
 		for _, stat := range *stats {
 			if stat.Resource == "user" {
 				var err error
@@ -62,11 +67,11 @@ func (s *StatsService) SaveStats(enableTraffic bool) error {
 			if stat.Direction {
 				switch stat.Resource {
 				case "inbound":
-					onlineResources.Inbound = append(onlineResources.Inbound, stat.Tag)
+					sampled.Inbound = append(sampled.Inbound, stat.Tag)
 				case "outbound":
-					onlineResources.Outbound = append(onlineResources.Outbound, stat.Tag)
+					sampled.Outbound = append(sampled.Outbound, stat.Tag)
 				case "user":
-					onlineResources.User = append(onlineResources.User, stat.Tag)
+					sampled.User = append(sampled.User, stat.Tag)
 				}
 			}
 		}
@@ -76,6 +81,12 @@ func (s *StatsService) SaveStats(enableTraffic bool) error {
 		}
 		return tx.Create(&stats).Error
 	})
+	if err == nil {
+		onlineResourcesMu.Lock()
+		*onlineResources = sampled
+		onlineResourcesMu.Unlock()
+	}
+	return err
 }
 
 func (s *StatsService) GetStats(resource string, tag string, limit int) ([]model.Stats, error) {
@@ -145,7 +156,25 @@ func (s *StatsService) downsampleStats(stats []model.Stats, maxRows int) []model
 }
 
 func (s *StatsService) GetOnlines() (onlines, error) {
-	return *onlineResources, nil
+	if corePtr != nil && corePtr.IsRunning() {
+		box := corePtr.GetInstance()
+		if box != nil && box.ConnTracker() != nil {
+			active := box.ConnTracker().Snapshot()
+			return onlines{
+				Inbound:  active.Inbound,
+				Outbound: active.Outbound,
+				User:     active.User,
+			}, nil
+		}
+	}
+
+	onlineResourcesMu.RLock()
+	defer onlineResourcesMu.RUnlock()
+	return onlines{
+		Inbound:  append([]string(nil), onlineResources.Inbound...),
+		Outbound: append([]string(nil), onlineResources.Outbound...),
+		User:     append([]string(nil), onlineResources.User...),
+	}, nil
 }
 func (s *StatsService) DelOldStats(days int) error {
 	oldTime := time.Now().AddDate(0, 0, -(days)).Unix()

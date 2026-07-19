@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"sort"
 	"sync"
 
 	"github.com/gofrs/uuid/v5"
@@ -19,7 +20,17 @@ type ConnectionInfo struct {
 	Conn       net.Conn
 	PacketConn network.PacketConn
 	Inbound    string
+	Outbound   string
+	User       string
 	Type       string // "tcp" or "udp"
+}
+
+// ResourceSnapshot describes the resources used by currently tracked
+// connections. It is intentionally reduced to names for status reporting.
+type ResourceSnapshot struct {
+	Inbound  []string
+	Outbound []string
+	User     []string
 }
 
 type ConnTracker struct {
@@ -54,10 +65,12 @@ func (c *ConnTracker) generateConnectionID() string {
 func (c *ConnTracker) RoutedConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) net.Conn {
 	connID := c.generateConnectionID()
 	connInfo := &ConnectionInfo{
-		ID:      connID,
-		Conn:    conn,
-		Inbound: metadata.Inbound,
-		Type:    "tcp",
+		ID:       connID,
+		Conn:     conn,
+		Inbound:  metadata.Inbound,
+		Outbound: matchOutbound.Tag(),
+		User:     metadata.User,
+		Type:     "tcp",
 	}
 
 	c.trackConnection(connID, connInfo)
@@ -71,6 +84,8 @@ func (c *ConnTracker) RoutedPacketConnection(ctx context.Context, conn network.P
 		ID:         connID,
 		PacketConn: conn,
 		Inbound:    metadata.Inbound,
+		Outbound:   matchOutbound.Tag(),
+		User:       metadata.User,
 		Type:       "udp",
 	}
 
@@ -109,6 +124,44 @@ func (c *ConnTracker) untrackConnection(connID string) {
 	c.access.Lock()
 	defer c.access.Unlock()
 	delete(c.connections, connID)
+}
+
+// Snapshot returns the currently active inbound, outbound, and user names.
+// The tracker owns the connection lifecycle, so this is more accurate than
+// inferring online state from destructive traffic counters.
+func (c *ConnTracker) Snapshot() ResourceSnapshot {
+	c.access.Lock()
+	defer c.access.Unlock()
+
+	inbounds := make(map[string]struct{})
+	outbounds := make(map[string]struct{})
+	users := make(map[string]struct{})
+	for _, connInfo := range c.connections {
+		if connInfo.Inbound != "" {
+			inbounds[connInfo.Inbound] = struct{}{}
+		}
+		if connInfo.Outbound != "" {
+			outbounds[connInfo.Outbound] = struct{}{}
+		}
+		if connInfo.User != "" {
+			users[connInfo.User] = struct{}{}
+		}
+	}
+
+	return ResourceSnapshot{
+		Inbound:  sortedResourceNames(inbounds),
+		Outbound: sortedResourceNames(outbounds),
+		User:     sortedResourceNames(users),
+	}
+}
+
+func sortedResourceNames(names map[string]struct{}) []string {
+	result := make([]string, 0, len(names))
+	for name := range names {
+		result = append(result, name)
+	}
+	sort.Strings(result)
+	return result
 }
 
 // shouldUntrackIOErr reports whether err indicates the connection is done (peer closed, reset, etc.).

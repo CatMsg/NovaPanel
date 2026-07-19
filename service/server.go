@@ -411,14 +411,28 @@ func (s *ServerService) GetDatabaseInfo() map[string]int64 {
 	}
 
 	var clientsCount, inboundsCount, outboundsCount, servicesCount, endpointsCount, clientUp, clientDown int64
-
-	db.Model(&model.Client{}).Count(&clientsCount)
-	db.Model(&model.Inbound{}).Count(&inboundsCount)
-	db.Model(&model.Outbound{}).Count(&outboundsCount)
-	db.Model(&model.Service{}).Count(&servicesCount)
-	db.Model(&model.Endpoint{}).Count(&endpointsCount)
-	db.Model(&model.Client{}).Select("COALESCE(SUM(up+total_up),0)").Scan(&clientUp)
-	db.Model(&model.Client{}).Select("COALESCE(SUM(down+total_down),0)").Scan(&clientDown)
+	queries := []struct {
+		name  string
+		query func() error
+	}{
+		{name: "clients", query: func() error { return db.Model(&model.Client{}).Count(&clientsCount).Error }},
+		{name: "inbounds", query: func() error { return db.Model(&model.Inbound{}).Count(&inboundsCount).Error }},
+		{name: "outbounds", query: func() error { return db.Model(&model.Outbound{}).Count(&outboundsCount).Error }},
+		{name: "services", query: func() error { return db.Model(&model.Service{}).Count(&servicesCount).Error }},
+		{name: "endpoints", query: func() error { return db.Model(&model.Endpoint{}).Count(&endpointsCount).Error }},
+		{name: "client up", query: func() error {
+			return db.Model(&model.Client{}).Select("COALESCE(SUM(up+total_up),0)").Scan(&clientUp).Error
+		}},
+		{name: "client down", query: func() error {
+			return db.Model(&model.Client{}).Select("COALESCE(SUM(down+total_down),0)").Scan(&clientDown).Error
+		}},
+	}
+	for _, item := range queries {
+		if err := item.query(); err != nil {
+			logger.Warning("load database info failed for ", item.name, ": ", err)
+			return nil
+		}
+	}
 
 	info["clients"] = clientsCount
 	info["inbounds"] = inboundsCount

@@ -399,12 +399,7 @@ func (s *FleetService) applyFleetStatus(view *FleetServerView, payload map[strin
 	if publicIP, ok := payload["publicIp"].(string); ok {
 		view.PublicIP = publicIP
 	}
-	if databaseInfo, ok := payload["database"].(map[string]interface{}); ok {
-		view.Clients = fleetInt(databaseInfo["clients"])
-		view.Inbounds = fleetInt(databaseInfo["inbounds"])
-		view.Outbounds = fleetInt(databaseInfo["outbounds"])
-		view.Endpoints = fleetInt(databaseInfo["endpoints"])
-	}
+	applyFleetDatabaseInfo(view, payload["database"])
 	if online, ok := payload["online"].(map[string]interface{}); ok {
 		view.OnlineUsers = fleetInt(online["users"])
 		view.OnlineInbounds = fleetInt(online["inbounds"])
@@ -418,6 +413,21 @@ func (s *FleetService) applyFleetStatus(view *FleetServerView, payload map[strin
 		view.PortBackend, _ = ports["backend"].(string)
 		view.Listeners = fleetSliceLength(ports["listeners"])
 		view.NatRules = fleetSliceLength(ports["nat_ipv4"]) + fleetSliceLength(ports["nat_ipv6"])
+	}
+}
+
+func applyFleetDatabaseInfo(view *FleetServerView, value interface{}) {
+	switch databaseInfo := value.(type) {
+	case map[string]interface{}:
+		view.Clients = fleetInt(databaseInfo["clients"])
+		view.Inbounds = fleetInt(databaseInfo["inbounds"])
+		view.Outbounds = fleetInt(databaseInfo["outbounds"])
+		view.Endpoints = fleetInt(databaseInfo["endpoints"])
+	case map[string]int64:
+		view.Clients = int(databaseInfo["clients"])
+		view.Inbounds = int(databaseInfo["inbounds"])
+		view.Outbounds = int(databaseInfo["outbounds"])
+		view.Endpoints = int(databaseInfo["endpoints"])
 	}
 }
 
