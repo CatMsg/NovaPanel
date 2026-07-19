@@ -88,7 +88,7 @@
 
       <v-row class="fleet-grid" dense>
         <v-col v-for="server in servers" :key="server.id" cols="12" md="6" xl="4">
-          <v-card class="fleet-card" rounded="xl" variant="flat">
+          <v-card class="fleet-card" rounded="xl" variant="flat" @click="openDetails(server)">
             <div class="fleet-card__header">
               <div class="fleet-card__identity">
                 <div class="fleet-card__icon" :class="statusClass(server)">
@@ -152,6 +152,17 @@
               </span>
               <span v-if="server.error" class="fleet-card__error" :title="server.error">{{ server.error }}</span>
             </div>
+            <div class="fleet-card__actions">
+              <v-btn size="small" variant="tonal" @click.stop="openDetails(server)">
+                <v-icon icon="mdi-information-outline" start />详情
+              </v-btn>
+              <v-btn size="small" variant="text" @click.stop="openLogs(server)">
+                <v-icon icon="mdi-text-box-outline" start />日志
+              </v-btn>
+              <v-btn size="small" variant="text" color="warning" :disabled="!server.reachable" @click.stop="restartServer(server)">
+                <v-icon icon="mdi-restart" start />重启
+              </v-btn>
+            </div>
           </v-card>
         </v-col>
       </v-row>
@@ -190,6 +201,48 @@
           <v-spacer />
           <v-btn variant="text" @click="showConfig = false">取消</v-btn>
           <v-btn color="primary" :loading="saving" @click="saveConfig">保存并检查</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="showDetails" max-width="760" scrollable>
+      <v-card rounded="xl" class="fleet-dialog" v-if="selectedServer">
+        <v-card-title class="fleet-dialog__title">
+          <span>{{ selectedServer.name }} · 服务器详情</span>
+          <v-btn icon="mdi-close" variant="text" @click="showDetails = false" />
+        </v-card-title>
+        <v-card-text>
+          <div class="fleet-detail__status">
+            <v-chip :color="selectedServer.reachable ? 'success' : 'error'" variant="tonal">
+              {{ selectedServer.reachable ? '在线' : '失联' }}
+            </v-chip>
+            <span>检查时间：{{ selectedServer.checkedAt ? new Date(selectedServer.checkedAt).toLocaleString() : '-' }}</span>
+            <span>延迟：{{ selectedServer.id === 'local' ? '本机' : `${selectedServer.latencyMs} ms` }}</span>
+          </div>
+          <div class="fleet-detail__grid">
+            <div><span>地址</span><strong>{{ selectedServer.url }}</strong></div>
+            <div><span>公网 IP</span><strong>{{ selectedServer.PublicIP || '-' }}</strong></div>
+            <div><span>版本</span><strong>{{ selectedServer.System?.appVersion || '-' }}</strong></div>
+            <div><span>运行时间</span><strong>{{ formatUptime(selectedServer.Uptime) }}</strong></div>
+            <div><span>防火墙</span><strong>{{ selectedServer.portBackend || '-' }}</strong></div>
+            <div><span>监听 / NAT</span><strong>{{ selectedServer.listeners }} / {{ selectedServer.natRules }}</strong></div>
+            <div><span>用户 / 在线</span><strong>{{ selectedServer.Clients }} / {{ selectedServer.OnlineUsers }}</strong></div>
+            <div><span>入站 / 出站</span><strong>{{ selectedServer.Inbounds }} / {{ selectedServer.Outbounds }}</strong></div>
+            <div><span>节点 / MASQUE</span><strong>{{ selectedServer.Endpoints }} / {{ selectedServer.MasqueRunning }} / {{ selectedServer.MasqueTotal }}</strong></div>
+          </div>
+          <v-alert v-if="selectedServer.error" type="error" variant="tonal" class="mt-4">{{ selectedServer.error }}</v-alert>
+          <div class="fleet-detail__log-head">
+            <span>最近日志</span>
+            <v-btn size="small" variant="tonal" :loading="logsLoading" @click="loadLogs(selectedServer)">刷新日志</v-btn>
+          </div>
+          <pre class="fleet-detail__logs">{{ logLines.length ? logLines.join('\n') : '点击“刷新日志”查看最近 100 行日志' }}</pre>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="showDetails = false">关闭</v-btn>
+          <v-btn color="warning" :loading="actionLoading" :disabled="!selectedServer.reachable" @click="restartServer(selectedServer)">
+            <v-icon icon="mdi-restart" start />重启面板
+          </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -242,9 +295,14 @@ type FleetConfig = {
 const loading = ref(false)
 const saving = ref(false)
 const showConfig = ref(false)
+const showDetails = ref(false)
 const servers = ref<FleetServer[]>([])
 const configs = ref<FleetConfig[]>([])
 const checkedAt = ref('')
+const selectedServer = ref<FleetServer | null>(null)
+const logLines = ref<string[]>([])
+const logsLoading = ref(false)
+const actionLoading = ref(false)
 
 const normalizeServer = (server: any): FleetServer => ({
   ...server,
@@ -324,6 +382,36 @@ const saveConfig = async () => {
     await loadFleet()
   }
   saving.value = false
+}
+
+const openDetails = (server: FleetServer) => {
+  selectedServer.value = server
+  logLines.value = []
+  showDetails.value = true
+}
+
+const loadLogs = async (server: FleetServer) => {
+  logsLoading.value = true
+  const response = await HttpUtils.post('api/fleetAction', { id: server.id, action: 'logs' })
+  if (response.success) {
+    logLines.value = Array.isArray(response.obj) ? response.obj.map((line) => String(line)) : []
+  }
+  logsLoading.value = false
+}
+
+const openLogs = async (server: FleetServer) => {
+  openDetails(server)
+  await loadLogs(server)
+}
+
+const restartServer = async (server: FleetServer) => {
+  actionLoading.value = true
+  const response = await HttpUtils.post('api/fleetAction', { id: server.id, action: 'restart' })
+  if (response.success) {
+    showDetails.value = false
+    window.setTimeout(loadFleet, 4500)
+  }
+  actionLoading.value = false
 }
 
 const statusClass = (server: FleetServer) => {
@@ -416,6 +504,19 @@ onMounted(loadFleet)
 .fleet-core-state { display: inline-flex; align-items: center; gap: 5px; }
 .fleet-core-state.is-running { color: #22c55e; }
 .fleet-card__error { overflow: hidden; color: #fb7185; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-card__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--np-border); }
+.fleet-detail__status { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; color: var(--np-text-muted); font-size: 0.82rem; }
+.fleet-detail__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
+.fleet-detail__grid > div { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--np-border); border-radius: 14px; background: var(--np-surface-muted); }
+.fleet-detail__grid span, .fleet-detail__log-head { color: var(--np-text-muted); font-size: 0.76rem; }
+.fleet-detail__grid strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-detail__log-head { display: flex; align-items: center; justify-content: space-between; margin-top: 18px; }
+.fleet-detail__logs { max-height: 260px; margin: 8px 0 0; padding: 14px; overflow: auto; border: 1px solid var(--np-border); border-radius: 14px; background: var(--np-surface-muted); color: var(--np-text); white-space: pre-wrap; word-break: break-word; font: 0.76rem/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+@media (max-width: 600px) {
+  .fleet-detail__grid { grid-template-columns: 1fr; }
+  .fleet-card__actions .v-btn { flex: 1 1 auto; }
+}
 
 .fleet-dialog__title { display: flex; align-items: center; justify-content: space-between; }
 .fleet-config-row { display: grid; grid-template-columns: 0.8fr 1.5fr 1.3fr auto auto; align-items: center; gap: 10px; padding: 10px 0; }

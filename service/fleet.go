@@ -74,9 +74,9 @@ type FleetSnapshot struct {
 }
 
 type fleetAPIResponse struct {
-	Success bool                   `json:"success"`
-	Msg     string                 `json:"msg"`
-	Obj     map[string]interface{} `json:"obj"`
+	Success bool        `json:"success"`
+	Msg     string      `json:"msg"`
+	Obj     interface{} `json:"obj"`
 }
 
 type FleetService struct {
@@ -259,8 +259,55 @@ func (s *FleetService) fetchFleetServer(config FleetServer) FleetServerView {
 	}
 	view.LatencyMs = time.Since(started).Milliseconds()
 	view.Reachable = true
-	s.applyFleetStatus(&view, status.Obj)
+	if payload, ok := status.Obj.(map[string]interface{}); ok {
+		s.applyFleetStatus(&view, payload)
+	}
 	return view
+}
+
+// FleetAction executes a safe operational action for a local or configured
+// remote panel. Mutating actions are deliberately limited to a restart.
+func (s *FleetService) FleetAction(id, action string) (interface{}, error) {
+	id = strings.TrimSpace(id)
+	action = strings.TrimSpace(action)
+	if action != "logs" && action != "restart" {
+		return nil, fmt.Errorf("不支持的服务器操作: %s", action)
+	}
+	if id == "local" {
+		if action == "logs" {
+			return (&ServerService{}).GetLogs("100", "info"), nil
+		}
+		if err := (&PanelService{}).RestartPanel(3 * time.Second); err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"scheduled": true}, nil
+	}
+	configs, err := s.loadFleetServers()
+	if err != nil {
+		return nil, err
+	}
+	for _, config := range configs {
+		if config.ID != id {
+			continue
+		}
+		if !config.Enabled {
+			return nil, fmt.Errorf("服务器已停用")
+		}
+		token, err := s.decryptFleetToken(config.TokenEnc)
+		if err != nil {
+			return nil, fmt.Errorf("令牌解密失败: %w", err)
+		}
+		if action == "logs" {
+			result, err := s.fetchFleetAPI(config.URL, token, "logs", "c=100&l=info")
+			return result.Obj, err
+		}
+		result, err := s.fetchFleetAPIRequest(http.MethodPost, config.URL, token, "restartApp", "", nil)
+		if err != nil {
+			return nil, err
+		}
+		return result.Obj, nil
+	}
+	return nil, fmt.Errorf("服务器不存在: %s", id)
 }
 
 func (s *FleetService) applyFleetStatus(view *FleetServerView, payload map[string]interface{}) {
@@ -299,11 +346,15 @@ func (s *FleetService) applyFleetStatus(view *FleetServerView, payload map[strin
 }
 
 func (s *FleetService) fetchFleetAPI(baseURL, token, action, query string) (fleetAPIResponse, error) {
+	return s.fetchFleetAPIRequest(http.MethodGet, baseURL, token, action, query, nil)
+}
+
+func (s *FleetService) fetchFleetAPIRequest(method, baseURL, token, action, query string, requestBody io.Reader) (fleetAPIResponse, error) {
 	endpoint := strings.TrimRight(baseURL, "/") + "/apiv2/" + action
 	if query != "" {
 		endpoint += "?" + query
 	}
-	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	req, err := http.NewRequest(method, endpoint, requestBody)
 	if err != nil {
 		return fleetAPIResponse{}, err
 	}

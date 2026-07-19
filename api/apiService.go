@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/CatMsg/NovaPanel/database"
@@ -282,6 +283,13 @@ func (a *ApiService) SaveFleet(c *gin.Context) {
 	jsonMsg(c, "save", nil)
 }
 
+func (a *ApiService) FleetAction(c *gin.Context) {
+	id := strings.TrimSpace(c.Request.FormValue("id"))
+	action := strings.TrimSpace(c.Request.FormValue("action"))
+	obj, err := a.FleetService.FleetAction(id, action)
+	jsonObj(c, obj, err)
+}
+
 func (a *ApiService) GetOnlines(c *gin.Context) {
 	onlines, err := a.StatsService.GetOnlines()
 	jsonObj(c, onlines, err)
@@ -389,7 +397,7 @@ func (a *ApiService) Save(c *gin.Context, loginUser string) {
 		return
 	}
 	if obj == "settings" && changed {
-		if restartErr := a.PanelService.RestartPanel(3); restartErr != nil {
+		if restartErr := a.PanelService.RestartPanel(3 * time.Second); restartErr != nil {
 			logger.Warning("schedule panel restart failed:", restartErr)
 		}
 	}
@@ -400,7 +408,7 @@ func (a *ApiService) Save(c *gin.Context, loginUser string) {
 }
 
 func (a *ApiService) RestartApp(c *gin.Context) {
-	err := a.PanelService.RestartPanel(3)
+	err := a.PanelService.RestartPanel(3 * time.Second)
 	jsonMsg(c, "restartApp", err)
 }
 

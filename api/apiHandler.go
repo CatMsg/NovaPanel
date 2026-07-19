@@ -60,6 +60,8 @@ func (a *APIHandler) postHandler(c *gin.Context) {
 		a.apiv2.ReloadTokens()
 	case "fleetSave":
 		a.ApiService.SaveFleet(c)
+	case "fleetAction":
+		a.ApiService.FleetAction(c)
 	default:
 		jsonMsg(c, "failed", common.NewError("unknown action: ", action))
 	}

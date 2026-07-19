@@ -281,11 +281,13 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 			if act == "edit" && oldSnapshot != nil && oldSnapshot.Type != "masque" {
 				err := corePtr.RemoveEndpoint(oldSnapshot.Tag)
 				if err != nil && err != os.ErrInvalid {
-					return err
+					return errors.Join(err, syncManagedEndpointPortForwarding(&endpointSnapshot, oldSnapshot))
 				}
 			}
 			if len(configDataSnapshot) > 0 {
-				return corePtr.AddEndpoint(configDataSnapshot)
+				if err := corePtr.AddEndpoint(configDataSnapshot); err != nil {
+					return errors.Join(err, rollbackEndpointExternalState(act, oldSnapshot, &endpointSnapshot))
+				}
 			}
 			return nil
 		}
@@ -317,7 +319,7 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 			if coreWasRunning && oldSnapshot.Type != "masque" {
 				err := corePtr.RemoveEndpoint(tag)
 				if err != nil && err != os.ErrInvalid {
-					return err
+					return errors.Join(err, syncManagedEndpointPortForwarding(nil, oldSnapshot))
 				}
 			}
 			return nil

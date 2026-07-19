@@ -45,6 +45,8 @@ func (a *APIv2Handler) postHandler(c *gin.Context) {
 		a.ApiService.Save(c, username)
 	case "restartApp":
 		a.ApiService.RestartApp(c)
+	case "fleet-action":
+		a.ApiService.FleetAction(c)
 	case "restartSb":
 		a.ApiService.RestartSb(c)
 	case "linkConvert":

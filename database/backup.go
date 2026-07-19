@@ -2,6 +2,7 @@ package database
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -212,6 +213,16 @@ func ImportDB(file multipart.File) error {
 	if err != nil {
 		return common.NewErrorf("Error saving db: %v", err)
 	}
+	if err := tempFile.Sync(); err != nil {
+		return common.NewErrorf("Error syncing temporary db: %v", err)
+	}
+	if err := tempFile.Close(); err != nil {
+		return common.NewErrorf("Error closing temporary db: %v", err)
+	}
+
+	if err := validateAndSanitizeRestoreDB(tempPath); err != nil {
+		return common.NewErrorf("备份校验失败: %v", err)
+	}
 
 	// Check if we can init db or not
 	newDb, err := gorm.Open(sqlite.Open(tempPath), &gorm.Config{})
@@ -236,9 +247,6 @@ func ImportDB(file multipart.File) error {
 	if err != nil {
 		return common.NewErrorf("Error backing up temporary db file: %v", err)
 	}
-
-	// Remove the temporary file before returning
-	defer os.Remove(fallbackPath)
 
 	// Move temp to DB path
 	err = os.Rename(tempPath, config.GetDBPath())
@@ -267,6 +275,7 @@ func ImportDB(file multipart.File) error {
 	if err := cleanupRestoredEndpointConflicts(); err != nil {
 		logger.Warning("cleanup conflicted endpoints after restore failed:", err)
 	}
+	logger.Info("database restore completed; fallback database kept at ", fallbackPath)
 
 	// Restart app
 	err = SendSighup()
@@ -275,6 +284,95 @@ func ImportDB(file multipart.File) error {
 	}
 
 	return nil
+}
+
+// validateAndSanitizeRestoreDB checks the uploaded database before it can
+// replace the live database. This keeps a bad backup from taking the panel
+// offline and removes machine-specific TLS paths that cannot work locally.
+func validateAndSanitizeRestoreDB(path string) error {
+	conn, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		return err
+	}
+	sqlDB, err := conn.DB()
+	if err != nil {
+		return err
+	}
+	defer sqlDB.Close()
+
+	var integrity string
+	if err := conn.Raw("PRAGMA integrity_check").Scan(&integrity).Error; err != nil {
+		return err
+	}
+	if !strings.EqualFold(strings.TrimSpace(integrity), "ok") {
+		return fmt.Errorf("sqlite integrity_check: %s", integrity)
+	}
+
+	for _, table := range []string{"settings", "inbounds", "outbounds", "endpoints", "users", "clients"} {
+		var count int64
+		if err := conn.Raw("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&count).Error; err != nil {
+			return err
+		}
+		if count != 1 {
+			return fmt.Errorf("缺少数据表 %s", table)
+		}
+	}
+
+	var settings []model.Setting
+	if err := conn.Find(&settings).Error; err != nil {
+		return err
+	}
+	values := make(map[string]string, len(settings))
+	for _, setting := range settings {
+		values[setting.Key] = setting.Value
+	}
+	if raw := strings.TrimSpace(values["fleetServers"]); raw != "" {
+		var fleet []map[string]interface{}
+		if err := json.Unmarshal([]byte(raw), &fleet); err != nil {
+			return fmt.Errorf("服务器集合配置损坏: %w", err)
+		}
+		if fleet == nil {
+			return fmt.Errorf("服务器集合配置必须是数组")
+		}
+	}
+
+	updates := make(map[string]string)
+	for _, pair := range [][2]string{
+		{"webCertFile", "webKeyFile"},
+		{"subCertFile", "subKeyFile"},
+	} {
+		cert, key := strings.TrimSpace(values[pair[0]]), strings.TrimSpace(values[pair[1]])
+		if cert == "" && key == "" {
+			continue
+		}
+		certInfo, certErr := os.Stat(cert)
+		keyInfo, keyErr := os.Stat(key)
+		if certErr != nil || keyErr != nil || certInfo.IsDir() || keyInfo.IsDir() || certInfo.Size() == 0 || keyInfo.Size() == 0 {
+			updates[pair[0]], updates[pair[1]] = "", ""
+			if pair[0] == "webCertFile" {
+				updates["webDomain"] = ""
+			} else {
+				updates["subDomain"] = ""
+			}
+		}
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	return conn.Transaction(func(tx *gorm.DB) error {
+		for key, value := range updates {
+			result := tx.Model(&model.Setting{}).Where("key = ?", key).Update("value", value)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				if err := tx.Create(&model.Setting{Key: key, Value: value}).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }
 
 func IsSQLiteDB(file io.Reader) (bool, error) {

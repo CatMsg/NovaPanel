@@ -58,6 +58,8 @@ GitHub Release 提供 Linux 和 Windows 产物；Windows 也可以使用仓库�
 | 入口 | 命令 | 说明 |
 | --- | --- | --- |
 | 指定版本 | `bash <(curl -Ls https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh) vx.x.x` | 安装固定版本 |
+| 后台更新 | `s-ui update --background` | 脱离 SSH 会话执行更新，避免更新重启时连接中断 |
+| 更新状态 | `s-ui update-status` | 查看后台更新状态和最近日志 |
 | Docker Compose | `docker compose up -d` | 使用容器部署 |
 | 源码运行 | `./runSUI.sh` | 
 
@@ -138,6 +140,9 @@ docker build -t novapanel .
 - Hysteria2 的 `server_ports` 支持单端口、范围和组合写法，例如 `500,900,1000-1400`，恢复备份后会自动重建对应规则。
 - 新增 MASQUE 协议支持，面板可直接管理并启动对应服务进程。
 - 备份恢复前会检查端口管理后端，自动适配 `ufw`、`nftables` 或 `iptables`，并在冲突场景下尽量保证恢复结果可用。
+- 服务器集合支持保存远端 NovaPanel 地址和加密令牌，可集中查看版本、核心、端口、用户、节点和 MASQUE 状态，并查看日志或重启面板。
+- 服务器集合配置随数据库备份保存；恢复时会校验 SQLite 完整性、关键数据表和集合配置，失效的本机证书路径会自动清理，并保留恢复前数据库作为回退副本。
+- 入站、节点、面板端口和订阅端口的配置变更采用数据库、核心和端口规则的失败回滚策略，避免只保存了一半导致状态不一致。
 - SSL 证书申请成功后可自动回填面板配置路径，并提供重置入口作为兜底。
 - 修复配置保存过程中偶发的 `database is locked` 问题，减少保存后重启核心时的并发冲突。
 - 首页与登录页已做移动端适配，信息卡和实时状态也针对小屏做了重新整理。

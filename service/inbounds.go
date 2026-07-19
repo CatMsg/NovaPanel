@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -16,6 +17,37 @@ import (
 
 type InboundService struct {
 	ClientService
+}
+
+func (s *InboundService) rollbackInboundCoreState(act string, oldInbound, newInbound *model.Inbound) error {
+	if corePtr == nil || !corePtr.IsRunning() {
+		return nil
+	}
+	switch act {
+	case "new":
+		if newInbound == nil {
+			return nil
+		}
+		if err := corePtr.RemoveInbound(newInbound.Tag); err != nil && !errors.Is(err, os.ErrInvalid) {
+			return err
+		}
+	case "edit", "del":
+		if oldInbound == nil {
+			return nil
+		}
+		configData, err := oldInbound.MarshalJSON()
+		if err != nil {
+			return err
+		}
+		configData, err = s.addUsers(database.GetDB(), configData, oldInbound.Id, oldInbound.Type)
+		if err != nil {
+			return err
+		}
+		if err := corePtr.AddInbound(configData); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *InboundService) Get(ids string) (*[]map[string]interface{}, error) {
@@ -210,20 +242,30 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		oldSnapshot := oldInbound
 		inboundConfigSnapshot := append([]byte(nil), inboundConfig...)
 		postCommit = func() error {
+			coreChanged := false
 			if corePtr.IsRunning() {
 				if act == "edit" {
 					if err := corePtr.RemoveInbound(oldSnapshot.Tag); err != nil && err != os.ErrInvalid {
 						return err
 					}
+					coreChanged = true
 				}
 
 				if len(inboundConfigSnapshot) > 0 {
 					if err := corePtr.AddInbound(inboundConfigSnapshot); err != nil {
-						return err
+						rollbackErr := s.rollbackInboundCoreState(act, oldSnapshot, &inboundSnapshot)
+						return errors.Join(err, rollbackErr)
 					}
+					coreChanged = true
 				}
 			}
-			return s.syncInboundPortForwarding(oldSnapshot, &inboundSnapshot)
+			if err := s.syncInboundPortForwarding(oldSnapshot, &inboundSnapshot); err != nil {
+				if coreChanged {
+					return errors.Join(err, s.rollbackInboundCoreState(act, oldSnapshot, &inboundSnapshot))
+				}
+				return err
+			}
+			return nil
 		}
 	case "del":
 		var tag string
@@ -254,12 +296,20 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		}
 		oldSnapshot := oldInbound
 		postCommit = func() error {
+			coreChanged := false
 			if corePtr.IsRunning() {
 				if err := corePtr.RemoveInbound(tag); err != nil && err != os.ErrInvalid {
 					return err
 				}
+				coreChanged = true
 			}
-			return s.syncInboundPortForwarding(oldSnapshot, nil)
+			if err := s.syncInboundPortForwarding(oldSnapshot, nil); err != nil {
+				if coreChanged {
+					return errors.Join(err, s.rollbackInboundCoreState(act, oldSnapshot, nil))
+				}
+				return err
+			}
+			return nil
 		}
 	default:
 		return nil, common.NewErrorf("unknown action: %s", act)

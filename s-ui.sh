@@ -33,6 +33,10 @@ fi
 echo "当前系统发行版为：$release"
 
 readonly SUI_INSTALL_SCRIPT_URL="https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh"
+readonly SUI_UPDATE_STATE_DIR="/var/lib/s-ui"
+readonly SUI_UPDATE_LOG="${SUI_UPDATE_STATE_DIR}/update.log"
+readonly SUI_UPDATE_STATUS="${SUI_UPDATE_STATE_DIR}/update.status"
+readonly SUI_UPDATE_PID="${SUI_UPDATE_STATE_DIR}/update.pid"
 
 confirm() {
     if [[ $# > 1 ]]; then
@@ -82,7 +86,7 @@ update() {
         current_version=$(/usr/local/s-ui/sui -v 2>/dev/null | awk '/^NovaPanel Panel[[:space:]]+/ {print $2}' | head -n1)
     fi
     latest_version=$(curl -Ls "https://api.github.com/repos/CatMsg/NovaPanel/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-    if [[ -n "${current_version}" && -n "${latest_version}" && "${current_version}" == "${latest_version}" ]]; then
+    if [[ -n "${current_version}" && -n "${latest_version}" && "${current_version}" == "${latest_version}" && "${SUI_AUTO_UPGRADE:-}" != "1" ]]; then
         confirm "当前版本 ${current_version} 与最新版本一致，是否仍然覆盖安装？" "n"
         if [[ $? != 0 ]]; then
             LOGE "已取消"
@@ -95,7 +99,64 @@ update() {
     SUI_AUTO_UPGRADE=1 run_install_script
     if [[ $? == 0 ]]; then
         LOGI "更新完成，面板已自动重启"
-        exit 0
+        return 0
+    fi
+    return 1
+}
+
+write_update_status() {
+    local state="$1"
+    local message="${2:-}"
+    mkdir -p "${SUI_UPDATE_STATE_DIR}"
+    {
+        printf 'state=%s\n' "${state}"
+        printf 'updated_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        printf 'message=%s\n' "${message}"
+    } > "${SUI_UPDATE_STATUS}"
+}
+
+run_update_worker() {
+    write_update_status "running" "正在后台更新"
+    SUI_AUTO_UPGRADE=1 update
+    local status=$?
+    if [[ ${status} -eq 0 ]]; then
+        write_update_status "success" "更新完成，面板已重启"
+    else
+        write_update_status "failed" "更新失败，详见 ${SUI_UPDATE_LOG}"
+    fi
+    rm -f "${SUI_UPDATE_PID}"
+    return ${status}
+}
+
+start_background_update() {
+    mkdir -p "${SUI_UPDATE_STATE_DIR}"
+    if [[ -f "${SUI_UPDATE_PID}" ]]; then
+        local pid
+        pid=$(cat "${SUI_UPDATE_PID}")
+        if [[ "${pid}" =~ ^[0-9]+$ ]] && kill -0 "${pid}" 2>/dev/null; then
+            LOGI "已有更新任务运行中，PID=${pid}"
+            return 0
+        fi
+        rm -f "${SUI_UPDATE_PID}"
+    fi
+    : > "${SUI_UPDATE_LOG}"
+    write_update_status "queued" "已提交后台更新任务"
+    nohup setsid bash "$0" update --worker >> "${SUI_UPDATE_LOG}" 2>&1 < /dev/null &
+    local pid=$!
+    printf '%s\n' "${pid}" > "${SUI_UPDATE_PID}"
+    LOGI "后台更新已启动，PID=${pid}"
+    LOGI "日志：${SUI_UPDATE_LOG}"
+}
+
+show_update_status() {
+    if [[ -f "${SUI_UPDATE_STATUS}" ]]; then
+        cat "${SUI_UPDATE_STATUS}"
+    else
+        echo "state=never"
+    fi
+    if [[ -f "${SUI_UPDATE_LOG}" ]]; then
+        echo "--- 最近日志 ---"
+        tail -n 30 "${SUI_UPDATE_LOG}"
     fi
 }
 
@@ -930,6 +991,8 @@ show_usage() {
     echo -e "s-ui disable      - 禁用开机自启"
     echo -e "s-ui log          - 查看 NovaPanel 日志"
     echo -e "s-ui update       - 更新"
+    echo -e "s-ui update --background - 脱离 SSH 后台更新"
+    echo -e "s-ui update-status - 查看后台更新状态和日志"
     echo -e "s-ui install      - 安装"
     echo -e "s-ui uninstall    - 卸载"
     echo -e "s-ui help         - 控制菜单用法"
@@ -1066,7 +1129,17 @@ if [[ $# > 0 ]]; then
         check_install 0 && show_log s-ui 0
         ;;
     "update")
-        check_install 0 && update 0
+        check_install 0 || exit $?
+        if [[ "${2:-}" == "--background" || "${2:-}" == "-d" ]]; then
+            start_background_update
+        elif [[ "${2:-}" == "--worker" ]]; then
+            run_update_worker
+        else
+            update 0
+        fi
+        ;;
+    "update-status")
+        check_install 0 && show_update_status
         ;;
     "install")
         check_uninstall 0 && install 0

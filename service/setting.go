@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -624,19 +625,29 @@ func (s *SettingService) applySettingSideEffects(tx *gorm.DB, key, value string)
 }
 
 func (s *SettingService) buildSavePostCommit(change settingPortChange, changedSettings map[string]string) func() error {
-	actions := make([]func() error, 0, 2)
-
-	if change.webPortChanged || change.subPortChanged {
-		actions = append(actions, func() error {
-			return s.SyncManagedPanelPortForwarding(change.oldWebPort, change.newWebPort, change.oldSubPort, change.newSubPort)
-		})
+	portsChanged := change.webPortChanged || change.subPortChanged
+	needsRestart := requiresSubServerRestart(changedSettings)
+	if !portsChanged && !needsRestart {
+		return nil
 	}
-
-	if requiresSubServerRestart(changedSettings) {
-		actions = append(actions, restartSubServer)
+	return func() error {
+		if portsChanged {
+			if err := s.SyncManagedPanelPortForwarding(change.oldWebPort, change.newWebPort, change.oldSubPort, change.newSubPort); err != nil {
+				return err
+			}
+		}
+		if !needsRestart {
+			return nil
+		}
+		if err := restartSubServer(); err != nil {
+			if portsChanged {
+				rollbackErr := s.SyncManagedPanelPortForwarding(change.newWebPort, change.oldWebPort, change.newSubPort, change.oldSubPort)
+				return errors.Join(err, rollbackErr)
+			}
+			return err
+		}
+		return nil
 	}
-
-	return combinePostCommitActions(actions...)
 }
 
 func requiresSubServerRestart(changedSettings map[string]string) bool {
