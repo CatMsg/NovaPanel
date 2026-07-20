@@ -8,21 +8,18 @@
   >
     <v-card class="rounded-lg history-dialog" :loading="loading">
       <v-card-title class="history-dialog__title">
-        <v-row>
-          <v-col>
+        <div class="history-dialog__title-row">
+          <div>
             {{ $t('client.history') }}
             <span v-if="clientName"> - {{ clientName }}</span>
-          </v-col>
-          <v-spacer></v-spacer>
-          <v-col cols="auto">
-            <v-icon icon="mdi-close" @click="$emit('close')" />
-          </v-col>
-        </v-row>
+          </div>
+          <v-btn icon="mdi-close" variant="text" :aria-label="$t('actions.close')" :title="$t('actions.close')" @click="$emit('close')" />
+        </div>
       </v-card-title>
       <v-divider></v-divider>
       <v-card-text class="history-dialog__body">
-        <v-row class="mb-2 history-dialog__filters" align="center">
-          <v-col cols="12" md="8">
+        <v-row class="history-dialog__filters" align="center" dense>
+          <v-col cols="12" md="4">
             <v-text-field
               v-model="keyword"
               clearable
@@ -30,12 +27,22 @@
               variant="underlined"
               prepend-inner-icon="mdi-magnify"
               :label="$t('search')"
+              hide-details
             />
           </v-col>
-          <v-col cols="12" md="4" class="text-md-end">
-            <v-chip density="compact" variant="tonal" color="primary">
-              {{ filteredHistory.length }} / {{ history.length }}
-            </v-chip>
+          <v-col cols="6" md="2">
+            <v-select v-model="timeRange" :items="timeRangeItems" density="compact" variant="outlined" :label="$t('client.timeRange')" hide-details />
+          </v-col>
+          <v-col cols="6" md="2">
+            <v-select v-model="inboundFilter" :items="inboundOptions" density="compact" variant="outlined" :label="$t('pages.inbounds')" hide-details />
+          </v-col>
+          <v-col cols="6" md="2">
+            <v-select v-model="outboundFilter" :items="outboundOptions" density="compact" variant="outlined" :label="$t('pages.outbounds')" hide-details />
+          </v-col>
+          <v-col cols="6" md="2" class="history-dialog__filter-actions">
+            <v-btn block variant="tonal" color="primary" :disabled="filteredHistory.length === 0" @click="exportHistory">
+              <v-icon icon="mdi-download-outline" start />{{ $t('client.exportHistory') }}
+            </v-btn>
           </v-col>
         </v-row>
         <v-alert
@@ -102,11 +109,11 @@
               <strong>{{ history.length }}</strong>
             </div>
             <div class="history-dialog__desktop-stat">
-              <span>{{ $t('search') }}</span>
-              <strong>{{ hasKeyword ? filteredHistory.length : $t('all') }}</strong>
+              <span>{{ $t('client.filtered') }}</span>
+              <strong>{{ hasFilters ? filteredHistory.length : $t('all') }}</strong>
             </div>
             <div class="history-dialog__desktop-stat">
-              <span>{{ $t('objects.domain') }}</span>
+              <span>{{ $t('rule.domain') }}</span>
               <strong>{{ desktopTopDomain }}</strong>
             </div>
           </div>
@@ -142,11 +149,6 @@
                   {{ item.destination }}
                 </span>
               </div>
-            </template>
-            <template v-slot:item.destination="{ value }">
-              <span class="history-dialog__table-text history-dialog__table-text--muted" dir="ltr" :title="value || '-'">
-                {{ value || '-' }}
-              </span>
             </template>
             <template v-slot:item.inbound="{ value }">
               <v-chip size="small" variant="tonal" color="primary" class="history-dialog__tag-chip" :title="value || '-'">
@@ -195,27 +197,59 @@ const loading = ref(false)
 const clientName = ref('')
 const history = ref<HistoryEntry[]>([])
 const keyword = ref('')
+const timeRange = ref('all')
+const inboundFilter = ref('all')
+const outboundFilter = ref('all')
 const page = ref(1)
 const tableShell = ref<HTMLElement | null>(null)
 const itemsPerPage = 10
 
 const headers = [
   { title: i18n.global.t('admin.date') + '-' + i18n.global.t('admin.time'), key: 'dateTime' },
-  { title: i18n.global.t('objects.domain'), key: 'domain' },
-  { title: 'Destination', key: 'destination' },
+  { title: i18n.global.t('rule.domain'), key: 'domain' },
   { title: i18n.global.t('pages.inbounds'), key: 'inbound' },
   { title: i18n.global.t('pages.outbounds'), key: 'outbound' },
   { title: i18n.global.t('network'), key: 'network' },
   { title: i18n.global.t('protocol'), key: 'protocol' },
 ]
 
+const timeRangeItems = [
+  { title: i18n.global.t('all'), value: 'all' },
+  { title: i18n.global.t('client.lastDay'), value: 'day' },
+  { title: i18n.global.t('client.lastWeek'), value: 'week' },
+  { title: i18n.global.t('client.lastMonth'), value: 'month' },
+]
+
+const inboundOptions = computed(() => [
+  { title: i18n.global.t('all'), value: 'all' },
+  ...[...new Set(history.value.map(item => item.inbound).filter(Boolean))]
+    .sort()
+    .map(value => ({ title: value as string, value: value as string })),
+])
+
+const outboundOptions = computed(() => [
+  { title: i18n.global.t('all'), value: 'all' },
+  ...[...new Set(history.value.map(item => item.outbound).filter(Boolean))]
+    .sort()
+    .map(value => ({ title: value as string, value: value as string })),
+])
+
 const filteredHistory = computed(() => {
   const query = keyword.value.trim().toLowerCase()
-  if (!query) {
-    return history.value
-  }
+  const rangeSeconds = timeRange.value === 'day'
+    ? 86400
+    : timeRange.value === 'week'
+      ? 7 * 86400
+      : timeRange.value === 'month'
+        ? 30 * 86400
+        : 0
+  const minimumTime = rangeSeconds > 0 ? Date.now() / 1000 - rangeSeconds : 0
 
   return history.value.filter((item) => {
+    if (minimumTime > 0 && item.dateTime < minimumTime) return false
+    if (inboundFilter.value !== 'all' && item.inbound !== inboundFilter.value) return false
+    if (outboundFilter.value !== 'all' && item.outbound !== outboundFilter.value) return false
+    if (!query) return true
     const formattedDate = dateFormatted(item.dateTime).toLowerCase()
     return [
       formattedDate,
@@ -231,7 +265,12 @@ const filteredHistory = computed(() => {
   })
 })
 
-const hasKeyword = computed(() => keyword.value.trim().length > 0)
+const hasFilters = computed(() =>
+  keyword.value.trim().length > 0
+  || timeRange.value !== 'all'
+  || inboundFilter.value !== 'all'
+  || outboundFilter.value !== 'all',
+)
 
 const desktopTopDomain = computed(() => {
   const counts = new Map<string, number>()
@@ -251,11 +290,39 @@ const pagedHistory = computed(() => {
   return filteredHistory.value.slice(start, start + itemsPerPage)
 })
 
+const csvCell = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""')}"`
+
+const exportHistory = () => {
+  if (filteredHistory.value.length === 0) return
+  const rows = [
+    ['Date', 'Domain', 'Destination', 'Inbound', 'Outbound', 'Network', 'Protocol'],
+    ...filteredHistory.value.map(item => [
+      dateFormatted(item.dateTime),
+      item.domain,
+      item.destination,
+      item.inbound,
+      item.outbound,
+      item.network,
+      item.protocol,
+    ]),
+  ]
+  const csv = `\uFEFF${rows.map(row => row.map(csvCell).join(',')).join('\n')}`
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${clientName.value || 'client'}-history.csv`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
 const loadData = async () => {
   if (props.id <= 0) {
     history.value = []
     clientName.value = ''
     keyword.value = ''
+    timeRange.value = 'all'
+    inboundFilter.value = 'all'
+    outboundFilter.value = 'all'
     page.value = 1
     return
   }
@@ -296,12 +363,15 @@ const onDialogUpdate = (v: boolean) => {
     history.value = []
     clientName.value = ''
     keyword.value = ''
+    timeRange.value = 'all'
+    inboundFilter.value = 'all'
+    outboundFilter.value = 'all'
     page.value = 1
     emit('close')
   }
 }
 
-watch(keyword, () => {
+watch([keyword, timeRange, inboundFilter, outboundFilter], () => {
   page.value = 1
   resetTableScroll()
 })
@@ -321,6 +391,9 @@ watch(
       history.value = []
       clientName.value = ''
       keyword.value = ''
+      timeRange.value = 'all'
+      inboundFilter.value = 'all'
+      outboundFilter.value = 'all'
       page.value = 1
     }
   },
@@ -340,6 +413,14 @@ watch(
   padding-bottom: 10px;
 }
 
+.history-dialog__title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .history-dialog__body {
   display: flex;
   flex-direction: column;
@@ -351,6 +432,11 @@ watch(
 
 .history-dialog__filters {
   flex: 0 0 auto;
+}
+
+.history-dialog__filter-actions {
+  display: flex;
+  align-items: center;
 }
 
 .history-dialog__table-shell {
@@ -645,6 +731,12 @@ watch(
 
   .history-dialog__body {
     padding: 12px;
+  }
+
+  .history-dialog__filters {
+    max-height: 210px;
+    overflow: auto;
+    padding-right: 2px;
   }
 }
 
