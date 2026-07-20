@@ -24,6 +24,9 @@ export default {
   email: "電子郵件",
   commaSeparated: "（逗號分隔）",
   count: "計數",
+  itemCount: "{count} 項",
+  unknown: "未知",
+  status: "狀態",
   search: "關鍵字",
   template: "模板",
   editor: "編輯器",
@@ -136,6 +139,7 @@ export default {
     edit: "編輯",
     del: "刪除",
     clone: "克隆",
+    copy: "複製",
     test: "測試",
     testAll: "測試全部",
     save: "保存",
@@ -156,6 +160,10 @@ export default {
     pwRules: "密碼不能為空",
   },
   menu: {
+    open: "開啟導覽選單",
+    close: "關閉導覽選單",
+    language: "切換語言",
+    theme: "切換主題",
     logout: "退出登錄",
   },
   admin: {

@@ -18,7 +18,7 @@
           </div>
         </div>
         <div class="settings-hero__meta">
-          <span>当前标签 {{ tab }}</span>
+          <span>当前标签 {{ tabLabel }}</span>
           <span>•</span>
           <span>{{ stateChange ? '未保存更改' : '配置已同步' }}</span>
         </div>
@@ -37,7 +37,19 @@
   </v-card>
 
   <v-card class="settings-panel" rounded="xl" variant="flat" :loading="loading">
+    <v-select
+      v-if="smAndDown"
+      v-model="tab"
+      class="settings-panel__mobile-tabs"
+      :items="tabItems"
+      item-title="title"
+      item-value="value"
+      variant="outlined"
+      density="comfortable"
+      hide-details
+    />
     <v-tabs
+      v-else
       v-model="tab"
       color="primary"
       align-tabs="center"
@@ -204,10 +216,19 @@ import { Ref, computed, defineAsyncComponent, inject, onMounted, ref } from 'vue
 import HttpUtils from '@/plugins/httputil'
 import { FindDiff } from '@/plugins/utils'
 import { push } from 'notivue'
+import { useDisplay } from 'vuetify'
 
 const SubJsonExtVue = defineAsyncComponent(() => import('@/components/SubJsonExt.vue'))
 const SubClashExtVue = defineAsyncComponent(() => import('@/components/SubClashExt.vue'))
 const tab = ref("t1")
+const { smAndDown } = useDisplay()
+const tabItems = computed(() => [
+  { title: i18n.global.t('setting.interface'), value: 't1' },
+  { title: i18n.global.t('setting.sub'), value: 't2' },
+  { title: i18n.global.t('setting.jsonSub'), value: 't3' },
+  { title: i18n.global.t('setting.clashSub'), value: 't4' },
+])
+const tabLabel = computed(() => tabItems.value.find((item) => item.value === tab.value)?.title ?? '')
 const loading:Ref = inject('loading')?? ref(false)
 const oldSettings = ref({})
 
@@ -491,6 +512,10 @@ const stateChange = computed(() => {
 
 .settings-panel {
   overflow: hidden;
+}
+
+.settings-panel__mobile-tabs {
+  margin: 14px 14px 0;
 }
 
 .v-theme--dark .settings-hero,

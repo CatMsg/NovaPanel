@@ -17,7 +17,7 @@
   <v-card class="resource-hero resource-hero--inbounds" rounded="xl" variant="flat">
     <div class="resource-hero__topline">
       <span class="resource-hero__badge">{{ $t('pages.inbounds') }}</span>
-      <span class="resource-hero__badge resource-hero__badge--soft">{{ inbounds.length }} items</span>
+      <span class="resource-hero__badge resource-hero__badge--soft">{{ $t('itemCount', { count: inbounds.length }) }}</span>
     </div>
     <v-row class="resource-hero__content" align="center">
       <v-col cols="12" lg="8">
@@ -100,12 +100,12 @@
         </v-card-text>
         <v-divider></v-divider>
         <v-card-actions class="resource-card__actions">
-          <v-btn icon="mdi-file-edit" @click="showModal(item.id)">
-            <v-icon />
+          <v-btn class="np-card-action" variant="text" @click="showModal(item.id)">
+            <v-icon icon="mdi-file-edit" /><span>{{ $t('actions.edit') }}</span>
             <v-tooltip activator="parent" location="top" :text="$t('actions.edit')"></v-tooltip>
           </v-btn>
-          <v-btn icon="mdi-file-remove" style="margin-inline-start:0;" color="warning" @click="delOverlay[index] = true">
-            <v-icon />
+          <v-btn class="np-card-action" variant="text" style="margin-inline-start:0;" color="warning" @click="delOverlay[index] = true">
+            <v-icon icon="mdi-file-remove" /><span>{{ $t('actions.del') }}</span>
             <v-tooltip activator="parent" location="top" :text="$t('actions.del')"></v-tooltip>
           </v-btn>
           <v-overlay
@@ -122,12 +122,12 @@
               </v-card-actions>
             </v-card>
           </v-overlay>
-          <v-btn icon="mdi-content-duplicate" :loading="cloneLoading" @click="clone(item.id)">
-            <v-icon />
+          <v-btn class="np-card-action" variant="text" :loading="cloneLoading" @click="clone(item.id)">
+            <v-icon icon="mdi-content-duplicate" /><span>{{ $t('actions.clone') }}</span>
             <v-tooltip activator="parent" location="top" :text="$t('actions.clone')"></v-tooltip>
           </v-btn>
-          <v-btn icon="mdi-chart-line" @click="showStats(item.tag)" v-if="Data().enableTraffic">
-            <v-icon />
+          <v-btn class="np-card-action" variant="text" @click="showStats(item.tag)" v-if="Data().enableTraffic">
+            <v-icon icon="mdi-chart-line" /><span>{{ $t('stats.graphTitle') }}</span>
             <v-tooltip activator="parent" location="top" :text="$t('stats.graphTitle')"></v-tooltip>
           </v-btn>
         </v-card-actions>

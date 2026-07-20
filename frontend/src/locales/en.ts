@@ -24,6 +24,9 @@ export default {
   email: "Email",
   commaSeparated: "(comma separated)",
   count: "Count",
+  itemCount: "{count} items",
+  unknown: "Unknown",
+  status: "Status",
   search: "Keyword",
   template: "Template",
   editor: "Editor",
@@ -136,6 +139,7 @@ export default {
     edit: "Edit",
     del: "Delete",
     clone: "Clone",
+    copy: "Copy",
     test: "Test",
     testAll: "Test all",
     save: "Save",
@@ -156,6 +160,10 @@ export default {
     pwRules: "Password can not be empty",
   },
   menu: {
+    open: "Open navigation menu",
+    close: "Close navigation menu",
+    language: "Change language",
+    theme: "Change theme",
     logout: "Logout",
   },
   admin: {

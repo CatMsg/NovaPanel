@@ -29,7 +29,7 @@
   <v-card class="resource-hero resource-hero--endpoints" rounded="xl" variant="flat">
     <div class="resource-hero__topline">
       <span class="resource-hero__badge">{{ $t('pages.endpoints') }}</span>
-      <span class="resource-hero__badge resource-hero__badge--soft">{{ endpoints.length }} items</span>
+      <span class="resource-hero__badge resource-hero__badge--soft">{{ $t('itemCount', { count: endpoints.length }) }}</span>
     </div>
     <v-row class="resource-hero__content" align="center">
       <v-col cols="12" lg="8">
@@ -175,20 +175,20 @@
         </v-card-text>
         <v-divider></v-divider>
         <v-card-actions class="endpoint-actions">
-          <v-btn icon="mdi-file-edit" @click="showModal(item.id)">
-            <v-icon />
+          <v-btn class="np-card-action" variant="text" @click="showModal(item.id)">
+            <v-icon icon="mdi-file-edit" /><span>{{ $t('actions.edit') }}</span>
             <v-tooltip activator="parent" location="top" :text="$t('actions.edit')"></v-tooltip>
           </v-btn>
-          <v-btn icon="mdi-file-remove" style="margin-inline-start:0;" color="warning" @click="delOverlay[index] = true">
-            <v-icon />
+          <v-btn class="np-card-action" variant="text" style="margin-inline-start:0;" color="warning" @click="delOverlay[index] = true">
+            <v-icon icon="mdi-file-remove" /><span>{{ $t('actions.del') }}</span>
             <v-tooltip activator="parent" location="top" :text="$t('actions.del')"></v-tooltip>
           </v-btn>
-          <v-btn v-if="item.type == 'masque'" icon="mdi-content-copy" @click="copyMasque(item)">
-            <v-icon />
+          <v-btn v-if="item.type == 'masque'" class="np-card-action" variant="text" @click="copyMasque(item)">
+            <v-icon icon="mdi-content-copy" /><span>{{ $t('actions.copy') }}</span>
             <v-tooltip activator="parent" location="top" text="Copy config"></v-tooltip>
           </v-btn>
-          <v-btn v-if="item.type == 'masque'" icon="mdi-information-outline" @click="showMasqueStatus(item.id)">
-            <v-icon />
+          <v-btn v-if="item.type == 'masque'" class="np-card-action" variant="text" @click="showMasqueStatus(item.id)">
+            <v-icon icon="mdi-information-outline" /><span>{{ $t('status') }}</span>
             <v-tooltip activator="parent" location="top" text="MASQUE status"></v-tooltip>
           </v-btn>
           <v-overlay
@@ -207,14 +207,15 @@
           </v-overlay>
           <v-btn
             v-if="item.type == 'wireguard' && item.peers?.length>0"
-            icon="mdi-qrcode"
+            class="np-card-action"
+            variant="text"
             @click="showQrCode(item.id)"
           >
-            <v-icon />
+            <v-icon icon="mdi-qrcode" /><span>QR</span>
             <v-tooltip activator="parent" location="top" text="WireGuard QR Code"></v-tooltip>
           </v-btn>
-          <v-btn icon="mdi-chart-line" @click="showStats(item.tag)" v-if="Data().enableTraffic">
-            <v-icon />
+          <v-btn class="np-card-action" variant="text" @click="showStats(item.tag)" v-if="Data().enableTraffic">
+            <v-icon icon="mdi-chart-line" /><span>{{ $t('stats.graphTitle') }}</span>
             <v-tooltip activator="parent" location="top" :text="$t('stats.graphTitle')"></v-tooltip>
           </v-btn>
         </v-card-actions>

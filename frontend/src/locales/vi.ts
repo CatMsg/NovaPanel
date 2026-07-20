@@ -24,6 +24,9 @@ export default {
   email: "Email",
   commaSeparated: "(được phân tách bằng dấu phẩy)",
   count: "Đếm",
+  itemCount: "{count} mục",
+  unknown: "Không rõ",
+  status: "Trạng thái",
   search: "Từ khóa",
   template: "Mẫu",
   editor: "Bản sử dụng",
@@ -136,6 +139,7 @@ export default {
     edit: "Chỉnh sửa",
     del: "Xóa",
     clone: "Nhân bản",
+    copy: "Sao chép",
     test: "Kiểm tra",
     testAll: "Kiểm tra tất cả",
     save: "Lưu",
@@ -156,6 +160,10 @@ export default {
     pwRules: "Mật khẩu không thể trống",
   },
   menu: {
+    open: "Mở menu điều hướng",
+    close: "Đóng menu điều hướng",
+    language: "Đổi ngôn ngữ",
+    theme: "Đổi giao diện",
     logout: "Đăng xuất",
   },
   admin: {

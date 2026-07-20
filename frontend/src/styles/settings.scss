@@ -558,6 +558,19 @@ body::after {
   opacity: 0.84;
 }
 
+.np-card-action {
+  min-width: 40px !important;
+  padding-inline: 10px !important;
+}
+
+.np-card-action .v-btn__content {
+  gap: 6px;
+}
+
+.np-card-action .v-btn__content > span {
+  display: none;
+}
+
 @media (max-width: 960px) {
   body {
     background-attachment: scroll;
@@ -593,6 +606,52 @@ body::after {
   body::before {
     display: none;
     opacity: 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .np-card-action {
+    flex: 1 1 calc(50% - 4px) !important;
+    min-height: 42px;
+    border: 1px solid var(--np-border);
+    border-radius: 14px !important;
+    background: var(--np-surface-muted);
+  }
+
+  .np-card-action .v-btn__content > span {
+    display: inline;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .resource-hero__content,
+  .clients-hero__content,
+  .settings-hero__content,
+  .ports-hero__content {
+    min-height: 0 !important;
+  }
+
+  .resource-hero__subtitle,
+  .clients-hero__subtitle,
+  .settings-hero__subtitle,
+  .ports-hero__subtitle,
+  .fleet-hero__subtitle {
+    display: -webkit-box;
+    margin-top: 7px !important;
+    overflow: hidden;
+    font-size: 0.86rem;
+    line-height: 1.5 !important;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .resource-hero__meta,
+  .clients-hero__meta,
+  .settings-hero__meta,
+  .ports-hero__meta,
+  .fleet-hero__meta {
+    margin-top: 10px !important;
   }
 }
 

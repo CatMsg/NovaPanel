@@ -24,6 +24,9 @@ export default {
   email: "电子邮件",
   commaSeparated: "（逗号分隔）",
   count: "计数",
+  itemCount: "{count} 项",
+  unknown: "未知",
+  status: "状态",
   search: "关键字",
   template: "模板",
   editor: "编辑器",
@@ -137,6 +140,7 @@ export default {
     edit: "编辑",
     del: "删除",
     clone: "克隆",
+    copy: "复制",
     test: "测试",
     testAll: "测试全部",
     save: "保存",
@@ -157,6 +161,10 @@ export default {
     pwRules: "密码不能为空",
   },
   menu: {
+    open: "打开导航菜单",
+    close: "关闭导航菜单",
+    language: "切换语言",
+    theme: "切换主题",
     logout: "退出登录",
   },
   admin: {

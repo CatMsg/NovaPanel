@@ -7,7 +7,7 @@
       <v-card class="ports-hero" rounded="xl" variant="flat">
         <div class="ports-hero__topline">
           <span class="ports-hero__badge">{{ $t('pages.ports') }}</span>
-          <span class="ports-hero__badge ports-hero__badge--soft">{{ status.backend || 'unknown' }}</span>
+          <span class="ports-hero__badge ports-hero__badge--soft">{{ status.backend || $t('unknown') }}</span>
         </div>
 
         <v-row class="ports-hero__content" align="center">
@@ -66,7 +66,7 @@
         <v-col cols="12" sm="6" lg="3">
           <v-card class="ports-summary__card ports-summary__card--four" rounded="xl" variant="flat">
             <div class="ports-summary__label">后端</div>
-            <div class="ports-summary__value">{{ status.backend || 'unknown' }}</div>
+            <div class="ports-summary__value">{{ status.backend || $t('unknown') }}</div>
           </v-card>
         </v-col>
       </v-row>

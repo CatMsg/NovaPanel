@@ -24,6 +24,9 @@ export default {
   email: "Электронная почта",
   commaSeparated: "(разделено запятыми)",
   count: "Количество",
+  itemCount: "Элементов: {count}",
+  unknown: "Неизвестно",
+  status: "Статус",
   search: "Ключевое слово",
   template: "Шаблон",
   editor: "Редактор",
@@ -136,6 +139,7 @@ export default {
     edit: "Редактировать",
     del: "Удалить",
     clone: "Клонировать",
+    copy: "Копировать",
     test: "Тест",
     testAll: "Тестировать все",
     save: "Сохранить",
@@ -157,6 +161,10 @@ export default {
     pwRules: "Пароль не может быть пустым",
   },
   menu: {
+    open: "Открыть меню навигации",
+    close: "Закрыть меню навигации",
+    language: "Изменить язык",
+    theme: "Изменить тему",
     logout: "Выйти",
   },
   admin: {

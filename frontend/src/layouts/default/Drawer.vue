@@ -8,7 +8,7 @@
   >
     <v-list-item class="app-drawer__brand" :prepend-avatar="logoUrl" title="NovaPanel" :subtitle="$t('main.hero.badge')">
       <template v-slot:append v-if="isMobile">
-        <v-btn icon variant="text" @click.stop="emit('update:displayDrawer', false)">
+        <v-btn icon variant="text" :aria-label="$t('menu.close')" :title="$t('menu.close')" @click.stop="emit('update:displayDrawer', false)">
           <v-icon icon="mdi-close" />
         </v-btn>
       </template>

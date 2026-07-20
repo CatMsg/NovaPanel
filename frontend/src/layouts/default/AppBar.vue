@@ -1,7 +1,7 @@
 <template>
   <v-app-bar class="app-bar" flat height="72">
     <div class="app-bar__frame">
-      <v-btn v-if="isMobile" icon variant="text" class="app-bar__menu" @click="$emit('toggleDrawer')">
+      <v-btn v-if="isMobile" icon variant="text" class="app-bar__menu" :aria-label="$t('menu.open')" :title="$t('menu.open')" @click="$emit('toggleDrawer')">
         <v-icon icon="mdi-menu" />
       </v-btn>
       <div v-else class="app-bar__spacer"></div>
@@ -13,7 +13,7 @@
       <div class="app-bar__actions">
         <v-menu>
           <template v-slot:activator="{ props }">
-            <v-btn icon v-bind="props" variant="text" class="app-bar__icon-btn">
+            <v-btn icon v-bind="props" variant="text" class="app-bar__icon-btn" :aria-label="$t('menu.language')" :title="$t('menu.language')">
               <v-icon>mdi-translate</v-icon>
             </v-btn>
           </template>
@@ -30,7 +30,7 @@
         </v-menu>
         <v-menu>
           <template v-slot:activator="{ props }">
-            <v-btn icon v-bind="props" variant="text" class="app-bar__icon-btn">
+            <v-btn icon v-bind="props" variant="text" class="app-bar__icon-btn" :aria-label="$t('menu.theme')" :title="$t('menu.theme')">
               <v-icon>mdi-theme-light-dark</v-icon>
             </v-btn>
           </template>

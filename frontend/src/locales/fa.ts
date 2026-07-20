@@ -24,6 +24,9 @@ export default {
   email: "ایمیل",
   commaSeparated: "(جداشده با کاما)",
   count: "تعداد",
+  itemCount: "{count} مورد",
+  unknown: "نامشخص",
+  status: "وضعیت",
   search: "کلیدواژه",
   template: "الگو",
   editor: "ویرایشگر",
@@ -136,6 +139,7 @@ export default {
     edit: "ویرایش",
     del: "حذف",
     clone: "شبیه‌سازی",
+    copy: "رونوشت",
     test: "تست",
     testAll: "تست همه",
     save: "ذخیره",
@@ -156,6 +160,10 @@ export default {
     pwRules: "کلمه عبور نمی‌تواند خالی باشد",
   },
   menu: {
+    open: "باز کردن منوی ناوبری",
+    close: "بستن منوی ناوبری",
+    language: "تغییر زبان",
+    theme: "تغییر پوسته",
     logout: "خروج",
   },
   admin: {

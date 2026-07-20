@@ -8,7 +8,7 @@
         <div class="fleet-hero__topline">
           <span class="fleet-hero__badge">服务器集合</span>
           <span class="fleet-hero__badge fleet-hero__badge--soft">
-            {{ reachableCount }}/{{ servers.length }} 在线
+            {{ initialLoading ? '正在检查…' : `${reachableCount}/${servers.length} 在线` }}
           </span>
         </div>
         <v-row class="fleet-hero__content" align="center">
@@ -69,42 +69,42 @@
         <v-col cols="6" sm="3">
           <v-card class="fleet-summary__card fleet-summary__card--one" rounded="xl" variant="flat">
             <div class="fleet-summary__label">服务器总数</div>
-            <div class="fleet-summary__value">{{ servers.length }}</div>
+            <div class="fleet-summary__value">{{ initialLoading ? '—' : servers.length }}</div>
           </v-card>
         </v-col>
         <v-col cols="6" sm="3">
           <v-card class="fleet-summary__card fleet-summary__card--two" rounded="xl" variant="flat">
             <div class="fleet-summary__label">在线</div>
-            <div class="fleet-summary__value">{{ reachableCount }}</div>
+            <div class="fleet-summary__value">{{ initialLoading ? '—' : reachableCount }}</div>
           </v-card>
         </v-col>
         <v-col cols="6" sm="3">
           <v-card class="fleet-summary__card fleet-summary__card--three" rounded="xl" variant="flat">
             <div class="fleet-summary__label">核心运行</div>
-            <div class="fleet-summary__value">{{ runningCount }}</div>
+            <div class="fleet-summary__value">{{ initialLoading ? '—' : runningCount }}</div>
           </v-card>
         </v-col>
         <v-col cols="6" sm="3">
           <v-card class="fleet-summary__card fleet-summary__card--four" rounded="xl" variant="flat">
             <div class="fleet-summary__label">异常</div>
-            <div class="fleet-summary__value">{{ errorCount }}</div>
+            <div class="fleet-summary__value">{{ initialLoading ? '—' : errorCount }}</div>
           </v-card>
         </v-col>
         <v-col cols="6" sm="3">
           <v-card class="fleet-summary__card fleet-summary__card--five" rounded="xl" variant="flat">
             <div class="fleet-summary__label">在线用户</div>
-            <div class="fleet-summary__value">{{ onlineUsersTotal }}</div>
+            <div class="fleet-summary__value">{{ initialLoading ? '—' : onlineUsersTotal }}</div>
           </v-card>
         </v-col>
         <v-col cols="6" sm="3">
           <v-card class="fleet-summary__card fleet-summary__card--six" rounded="xl" variant="flat">
             <div class="fleet-summary__label">节点总数</div>
-            <div class="fleet-summary__value">{{ endpointTotal }}</div>
+            <div class="fleet-summary__value">{{ initialLoading ? '—' : endpointTotal }}</div>
           </v-card>
         </v-col>
       </v-row>
 
-      <v-alert v-if="servers.length === 1" type="info" variant="tonal" rounded="xl" class="fleet-empty">
+      <v-alert v-if="!initialLoading && servers.length === 1" type="info" variant="tonal" rounded="xl" class="fleet-empty">
         当前只有本机。点击“管理服务器”添加远端 NovaPanel 的 API 地址和令牌，即可纳入集合。
       </v-alert>
 
@@ -329,7 +329,7 @@ type FleetConfig = {
   enabled: boolean
 }
 
-const loading = ref(false)
+const loading = ref(true)
 const saving = ref(false)
 const showConfig = ref(false)
 const showDetails = ref(false)
@@ -373,6 +373,7 @@ const errorCount = computed(() => servers.value.filter((server) => server.error 
 const remoteCount = computed(() => remoteServers.value.length)
 const onlineUsersTotal = computed(() => servers.value.reduce((total, server) => total + server.OnlineUsers, 0))
 const endpointTotal = computed(() => servers.value.reduce((total, server) => total + server.Endpoints, 0))
+const initialLoading = computed(() => loading.value && servers.value.length === 0)
 const formattedCheckedAt = computed(() => {
   if (!checkedAt.value) return '-'
   const date = new Date(checkedAt.value)
@@ -391,20 +392,23 @@ const formatUptime = (seconds: number) => {
 
 const loadFleet = async () => {
   loading.value = true
-  const response = await HttpUtils.get('api/fleet')
-  if (response.success && response.obj) {
-    servers.value = (response.obj.servers ?? []).map(normalizeServer)
-    checkedAt.value = response.obj.checkedAt ?? ''
-    configs.value = remoteServers.value.map((server) => ({
-      id: server.id,
-      name: server.name,
-      url: server.url,
-      token: '',
-      tokenSet: server.tokenSet,
-      enabled: server.enabled,
-    }))
+  try {
+    const response = await HttpUtils.get('api/fleet')
+    if (response.success && response.obj) {
+      servers.value = (response.obj.servers ?? []).map(normalizeServer)
+      checkedAt.value = response.obj.checkedAt ?? ''
+      configs.value = remoteServers.value.map((server) => ({
+        id: server.id,
+        name: server.name,
+        url: server.url,
+        token: '',
+        tokenSet: server.tokenSet,
+        enabled: server.enabled,
+      }))
+    }
+  } finally {
+    loading.value = false
   }
-  loading.value = false
 }
 
 const addConfig = () => {
@@ -671,8 +675,8 @@ onMounted(loadFleet)
 
 @media (max-width: 800px) {
   .fleet-hero { padding: 18px; }
-  .fleet-hero__actions { justify-content: stretch; }
-  .fleet-hero__actions .v-btn { flex: 1; }
+  .fleet-hero__actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .fleet-hero__actions .v-btn { width: 100%; min-width: 0; }
   .fleet-hero__meta { flex-wrap: wrap; }
   .fleet-config-row { grid-template-columns: 1fr; padding: 14px 0; border-bottom: 1px solid var(--np-border); }
 }
