@@ -58,7 +58,7 @@ func detectPortDrift(natIPv4, natIPv6 []PortNatEntry, backend string, collection
 	}
 	desired, desiredErrors := loadDesiredPortDriftRules()
 	allErrors := append(append([]string(nil), collectionErrors...), desiredErrors...)
-	report := buildPortDriftReport(desired, natIPv4, natIPv6)
+	report := buildPortDriftReport(desired, natIPv4, natIPv6, backend)
 	if len(allErrors) > 0 {
 		report.Status = "unknown"
 		for _, err := range allErrors {
@@ -77,29 +77,16 @@ func detectPortDrift(natIPv4, natIPv6 []PortNatEntry, backend string, collection
 	return report
 }
 
-func buildPortDriftReport(desired []portDriftRule, natIPv4, natIPv6 []PortNatEntry) PortDriftReport {
+func buildPortDriftReport(desired []portDriftRule, natIPv4, natIPv6 []PortNatEntry, backend string) PortDriftReport {
 	report := PortDriftReport{
 		Status:       "healthy",
 		DesiredRules: len(desired),
 		Issues:       make([]PortDriftIssue, 0),
 	}
 
-	actualByRuleFamily := make(map[string]int)
-	actualRules := make([]PortNatEntry, 0, len(natIPv4)+len(natIPv6))
-	actualRules = append(actualRules, natIPv4...)
-	actualRules = append(actualRules, natIPv6...)
-	for _, entry := range actualRules {
-		if !strings.HasPrefix(entry.Chain, "NPHY2_") || !strings.EqualFold(entry.Target, "REDIRECT") {
-			continue
-		}
-		report.ActualManagedRules++
-		key := portDriftRuleKey(entry.Chain, entry.Protocol, entry.DPort, entry.ToPorts)
-		actualByRuleFamily[entry.Family+"|"+key]++
-	}
-
 	desiredKeys := make(map[string]portDriftRule, len(desired))
 	for _, rule := range desired {
-		key := portDriftRuleKey(rule.chain, rule.protocol, rule.dport, rule.toPorts)
+		key := portDriftDesiredRuleKey(rule, backend)
 		if _, duplicate := desiredKeys[key]; duplicate {
 			report.IssueCount++
 			report.Issues = append(report.Issues, PortDriftIssue{
@@ -115,6 +102,28 @@ func buildPortDriftReport(desired []portDriftRule, natIPv4, natIPv6 []PortNatEnt
 			continue
 		}
 		desiredKeys[key] = rule
+	}
+
+	actualByRuleFamily := make(map[string]int)
+	actualRules := make([]PortNatEntry, 0, len(natIPv4)+len(natIPv6))
+	actualRules = append(actualRules, natIPv4...)
+	actualRules = append(actualRules, natIPv6...)
+	for _, entry := range actualRules {
+		key, managed := portDriftActualRuleKey(entry, backend, desiredKeys)
+		if !managed {
+			continue
+		}
+		report.ActualManagedRules++
+		actualByRuleFamily[entry.Family+"|"+key]++
+	}
+
+	processedDesired := make(map[string]struct{}, len(desiredKeys))
+	for _, rule := range desired {
+		key := portDriftDesiredRuleKey(rule, backend)
+		if _, processed := processedDesired[key]; processed {
+			continue
+		}
+		processedDesired[key] = struct{}{}
 
 		familyCounts := make(map[string]int)
 		for familyAndKey, count := range actualByRuleFamily {
@@ -162,7 +171,7 @@ func buildPortDriftReport(desired []portDriftRule, natIPv4, natIPv6 []PortNatEnt
 		if !strings.HasPrefix(entry.Chain, "NPHY2_") || !strings.EqualFold(entry.Target, "REDIRECT") {
 			continue
 		}
-		key := portDriftRuleKey(entry.Chain, entry.Protocol, entry.DPort, entry.ToPorts)
+		key := portDriftActualComparisonKey(entry, backend)
 		if _, expected := desiredKeys[key]; expected {
 			continue
 		}
@@ -190,11 +199,18 @@ func buildPortDriftReport(desired []portDriftRule, natIPv4, natIPv6 []PortNatEnt
 		if strings.HasPrefix(entry.Chain, "NPHY2_") || !strings.EqualFold(entry.Target, "REDIRECT") {
 			continue
 		}
+		if _, expected := desiredKeys[portDriftActualComparisonKey(entry, backend)]; expected {
+			continue
+		}
 		if _, managed := managedPorts[entry.Protocol+"|"+entry.DPort]; !managed {
 			continue
 		}
 		report.UnexpectedCount++
 		report.IssueCount++
+		detail := "受管端口存在未归属 NovaPanel 链的 REDIRECT 规则"
+		if strings.EqualFold(backend, "UFW") {
+			detail = "UFW 受管端口存在目标不匹配的 REDIRECT 规则"
+		}
 		report.Issues = append(report.Issues, PortDriftIssue{
 			Type:     "unexpected",
 			Severity: "warning",
@@ -203,7 +219,7 @@ func buildPortDriftReport(desired []portDriftRule, natIPv4, natIPv6 []PortNatEnt
 			Port:     entry.DPort,
 			ToPorts:  entry.ToPorts,
 			Chain:    entry.Chain,
-			Detail:   "受管端口存在未归属 NovaPanel 链的 REDIRECT 规则",
+			Detail:   detail,
 		})
 	}
 
@@ -217,6 +233,36 @@ func buildPortDriftReport(desired []portDriftRule, natIPv4, natIPv6 []PortNatEnt
 		return report.Issues[i].Type < report.Issues[j].Type
 	})
 	return report
+}
+
+func portDriftDesiredRuleKey(rule portDriftRule, backend string) string {
+	if strings.EqualFold(backend, "UFW") {
+		return portDriftRuleKey("PREROUTING", rule.protocol, rule.dport, rule.toPorts)
+	}
+	return portDriftRuleKey(rule.chain, rule.protocol, rule.dport, rule.toPorts)
+}
+
+func portDriftActualComparisonKey(entry PortNatEntry, backend string) string {
+	chain := entry.Chain
+	if strings.EqualFold(backend, "UFW") && strings.EqualFold(chain, "PREROUTING") {
+		chain = "PREROUTING"
+	}
+	return portDriftRuleKey(chain, entry.Protocol, entry.DPort, entry.ToPorts)
+}
+
+func portDriftActualRuleKey(entry PortNatEntry, backend string, desiredKeys map[string]portDriftRule) (string, bool) {
+	if !strings.EqualFold(entry.Target, "REDIRECT") {
+		return "", false
+	}
+	key := portDriftActualComparisonKey(entry, backend)
+	if strings.HasPrefix(entry.Chain, "NPHY2_") {
+		return key, true
+	}
+	if strings.EqualFold(backend, "UFW") && strings.EqualFold(entry.Chain, "PREROUTING") {
+		_, expected := desiredKeys[key]
+		return key, expected
+	}
+	return "", false
 }
 
 func portDriftRuleKey(chain, protocol, dport, toPorts string) string {
