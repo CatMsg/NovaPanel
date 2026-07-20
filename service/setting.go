@@ -73,7 +73,6 @@ var defaultValueMap = map[string]string{
 	"endpointMode":         "slave",
 	"endpointSources":      "",
 	"alertEnabled":         "false",
-	"alertWebhookURL":      "",
 	"alertTelegramToken":   "",
 	"alertTelegramChatID":  "",
 	"alertIntervalMinutes": "5",
@@ -138,6 +137,7 @@ func (s *SettingService) GetAllSetting() (*map[string]string, error) {
 	delete(allSetting, "config")
 	delete(allSetting, "version")
 	delete(allSetting, "alertTelegramToken")
+	delete(allSetting, "alertWebhookURL")
 	delete(allSetting, "alertLastFingerprint")
 	delete(allSetting, "alertLastSentAt")
 

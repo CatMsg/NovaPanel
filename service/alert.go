@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,7 +20,6 @@ import (
 
 type AlertSettings struct {
 	Enabled            bool   `json:"enabled"`
-	WebhookURL         string `json:"webhookUrl"`
 	TelegramToken      string `json:"telegramToken,omitempty"`
 	TelegramTokenSet   bool   `json:"telegramTokenSet"`
 	TelegramChatID     string `json:"telegramChatId"`
@@ -49,7 +47,6 @@ func (s *AlertService) GetAlertSettings() (*AlertSettings, error) {
 	cooldown, _ := strconv.Atoi(values["alertCooldownMinutes"])
 	return &AlertSettings{
 		Enabled:          values["alertEnabled"] == "true",
-		WebhookURL:       values["alertWebhookURL"],
 		TelegramTokenSet: strings.TrimSpace(values["alertTelegramToken"]) != "",
 		TelegramChatID:   values["alertTelegramChatID"],
 		IntervalMinutes:  interval,
@@ -58,7 +55,6 @@ func (s *AlertService) GetAlertSettings() (*AlertSettings, error) {
 }
 
 func (s *AlertService) SaveAlertSettings(input AlertSettings) error {
-	input.WebhookURL = strings.TrimSpace(input.WebhookURL)
 	input.TelegramToken = strings.TrimSpace(input.TelegramToken)
 	input.TelegramChatID = strings.TrimSpace(input.TelegramChatID)
 	if input.IntervalMinutes < 1 || input.IntervalMinutes > 1440 {
@@ -67,16 +63,22 @@ func (s *AlertService) SaveAlertSettings(input AlertSettings) error {
 	if input.CooldownMinutes < 1 || input.CooldownMinutes > 10080 {
 		return fmt.Errorf("冷却时间必须在 1 到 10080 分钟之间")
 	}
-	if input.WebhookURL != "" {
-		parsed, err := url.ParseRequestURI(input.WebhookURL)
-		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-			return fmt.Errorf("Webhook 地址必须是有效的 HTTP 或 HTTPS URL")
-		}
-	}
 	return retryWriteTx(func(tx *gorm.DB) error {
+		storedToken, err := s.getStringTx(tx, "alertTelegramToken")
+		if err != nil {
+			return err
+		}
+		effectiveToken := storedToken
+		if input.ClearTelegramToken {
+			effectiveToken = ""
+		} else if input.TelegramToken != "" {
+			effectiveToken = input.TelegramToken
+		}
+		if input.Enabled && (strings.TrimSpace(effectiveToken) == "" || input.TelegramChatID == "") {
+			return fmt.Errorf("启用告警前必须配置 Telegram Bot Token 和 Chat ID")
+		}
 		values := map[string]string{
 			"alertEnabled":         strconv.FormatBool(input.Enabled),
-			"alertWebhookURL":      input.WebhookURL,
 			"alertTelegramChatID":  input.TelegramChatID,
 			"alertIntervalMinutes": strconv.Itoa(input.IntervalMinutes),
 			"alertCooldownMinutes": strconv.Itoa(input.CooldownMinutes),
@@ -149,7 +151,7 @@ func (s *AlertService) EvaluateAndNotify() error {
 }
 
 func (s *AlertService) alertSettingValues() (map[string]string, error) {
-	keys := []string{"alertEnabled", "alertWebhookURL", "alertTelegramToken", "alertTelegramChatID", "alertIntervalMinutes", "alertCooldownMinutes", "alertLastFingerprint", "alertLastSentAt"}
+	keys := []string{"alertEnabled", "alertTelegramToken", "alertTelegramChatID", "alertIntervalMinutes", "alertCooldownMinutes", "alertLastFingerprint", "alertLastSentAt"}
 	values := make(map[string]string, len(keys))
 	for _, key := range keys {
 		value, err := s.getString(key)
@@ -162,27 +164,16 @@ func (s *AlertService) alertSettingValues() (map[string]string, error) {
 }
 
 func (s *AlertService) sendAlert(values map[string]string, message string) error {
-	var errs []error
-	sent := false
-	if webhook := strings.TrimSpace(values["alertWebhookURL"]); webhook != "" {
-		sent = true
-		if err := postAlertJSON(webhook, map[string]string{"title": "NovaPanel", "message": message}); err != nil {
-			errs = append(errs, fmt.Errorf("webhook: %w", err))
-		}
-	}
 	token := strings.TrimSpace(values["alertTelegramToken"])
 	chatID := strings.TrimSpace(values["alertTelegramChatID"])
-	if token != "" && chatID != "" {
-		sent = true
-		endpoint := "https://api.telegram.org/bot" + url.PathEscape(token) + "/sendMessage"
-		if err := postAlertJSON(endpoint, map[string]string{"chat_id": chatID, "text": message}); err != nil {
-			errs = append(errs, fmt.Errorf("telegram: %w", err))
-		}
+	if token == "" || chatID == "" {
+		return fmt.Errorf("Telegram Bot Token 或 Chat ID 未配置")
 	}
-	if !sent {
-		return errors.New("至少配置一个 Webhook 或 Telegram 通知通道")
+	endpoint := "https://api.telegram.org/bot" + url.PathEscape(token) + "/sendMessage"
+	if err := postAlertJSON(endpoint, map[string]string{"chat_id": chatID, "text": message}); err != nil {
+		return fmt.Errorf("telegram: %w", err)
 	}
-	return errors.Join(errs...)
+	return nil
 }
 
 func postAlertJSON(endpoint string, payload interface{}) error {
