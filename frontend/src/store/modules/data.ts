@@ -132,13 +132,33 @@ const Data = defineStore('Data', {
       }
       return <Client>{}
     },
-    async save (object: string, action: string, data: any, initUsers?: number[]): Promise<boolean> {
-      let postData = {
+    async preflightSave (object: string, action: string, data: any, initUsers?: number[]): Promise<any | null> {
+      const postData = {
         object: object,
         action: action,
         data: JSON.stringify(data, null, 2),
         initUsers: initUsers?.join(',') ?? undefined
       }
+      const preflight = await HttpUtils.post('api/preflight', postData)
+      if (!preflight.success) return null
+      if (preflight.obj?.changed === false) {
+        push.info({ message: i18n.global.t('noChanges') })
+      }
+      if (Array.isArray(preflight.obj?.warnings) && preflight.obj.warnings.length > 0) {
+        push.warning({ message: preflight.obj.warnings.join('\n') })
+      }
+      return preflight.obj
+    },
+    async save (object: string, action: string, data: any, initUsers?: number[]): Promise<boolean> {
+      const postData = {
+        object: object,
+        action: action,
+        data: JSON.stringify(data, null, 2),
+        initUsers: initUsers?.join(',') ?? undefined
+      }
+      const preflight = await this.preflightSave(object, action, data, initUsers)
+      if (!preflight) return false
+      if (preflight.changed === false) return true
       const msg = await HttpUtils.post('api/save', postData)
       if (msg.success) {
         const objectName = ['tls', 'config'].includes(object) ? object : object.substring(0, object.length - 1)

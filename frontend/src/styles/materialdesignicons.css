@@ -62,12 +62,24 @@
   content: "\F05D6";
 }
 
+.mdi-alert::before {
+  content: "\F0026";
+}
+
+.mdi-alert-outline::before {
+  content: "\F002A";
+}
+
 .mdi-application-cog::before {
   content: "\F0675";
 }
 
 .mdi-arrow-expand::before {
   content: "\F0616";
+}
+
+.mdi-arrow-right::before {
+  content: "\F0054";
 }
 
 .mdi-backup-restore::before {
@@ -102,6 +114,14 @@
   content: "\F012C";
 }
 
+.mdi-check-circle::before {
+  content: "\F05E0";
+}
+
+.mdi-check-circle-outline::before {
+  content: "\F05E1";
+}
+
 .mdi-chevron-left::before {
   content: "\F0141";
 }
@@ -120,6 +140,10 @@
 
 .mdi-close-circle::before {
   content: "\F0159";
+}
+
+.mdi-close-circle-outline::before {
+  content: "\F015A";
 }
 
 .mdi-cloud-download::before {
@@ -210,6 +234,10 @@
   content: "\F02D6";
 }
 
+.mdi-heart-pulse::before {
+  content: "\F05F6";
+}
+
 .mdi-history::before {
   content: "\F02DA";
 }
@@ -232,6 +260,10 @@
 
 .mdi-lan::before {
   content: "\F0317";
+}
+
+.mdi-lan-check::before {
+  content: "\F12AA";
 }
 
 .mdi-laptop::before {
@@ -272,6 +304,10 @@
 
 .mdi-qrcode::before {
   content: "\F0432";
+}
+
+.mdi-radar::before {
+  content: "\F0437";
 }
 
 .mdi-refresh::before {

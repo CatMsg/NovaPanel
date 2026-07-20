@@ -217,6 +217,7 @@ import HttpUtils from '@/plugins/httputil'
 import { FindDiff } from '@/plugins/utils'
 import { push } from 'notivue'
 import { useDisplay } from 'vuetify'
+import Data from '@/store/modules/data'
 
 const SubJsonExtVue = defineAsyncComponent(() => import('@/components/SubJsonExt.vue'))
 const SubClashExtVue = defineAsyncComponent(() => import('@/components/SubClashExt.vue'))
@@ -294,6 +295,11 @@ const setData = (data: any) => {
 const save = async () => {
   loading.value = true
   autoFillSubDomain()
+  const preflight = await Data().preflightSave('settings', 'set', settings.value)
+  if (!preflight || preflight.changed === false) {
+    loading.value = false
+    return
+  }
   const msg = await HttpUtils.post('api/save', { object: 'settings', action: 'set', data: JSON.stringify(settings.value) })
   if (msg.success) {
     push.success({

@@ -29,6 +29,12 @@ const routes = [
         meta: { dataRefreshInterval: 30000 },
       },
       {
+        path: '/health',
+        name: 'pages.health',
+        component: () => import('@/views/Health.vue'),
+        meta: { dataRefreshInterval: 0 },
+      },
+      {
         path: '/fleet',
         name: 'pages.fleet',
         component: () => import('@/views/Fleet.vue'),

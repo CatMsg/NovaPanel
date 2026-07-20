@@ -29,6 +29,7 @@ type ApiService struct {
 	service.PanelService
 	service.StatsService
 	service.ServerService
+	service.HealthService
 }
 
 func (a *ApiService) LoadData(c *gin.Context) {
@@ -237,6 +238,20 @@ func (a *ApiService) GetStatus(c *gin.Context) {
 func (a *ApiService) GetPublicIP(c *gin.Context) {
 	ip := a.ServerService.GetPublicIP()
 	jsonObj(c, ip, nil)
+}
+
+func (a *ApiService) GetHealth(c *gin.Context) {
+	force := c.Query("force") == "1" || strings.EqualFold(c.Query("force"), "true")
+	jsonObj(c, a.HealthService.GetHealthReport(force), nil)
+}
+
+func (a *ApiService) PreflightSave(c *gin.Context) {
+	obj := c.Request.FormValue("object")
+	act := c.Request.FormValue("action")
+	data := json.RawMessage(c.Request.FormValue("data"))
+	initUsers := c.Request.FormValue("initUsers")
+	report, err := a.ConfigService.PreflightSave(obj, act, data, initUsers, getHostname(c))
+	jsonObj(c, report, err)
 }
 
 func (a *ApiService) GetPorts(c *gin.Context) {

@@ -42,6 +42,8 @@ func (a *APIHandler) postHandler(c *gin.Context) {
 		a.ApiService.ChangePass(c)
 	case "save":
 		a.ApiService.Save(c, loginUser)
+	case "preflight":
+		a.ApiService.PreflightSave(c)
 	case "restartApp":
 		a.ApiService.RestartApp(c)
 	case "restartSb":
@@ -97,6 +99,8 @@ func (a *APIHandler) getHandler(c *gin.Context) {
 		a.ApiService.GetStatus(c)
 	case "public-ip":
 		a.ApiService.GetPublicIP(c)
+	case "health":
+		a.ApiService.GetHealth(c)
 	case "ports":
 		a.ApiService.GetPorts(c)
 	case "masque-status":

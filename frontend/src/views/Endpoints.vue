@@ -357,6 +357,11 @@ const loadEndpointAggregateConfig = async () => {
 
 const saveEndpointAggregateConfig = async () => {
   endpointAggregateSaving.value = true
+  const preflight = await Data().preflightSave('settings', 'set', endpointAggregateConfig.value)
+  if (!preflight || preflight.changed === false) {
+    endpointAggregateSaving.value = false
+    return
+  }
   const msg = await HttpUtils.post('api/save', {
     object: 'settings',
     action: 'set',
