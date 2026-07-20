@@ -84,11 +84,6 @@
         <v-col cols="12" md="5">
           <v-text-field v-model="alerts.telegramChatId" label="Telegram Chat ID" prepend-inner-icon="mdi-account-tie" />
         </v-col>
-        <v-col cols="12">
-          <v-alert type="info" variant="tonal" density="comfortable" class="alert-settings__guide">
-            <strong>简要配置：</strong>在 Telegram 联系 <code>@BotFather</code>，发送 <code>/newbot</code> 创建机器人并复制 Token；先给机器人发送一条消息，再访问 <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>，从返回内容中找到 <code>chat.id</code>。填入上方两项，保存后点击“测试通知”。Token 已配置时留空不会清除原值。
-          </v-alert>
-        </v-col>
         <v-col cols="6" md="3">
           <v-number-input v-model="alerts.intervalMinutes" label="检查间隔（分钟）" :min="1" :max="1440" control-variant="stacked" />
         </v-col>
@@ -239,8 +234,6 @@ onMounted(() => {
 .alert-settings__header h2 { margin: 3px 0 0; font-size: 20px; }
 .alert-settings__header p { margin: 8px 0 0; color: var(--np-text-muted); }
 .alert-settings__eyebrow { color: rgb(var(--v-theme-primary)); font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
-.alert-settings__guide { line-height: 1.65; }
-.alert-settings__guide code { overflow-wrap: anywhere; }
 .alert-settings__actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
 @media (max-width: 959px) { .health-hero__actions { justify-content: flex-start; } .health-grid { grid-template-columns: 1fr; } }
 @media (max-width: 599px) { .health-hero { border-radius: 24px; } .health-hero__title-row { align-items: center; } .health-hero__icon { width: 48px; height: 48px; } .health-summary__card { min-height: 96px; padding: 14px; gap: 10px; } .health-summary__icon { width: 36px; height: 36px; } .health-summary__value { font-size: 24px; } .health-check { flex-wrap: wrap; } .health-diagnostics__header, .alert-settings__header { align-items: stretch; flex-direction: column; } .alert-settings__actions { justify-content: stretch; } .alert-settings__actions .v-btn { flex: 1; } }
