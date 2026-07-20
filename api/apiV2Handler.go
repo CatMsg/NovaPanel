@@ -49,6 +49,10 @@ func (a *APIv2Handler) postHandler(c *gin.Context) {
 		a.ApiService.RestartApp(c)
 	case "fleet-action":
 		a.ApiService.FleetAction(c)
+	case "alertSave":
+		a.ApiService.SaveAlertSettings(c)
+	case "alertTest":
+		a.ApiService.TestAlert(c)
 	case "restartSb":
 		a.ApiService.RestartSb(c)
 	case "linkConvert":
@@ -86,6 +90,8 @@ func (a *APIv2Handler) getHandler(c *gin.Context) {
 		a.ApiService.GetPublicIP(c)
 	case "health":
 		a.ApiService.GetHealth(c)
+	case "alert-settings":
+		a.ApiService.GetAlertSettings(c)
 	case "ports":
 		a.ApiService.GetPorts(c)
 	case "fleet-status":

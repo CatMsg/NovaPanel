@@ -114,7 +114,7 @@
             <div class="fleet-card__header">
               <div class="fleet-card__identity">
                 <div class="fleet-card__icon" :class="statusClass(server)">
-                  <v-icon :icon="server.id === 'local' ? 'mdi-home-network' : 'mdi-server'" />
+                  <v-icon :icon="server.id === 'local' ? 'mdi-home' : 'mdi-server'" />
                 </div>
                 <div class="fleet-card__name-wrap">
                   <div class="fleet-card__name">{{ server.name }}</div>

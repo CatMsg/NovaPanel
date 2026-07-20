@@ -70,6 +70,10 @@ func (a *APIHandler) postHandler(c *gin.Context) {
 		a.ApiService.FleetAction(c)
 	case "fleetRefresh":
 		a.ApiService.FleetRefresh(c)
+	case "alertSave":
+		a.ApiService.SaveAlertSettings(c)
+	case "alertTest":
+		a.ApiService.TestAlert(c)
 	default:
 		jsonMsg(c, "failed", common.NewError("unknown action: ", action))
 	}
@@ -101,6 +105,8 @@ func (a *APIHandler) getHandler(c *gin.Context) {
 		a.ApiService.GetPublicIP(c)
 	case "health":
 		a.ApiService.GetHealth(c)
+	case "alert-settings":
+		a.ApiService.GetAlertSettings(c)
 	case "ports":
 		a.ApiService.GetPorts(c)
 	case "masque-status":

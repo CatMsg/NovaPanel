@@ -337,8 +337,18 @@ func (s *FleetService) FleetAction(id, action string) (interface{}, error) {
 			return GetUpdateStatus()
 		}
 		if action == "update" {
-			if err := StartBackgroundUpdate(); err != nil {
+			started, err := StartBackgroundUpdate()
+			if err != nil {
 				return nil, err
+			}
+			if !started {
+				status, statusErr := GetUpdateStatus()
+				if statusErr != nil {
+					return nil, statusErr
+				}
+				status["scheduled"] = false
+				status["message"] = "已有更新任务正在运行"
+				return status, nil
 			}
 			return map[string]interface{}{"scheduled": true, "state": "queued"}, nil
 		}

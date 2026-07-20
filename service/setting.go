@@ -47,35 +47,43 @@ var defaultConfig = `{
 }`
 
 var defaultValueMap = map[string]string{
-	"webListen":        "",
-	"webDomain":        "",
-	"webPort":          "2095",
-	"secret":           common.Random(32),
-	"webCertFile":      "",
-	"webKeyFile":       "",
-	"webPath":          "/app/",
-	"webURI":           "",
-	"sessionMaxAge":    "0",
-	"trafficAge":       "30",
-	"timeLocation":     "Asia/Shanghai",
-	"subListen":        "",
-	"subPort":          "2096",
-	"subPath":          "/sub/",
-	"subDomain":        "",
-	"subCertFile":      "",
-	"subKeyFile":       "",
-	"subUpdates":       "12",
-	"subEncode":        "true",
-	"subShowInfo":      "true",
-	"subURI":           "",
-	"subMode":          "slave",
-	"subMasterSources": "",
-	"endpointMode":     "slave",
-	"endpointSources":  "",
-	"subJsonExt":       "",
-	"subClashExt":      "",
-	"config":           defaultConfig,
-	"version":          config.GetVersion(),
+	"webListen":            "",
+	"webDomain":            "",
+	"webPort":              "2095",
+	"secret":               common.Random(32),
+	"webCertFile":          "",
+	"webKeyFile":           "",
+	"webPath":              "/app/",
+	"webURI":               "",
+	"sessionMaxAge":        "0",
+	"trafficAge":           "30",
+	"timeLocation":         "Asia/Shanghai",
+	"subListen":            "",
+	"subPort":              "2096",
+	"subPath":              "/sub/",
+	"subDomain":            "",
+	"subCertFile":          "",
+	"subKeyFile":           "",
+	"subUpdates":           "12",
+	"subEncode":            "true",
+	"subShowInfo":          "true",
+	"subURI":               "",
+	"subMode":              "slave",
+	"subMasterSources":     "",
+	"endpointMode":         "slave",
+	"endpointSources":      "",
+	"alertEnabled":         "false",
+	"alertWebhookURL":      "",
+	"alertTelegramToken":   "",
+	"alertTelegramChatID":  "",
+	"alertIntervalMinutes": "5",
+	"alertCooldownMinutes": "60",
+	"alertLastFingerprint": "",
+	"alertLastSentAt":      "0",
+	"subJsonExt":           "",
+	"subClashExt":          "",
+	"config":               defaultConfig,
+	"version":              config.GetVersion(),
 }
 
 type SettingService struct {
@@ -129,6 +137,9 @@ func (s *SettingService) GetAllSetting() (*map[string]string, error) {
 	delete(allSetting, "secret")
 	delete(allSetting, "config")
 	delete(allSetting, "version")
+	delete(allSetting, "alertTelegramToken")
+	delete(allSetting, "alertLastFingerprint")
+	delete(allSetting, "alertLastSentAt")
 
 	return &allSetting, nil
 }

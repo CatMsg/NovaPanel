@@ -31,6 +31,8 @@ func (c *CronJob) Start(loc *time.Location, trafficAge int) error {
 		c.cron.AddJob("@every 5s", NewCheckCoreJob())
 		// database WAL checkpoint
 		c.cron.AddJob("@every 10m", NewWALCheckpointJob())
+		// AlertService applies its own configured interval and deduplication.
+		c.cron.AddJob("@every 1m", NewAlertJob())
 	}()
 
 	return nil

@@ -22,6 +22,7 @@ var (
 	startCoreInProgress bool
 	lastStartFailTime   time.Time
 	startCooldown       = 15 * time.Second
+	saveConfigMu        sync.Mutex
 )
 
 type ConfigService struct {
@@ -207,10 +208,19 @@ func (s *ConfigService) CheckOutbound(tag string, link string) core.CheckOutboun
 }
 
 func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initUsers string, loginUser string, hostname string) ([]string, bool, error) {
+	saveConfigMu.Lock()
+	defer saveConfigMu.Unlock()
+
 	var objs []string = []string{obj}
 	var postCommit func() error
+	var snapshot *configSnapshot
+	var changeID uint64
 	err := retryWriteTx(func(tx *gorm.DB) error {
 		var err error
+		snapshot, err = captureConfigSnapshot(tx, obj == "settings")
+		if err != nil {
+			return err
+		}
 
 		switch obj {
 		case "clients":
@@ -256,13 +266,18 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 		}
 
 		dt := time.Now().Unix()
-		return tx.Create(&model.Changes{
+		change := &model.Changes{
 			DateTime: dt,
 			Actor:    loginUser,
 			Key:      obj,
 			Action:   act,
 			Obj:      data,
-		}).Error
+		}
+		if err := tx.Create(change).Error; err != nil {
+			return err
+		}
+		changeID = change.Id
+		return nil
 	})
 	if errors.Is(err, ErrNoChanges) {
 		return objs, false, nil
@@ -292,7 +307,11 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 	}
 
 	if err = runPostCommitActions(actions); err != nil {
-		return nil, false, err
+		rollbackErr := s.compensateFailedSave(snapshot, obj, changeID)
+		if rollbackErr != nil {
+			return nil, false, errors.Join(err, common.NewErrorf("保存补偿失败: %v", rollbackErr))
+		}
+		return nil, false, common.NewErrorf("保存失败，配置已自动回滚: %v", err)
 	}
 
 	LastUpdate = time.Now().Unix()

@@ -74,6 +74,30 @@ body {
   }
 }
 
+:where(a, button, [role='button'], input, textarea, select):focus-visible {
+  outline: 3px solid rgba(10, 132, 255, 0.38);
+  outline-offset: 2px;
+}
+
+.v-dialog > .v-overlay__content {
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
+  margin: 16px;
+}
+
+.v-dialog > .v-overlay__content > .v-card {
+  max-height: inherit;
+}
+
+.v-table__wrapper {
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.v-theme--dark :where(.v-field, .v-table, .v-card-title, .v-card-text) {
+  color: var(--np-text-main);
+}
+
 html:has(.v-theme--dark),
 body:has(.v-theme--dark) {
   color-scheme: dark;
@@ -253,6 +277,21 @@ body::after {
 }
 
 @media (max-width: 600px) {
+	.v-dialog > .v-overlay__content {
+		max-width: calc(100vw - 16px);
+		max-height: calc(100dvh - 16px);
+		margin: 8px;
+	}
+
+	.v-card-actions {
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+
+	.v-card-actions > .v-btn {
+		min-height: 42px;
+	}
+
   .app-bar {
     left: 8px !important;
     right: 8px !important;

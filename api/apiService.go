@@ -30,6 +30,7 @@ type ApiService struct {
 	service.StatsService
 	service.ServerService
 	service.HealthService
+	service.AlertService
 }
 
 func (a *ApiService) LoadData(c *gin.Context) {
@@ -243,6 +244,24 @@ func (a *ApiService) GetPublicIP(c *gin.Context) {
 func (a *ApiService) GetHealth(c *gin.Context) {
 	force := c.Query("force") == "1" || strings.EqualFold(c.Query("force"), "true")
 	jsonObj(c, a.HealthService.GetHealthReport(force), nil)
+}
+
+func (a *ApiService) GetAlertSettings(c *gin.Context) {
+	settings, err := a.AlertService.GetAlertSettings()
+	jsonObj(c, settings, err)
+}
+
+func (a *ApiService) SaveAlertSettings(c *gin.Context) {
+	var settings service.AlertSettings
+	if err := json.Unmarshal([]byte(c.Request.FormValue("data")), &settings); err != nil {
+		jsonMsg(c, "save", err)
+		return
+	}
+	jsonMsg(c, "save", a.AlertService.SaveAlertSettings(settings))
+}
+
+func (a *ApiService) TestAlert(c *gin.Context) {
+	jsonMsg(c, "save", a.AlertService.TestAlert())
 }
 
 func (a *ApiService) PreflightSave(c *gin.Context) {

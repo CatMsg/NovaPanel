@@ -22,6 +22,15 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Keep this curated map in sync with icons used by the application. */
+.mdi-dots-horizontal::before { content: "\F01D8"; }
+.mdi-download-outline::before { content: "\F0B8F"; }
+.mdi-send-check-outline::before { content: "\F1162"; }
+.mdi-server-plus::before { content: "\F0490"; }
+.mdi-text-box-outline::before { content: "\F09ED"; }
+.mdi-webhook::before { content: "\F062F"; }
+.mdi-wrench-outline::before { content: "\F0BE0"; }
+
 .mdi-account-arrow-right-outline::before {
   content: "\F0B54";
 }

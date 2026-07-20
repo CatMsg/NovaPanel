@@ -9,7 +9,9 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 )
 
 const (
@@ -19,18 +21,37 @@ const (
 	updatePID      = updateStateDir + "/update.pid"
 )
 
+var (
+	backgroundUpdateMu sync.Mutex
+	updateCandidates   = []string{"/usr/bin/s-ui", "/usr/local/s-ui/s-ui.sh"}
+	lastUpdateLaunch   time.Time
+)
+
 // StartBackgroundUpdate delegates the upgrade to the installed compatibility
 // script. The new process is detached so an SSH disconnect cannot interrupt it.
-func StartBackgroundUpdate() error {
-	candidates := []string{"/usr/bin/s-ui", "/usr/local/s-ui/s-ui.sh"}
-	for _, path := range candidates {
+func StartBackgroundUpdate() (bool, error) {
+	backgroundUpdateMu.Lock()
+	defer backgroundUpdateMu.Unlock()
+	if time.Since(lastUpdateLaunch) < 10*time.Second {
+		return false, nil
+	}
+
+	status, err := GetUpdateStatus()
+	if err != nil {
+		return false, err
+	}
+	if running, _ := status["running"].(bool); running {
+		return false, nil
+	}
+
+	for _, path := range updateCandidates {
 		if _, err := os.Stat(path); err != nil {
 			continue
 		}
 		command := exec.Command(path, "update", "--background")
 		devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 		if err != nil {
-			return err
+			return false, err
 		}
 		command.Stdin = devNull
 		command.Stdout = devNull
@@ -40,9 +61,10 @@ func StartBackgroundUpdate() error {
 			continue
 		}
 		_ = devNull.Close()
-		return nil
+		lastUpdateLaunch = time.Now()
+		return true, nil
 	}
-	return errors.New("未找到 s-ui 更新脚本")
+	return false, errors.New("未找到 s-ui 更新脚本")
 }
 
 // GetUpdateStatus returns a small, safe status object for the local panel and

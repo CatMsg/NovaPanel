@@ -67,6 +67,38 @@
         <v-btn variant="tonal" prepend-icon="mdi-lan-check" :loading="reconciling" @click="reconcilePorts">重建端口规则</v-btn>
       </div>
     </v-card>
+
+    <v-card class="alert-settings glass-card" elevation="0">
+      <div class="alert-settings__header">
+        <div>
+          <div class="alert-settings__eyebrow">主动通知</div>
+          <h2>告警通知</h2>
+          <p>周期检查健康状态，仅在异常变化或冷却时间到期后发送，避免重复轰炸。</p>
+        </div>
+        <v-switch v-model="alerts.enabled" color="primary" label="启用告警" hide-details inset />
+      </div>
+      <v-row class="mt-2">
+        <v-col cols="12">
+          <v-text-field v-model="alerts.webhookUrl" label="Webhook URL" prepend-inner-icon="mdi-webhook" hint="接收 { title, message } JSON；留空则不发送 Webhook" persistent-hint clearable />
+        </v-col>
+        <v-col cols="12" md="7">
+          <v-text-field v-model="alerts.telegramToken" :label="alerts.telegramTokenSet ? 'Telegram Bot Token（已配置，留空不修改）' : 'Telegram Bot Token'" prepend-inner-icon="mdi-send-check-outline" type="password" autocomplete="new-password" />
+        </v-col>
+        <v-col cols="12" md="5">
+          <v-text-field v-model="alerts.telegramChatId" label="Telegram Chat ID" prepend-inner-icon="mdi-account-tie" />
+        </v-col>
+        <v-col cols="6" md="3">
+          <v-number-input v-model="alerts.intervalMinutes" label="检查间隔（分钟）" :min="1" :max="1440" control-variant="stacked" />
+        </v-col>
+        <v-col cols="6" md="3">
+          <v-number-input v-model="alerts.cooldownMinutes" label="重复冷却（分钟）" :min="1" :max="10080" control-variant="stacked" />
+        </v-col>
+        <v-col cols="12" md="6" class="alert-settings__actions">
+          <v-btn variant="tonal" prepend-icon="mdi-send-check-outline" :loading="testingAlert" @click="testAlert">测试通知</v-btn>
+          <v-btn color="primary" prepend-icon="mdi-content-save-outline" :loading="savingAlerts" @click="saveAlerts">保存告警</v-btn>
+        </v-col>
+      </v-row>
+    </v-card>
   </div>
 </template>
 
@@ -78,11 +110,15 @@ import HttpUtils from '@/plugins/httputil'
 
 interface HealthCheck { id: string; title: string; status: string; summary: string; detail?: string; action?: string }
 interface HealthReport { status: string; checkedAt: string; durationMs: number; summary: Record<string, number>; checks: HealthCheck[]; diagnostics: Record<string, unknown> }
+interface AlertSettings { enabled: boolean; webhookUrl: string; telegramToken: string; telegramTokenSet: boolean; telegramChatId: string; intervalMinutes: number; cooldownMinutes: number }
 
 const router = useRouter()
 const loading = ref(false)
 const reconciling = ref(false)
 const report = ref<HealthReport | null>(null)
+const savingAlerts = ref(false)
+const testingAlert = ref(false)
+const alerts = ref<AlertSettings>({ enabled: false, webhookUrl: '', telegramToken: '', telegramTokenSet: false, telegramChatId: '', intervalMinutes: 5, cooldownMinutes: 60 })
 
 const statusLabel = computed(() => ({ healthy: '全部正常', warning: '需要关注', critical: '发现异常' } as Record<string, string>)[report.value?.status ?? ''] ?? '等待检查')
 const checkedAt = computed(() => report.value?.checkedAt ? new Date(report.value.checkedAt).toLocaleString() : '-')
@@ -105,6 +141,25 @@ const reconcilePorts = async () => {
   const msg = await HttpUtils.post('api/reconcilePorts', {})
   reconciling.value = false
   if (msg.success) await loadHealth(true)
+}
+
+const loadAlerts = async () => {
+  const msg = await HttpUtils.get('api/alert-settings')
+  if (msg.success && msg.obj) alerts.value = { ...alerts.value, ...(msg.obj as AlertSettings), telegramToken: '' }
+}
+
+const saveAlerts = async () => {
+  savingAlerts.value = true
+  const msg = await HttpUtils.post('api/alertSave', { data: JSON.stringify(alerts.value) })
+  savingAlerts.value = false
+  if (msg.success) await loadAlerts()
+}
+
+const testAlert = async () => {
+  testingAlert.value = true
+  const msg = await HttpUtils.post('api/alertTest', {})
+  testingAlert.value = false
+  if (msg.success) push.success({ message: '测试通知已发送' })
 }
 
 const copyReport = async () => {
@@ -132,7 +187,10 @@ const statusColor = (status: string) => ({ ok: 'success', warning: 'warning', er
 const statusIcon = (status: string) => ({ ok: 'mdi-check-circle', warning: 'mdi-alert', error: 'mdi-close-circle', info: 'mdi-information' } as Record<string, string>)[status] ?? 'mdi-information'
 const checkStatusLabel = (status: string) => ({ ok: '正常', warning: '警告', error: '异常', info: '信息' } as Record<string, string>)[status] ?? status
 
-onMounted(() => loadHealth(false))
+onMounted(() => {
+  loadHealth(false)
+  loadAlerts()
+})
 </script>
 
 <style scoped>
@@ -174,6 +232,12 @@ onMounted(() => loadHealth(false))
 .health-diagnostics { padding: 22px; border-radius: 24px; }
 .health-diagnostics__header { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .health-diagnostics p { margin: 8px 0 0; color: var(--np-text-muted); }
+.alert-settings { margin-top: 14px; padding: 24px; border-radius: 24px; }
+.alert-settings__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.alert-settings__header h2 { margin: 3px 0 0; font-size: 20px; }
+.alert-settings__header p { margin: 8px 0 0; color: var(--np-text-muted); }
+.alert-settings__eyebrow { color: rgb(var(--v-theme-primary)); font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.alert-settings__actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
 @media (max-width: 959px) { .health-hero__actions { justify-content: flex-start; } .health-grid { grid-template-columns: 1fr; } }
-@media (max-width: 599px) { .health-hero { border-radius: 24px; } .health-hero__title-row { align-items: center; } .health-hero__icon { width: 48px; height: 48px; } .health-summary__card { min-height: 96px; padding: 14px; gap: 10px; } .health-summary__icon { width: 36px; height: 36px; } .health-summary__value { font-size: 24px; } .health-check { flex-wrap: wrap; } .health-diagnostics__header { align-items: stretch; flex-direction: column; } }
+@media (max-width: 599px) { .health-hero { border-radius: 24px; } .health-hero__title-row { align-items: center; } .health-hero__icon { width: 48px; height: 48px; } .health-summary__card { min-height: 96px; padding: 14px; gap: 10px; } .health-summary__icon { width: 36px; height: 36px; } .health-summary__value { font-size: 24px; } .health-check { flex-wrap: wrap; } .health-diagnostics__header, .alert-settings__header { align-items: stretch; flex-direction: column; } .alert-settings__actions { justify-content: stretch; } .alert-settings__actions .v-btn { flex: 1; } }
 </style>
