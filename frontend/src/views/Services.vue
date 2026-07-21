@@ -13,7 +13,6 @@
   <v-card class="resource-hero resource-hero--services" rounded="xl" variant="flat">
     <div class="resource-hero__topline">
       <span class="resource-hero__badge">{{ $t('pages.services') }}</span>
-      <span class="resource-hero__badge resource-hero__badge--soft">{{ $t('itemCount', { count: services.length }) }}</span>
     </div>
     <v-row class="resource-hero__content" align="center">
       <v-col cols="12" lg="8">
@@ -29,14 +28,12 @@
           </div>
         </div>
         <div class="resource-hero__meta">
-          <span>总数 {{ services.length }}</span>
-          <span>•</span>
           <span>已绑定 TLS {{ services.filter(s => s.tls_id > 0).length }}</span>
           <span>•</span>
           <span>监听端口 {{ new Set(services.map(s => s.listen_port)).size }}</span>
         </div>
       </v-col>
-      <v-col cols="12" lg="4" class="resource-hero__actions">
+      <v-col v-if="services.length > 0" cols="12" lg="4" class="resource-hero__actions">
         <v-btn color="primary" size="large" @click="showModal(0)">
           <v-icon icon="mdi-plus" start />
           {{ $t('actions.add') }}
@@ -203,13 +200,6 @@ const delSrv = async (id: number) => {
   text-transform: uppercase;
   color: var(--np-accent);
   background: rgba(10, 132, 255, 0.08);
-}
-
-.resource-hero__badge--soft {
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--np-text-muted);
-  background: rgba(148, 163, 184, 0.12);
 }
 
 .resource-hero__content {

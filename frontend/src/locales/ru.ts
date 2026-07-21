@@ -475,6 +475,7 @@ export default {
   },
   rule: {
     add: "Добавить правило",
+    listTitle: "Правила маршрутизации",
     simple: "Простое",
     logical: "Логическое",
     mode: "Режим",

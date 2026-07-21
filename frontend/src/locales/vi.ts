@@ -474,6 +474,7 @@ export default {
   },
   rule: {
     add: "Thêm Quy tắc",
+    listTitle: "Quy tắc định tuyến",
     simple: "Đơn giản",
     logical: "Logic",
     mode: "Chế độ",

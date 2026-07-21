@@ -474,6 +474,7 @@ export default {
   },
   rule: {
     add: "添加規則",
+    listTitle: "路由規則",
     simple: "簡單",
     logical: "邏輯",
     mode: "模式",

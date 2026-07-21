@@ -42,14 +42,11 @@
     :title="$t('pages.rules')"
     description="统一编排默认出口、规则集和路由规则，支持拖动调整匹配顺序。"
     icon="mdi-routes"
-    :status="`${rules.length} 条规则`"
   >
     <template #meta>
       <span>规则集 {{ rulesets.length }}</span><span>•</span><span>路由规则 {{ rules.length }}</span><span>•</span><span>顺序优先匹配</span>
     </template>
     <template #actions>
-      <v-btn color="primary" variant="tonal" @click="showRuleModal(-1)"><v-icon icon="mdi-plus" start />{{ $t('rule.add') }}</v-btn>
-      <v-btn color="primary" variant="tonal" @click="showRulesetModal(-1)"><v-icon icon="mdi-playlist-plus" start />{{ $t('ruleset.add') }}</v-btn>
       <v-menu v-model="actionMenu" :close-on-content-click="false" location="bottom center">
         <template v-slot:activator="{ props }">
           <v-btn v-bind="props" hide-details variant="outlined">
@@ -98,9 +95,12 @@
     </v-col>
   </v-row>
   <v-row class="rules-section">
-    <v-col class="rules-section__heading" cols="12"><h2>{{ $t('rule.ruleset') }}</h2><p>远程或本地规则集，可被下方路由规则复用。</p></v-col>
+    <v-col class="rules-section__heading" cols="12">
+      <div><h2>{{ $t('rule.ruleset') }}</h2><p>远程或本地规则集，可被下方路由规则复用。</p></div>
+      <v-btn color="primary" variant="tonal" @click="showRulesetModal(-1)"><v-icon icon="mdi-playlist-plus" start />{{ $t('ruleset.add') }}</v-btn>
+    </v-col>
     <v-col v-if="rulesets.length === 0" cols="12">
-      <EmptyState icon="mdi-file-tree-outline" title="暂无规则集" description="添加规则集后，可在路由规则中按标签引用。" :action="$t('ruleset.add')" @action="showRulesetModal(-1)" />
+      <EmptyState icon="mdi-file-tree-outline" title="暂无规则集" description="添加规则集后，可在路由规则中按标签引用。" />
     </v-col>
     <v-col cols="12" sm="6" md="4" lg="3" v-for="(item, index) in <any[]>rulesets" :key="item.tag">
       <v-card class="np-resource-card" rounded="xl" variant="flat" :title="item.tag">
@@ -135,9 +135,12 @@
     </v-col>
   </v-row>
   <v-row class="rules-section">
-    <v-col class="rules-section__heading" cols="12"><h2>{{ $t('pages.rules') }}</h2><p>从上到下依次匹配；拖动卡片即可调整优先级。</p></v-col>
+    <v-col class="rules-section__heading" cols="12">
+      <div><h2>{{ $t('rule.listTitle') }}</h2><p>从上到下依次匹配；拖动卡片即可调整优先级。</p></div>
+      <v-btn color="primary" variant="tonal" @click="showRuleModal(-1)"><v-icon icon="mdi-plus" start />{{ $t('rule.add') }}</v-btn>
+    </v-col>
     <v-col v-if="rules.length === 0" cols="12">
-      <EmptyState icon="mdi-routes" title="暂无路由规则" description="添加第一条规则后，流量会按列表顺序执行匹配。" :action="$t('rule.add')" @action="showRuleModal(-1)" />
+      <EmptyState icon="mdi-routes" title="暂无路由规则" description="添加第一条规则后，流量会按列表顺序执行匹配。" />
     </v-col>
     <v-col cols="12" sm="6" md="4" lg="3" v-for="(item, index) in <any[]>rules"
         :key="item.id" :draggable="true"
@@ -354,6 +357,13 @@ function saveImportRulesets(items: any[]) {
   letter-spacing: -0.02em;
 }
 
+.rules-section__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 .rules-section__heading p {
   margin: 5px 0 0;
   color: var(--np-text-muted);
@@ -362,5 +372,23 @@ function saveImportRulesets(items: any[]) {
 
 @media (max-width: 599px) {
   .rules-section { border-radius: 22px; }
+
+  .rules-section__heading {
+    align-items: flex-start;
+  }
+
+  .rules-section__heading .v-btn {
+    min-width: 42px;
+    padding-inline: 10px;
+  }
+
+  .rules-section__heading .v-btn :deep(.v-btn__content) {
+    font-size: 0;
+  }
+
+  .rules-section__heading .v-btn :deep(.v-icon) {
+    margin: 0;
+    font-size: 20px;
+  }
 }
 </style>

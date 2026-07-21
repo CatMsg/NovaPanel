@@ -474,6 +474,7 @@ export default {
   },
   rule: {
     add: "ایجاد قانون",
+    listTitle: "قوانین مسیریابی",
     simple: "ساده",
     logical: "منطقی",
     mode: "حالت",

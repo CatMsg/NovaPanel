@@ -480,6 +480,7 @@ export default {
   },
   rule: {
     add: "Add Rule",
+    listTitle: "Routing Rules",
     simple: "Simple",
     logical: "Logical",
     mode: "Mode",
