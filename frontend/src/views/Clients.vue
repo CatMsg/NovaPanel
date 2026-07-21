@@ -80,8 +80,10 @@
           <span>{{ $t('client.total') }} {{ clients.length }}</span>
           <span>•</span>
           <span>{{ $t('online') }} {{ onlineCount }}</span>
-          <span>•</span>
-          <span>{{ $t('client.showing') }} {{ visibleClients.length }}</span>
+          <template v-if="activeFilterCount > 0">
+            <span>•</span>
+            <span>{{ $t('client.showing') }} {{ visibleClients.length }}</span>
+          </template>
         </div>
       </v-col>
       <v-col cols="12" lg="5" class="clients-hero__actions">

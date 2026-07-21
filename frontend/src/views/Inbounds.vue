@@ -17,7 +17,6 @@
   <v-card class="resource-hero resource-hero--inbounds" rounded="xl" variant="flat">
     <div class="resource-hero__topline">
       <span class="resource-hero__badge">{{ $t('pages.inbounds') }}</span>
-      <span class="resource-hero__badge resource-hero__badge--soft">{{ $t('itemCount', { count: inbounds.length }) }}</span>
     </div>
     <v-row class="resource-hero__content" align="center">
       <v-col cols="12" lg="8">
@@ -252,13 +251,6 @@ const closeStats = () => {
   text-transform: uppercase;
   color: var(--np-accent);
   background: rgba(10, 132, 255, 0.08);
-}
-
-.resource-hero__badge--soft {
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--np-text-muted);
-  background: rgba(148, 163, 184, 0.12);
 }
 
 .resource-hero__content {

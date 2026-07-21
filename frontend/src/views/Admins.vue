@@ -23,7 +23,6 @@
     :title="$t('pages.admins')"
     description="管理后台账号、查看操作记录并维护远程 API 访问令牌。"
     icon="mdi-shield-account-outline"
-    :status="`${users.length} 个管理员`"
   >
     <template #meta>
       <span>管理员 {{ users.length }}</span><span>•</span><span>操作审计</span><span>•</span><span>API 令牌</span>

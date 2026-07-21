@@ -29,7 +29,6 @@
   <v-card class="resource-hero resource-hero--endpoints" rounded="xl" variant="flat">
     <div class="resource-hero__topline">
       <span class="resource-hero__badge">{{ $t('pages.endpoints') }}</span>
-      <span class="resource-hero__badge resource-hero__badge--soft">{{ $t('itemCount', { count: endpoints.length }) }}</span>
     </div>
     <v-row class="resource-hero__content" align="center">
       <v-col cols="12" lg="8">
@@ -52,7 +51,7 @@
           <span>MASQUE {{ endpoints.filter(e => e.type == 'masque').length }}</span>
         </div>
       </v-col>
-      <v-col cols="12" lg="4" class="resource-hero__actions">
+      <v-col v-if="endpoints.length > 0" cols="12" lg="4" class="resource-hero__actions">
         <v-btn color="primary" size="large" @click="showModal(0)">
           <v-icon icon="mdi-plus" start />
           {{ $t('actions.add') }}
@@ -494,13 +493,6 @@ const copyMasque = async (item: any) => {
   text-transform: uppercase;
   color: var(--np-accent);
   background: rgba(10, 132, 255, 0.08);
-}
-
-.resource-hero__badge--soft {
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--np-text-muted);
-  background: rgba(148, 163, 184, 0.12);
 }
 
 .resource-hero__content {

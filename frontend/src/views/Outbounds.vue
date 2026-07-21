@@ -23,7 +23,6 @@
   <v-card class="resource-hero resource-hero--outbounds" rounded="xl" variant="flat">
     <div class="resource-hero__topline">
       <span class="resource-hero__badge">{{ $t('pages.outbounds') }}</span>
-      <span class="resource-hero__badge resource-hero__badge--soft">{{ $t('itemCount', { count: outbounds.length }) }}</span>
     </div>
     <v-row class="resource-hero__content" align="center">
       <v-col cols="12" lg="8">
@@ -47,7 +46,7 @@
         </div>
       </v-col>
       <v-col cols="12" lg="4" class="resource-hero__actions">
-        <v-btn color="primary" size="large" @click="showModal(0)">
+        <v-btn v-if="outbounds.length > 0" color="primary" size="large" @click="showModal(0)">
           <v-icon icon="mdi-plus" start />
           {{ $t('actions.add') }}
         </v-btn>
@@ -56,6 +55,7 @@
           {{ $t('actions.addbulk') }}
         </v-btn>
         <v-btn
+          v-if="outbounds.length > 0"
           color="secondary"
           variant="outlined"
           :loading="testingAll"
@@ -321,13 +321,6 @@ const closeStats = () => {
   text-transform: uppercase;
   color: var(--np-accent);
   background: rgba(10, 132, 255, 0.08);
-}
-
-.resource-hero__badge--soft {
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--np-text-muted);
-  background: rgba(148, 163, 184, 0.12);
 }
 
 .resource-hero__content {

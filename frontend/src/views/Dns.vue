@@ -26,14 +26,11 @@
     :title="$t('pages.dns')"
     description="集中维护 DNS 服务器、缓存策略与匹配规则，拖动规则即可调整解析优先级。"
     icon="mdi-dns-outline"
-    :status="`${dns.servers.length} 个服务器`"
   >
     <template #meta>
       <span>服务器 {{ dns.servers.length }}</span><span>•</span><span>规则 {{ dnsRules.length }}</span><span>•</span><span>默认 {{ finalDns || $t('dns.firstServer') }}</span>
     </template>
     <template #actions>
-      <v-btn color="primary" variant="tonal" @click="showDnsModal(-1)"><v-icon icon="mdi-plus" start />{{ $t('dns.add') }}</v-btn>
-      <v-btn color="primary" variant="tonal" @click="showDnsRuleModal(-1)"><v-icon icon="mdi-playlist-plus" start />{{ $t('dns.rule.add') }}</v-btn>
       <v-btn variant="outlined" color="warning" @click="saveConfig" :loading="loading" :disabled="stateChange">
         <v-icon icon="mdi-content-save-outline" start />{{ $t('actions.save') }}
       </v-btn>
@@ -90,9 +87,12 @@
     </v-col>
   </v-row>
   <v-row class="dns-section">
-    <v-col class="dns-section__heading" cols="12"><h2>{{ $t('dns.title') }}</h2><p>可复用的解析服务器与 TLS 连接配置。</p></v-col>
+    <v-col class="dns-section__heading" cols="12">
+      <div><h2>{{ $t('dns.title') }}</h2><p>可复用的解析服务器与 TLS 连接配置。</p></div>
+      <v-btn color="primary" variant="tonal" @click="showDnsModal(-1)"><v-icon icon="mdi-plus" start />{{ $t('dns.add') }}</v-btn>
+    </v-col>
     <v-col v-if="dns.servers.length === 0" cols="12">
-      <EmptyState icon="mdi-server-network-outline" title="暂无 DNS 服务器" description="添加解析服务器后即可在默认解析和规则中使用。" :action="$t('dns.add')" @action="showDnsModal(-1)" />
+      <EmptyState icon="mdi-server-network-outline" title="暂无 DNS 服务器" description="添加解析服务器后即可在默认解析和规则中使用。" />
     </v-col>
     <v-col cols="12" sm="6" md="4" lg="3" v-for="(item, index) in <any[]>dns.servers" :key="item.id">
       <v-card class="np-resource-card" rounded="xl" variant="flat" :title="item.tag">
@@ -150,9 +150,12 @@
     </v-col>
   </v-row>
   <v-row class="dns-section">
-    <v-col class="dns-section__heading" cols="12"><h2>{{ $t('dns.rule.title') }}</h2><p>从上到下依次匹配，拖动卡片调整规则顺序。</p></v-col>
+    <v-col class="dns-section__heading" cols="12">
+      <div><h2>{{ $t('dns.rule.title') }}</h2><p>从上到下依次匹配，拖动卡片调整规则顺序。</p></div>
+      <v-btn color="primary" variant="tonal" @click="showDnsRuleModal(-1)"><v-icon icon="mdi-playlist-plus" start />{{ $t('dns.rule.add') }}</v-btn>
+    </v-col>
     <v-col v-if="dnsRules.length === 0" cols="12">
-      <EmptyState icon="mdi-filter-cog-outline" title="暂无 DNS 规则" description="添加规则后，可按域名、入站或用户选择不同解析器。" :action="$t('dns.rule.add')" @action="showDnsRuleModal(-1)" />
+      <EmptyState icon="mdi-filter-cog-outline" title="暂无 DNS 规则" description="添加规则后，可按域名、入站或用户选择不同解析器。" />
     </v-col>
     <v-col cols="12" sm="6" md="4" lg="3" v-for="(item, index) in <any[]>dnsRules"
       :key="item.id"
@@ -398,6 +401,7 @@ const onDrop = (index: any) => {
 }
 
 .dns-section.np-section-card { padding: 12px; }
+.dns-section__heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .dns-section__heading h2 { margin: 0; font-size: 18px; letter-spacing: -0.02em; }
 .dns-section__heading p { margin: 5px 0 0; color: var(--np-text-muted); font-size: 13px; }
 
@@ -409,5 +413,9 @@ const onDrop = (index: any) => {
 
 @media (max-width: 599px) {
   .dns-section { border-radius: 22px; }
+  .dns-section__heading { align-items: flex-start; }
+  .dns-section__heading .v-btn { min-width: 42px; padding-inline: 10px; }
+  .dns-section__heading .v-btn :deep(.v-btn__content) { font-size: 0; }
+  .dns-section__heading .v-btn :deep(.v-icon) { margin: 0; font-size: 20px; }
 }
 </style>
