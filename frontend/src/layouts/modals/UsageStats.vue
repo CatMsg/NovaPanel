@@ -5,9 +5,9 @@
         <v-row>
           <v-col>{{ $t('main.stats.title') }}</v-col>
           <v-spacer></v-spacer>
-          <v-col cols="auto">
-            <v-icon icon="mdi-refresh" class="me-2" @click="refresh" v-tooltip:top="$t('actions.update')" />
-            <v-icon icon="mdi-close" @click="$emit('update:visible', false)" />
+          <v-col cols="auto" class="d-flex ga-1">
+            <v-btn icon="mdi-refresh" size="small" variant="text" :aria-label="$t('actions.update')" @click="refresh" />
+            <v-btn icon="mdi-close" size="small" variant="text" :aria-label="$t('actions.close')" @click="$emit('update:visible', false)" />
           </v-col>
         </v-row>
       </v-card-title>

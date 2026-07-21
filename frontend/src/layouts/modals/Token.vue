@@ -5,7 +5,7 @@
         <v-row>
           <v-col>{{ $t('admin.api.title') }}</v-col>
           <v-spacer></v-spacer>
-          <v-col cols="auto"><v-icon icon="mdi-close-box" @click="$emit('close')" /></v-col>
+          <v-col cols="auto"><v-btn icon="mdi-close" variant="text" :aria-label="$t('actions.close')" @click="$emit('close')" /></v-col>
         </v-row>
       </v-card-title>
       <v-divider></v-divider>
@@ -79,7 +79,7 @@
               <v-row>
                 <v-col>{{ $t('admin.api.token') }}</v-col>
                 <v-spacer></v-spacer>
-                <v-col cols="auto"><v-icon icon="mdi-close-box" @click="showNewToken = false" /></v-col>
+                <v-col cols="auto"><v-btn icon="mdi-close" variant="text" :aria-label="$t('actions.close')" @click="showNewToken = false" /></v-col>
               </v-row>
             </v-card-title>
             <v-divider></v-divider>

@@ -416,7 +416,7 @@ export default {
   padding-inline: 18px 18px;
 }
 
-:global(.v-theme--dark) .modal-shell {
+.modal-shell.v-theme--dark {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 24%),
     rgba(11, 18, 31, 0.78);

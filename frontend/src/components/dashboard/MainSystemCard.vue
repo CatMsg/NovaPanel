@@ -71,7 +71,7 @@ defineProps<{
   text-align: start;
 }
 
-:global(.v-theme--dark) .main-info-grid__label {
+:global(.v-theme--dark .main-info-grid__label) {
   color: rgba(186, 202, 224, 0.78);
 }
 </style>

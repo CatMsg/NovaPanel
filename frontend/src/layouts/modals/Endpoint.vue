@@ -370,7 +370,7 @@ export default {
   padding: 16px 20px 20px;
 }
 
-:global(.v-theme--dark) .modal-shell {
+.modal-shell.v-theme--dark {
   background: linear-gradient(180deg, rgba(18, 23, 37, 0.98), rgba(14, 17, 28, 0.96));
   border-color: rgba(120, 146, 255, 0.16);
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.36);

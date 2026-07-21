@@ -86,8 +86,7 @@ body {
 }
 
 .v-dialog > .v-overlay__content > .v-card {
-  max-height: inherit;
-  color: var(--np-text-main);
+	color: var(--np-text-main);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.16), transparent 24%),
     var(--np-surface-strong) !important;
@@ -101,8 +100,7 @@ body {
 }
 
 .v-theme--dark.v-overlay__content > .v-card,
-.v-theme--dark .v-dialog > .v-overlay__content > .v-card,
-.v-theme--dark.v-card {
+.v-theme--dark .v-dialog > .v-overlay__content > .v-card {
   color: var(--np-text-main);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.055), transparent 22%),
@@ -302,6 +300,54 @@ body::after {
 		max-width: calc(100vw - 16px);
 		max-height: calc(100dvh - 16px);
 		margin: 8px;
+	}
+
+	.v-dialog > .v-overlay__content > .v-card {
+		border-radius: 24px !important;
+	}
+
+	.v-dialog > .v-overlay__content > .v-card > .v-card-title {
+		flex: 0 0 auto;
+		padding: 16px 18px;
+		font-size: 1.15rem;
+		line-height: 1.35;
+	}
+
+	.v-dialog > .v-overlay__content > .v-card > .v-card-text {
+		min-height: 0;
+	}
+
+	.v-dialog > .v-overlay__content > .v-card > .v-card-actions {
+		flex: 0 0 auto;
+		padding: 12px 16px 16px;
+		border-top: 1px solid var(--np-border);
+		background: var(--np-surface-strong);
+	}
+
+	.v-dialog > .v-overlay__content > .v-card .v-card {
+		border-radius: 18px !important;
+		background: rgba(var(--v-theme-surface), 0.58);
+		box-shadow: none;
+		backdrop-filter: none;
+		-webkit-backdrop-filter: none;
+	}
+
+	.v-dialog > .v-overlay__content > .v-theme--dark.v-card .v-card {
+		background: rgba(var(--v-theme-surface), 0.42);
+		border-color: rgba(148, 163, 184, 0.14);
+	}
+
+	.v-dialog .v-field,
+	.v-dialog .v-input .v-field {
+		border-radius: 16px;
+	}
+
+	.v-dialog .v-row {
+		margin-inline: -6px;
+	}
+
+	.v-dialog .v-col {
+		padding: 6px;
 	}
 
 	.v-card-actions {
@@ -547,8 +593,8 @@ body::after {
 }
 
 .v-menu > .v-overlay__content,
-.v-overlay__content .v-list,
-.v-overlay__content .v-card {
+.v-overlay__content > .v-list,
+.v-overlay__content > .v-card {
   border-radius: 24px;
   backdrop-filter: blur(28px) saturate(1.2);
   border: 1px solid var(--np-border);
@@ -567,8 +613,8 @@ body::after {
 .v-theme--dark .v-list,
 .v-theme--dark .v-navigation-drawer,
 .v-theme--dark .v-menu > .v-overlay__content,
-.v-theme--dark .v-overlay__content .v-list,
-.v-theme--dark .v-overlay__content .v-card {
+.v-theme--dark .v-overlay__content > .v-list,
+.v-theme--dark .v-overlay__content > .v-card {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }

@@ -1,16 +1,13 @@
 <template>
   <v-dialog transition="dialog-bottom-transition" width="90%" max-width="800" :loading="loading">
-    <v-card class="rounded-lg">
-      <v-card-title>
-        <v-row>
-          <v-col>{{ $t('admin.changes') }}</v-col>
-          <v-spacer></v-spacer>
-          <v-col cols="auto"><v-icon icon="mdi-close-box" @click="$emit('close')" /></v-col>
-        </v-row>
+    <v-card class="rounded-lg changes-dialog">
+      <v-card-title class="changes-dialog__title">
+        <span>{{ $t('admin.changes') }}</span>
+        <v-btn icon="mdi-close" variant="text" :aria-label="$t('actions.close')" @click="$emit('close')" />
       </v-card-title>
       <v-divider></v-divider>
-      <v-card-text>
-        <v-row>
+      <v-card-text class="changes-dialog__body">
+        <v-row class="changes-dialog__filters">
           <v-col cols="12" sm="4" md="3">
             <v-select
             hide-details
@@ -48,7 +45,32 @@
             </v-btn>
           </v-col>
         </v-row>
+        <div v-if="smAndDown" class="changes-dialog__mobile-list">
+          <article v-for="item in changes" :key="item.id" class="changes-dialog__mobile-item">
+            <div class="changes-dialog__mobile-head">
+              <strong>#{{ item.id }}</strong>
+              <span dir="ltr">{{ dateFormatted(item.dateTime) }}</span>
+            </div>
+            <div class="changes-dialog__mobile-meta">
+              <div>
+                <span>{{ $t('admin.actor') }}</span>
+                <strong>{{ item.Actor || '-' }}</strong>
+              </div>
+              <div>
+                <span>{{ $t('admin.key') }}</span>
+                <strong>{{ item.key || '-' }}</strong>
+              </div>
+              <div>
+                <span>{{ $t('admin.action') }}</span>
+                <strong>{{ $t('actions.' + item.action) }}</strong>
+              </div>
+            </div>
+            <pre v-if="item.obj" class="changes-dialog__mobile-object" dir="ltr">{{ item.obj }}</pre>
+          </article>
+          <v-alert v-if="!loading && changes.length === 0" type="info" variant="tonal" :text="$t('noData')" />
+        </div>
         <v-data-table
+          v-else
           :headers="changesHeaders"
           :items="changes"
           item-value="id"
@@ -83,9 +105,14 @@
 <script lang="ts">
 import { i18n } from '@/locales'
 import HttpUtils from '@/plugins/httputil'
+import { useDisplay } from 'vuetify'
 
 export default {
   props: ['admins', 'actor', 'visible'],
+  setup() {
+    const { smAndDown } = useDisplay()
+    return { smAndDown }
+  },
   data() {
     return {
       loading: false,
@@ -143,3 +170,107 @@ export default {
   },
 }
 </script>
+
+<style scoped lang="scss">
+.changes-dialog {
+  display: flex;
+  flex-direction: column;
+  max-height: min(90vh, 900px);
+}
+
+.changes-dialog__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.changes-dialog__body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.changes-dialog__mobile-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.changes-dialog__mobile-item {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--np-border);
+  border-radius: 18px;
+  background: rgba(var(--v-theme-surface), 0.46);
+}
+
+.changes-dialog__mobile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--np-text-main);
+}
+
+.changes-dialog__mobile-head span {
+  color: var(--np-text-muted);
+  font-size: 0.78rem;
+}
+
+.changes-dialog__mobile-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.changes-dialog__mobile-meta > div {
+  min-width: 0;
+  padding: 9px;
+  border-radius: 12px;
+  background: rgba(148, 163, 184, 0.1);
+}
+
+.changes-dialog__mobile-meta span,
+.changes-dialog__mobile-meta strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.changes-dialog__mobile-meta span {
+  color: var(--np-text-muted);
+  font-size: 0.7rem;
+}
+
+.changes-dialog__mobile-meta strong {
+  margin-top: 4px;
+  color: var(--np-text-main);
+  font-size: 0.8rem;
+}
+
+.changes-dialog__mobile-object {
+  max-height: 112px;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  border-radius: 12px;
+  color: var(--np-text-main);
+  background: rgba(15, 23, 42, 0.08);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 600px) {
+  .changes-dialog {
+    max-height: calc(100dvh - 16px);
+  }
+
+  .changes-dialog__body {
+    padding: 12px 14px 16px;
+  }
+}
+</style>

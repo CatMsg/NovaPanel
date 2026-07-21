@@ -298,26 +298,26 @@ const isActiveTheme = (th: string) => {
   height: 42px;
 }
 
-:global(.v-theme--dark) .login-card__badge--soft {
+.login-shell.v-theme--dark .login-card__badge--soft {
   color: rgba(237, 244, 255, 0.76);
 }
 
-:global(.v-theme--dark) .login-brand__subtitle {
+.login-shell.v-theme--dark .login-brand__subtitle {
   color: rgba(191, 205, 224, 0.8);
 }
 
-:global(.v-theme--dark) .login-brand__avatar {
+.login-shell.v-theme--dark .login-brand__avatar {
   background: rgba(10, 18, 34, 0.92);
 }
 
-:global(.v-theme--dark) .login-card {
+.login-shell.v-theme--dark .login-card {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 28%),
     rgba(10, 18, 34, 0.78);
   border-color: rgba(125, 211, 252, 0.12);
 }
 
-:global(.v-theme--dark) .login-brand__tag {
+.login-shell.v-theme--dark .login-brand__tag {
   border-color: rgba(125, 211, 252, 0.12);
 }
 

@@ -1,40 +1,21 @@
 <template>
   <v-dialog transition="dialog-bottom-transition" width="90%" max-width="500">
-    <v-card class="rounded-lg">
-      <v-card-title>
-        <v-row>
-          <v-col>{{ $t('main.backup.title') }}</v-col>
-          <v-spacer></v-spacer>
-          <v-col cols="auto">
-            <v-icon icon="mdi-close" @click="control.visible = false" />
-          </v-col>
-        </v-row>
+    <v-card class="rounded-lg backup-dialog">
+      <v-card-title class="backup-dialog__title">
+        <span>{{ $t('main.backup.title') }}</span>
+        <v-btn icon="mdi-close" variant="text" :aria-label="$t('actions.close')" @click="control.visible = false" />
       </v-card-title>
       <v-divider></v-divider>
-      <v-card-text>
-        <v-row>
-          <v-col cols="auto">
-            <v-checkbox v-model="exclude" :label="$t('main.backup.exclStats')" value="stats" hide-details></v-checkbox>
-          </v-col>
-          <v-col cols="auto">
-            <v-checkbox v-model="exclude" :label="$t('main.backup.exclChanges')" value="changes" hide-details></v-checkbox>
-          </v-col>
-        </v-row>
-        <v-row>
-          <v-col cols="auto" align-self="center">
-            <v-btn color="primary" @click="backup()" hide-details>{{ $t('main.backup.backup') }}</v-btn>
-          </v-col>
-          <v-spacer></v-spacer>
-          <v-col cols="auto" align-self="center">
-            <v-btn color="primary" @click="restore()" hide-details>{{ $t('main.backup.restore') }}</v-btn>
-          </v-col>
-        </v-row>
-        <v-row>
-          <v-divider></v-divider>
-          <v-col cols="auto" align-self="center">
-            <v-btn color="primary" @click="config()" hide-details>{{ $t('main.backup.sbConfig') }}</v-btn>
-          </v-col>
-        </v-row>
+      <v-card-text class="backup-dialog__body">
+        <div class="backup-dialog__options">
+          <v-checkbox density="compact" v-model="exclude" :label="$t('main.backup.exclStats')" value="stats" hide-details />
+          <v-checkbox density="compact" v-model="exclude" :label="$t('main.backup.exclChanges')" value="changes" hide-details />
+        </div>
+        <div class="backup-dialog__actions">
+          <v-btn color="primary" variant="tonal" prepend-icon="mdi-download" @click="backup()">{{ $t('main.backup.backup') }}</v-btn>
+          <v-btn color="primary" variant="outlined" prepend-icon="mdi-backup-restore" @click="restore()">{{ $t('main.backup.restore') }}</v-btn>
+          <v-btn class="backup-dialog__config" color="primary" variant="text" prepend-icon="mdi-file-code" @click="config()">{{ $t('main.backup.sbConfig') }}</v-btn>
+        </div>
       </v-card-text>
     </v-card>
   </v-dialog>
@@ -118,3 +99,55 @@ export default {
   },
 }
 </script>
+
+<style scoped lang="scss">
+.backup-dialog__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.backup-dialog__body {
+  display: grid;
+  gap: 18px;
+  padding: 18px;
+}
+
+.backup-dialog__options {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--np-border);
+  border-radius: 18px;
+  background: rgba(var(--v-theme-surface), 0.5);
+}
+
+.backup-dialog__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.backup-dialog__actions .v-btn {
+  min-height: 44px;
+}
+
+.backup-dialog__config {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 420px) {
+  .backup-dialog__body {
+    padding: 14px;
+  }
+
+  .backup-dialog__actions {
+    grid-template-columns: 1fr;
+  }
+
+  .backup-dialog__config {
+    grid-column: auto;
+  }
+}
+</style>

@@ -624,24 +624,24 @@ onMounted(() => {
   color: inherit;
 }
 
-:global(.v-theme--dark) .ports-hero,
-:global(.v-theme--dark) .ports-summary__card,
-:global(.v-theme--dark) .ports-panel,
-:global(.v-theme--dark) .ports-alert {
+.ports-shell.v-theme--dark .ports-hero,
+.ports-shell.v-theme--dark .ports-summary__card,
+.ports-shell.v-theme--dark .ports-panel,
+.ports-shell.v-theme--dark .ports-alert {
   background: var(--np-surface-strong);
   border-color: var(--np-border);
   box-shadow: var(--np-shadow);
 }
 
-:global(.v-theme--dark) .ports-hero__badge--soft {
+.ports-shell.v-theme--dark .ports-hero__badge--soft {
   background: rgba(148, 163, 184, 0.16);
 }
 
-:global(.v-theme--dark) .ports-shell__glow--one {
+.ports-shell.v-theme--dark .ports-shell__glow--one {
   background: rgba(59, 130, 246, 0.14);
 }
 
-:global(.v-theme--dark) .ports-shell__glow--two {
+.ports-shell.v-theme--dark .ports-shell__glow--two {
   background: rgba(14, 165, 233, 0.1);
 }
 

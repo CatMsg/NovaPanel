@@ -16,7 +16,7 @@
           </v-col>
           <v-spacer></v-spacer>
           <v-col cols="auto">
-            <v-icon icon="mdi-close" @click="control.visible = false" />
+            <v-btn icon="mdi-close" variant="text" :aria-label="$t('actions.close')" @click="control.visible = false" />
           </v-col>
         </v-row>
       </v-card-title>

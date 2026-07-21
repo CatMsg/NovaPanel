@@ -266,8 +266,8 @@ defineProps<{
   color: var(--np-text-main);
 }
 
-:global(.v-theme--dark) .main-hero,
-:global(.v-theme--dark) .main-hero__panel {
+.main-hero.v-theme--dark,
+.main-hero.v-theme--dark .main-hero__panel {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.1), transparent 24%),
     rgba(17, 24, 39, 0.96) !important;
@@ -279,12 +279,12 @@ defineProps<{
   -webkit-backdrop-filter: none !important;
 }
 
-:global(.v-theme--dark) .main-hero__badge {
+.main-hero.v-theme--dark .main-hero__badge {
   background: rgba(255, 255, 255, 0.1);
   border-color: rgba(148, 163, 184, 0.18);
 }
 
-:global(.v-theme--dark) .main-hero__status-row {
+.main-hero.v-theme--dark .main-hero__status-row {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.05)),
     rgba(24, 32, 48, 0.98);
@@ -294,32 +294,32 @@ defineProps<{
     0 16px 26px rgba(0, 0, 0, 0.18);
 }
 
-:global(.v-theme--dark) .main-hero__status-row-icon {
+.main-hero.v-theme--dark .main-hero__status-row-icon {
   background: rgba(255, 255, 255, 0.1);
   border-color: rgba(148, 163, 184, 0.2);
 }
 
-:global(.v-theme--dark) .main-hero__status-row-label {
+.main-hero.v-theme--dark .main-hero__status-row-label {
   color: rgba(186, 202, 224, 0.76);
 }
 
-:global(.v-theme--dark) .main-hero__status-row-value {
+.main-hero.v-theme--dark .main-hero__status-row-value {
   color: rgba(237, 244, 255, 0.96);
 }
 
-:global(.v-theme--dark) .main-hero__badge--soft {
+.main-hero.v-theme--dark .main-hero__badge--soft {
   color: rgba(186, 202, 224, 0.78);
 }
 
-:global(.v-theme--dark) .main-hero__brand-icon {
+.main-hero.v-theme--dark .main-hero__brand-icon {
   border-color: rgba(125, 211, 252, 0.14);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04)),
     rgba(10, 16, 28, 0.82);
 }
 
-:global(.v-theme--dark) .main-hero__subtitle,
-:global(.v-theme--dark) .main-hero__panel-title {
+.main-hero.v-theme--dark .main-hero__subtitle,
+.main-hero.v-theme--dark .main-hero__panel-title {
   color: rgba(186, 202, 224, 0.78);
 }
 

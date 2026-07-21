@@ -394,15 +394,15 @@ const restartSingbox = async () => {
   font-size: 0.92rem;
 }
 
-:global(.v-theme--dark) .main-shell__glow--one {
+.main-shell.v-theme--dark .main-shell__glow--one {
   background: radial-gradient(circle, rgba(125, 211, 252, 0.18), transparent 68%);
 }
 
-:global(.v-theme--dark) .main-shell__glow--two {
+.main-shell.v-theme--dark .main-shell__glow--two {
   background: radial-gradient(circle, rgba(59, 130, 246, 0.12), transparent 70%);
 }
 
-:global(.v-theme--dark) .main-tile {
+.main-shell.v-theme--dark .main-tile {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.1), transparent 24%),
     rgba(17, 24, 39, 0.96) !important;
