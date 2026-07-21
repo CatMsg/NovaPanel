@@ -38,39 +38,29 @@
       <EmptyState icon="mdi-account-alert-outline" title="暂无管理员数据" description="未读取到管理员账号，请刷新页面或检查数据库状态。" />
     </v-col>
     <v-col cols="12" sm="6" lg="4" v-for="item in <any[]>users" :key="item.id">
-      <v-card class="np-resource-card admin-card" rounded="xl" variant="flat" :title="item.username">
-        <v-card-subtitle style="margin-top: -15px;">
-          {{ $t('admin.lastLogin') }}
-        </v-card-subtitle>
-        <v-card-text>
-          <v-row>
-            <v-col>{{ $t('admin.date') }}</v-col>
-            <v-col>
-              {{ item.loginDate }}
-            </v-col>
-          </v-row>
-          <v-row>
-            <v-col>{{ $t('admin.time') }}</v-col>
-            <v-col>
-              {{ item.loginTime }}
-            </v-col>
-          </v-row>
-          <v-row>
-            <v-col>IP</v-col>
-            <v-col>
-              {{ item.ip }}
-            </v-col>
-          </v-row>
-        </v-card-text>
-        <v-divider></v-divider>
-        <v-card-actions style="padding: 0;">
-          <v-btn icon="mdi-account-edit" @click="showEditModal(item)">
-            <v-icon />
-            <v-tooltip activator="parent" location="top" :text="$t('actions.edit')"></v-tooltip>
+      <v-card class="np-resource-card admin-card" rounded="xl" variant="flat">
+        <div class="admin-card__head">
+          <div class="admin-card__avatar"><v-icon icon="mdi-shield-account-outline" /></div>
+          <div class="admin-card__identity">
+            <strong>{{ item.username }}</strong>
+            <span>{{ $t('pages.admins') }}</span>
+          </div>
+          <v-chip size="x-small" color="success" variant="tonal">{{ $t('enable') }}</v-chip>
+        </div>
+        <div class="admin-card__login">
+          <span>{{ $t('admin.lastLogin') }}</span>
+          <strong>{{ item.loginDate }} <small>{{ item.loginTime }}</small></strong>
+        </div>
+        <div class="admin-card__meta">
+          <span>IP</span>
+          <strong>{{ item.ip }}</strong>
+        </div>
+        <v-card-actions class="admin-card__actions">
+          <v-btn color="primary" variant="tonal" @click="showEditModal(item)">
+            <v-icon icon="mdi-account-edit" start />{{ $t('actions.edit') }}
           </v-btn>
-          <v-btn icon="mdi-list-box-outline" @click="showChangesModal(item.username)">
-            <v-icon />
-            <v-tooltip activator="parent" location="top" :text="$t('admin.changes')"></v-tooltip>
+          <v-btn variant="outlined" @click="showChangesModal(item.username)">
+            <v-icon icon="mdi-list-box-outline" start />{{ $t('admin.changes') }}
           </v-btn>
         </v-card-actions>
       </v-card>
@@ -176,7 +166,109 @@ const closeTokenModal = () => {
 </script>
 
 <style scoped>
-.admins-grid { margin-top: 0; }
-.admin-card { min-height: 100%; }
-.admin-card :deep(.v-card-actions) { padding: 10px 12px; gap: 6px; }
+.admins-grid {
+  margin-top: 0;
+}
+
+.admin-card {
+  min-height: 100%;
+  overflow: hidden;
+  padding: 16px;
+}
+
+.admin-card__head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 11px;
+}
+
+.admin-card__avatar {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgba(10, 132, 255, 0.16);
+  border-radius: 14px;
+  color: var(--np-accent);
+  background: linear-gradient(145deg, rgba(125, 211, 252, 0.18), rgba(59, 130, 246, 0.08));
+}
+
+.admin-card__identity {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.admin-card__identity strong {
+  overflow: hidden;
+  color: var(--np-text-main);
+  font-size: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-card__identity span,
+.admin-card__login > span,
+.admin-card__meta > span {
+  color: var(--np-text-muted);
+  font-size: 0.72rem;
+}
+
+.admin-card__login {
+  display: grid;
+  gap: 5px;
+  margin-top: 16px;
+  padding: 13px 14px;
+  border: 1px solid var(--np-border);
+  border-radius: 15px;
+  background: var(--np-surface-muted);
+}
+
+.admin-card__login strong {
+  color: var(--np-text-main);
+  font-size: 0.88rem;
+}
+
+.admin-card__login small {
+  margin-left: 6px;
+  color: var(--np-text-muted);
+  font-weight: 600;
+}
+
+.admin-card__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 3px 4px;
+}
+
+.admin-card__meta strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--np-text-main);
+  font-size: 0.8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-card__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 14px 0 0 !important;
+}
+
+.admin-card__actions .v-btn {
+  min-width: 0;
+}
+
+@media (max-width: 599px) {
+  .admin-card {
+    padding: 14px;
+  }
+}
 </style>

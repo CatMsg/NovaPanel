@@ -51,69 +51,6 @@
           <span>•</span>
           <span>MASQUE {{ endpoints.filter(e => e.type == 'masque').length }}</span>
         </div>
-        <v-btn
-          class="endpoint-aggregate-toggle"
-          variant="tonal"
-          :append-icon="showEndpointAggregate ? 'mdi-chevron-up' : 'mdi-chevron-down'"
-          @click="showEndpointAggregate = !showEndpointAggregate"
-        >
-          节点聚合配置
-        </v-btn>
-        <div v-show="showEndpointAggregate" class="endpoint-aggregate">
-          <div class="endpoint-aggregate__header">
-            <div>
-              <div class="endpoint-aggregate__title">节点聚合</div>
-              <div class="endpoint-aggregate__desc">每台 VPS 暴露本机节点源，主节点填写上游源后输出聚合出口。</div>
-            </div>
-            <v-select
-              v-model="endpointAggregateConfig.endpointMode"
-              :items="endpointModeItems"
-              label="节点模式"
-              density="compact"
-              variant="outlined"
-              hide-details
-              class="endpoint-aggregate__mode"
-            />
-          </div>
-          <v-text-field
-            :model-value="endpointSourceURI"
-            label="本机节点源"
-            readonly
-            density="comfortable"
-            variant="outlined"
-            hide-details
-            append-inner-icon="mdi-content-copy"
-            @click:append-inner="copyEndpointSourceURI"
-          />
-          <v-textarea
-            v-if="endpointAggregateConfig.endpointMode == 'master'"
-            v-model="endpointAggregateConfig.endpointSources"
-            label="节点上游源"
-            hint="每行填写一个 VPS 的本机节点源链接，推荐使用 format=json。"
-            persistent-hint
-            rows="3"
-            auto-grow
-            density="comfortable"
-            variant="outlined"
-          />
-          <v-text-field
-            v-if="endpointAggregateConfig.endpointMode == 'master'"
-            :model-value="endpointAggregateURI"
-            label="节点聚合出口"
-            readonly
-            density="comfortable"
-            variant="outlined"
-            hide-details
-            append-inner-icon="mdi-content-copy"
-            @click:append-inner="copyEndpointAggregateURI"
-          />
-          <div class="endpoint-aggregate__actions">
-            <v-btn size="small" color="primary" variant="flat" :loading="endpointAggregateSaving" @click="saveEndpointAggregateConfig">
-              <v-icon icon="mdi-content-save-outline" start />
-              保存节点聚合
-            </v-btn>
-          </div>
-        </div>
       </v-col>
       <v-col cols="12" lg="4" class="resource-hero__actions">
         <v-btn color="primary" size="large" @click="showModal(0)">
@@ -124,7 +61,85 @@
     </v-row>
   </v-card>
 
+  <v-card class="endpoint-aggregate-card" rounded="xl" variant="flat">
+    <button class="endpoint-aggregate-card__head" type="button" @click="showEndpointAggregate = !showEndpointAggregate">
+      <span class="endpoint-aggregate-card__icon"><v-icon icon="mdi-source-branch" /></span>
+      <span class="endpoint-aggregate-card__copy">
+        <strong>节点聚合</strong>
+        <small>配置本机节点源，以及主节点使用的上游聚合出口。</small>
+      </span>
+      <v-chip size="small" variant="tonal">{{ endpointAggregateConfig.endpointMode == 'master' ? '主模式' : '从模式' }}</v-chip>
+      <v-icon :icon="showEndpointAggregate ? 'mdi-chevron-up' : 'mdi-chevron-down'" />
+    </button>
+    <v-expand-transition>
+      <div v-show="showEndpointAggregate" class="endpoint-aggregate">
+        <div class="endpoint-aggregate__header">
+          <div>
+            <div class="endpoint-aggregate__title">聚合方式</div>
+            <div class="endpoint-aggregate__desc">从模式暴露本机节点，主模式进一步汇总多个上游源。</div>
+          </div>
+          <v-select
+            v-model="endpointAggregateConfig.endpointMode"
+            :items="endpointModeItems"
+            label="节点模式"
+            density="compact"
+            variant="outlined"
+            hide-details
+            class="endpoint-aggregate__mode"
+          />
+        </div>
+        <v-text-field
+          :model-value="endpointSourceURI"
+          label="本机节点源"
+          readonly
+          density="comfortable"
+          variant="outlined"
+          hide-details
+          append-inner-icon="mdi-content-copy"
+          @click:append-inner="copyEndpointSourceURI"
+        />
+        <v-textarea
+          v-if="endpointAggregateConfig.endpointMode == 'master'"
+          v-model="endpointAggregateConfig.endpointSources"
+          label="节点上游源"
+          hint="每行填写一个 VPS 的本机节点源链接，推荐使用 format=json。"
+          persistent-hint
+          rows="3"
+          auto-grow
+          density="comfortable"
+          variant="outlined"
+        />
+        <v-text-field
+          v-if="endpointAggregateConfig.endpointMode == 'master'"
+          :model-value="endpointAggregateURI"
+          label="节点聚合出口"
+          readonly
+          density="comfortable"
+          variant="outlined"
+          hide-details
+          append-inner-icon="mdi-content-copy"
+          @click:append-inner="copyEndpointAggregateURI"
+        />
+        <div class="endpoint-aggregate__actions">
+          <v-btn size="small" color="primary" variant="flat" :loading="endpointAggregateSaving" @click="saveEndpointAggregateConfig">
+            <v-icon icon="mdi-content-save-outline" start />
+            保存节点聚合
+          </v-btn>
+        </div>
+      </div>
+    </v-expand-transition>
+  </v-card>
+
   <v-row class="resource-grid">
+    <v-col v-if="endpoints.length === 0" cols="12">
+      <EmptyState
+        icon="mdi-cloud-tags-outline"
+        title="暂无节点"
+        description="添加 MASQUE、WireGuard 等节点后，可在这里查看状态并复制客户端配置。"
+        :action="$t('actions.add')"
+        @action="showModal(0)"
+      />
+    </v-col>
     <v-col cols="12" sm="6" md="4" lg="3" v-for="(item, index) in <any[]>endpoints" :key="item.tag">
       <v-card class="resource-card" rounded="xl" variant="flat" :title="item.tag">
         <v-card-subtitle style="margin-top: -15px;">
@@ -240,6 +255,7 @@ import HttpUtils from '@/plugins/httputil'
 import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
 import { push } from 'notivue'
 import { useDisplay } from 'vuetify'
+import EmptyState from '@/components/EmptyState.vue'
 
 const EndpointVue = defineAsyncComponent(() => import('@/layouts/modals/Endpoint.vue'))
 const Stats = defineAsyncComponent(() => import('@/layouts/modals/Stats.vue'))
@@ -530,20 +546,69 @@ const copyMasque = async (item: any) => {
   font-size: 13px;
 }
 
-.endpoint-aggregate {
-  margin-top: 16px;
-  max-width: 720px;
-  display: grid;
-  gap: 12px;
-  padding: 14px;
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.48);
-  border: 1px solid rgba(148, 163, 184, 0.18);
+.endpoint-aggregate-card {
+  margin-bottom: 18px;
+  padding: 16px 18px;
+  border: 1px solid var(--np-border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent 48%),
+    var(--np-surface);
+  box-shadow: var(--np-shadow-soft);
 }
 
-.endpoint-aggregate-toggle {
-  display: none;
+.endpoint-aggregate-card__head {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.endpoint-aggregate-card__icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgba(10, 132, 255, 0.16);
+  border-radius: 13px;
+  color: var(--np-accent);
+  background: rgba(10, 132, 255, 0.09);
+}
+
+.endpoint-aggregate-card__copy {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.endpoint-aggregate-card__copy strong {
+  color: var(--np-text-main);
+  font-size: 0.96rem;
+}
+
+.endpoint-aggregate-card__copy small {
+  overflow: hidden;
+  color: var(--np-text-muted);
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.endpoint-aggregate {
   margin-top: 16px;
+  display: grid;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--np-border);
 }
 
 .endpoint-aggregate__header {
@@ -621,8 +686,10 @@ const copyMasque = async (item: any) => {
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
 }
 
-.v-theme--dark .endpoint-aggregate {
-  background: rgba(15, 23, 42, 0.54);
+.v-theme--dark .endpoint-aggregate-card {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 48%),
+    rgba(11, 18, 31, 0.78);
   border-color: rgba(148, 163, 184, 0.18);
 }
 
@@ -644,12 +711,19 @@ const copyMasque = async (item: any) => {
     width: 100%;
   }
 
-  .endpoint-aggregate-toggle {
-    display: inline-flex;
-  }
 }
 
 @media (max-width: 600px) {
+  .endpoint-aggregate-card {
+    margin-bottom: 12px;
+    padding: 14px;
+  }
+
+  .endpoint-aggregate-card__copy small,
+  .endpoint-aggregate-card__head > .v-chip {
+    display: none;
+  }
+
   .resource-hero__icon {
     width: 46px;
     height: 46px;
