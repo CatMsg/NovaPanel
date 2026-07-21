@@ -187,7 +187,7 @@
           clearable
           hide-details
         />
-        <v-chip size="small" variant="flat" color="primary">
+        <v-chip class="clients-table-card__count" size="small" variant="tonal" color="primary">
           {{ visibleClients.length }} / {{ clients.length }}
         </v-chip>
       </div>
@@ -218,35 +218,38 @@
           </div>
         </template>
         <template v-slot:item.inbounds="{ item }">
-          <span>
+          <span class="clients-inbound-count">
           <v-tooltip activator="parent" dir="ltr" location="start" v-if="item.inbounds.length > 0">
             <span v-for="i in item.inbounds">{{ inbounds.find(inb => inb.id == i)?.tag }}<br /></span>
           </v-tooltip>
+          <v-icon icon="mdi-tunnel-outline" size="15" />
           {{ item.inbounds?.length }}
           </span>
         </template>
         <template v-slot:item.usage="{ item }">
           <div class="clients-usage" v-tooltip:top="'↓' + HumanReadable.sizeFormat(item.down) + ' - ' + HumanReadable.sizeFormat(item.up) + '↑'">
-            <v-chip
-              size="small"
-              :color="item.volume==0 ? 'success' : item.volume<=(item.up + item.down)? 'error': ''"
-              label
-            >{{ HumanReadable.sizeFormat(item.up + item.down) + ' / ' + (item.volume == 0 ? $t('unlimited') : HumanReadable.sizeFormat(item.volume)) }}</v-chip>
+            <div class="clients-usage__value">
+              <strong>{{ HumanReadable.sizeFormat(item.up + item.down) }}</strong>
+              <span>/ {{ item.volume == 0 ? $t('unlimited') : HumanReadable.sizeFormat(item.volume) }}</span>
+            </div>
             <span>{{ $t('date.expiry') }}: {{ HumanReadable.remainedDays(item.expiry) }}</span>
           </div>
           <v-progress-linear
+            class="clients-usage__progress"
             :model-value="percent(item)"
             :color="percentColor(item)"
             v-if="item.volume>0"
-            bottom
+            height="4"
+            rounded
           >
           </v-progress-linear>
         </template>
         <template v-slot:item.status="{ item }">
           <div class="clients-status">
-            <v-chip density="comfortable" size="small" :color="clientState(item).color" variant="tonal">
-              {{ clientState(item).label }}
-            </v-chip>
+            <div class="clients-status__primary">
+              <span class="clients-status__dot" :class="`clients-status__dot--${clientState(item).color}`"></span>
+              <strong>{{ clientState(item).label }}</strong>
+            </div>
             <span>{{ isOnline(item.name).value ? $t('online') : $t('client.offline') }}</span>
           </div>
         </template>
@@ -471,8 +474,15 @@
   min-width: 220px;
 }
 
+.clients-table-card__count {
+  min-width: 48px;
+  justify-content: center;
+  font-weight: 800;
+}
+
 .clients-table {
   width: 100%;
+  margin-top: 4px;
 }
 
 .clients-table .v-table__wrapper {
@@ -482,20 +492,44 @@
 
 .clients-table .v-table__wrapper table {
   min-width: 760px;
+  border-collapse: separate;
+  border-spacing: 0 7px;
 }
 
 .clients-table thead th {
   white-space: nowrap;
-  background: rgba(10, 132, 255, 0.06);
+  height: 38px !important;
+  border-bottom: 0 !important;
+  background: transparent;
   color: var(--np-text-main);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .clients-table tbody td {
+  height: 66px !important;
+  border-top: 1px solid var(--np-border) !important;
+  border-bottom: 1px solid var(--np-border) !important;
+  background: color-mix(in srgb, var(--np-surface-muted) 82%, transparent);
   color: var(--np-text-main);
+  transition: background 160ms ease, border-color 160ms ease;
 }
 
-.clients-table tbody tr:hover {
-  background: rgba(10, 132, 255, 0.04);
+.clients-table tbody td:first-child {
+  border-left: 1px solid var(--np-border) !important;
+  border-radius: 16px 0 0 16px;
+}
+
+.clients-table tbody td:last-child {
+  border-right: 1px solid var(--np-border) !important;
+  border-radius: 0 16px 16px 0;
+}
+
+.clients-table tbody tr:hover td {
+  border-color: rgba(10, 132, 255, 0.2) !important;
+  background: rgba(10, 132, 255, 0.07);
 }
 
 .clients-table__actions {
@@ -515,15 +549,18 @@
 
 .clients-identity__avatar {
   display: grid;
-  width: 38px;
-  height: 38px;
+  width: 40px;
+  height: 40px;
   flex: 0 0 auto;
   place-items: center;
   border: 1px solid rgba(10, 132, 255, 0.16);
-  border-radius: 13px;
+  border-radius: 14px;
   color: var(--np-accent);
-  background: rgba(10, 132, 255, 0.1);
+  background:
+    linear-gradient(145deg, rgba(125, 211, 252, 0.2), rgba(59, 130, 246, 0.08)),
+    var(--np-surface);
   font-weight: 800;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .clients-identity__content {
@@ -554,6 +591,74 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 6px;
+}
+
+.clients-usage__value {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.clients-usage__value strong {
+  color: var(--np-text-main);
+  font-size: 0.84rem;
+}
+
+.clients-usage__value span {
+  color: var(--np-text-muted);
+  font-size: 0.74rem;
+}
+
+.clients-usage__progress {
+  width: min(100%, 210px);
+  margin-top: 7px;
+}
+
+.clients-inbound-count {
+  display: inline-flex;
+  min-width: 48px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--np-border);
+  border-radius: 11px;
+  color: var(--np-text-main);
+  background: var(--np-surface-muted);
+  font-weight: 700;
+}
+
+.clients-inbound-count .v-icon {
+  color: var(--np-accent);
+}
+
+.clients-status__primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.clients-status__primary strong {
+  font-size: 0.82rem;
+}
+
+.clients-status__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgb(148, 163, 184);
+  box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.12);
+}
+
+.clients-status__dot--success {
+  background: rgb(34, 197, 94);
+  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.12);
+}
+
+.clients-status__dot--error {
+  background: rgb(239, 68, 68);
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.12);
 }
 
 .clients-usage > span,
@@ -645,12 +750,19 @@
 }
 
 .v-theme--dark .clients-table thead th {
-  background: rgba(125, 211, 252, 0.08);
+  background: transparent;
   color: rgba(237, 244, 255, 0.92);
 }
 
 .v-theme--dark .clients-table tbody td {
+  border-color: rgba(148, 163, 184, 0.13) !important;
+  background: rgba(15, 23, 38, 0.72);
   color: rgba(237, 244, 255, 0.94);
+}
+
+.v-theme--dark .clients-table tbody tr:hover td {
+  border-color: rgba(125, 211, 252, 0.22) !important;
+  background: rgba(30, 58, 92, 0.5);
 }
 
 @media (max-width: 960px) {

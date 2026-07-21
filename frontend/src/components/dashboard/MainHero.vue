@@ -18,7 +18,13 @@
       </v-col>
       <v-col cols="12" lg="5">
         <v-card class="main-hero__panel" rounded="xl" variant="flat">
-          <div class="main-hero__panel-title">{{ $t('main.hero.live') }}</div>
+          <div class="main-hero__panel-head">
+            <div class="main-hero__panel-title">
+              <span class="main-hero__live-dot"></span>
+              {{ $t('main.hero.live') }}
+            </div>
+            <span class="main-hero__panel-count">{{ items.length }}</span>
+          </div>
           <div class="main-hero__status-list">
             <div
               v-for="(item, index) in items"
@@ -188,29 +194,66 @@ defineProps<{
 }
 
 .main-hero__panel-title {
-  margin-bottom: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-size: 0.92rem;
   font-weight: 700;
   color: var(--np-text-muted);
 }
 
+.main-hero__panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.main-hero__live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgb(34, 197, 94);
+  box-shadow: 0 0 0 5px rgba(34, 197, 94, 0.12);
+}
+
+.main-hero__panel-count {
+  display: grid;
+  min-width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 999px;
+  color: var(--np-text-muted);
+  background: rgba(255, 255, 255, 0.26);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
 .main-hero__status-list {
   display: grid;
-  gap: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .main-hero__status-row {
   display: flex;
-  align-items: center;
+  min-width: 0;
+  min-height: 88px;
+  flex-direction: column;
+  align-items: stretch;
   justify-content: space-between;
-  gap: 14px;
-  padding: 11px 0;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.34);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38);
 }
 
 .main-hero__status-row--last {
-  border-bottom: 0;
-  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
 }
 
 .main-hero__status-row-left {
@@ -259,11 +302,15 @@ defineProps<{
 }
 
 .main-hero__status-row-value {
-  flex: 0 0 auto;
+  min-width: 0;
+  padding-left: 38px;
+  overflow: hidden;
   font-size: 0.98rem;
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--np-text-main);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .main-hero.v-theme--dark,
@@ -286,12 +333,17 @@ defineProps<{
 
 .main-hero.v-theme--dark .main-hero__status-row {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.05)),
-    rgba(24, 32, 48, 0.98);
-  border-color: rgba(148, 163, 184, 0.2);
+    linear-gradient(145deg, rgba(255, 255, 255, 0.07), transparent 62%),
+    rgba(22, 30, 44, 0.72);
+  border-color: rgba(148, 163, 184, 0.16);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.07),
-    0 16px 26px rgba(0, 0, 0, 0.18);
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 10px 22px rgba(0, 0, 0, 0.12);
+}
+
+.main-hero.v-theme--dark .main-hero__panel-count {
+  border-color: rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.07);
 }
 
 .main-hero.v-theme--dark .main-hero__status-row-icon {
@@ -375,8 +427,11 @@ defineProps<{
   }
 
   .main-hero__panel-title {
-    margin-bottom: 8px;
     font-size: 0.8rem;
+  }
+
+  .main-hero__panel-head {
+    margin-bottom: 8px;
   }
 
   .main-hero__status-list {
@@ -412,8 +467,7 @@ defineProps<{
 
   .main-hero__status-row-value {
     font-size: 0.9rem;
-    margin-left: 0;
-    align-self: flex-end;
+    padding-left: 36px;
   }
 }
 </style>
