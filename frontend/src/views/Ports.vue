@@ -377,11 +377,11 @@ onMounted(() => {
 .ports-summary__card,
 .ports-panel,
 .ports-alert {
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--np-surface-strong);
   backdrop-filter: blur(16px);
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.08);
-  color: rgb(var(--v-theme-on-surface));
+  border: 1px solid var(--np-border);
+  box-shadow: var(--np-shadow);
+  color: var(--np-text-main);
 }
 
 .ports-hero {
@@ -406,7 +406,7 @@ onMounted(() => {
 }
 
 .ports-hero__badge--soft {
-  color: rgba(var(--v-theme-on-surface), 0.78);
+  color: var(--np-text-muted);
   background: rgba(148, 163, 184, 0.12);
   text-transform: none;
   letter-spacing: 0;
@@ -438,12 +438,12 @@ onMounted(() => {
   line-height: 1.1;
   font-weight: 800;
   letter-spacing: -0.03em;
-  color: rgb(var(--v-theme-on-surface));
+  color: var(--np-text-main);
 }
 
 .ports-hero__subtitle {
   margin: 12px 0 0;
-  color: rgba(var(--v-theme-on-surface), 0.64);
+  color: var(--np-text-muted);
   line-height: 1.7;
 }
 
@@ -452,7 +452,7 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  color: rgba(var(--v-theme-on-surface), 0.56);
+  color: var(--np-text-muted);
   font-size: 13px;
 }
 
@@ -520,7 +520,7 @@ onMounted(() => {
 
 .ports-summary__label {
   font-size: 13px;
-  color: rgba(var(--v-theme-on-surface), 0.55);
+  color: var(--np-text-muted);
 }
 
 .ports-summary__value {
@@ -528,7 +528,7 @@ onMounted(() => {
   font-size: 28px;
   font-weight: 800;
   line-height: 1.1;
-  color: rgb(var(--v-theme-on-surface));
+  color: var(--np-text-main);
   word-break: break-word;
 }
 
@@ -539,7 +539,7 @@ onMounted(() => {
 .ports-alert__title {
   font-weight: 700;
   margin-bottom: 6px;
-  color: rgb(var(--v-theme-on-surface));
+  color: var(--np-text-main);
 }
 
 .ports-alert__list {
@@ -549,7 +549,7 @@ onMounted(() => {
 
 .ports-drift__summary,
 .ports-drift__more {
-  color: rgba(var(--v-theme-on-surface), 0.72);
+  color: var(--np-text-muted);
   line-height: 1.6;
 }
 
@@ -590,33 +590,33 @@ onMounted(() => {
 
 .ports-table__empty {
   text-align: center;
-  color: rgba(var(--v-theme-on-surface), 0.56);
+  color: var(--np-text-muted);
   padding: 20px 12px;
 }
 
 :deep(.ports-table) {
   width: 100%;
-  color: rgb(var(--v-theme-on-surface));
+  color: var(--np-text-main);
 }
 
 :deep(.ports-table thead th) {
   white-space: nowrap;
   font-size: 12px;
-  color: rgba(var(--v-theme-on-surface), 0.72);
+  color: var(--np-text-muted);
   background: transparent;
 }
 
 :deep(.ports-table tbody td) {
   vertical-align: top;
-  color: rgb(var(--v-theme-on-surface));
+  color: var(--np-text-main);
 }
 
 :deep(.ports-table .v-table__wrapper) {
-  color: rgb(var(--v-theme-on-surface));
+  color: var(--np-text-main);
 }
 
 :deep(.ports-table .v-table__wrapper table) {
-  color: rgb(var(--v-theme-on-surface));
+  color: var(--np-text-main);
 }
 
 :deep(.ports-table .v-table__wrapper table thead th),
@@ -628,9 +628,9 @@ onMounted(() => {
 :global(.v-theme--dark) .ports-summary__card,
 :global(.v-theme--dark) .ports-panel,
 :global(.v-theme--dark) .ports-alert {
-  background: rgba(15, 23, 42, 0.72);
-  border-color: rgba(148, 163, 184, 0.16);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
+  background: var(--np-surface-strong);
+  border-color: var(--np-border);
+  box-shadow: var(--np-shadow);
 }
 
 :global(.v-theme--dark) .ports-hero__badge--soft {

@@ -34,6 +34,10 @@
   content: "\F0B54";
 }
 
+.mdi-account-alert-outline::before {
+  content: "\F0B50";
+}
+
 .mdi-account-edit::before {
   content: "\F06BC";
 }
@@ -86,6 +90,10 @@
   content: "\F0616";
 }
 
+.mdi-arrow-left::before {
+  content: "\F004D";
+}
+
 .mdi-arrow-right::before {
   content: "\F0054";
 }
@@ -134,8 +142,16 @@
   content: "\F0141";
 }
 
+.mdi-chevron-down::before {
+  content: "\F0140";
+}
+
 .mdi-chevron-right::before {
   content: "\F0142";
+}
+
+.mdi-chevron-up::before {
+  content: "\F0143";
 }
 
 .mdi-close::before {
@@ -206,6 +222,10 @@
   content: "\F01D6";
 }
 
+.mdi-dns-outline::before {
+  content: "\F0B8C";
+}
+
 .mdi-download::before {
   content: "\F01DA";
 }
@@ -230,12 +250,20 @@
   content: "\F0B98";
 }
 
+.mdi-file-tree-outline::before {
+  content: "\F13D2";
+}
+
 .mdi-filter-check-outline::before {
   content: "\F18ED";
 }
 
 .mdi-filter-menu-outline::before {
   content: "\F10E6";
+}
+
+.mdi-filter-cog-outline::before {
+  content: "\F1AA4";
 }
 
 .mdi-help::before {
@@ -264,6 +292,10 @@
 
 .mdi-key-star::before {
   content: "\F119E";
+}
+
+.mdi-key-outline::before {
+  content: "\F0DD6";
 }
 
 .mdi-lan::before {
@@ -350,12 +382,24 @@
   content: "\F048D";
 }
 
+.mdi-server-network-outline::before {
+  content: "\F1C99";
+}
+
+.mdi-server-plus-outline::before {
+  content: "\F1C9B";
+}
+
 .mdi-set-all::before {
   content: "\F0778";
 }
 
 .mdi-shield-lock-outline::before {
   content: "\F0CCC";
+}
+
+.mdi-shield-account-outline::before {
+  content: "\F0A12";
 }
 
 .mdi-speedometer::before {

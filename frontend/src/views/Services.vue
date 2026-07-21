@@ -46,6 +46,15 @@
   </v-card>
 
   <v-row class="resource-grid">
+    <v-col v-if="services.length === 0" cols="12">
+      <EmptyState
+        icon="mdi-server-plus-outline"
+        title="暂无服务"
+        description="创建服务后，可统一关联监听端口、TLS 和入站依赖。"
+        :action="$t('actions.add')"
+        @action="showModal(0)"
+      />
+    </v-col>
     <v-col cols="12" sm="6" md="4" lg="3" v-for="(item, index) in <any[]>services" :key="item.tag">
       <v-card class="resource-card" rounded="xl" variant="flat" :title="item.tag">
         <v-card-subtitle style="margin-top: -15px;">
@@ -107,6 +116,7 @@
 import Data from '@/store/modules/data'
 import { Srv } from '@/types/services'
 import { computed, defineAsyncComponent, ref } from 'vue'
+import EmptyState from '@/components/EmptyState.vue'
 
 const ServiceVue = defineAsyncComponent(() => import('@/layouts/modals/Service.vue'))
 

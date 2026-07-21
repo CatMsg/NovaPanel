@@ -103,9 +103,19 @@
           <h2>告警通知</h2>
           <p>通过 Telegram 推送健康异常，仅在状态变化或冷却时间到期后发送，避免重复轰炸。</p>
         </div>
-        <v-switch v-model="alerts.enabled" color="primary" label="启用告警" hide-details inset />
+        <div class="alert-settings__header-actions">
+          <v-switch v-model="alerts.enabled" color="primary" label="启用告警" hide-details inset />
+          <v-btn
+            variant="tonal"
+            :prepend-icon="showAlertSettings ? 'mdi-chevron-up' : 'mdi-tune-variant'"
+            @click="showAlertSettings = !showAlertSettings"
+          >
+            {{ showAlertSettings ? '收起配置' : '配置' }}
+          </v-btn>
+        </div>
       </div>
-      <v-row class="mt-2">
+      <v-expand-transition>
+      <v-row v-show="showAlertSettings" class="mt-2">
         <v-col cols="12" md="7">
           <v-text-field v-model="alerts.telegramToken" :label="alerts.telegramTokenSet ? 'Telegram Bot Token（已配置，留空不修改）' : 'Telegram Bot Token'" prepend-inner-icon="mdi-send-check-outline" type="password" autocomplete="new-password" />
         </v-col>
@@ -123,6 +133,7 @@
           <v-btn color="primary" prepend-icon="mdi-content-save-outline" :loading="savingAlerts" @click="saveAlerts">保存告警</v-btn>
         </v-col>
       </v-row>
+      </v-expand-transition>
     </v-card>
   </div>
 </template>
@@ -145,6 +156,7 @@ const repairingIssueId = ref('')
 const report = ref<HealthReport | null>(null)
 const savingAlerts = ref(false)
 const testingAlert = ref(false)
+const showAlertSettings = ref(false)
 const alerts = ref<AlertSettings>({ enabled: false, telegramToken: '', telegramTokenSet: false, telegramChatId: '', intervalMinutes: 5, cooldownMinutes: 60 })
 
 const statusLabel = computed(() => ({ healthy: '全部正常', warning: '需要关注', critical: '发现异常' } as Record<string, string>)[report.value?.status ?? ''] ?? '等待检查')
@@ -285,10 +297,11 @@ onMounted(() => {
 .port-issue__body span, .port-issue__body small { color: var(--np-text-muted); overflow-wrap: anywhere; }
 .alert-settings { margin-top: 14px; padding: 24px; border-radius: 24px; }
 .alert-settings__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.alert-settings__header-actions { display: flex; align-items: center; gap: 10px; }
 .alert-settings__header h2 { margin: 3px 0 0; font-size: 20px; }
 .alert-settings__header p { margin: 8px 0 0; color: var(--np-text-muted); }
 .alert-settings__eyebrow { color: rgb(var(--v-theme-primary)); font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .alert-settings__actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
 @media (max-width: 959px) { .health-hero__actions { justify-content: flex-start; } .health-grid { grid-template-columns: 1fr; } }
-@media (max-width: 599px) { .health-hero { border-radius: 24px; } .health-hero__title-row { align-items: center; } .health-hero__icon { width: 48px; height: 48px; } .health-summary__card { min-height: 96px; padding: 14px; gap: 10px; } .health-summary__icon { width: 36px; height: 36px; } .health-summary__value { font-size: 24px; } .health-check { flex-wrap: wrap; } .health-diagnostics__header, .alert-settings__header { align-items: stretch; flex-direction: column; } .port-issue { grid-template-columns: auto minmax(0, 1fr); } .port-issue > .v-btn, .port-issue > .v-chip { grid-column: 1 / -1; width: 100%; } .alert-settings__actions { justify-content: stretch; } .alert-settings__actions .v-btn { flex: 1; } }
+@media (max-width: 599px) { .health-hero { border-radius: 24px; } .health-hero__title-row { align-items: center; } .health-hero__icon { width: 48px; height: 48px; } .health-summary__card { min-height: 96px; padding: 14px; gap: 10px; } .health-summary__icon { width: 36px; height: 36px; } .health-summary__value { font-size: 24px; } .health-check { flex-wrap: wrap; } .health-diagnostics__header, .alert-settings__header { align-items: stretch; flex-direction: column; } .alert-settings__header-actions { justify-content: space-between; } .port-issue { grid-template-columns: auto minmax(0, 1fr); } .port-issue > .v-btn, .port-issue > .v-chip { grid-column: 1 / -1; width: 100%; } .alert-settings__actions { justify-content: stretch; } .alert-settings__actions .v-btn { flex: 1; } }
 </style>

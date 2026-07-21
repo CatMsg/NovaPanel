@@ -51,7 +51,15 @@
           <span>•</span>
           <span>MASQUE {{ endpoints.filter(e => e.type == 'masque').length }}</span>
         </div>
-        <div class="endpoint-aggregate">
+        <v-btn
+          class="endpoint-aggregate-toggle"
+          variant="tonal"
+          :append-icon="showEndpointAggregate ? 'mdi-chevron-up' : 'mdi-chevron-down'"
+          @click="showEndpointAggregate = !showEndpointAggregate"
+        >
+          节点聚合配置
+        </v-btn>
+        <div v-show="showEndpointAggregate" class="endpoint-aggregate">
           <div class="endpoint-aggregate__header">
             <div>
               <div class="endpoint-aggregate__title">节点聚合</div>
@@ -229,13 +237,19 @@ import Data from '@/store/modules/data'
 import { Endpoint } from '@/types/endpoints'
 import { buildMasqueConfig } from '@/plugins/masqueUtil'
 import HttpUtils from '@/plugins/httputil'
-import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
 import { push } from 'notivue'
+import { useDisplay } from 'vuetify'
 
 const EndpointVue = defineAsyncComponent(() => import('@/layouts/modals/Endpoint.vue'))
 const Stats = defineAsyncComponent(() => import('@/layouts/modals/Stats.vue'))
 const MasqueStatus = defineAsyncComponent(() => import('@/layouts/modals/MasqueStatus.vue'))
 const QrCode = defineAsyncComponent(() => import('@/layouts/modals/WgQrCode.vue'))
+const { smAndDown } = useDisplay()
+const showEndpointAggregate = ref(!smAndDown.value)
+watch(smAndDown, (mobile) => {
+  if (!mobile) showEndpointAggregate.value = true
+})
 
 const endpoints = computed((): Endpoint[] => {
   return <Endpoint[]> Data().endpoints
@@ -527,6 +541,11 @@ const copyMasque = async (item: any) => {
   border: 1px solid rgba(148, 163, 184, 0.18);
 }
 
+.endpoint-aggregate-toggle {
+  display: none;
+  margin-top: 16px;
+}
+
 .endpoint-aggregate__header {
   display: flex;
   gap: 12px;
@@ -623,6 +642,10 @@ const copyMasque = async (item: any) => {
   .endpoint-aggregate__mode {
     max-width: none;
     width: 100%;
+  }
+
+  .endpoint-aggregate-toggle {
+    display: inline-flex;
   }
 }
 

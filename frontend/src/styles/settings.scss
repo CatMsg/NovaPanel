@@ -87,6 +87,27 @@ body {
 
 .v-dialog > .v-overlay__content > .v-card {
   max-height: inherit;
+  color: var(--np-text-main);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), transparent 24%),
+    var(--np-surface-strong) !important;
+  border: 1px solid var(--np-border);
+  box-shadow: var(--np-shadow);
+}
+
+.v-dialog > .v-overlay__content > .v-card > :where(.v-card-title, .v-card-text, .v-card-actions) {
+  color: var(--np-text-main);
+  background: transparent;
+}
+
+.v-theme--dark.v-overlay__content > .v-card,
+.v-theme--dark .v-dialog > .v-overlay__content > .v-card,
+.v-theme--dark.v-card {
+  color: var(--np-text-main);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), transparent 22%),
+    rgba(11, 18, 31, 0.96) !important;
+  border-color: var(--np-border);
 }
 
 .v-table__wrapper {
@@ -597,9 +618,68 @@ body::after {
   opacity: 0.84;
 }
 
+.np-section-card {
+  padding: clamp(16px, 2.4vw, 24px);
+  border: 1px solid var(--np-border);
+  background: var(--np-surface-strong) !important;
+  box-shadow: var(--np-shadow-soft);
+}
+
+.np-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.np-section-heading h2 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+}
+
+.np-section-heading p {
+  margin: 4px 0 0;
+  color: var(--np-text-muted);
+  font-size: 13px;
+}
+
+.np-resource-card {
+  height: 100%;
+  border: 1px solid var(--np-border);
+  background: var(--np-surface) !important;
+  box-shadow: var(--np-shadow-soft);
+}
+
+.np-resource-card .v-card-text .v-row {
+  border-bottom: 1px solid var(--np-border);
+}
+
+.np-resource-card .v-card-text .v-row:last-child {
+  border-bottom: 0;
+}
+
+.np-resource-card .v-card-text .v-col:first-child {
+  color: var(--np-text-muted);
+}
+
+.np-resource-card .v-card-text .v-col:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 650;
+}
+
 .np-card-action {
   min-width: 40px !important;
   padding-inline: 10px !important;
+}
+
+@media (max-width: 599px) {
+  .np-section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 .np-card-action .v-btn__content {

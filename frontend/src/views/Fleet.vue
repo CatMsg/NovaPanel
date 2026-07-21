@@ -12,7 +12,7 @@
           </span>
         </div>
         <v-row class="fleet-hero__content" align="center">
-          <v-col cols="12" lg="8">
+          <v-col cols="12" lg="7">
             <div class="fleet-hero__title-row">
               <div class="fleet-hero__icon">
                 <v-icon icon="mdi-server-network" size="32" />
@@ -30,7 +30,7 @@
               <span>{{ remoteCount }} 台远端服务器</span>
             </div>
           </v-col>
-          <v-col cols="12" lg="4" class="fleet-hero__actions">
+          <v-col cols="12" lg="5" class="fleet-hero__actions">
             <v-btn
               variant="outlined"
               color="warning"
@@ -66,43 +66,43 @@
       </v-card>
 
       <v-row class="fleet-summary" dense>
-        <v-col cols="6" sm="3">
+        <v-col cols="6" class="fleet-summary__col">
           <v-card class="fleet-summary__card fleet-summary__card--one" rounded="xl" variant="flat">
             <div class="fleet-summary__label">服务器总数</div>
             <div class="fleet-summary__value">{{ initialLoading ? '—' : servers.length }}</div>
           </v-card>
         </v-col>
-        <v-col cols="6" sm="3">
+        <v-col cols="6" class="fleet-summary__col">
           <v-card class="fleet-summary__card fleet-summary__card--two" rounded="xl" variant="flat">
             <div class="fleet-summary__label">在线</div>
             <div class="fleet-summary__value">{{ initialLoading ? '—' : reachableCount }}</div>
           </v-card>
         </v-col>
-        <v-col cols="6" sm="3">
+        <v-col cols="6" class="fleet-summary__col">
           <v-card class="fleet-summary__card fleet-summary__card--three" rounded="xl" variant="flat">
             <div class="fleet-summary__label">核心运行</div>
             <div class="fleet-summary__value">{{ initialLoading ? '—' : runningCount }}</div>
           </v-card>
         </v-col>
-        <v-col cols="6" sm="3">
+        <v-col cols="6" class="fleet-summary__col">
           <v-card class="fleet-summary__card fleet-summary__card--four" rounded="xl" variant="flat">
             <div class="fleet-summary__label">异常</div>
             <div class="fleet-summary__value">{{ initialLoading ? '—' : errorCount }}</div>
           </v-card>
         </v-col>
-        <v-col cols="6" sm="3">
+        <v-col cols="6" class="fleet-summary__col">
           <v-card class="fleet-summary__card fleet-summary__card--five" rounded="xl" variant="flat">
             <div class="fleet-summary__label">在线用户</div>
             <div class="fleet-summary__value">{{ initialLoading ? '—' : onlineUsersTotal }}</div>
           </v-card>
         </v-col>
-        <v-col cols="6" sm="3">
+        <v-col cols="6" class="fleet-summary__col">
           <v-card class="fleet-summary__card fleet-summary__card--six" rounded="xl" variant="flat">
             <div class="fleet-summary__label">节点总数</div>
             <div class="fleet-summary__value">{{ initialLoading ? '—' : endpointTotal }}</div>
           </v-card>
         </v-col>
-        <v-col cols="6" sm="3">
+        <v-col cols="6" class="fleet-summary__col fleet-summary__col--last">
           <v-card class="fleet-summary__card fleet-summary__card--seven" rounded="xl" variant="flat">
             <div class="fleet-summary__label">配置差异</div>
             <div class="fleet-summary__value">{{ initialLoading ? '—' : driftServerCount }}</div>
@@ -687,10 +687,13 @@ onMounted(loadFleet)
 .fleet-hero__title { margin: 0; font-size: clamp(1.65rem, 3vw, 2.45rem); letter-spacing: -0.05em; }
 .fleet-hero__subtitle { margin: 6px 0 0; color: var(--np-text-muted); }
 .fleet-hero__meta { display: flex; gap: 10px; margin-top: 18px; color: var(--np-text-muted); font-size: 0.8rem; }
-.fleet-hero__actions { display: flex; justify-content: flex-end; gap: 10px; }
+.fleet-hero__actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: center; gap: 10px; }
+.fleet-hero__actions .v-btn { width: 100%; min-width: 0; }
 .fleet-batch-alert { margin-top: 16px; }
 
 .fleet-summary__card { padding: 16px 18px; min-height: 92px; }
+.fleet-summary { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.fleet-summary__col { flex: none; width: auto; max-width: none; padding: 0; }
 .fleet-summary__label { color: var(--np-text-muted); font-size: 0.78rem; }
 .fleet-summary__value { margin-top: 7px; font-size: 1.8rem; font-weight: 800; }
 .fleet-summary__card--one { border-top: 3px solid #38bdf8; }
@@ -755,5 +758,14 @@ onMounted(loadFleet)
   .fleet-hero__actions .v-btn { width: 100%; min-width: 0; }
   .fleet-hero__meta { flex-wrap: wrap; }
   .fleet-config-row { grid-template-columns: 1fr; padding: 14px 0; border-bottom: 1px solid var(--np-border); }
+}
+
+@media (max-width: 1279px) {
+  .fleet-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (max-width: 599px) {
+  .fleet-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fleet-summary__col--last { grid-column: 1 / -1; }
 }
 </style>

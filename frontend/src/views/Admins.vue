@@ -18,15 +18,27 @@
     :visible="tokenModal.visible"
     @close="closeTokenModal"
   />
-  <v-row>
-    <v-col cols="12" justify="center" align="center">
-      <v-btn color="primary" @click="showChangesModal('')" style="margin: 0 5px;">{{ $t('admin.changes') }}</v-btn>
-      <v-btn color="primary" @click="showTokenModal()">{{ $t('admin.api.token') }}</v-btn>
+  <PageHero
+    :eyebrow="$t('pages.admins')"
+    :title="$t('pages.admins')"
+    description="管理后台账号、查看操作记录并维护远程 API 访问令牌。"
+    icon="mdi-shield-account-outline"
+    :status="`${users.length} 个管理员`"
+  >
+    <template #meta>
+      <span>管理员 {{ users.length }}</span><span>•</span><span>操作审计</span><span>•</span><span>API 令牌</span>
+    </template>
+    <template #actions>
+      <v-btn color="primary" variant="tonal" @click="showChangesModal('')"><v-icon icon="mdi-history" start />{{ $t('admin.changes') }}</v-btn>
+      <v-btn color="primary" variant="outlined" @click="showTokenModal()"><v-icon icon="mdi-key-outline" start />{{ $t('admin.api.token') }}</v-btn>
+    </template>
+  </PageHero>
+  <v-row class="admins-grid">
+    <v-col v-if="users.length === 0" cols="12">
+      <EmptyState icon="mdi-account-alert-outline" title="暂无管理员数据" description="未读取到管理员账号，请刷新页面或检查数据库状态。" />
     </v-col>
-  </v-row>
-  <v-row>
-    <v-col cols="12" sm="4" md="3" lg="2" v-for="(item, index) in <any[]>users" :key="item.id">
-      <v-card rounded="xl" elevation="5" min-width="200" :title="item.username">
+    <v-col cols="12" sm="6" lg="4" v-for="item in <any[]>users" :key="item.id">
+      <v-card class="np-resource-card admin-card" rounded="xl" variant="flat" :title="item.username">
         <v-card-subtitle style="margin-top: -15px;">
           {{ $t('admin.lastLogin') }}
         </v-card-subtitle>
@@ -70,6 +82,8 @@
 import { i18n } from '@/locales'
 import HttpUtils from '@/plugins/httputil'
 import { Ref, defineAsyncComponent, ref, inject, onMounted } from 'vue'
+import PageHero from '@/components/PageHero.vue'
+import EmptyState from '@/components/EmptyState.vue'
 
 const AdminModal = defineAsyncComponent(() => import('@/layouts/modals/Admin.vue'))
 const ChangeModal = defineAsyncComponent(() => import('@/layouts/modals/Changes.vue'))
@@ -160,3 +174,9 @@ const closeTokenModal = () => {
   tokenModal.value.visible = false
 }
 </script>
+
+<style scoped>
+.admins-grid { margin-top: 0; }
+.admin-card { min-height: 100%; }
+.admin-card :deep(.v-card-actions) { padding: 10px 12px; gap: 6px; }
+</style>

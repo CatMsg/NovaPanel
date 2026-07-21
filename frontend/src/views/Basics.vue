@@ -1,12 +1,27 @@
 <template>
-  <v-row style="margin-bottom: 10px;">
-    <v-col cols="12" justify="center" align="center">
+  <div class="basics-page">
+    <PageHero
+      :eyebrow="$t('pages.basics')"
+      :title="$t('pages.basics')"
+      description="集中配置日志、时间同步与实验性能力，修改内容会在保存前保留变更状态。"
+      icon="mdi-tune-variant"
+      status="Sing-Box"
+    >
+      <template #meta>
+        <span>日志与时间</span><span>•</span><span>Clash / V2Ray API</span><span>•</span><span>缓存配置</span>
+      </template>
+      <template #actions>
       <v-btn variant="outlined" color="warning" @click="saveConfig" :loading="loading" :disabled="stateChange">
+        <v-icon icon="mdi-content-save-outline" start />
         {{ $t('actions.save') }}
       </v-btn>
-    </v-col>
-  </v-row>
-  <v-expansion-panels>
+      </template>
+    </PageHero>
+    <v-card class="np-section-card basics-panel" rounded="xl" variant="flat">
+      <div class="np-section-heading">
+        <div><h2>核心基础配置</h2><p>按功能展开配置，未展开的分组不会影响当前值。</p></div>
+      </div>
+      <v-expansion-panels variant="accordion">
     <v-expansion-panel :title="$t('basic.log.title')">
       <v-expansion-panel-text>
         <v-row>
@@ -226,7 +241,9 @@
         </v-row>
       </v-expansion-panel-text>
     </v-expansion-panel>
-  </v-expansion-panels>
+      </v-expansion-panels>
+    </v-card>
+  </div>
 </template>
 
 <script lang="ts" setup>
@@ -234,6 +251,7 @@ import Data from '@/store/modules/data'
 import { computed, defineAsyncComponent, ref, onBeforeMount } from 'vue'
 import { Config, Ntp } from '@/types/config'
 import { FindDiff } from '@/plugins/utils'
+import PageHero from '@/components/PageHero.vue'
 
 const Dial = defineAsyncComponent(() => import('@/components/Dial.vue'))
 
@@ -323,3 +341,13 @@ const origin = computed({
     }
 })
 </script>
+
+<style scoped>
+.basics-page { display: grid; gap: 0; }
+.basics-panel :deep(.v-expansion-panel) { border: 1px solid var(--np-border); background: var(--np-surface-muted); }
+.basics-panel :deep(.v-expansion-panel + .v-expansion-panel) { margin-top: 10px; }
+.basics-panel :deep(.v-expansion-panel-title) { min-height: 58px; font-weight: 700; }
+@media (max-width: 599px) {
+  .basics-panel { padding: 14px; }
+}
+</style>

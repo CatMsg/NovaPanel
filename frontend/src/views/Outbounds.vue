@@ -70,6 +70,15 @@
   </v-card>
 
   <v-row class="resource-grid">
+    <v-col v-if="outbounds.length === 0" cols="12">
+      <EmptyState
+        icon="mdi-cloud-upload-outline"
+        title="暂无出站"
+        description="添加单个出站或使用批量新增，随后可直接执行延迟测试。"
+        :action="$t('actions.add')"
+        @action="showModal(0)"
+      />
+    </v-col>
     <v-col cols="12" sm="6" md="4" lg="3" v-for="(item, index) in <any[]>outbounds" :key="item.tag">
       <v-card class="resource-card" rounded="xl" variant="flat" :title="item.tag">
         <v-card-subtitle style="margin-top: -15px;">
@@ -180,6 +189,7 @@ import Data from '@/store/modules/data'
 import HttpUtils from '@/plugins/httputil'
 import { Outbound } from '@/types/outbounds'
 import { computed, defineAsyncComponent, ref } from 'vue'
+import EmptyState from '@/components/EmptyState.vue'
 
 const OutboundVue = defineAsyncComponent(() => import('@/layouts/modals/Outbound.vue'))
 const OutboundBulk = defineAsyncComponent(() => import('@/layouts/modals/OutboundBulk.vue'))

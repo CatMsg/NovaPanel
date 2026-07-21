@@ -37,14 +37,23 @@
     @save="saveImportRulesets"
     @close="closeImportRulesets"
   />
-  <v-row>
-    <v-col cols="12" justify="center" align="center">
-      <v-btn color="primary" @click="showRuleModal(-1)" style="margin: 0 5px;">{{ $t('rule.add') }}</v-btn>
-      <v-btn color="primary" @click="showRulesetModal(-1)" style="margin: 0 5px;">{{ $t('ruleset.add') }}</v-btn>
+  <PageHero
+    :eyebrow="$t('pages.rules')"
+    :title="$t('pages.rules')"
+    description="统一编排默认出口、规则集和路由规则，支持拖动调整匹配顺序。"
+    icon="mdi-routes"
+    :status="`${rules.length} 条规则`"
+  >
+    <template #meta>
+      <span>规则集 {{ rulesets.length }}</span><span>•</span><span>路由规则 {{ rules.length }}</span><span>•</span><span>顺序优先匹配</span>
+    </template>
+    <template #actions>
+      <v-btn color="primary" variant="tonal" @click="showRuleModal(-1)"><v-icon icon="mdi-plus" start />{{ $t('rule.add') }}</v-btn>
+      <v-btn color="primary" variant="tonal" @click="showRulesetModal(-1)"><v-icon icon="mdi-playlist-plus" start />{{ $t('ruleset.add') }}</v-btn>
       <v-menu v-model="actionMenu" :close-on-content-click="false" location="bottom center">
         <template v-slot:activator="{ props }">
-          <v-btn v-bind="props" hide-details variant="text" icon>
-            <v-icon icon="mdi-tools" color="primary" />
+          <v-btn v-bind="props" hide-details variant="outlined">
+            <v-icon icon="mdi-tools" start />导入
           </v-btn>
         </template>
         <v-list density="compact" nav>
@@ -63,12 +72,12 @@
         </v-list>
       </v-menu>
       <v-btn variant="outlined" color="warning" @click="saveConfig" :loading="loading" :disabled="stateChange">
-        {{ $t('actions.save') }}
+        <v-icon icon="mdi-content-save-outline" start />{{ $t('actions.save') }}
       </v-btn>
-    </v-col>
-  </v-row>
-  <v-row>
-    <v-col class="v-card-subtitle" cols="12">{{ $t('basic.routing.title') }}</v-col>
+    </template>
+  </PageHero>
+  <v-row class="rules-section np-section-card">
+    <v-col class="rules-section__heading" cols="12"><h2>{{ $t('basic.routing.title') }}</h2><p>设置默认路由行为与系统接口识别策略。</p></v-col>
     <v-col cols="12">
       <v-row>
         <v-col cols="12" sm="6" md="3" lg="2">
@@ -88,10 +97,13 @@
       </v-row>
     </v-col>
   </v-row>
-  <v-row>
-    <v-col class="v-card-subtitle" cols="12">{{ $t('rule.ruleset') }}</v-col>
-    <v-col cols="12" sm="4" md="3" lg="2" v-for="(item, index) in <any[]>rulesets" :key="item.tag">
-      <v-card rounded="xl" elevation="5" min-width="200" :title="item.tag">
+  <v-row class="rules-section">
+    <v-col class="rules-section__heading" cols="12"><h2>{{ $t('rule.ruleset') }}</h2><p>远程或本地规则集，可被下方路由规则复用。</p></v-col>
+    <v-col v-if="rulesets.length === 0" cols="12">
+      <EmptyState icon="mdi-file-tree-outline" title="暂无规则集" description="添加规则集后，可在路由规则中按标签引用。" :action="$t('ruleset.add')" @action="showRulesetModal(-1)" />
+    </v-col>
+    <v-col cols="12" sm="6" md="4" lg="3" v-for="(item, index) in <any[]>rulesets" :key="item.tag">
+      <v-card class="np-resource-card" rounded="xl" variant="flat" :title="item.tag">
         <v-card-subtitle style="margin-top: -15px;">
           <v-row><v-col>{{ $t('ruleset.' + item.type) }}</v-col></v-row>
         </v-card-subtitle>
@@ -122,12 +134,15 @@
       </v-card>
     </v-col>
   </v-row>
-  <v-row>
-    <v-col class="v-card-subtitle" cols="12">{{ $t('pages.rules') }}</v-col>
-    <v-col cols="12" sm="4" md="3" lg="2" v-for="(item, index) in <any[]>rules"
+  <v-row class="rules-section">
+    <v-col class="rules-section__heading" cols="12"><h2>{{ $t('pages.rules') }}</h2><p>从上到下依次匹配；拖动卡片即可调整优先级。</p></v-col>
+    <v-col v-if="rules.length === 0" cols="12">
+      <EmptyState icon="mdi-routes" title="暂无路由规则" description="添加第一条规则后，流量会按列表顺序执行匹配。" :action="$t('rule.add')" @action="showRuleModal(-1)" />
+    </v-col>
+    <v-col cols="12" sm="6" md="4" lg="3" v-for="(item, index) in <any[]>rules"
         :key="item.id" :draggable="true"
         @dragstart="onDragStart(index)" @dragover.prevent @drop="onDrop(index)">
-      <v-card rounded="xl" elevation="5" min-width="200" :title="index+1">
+      <v-card class="np-resource-card" rounded="xl" variant="flat" :title="index+1">
         <v-card-subtitle style="margin-top: -15px;">
           <v-row><v-col>{{ item.type != undefined ? $t('rule.logical') + ' (' + item.mode + ')' : $t('rule.simple') }}</v-col></v-row>
         </v-card-subtitle>
@@ -167,6 +182,8 @@ import { computed, defineAsyncComponent, ref, onBeforeMount } from 'vue'
 import { Config } from '@/types/config'
 import { actionKeys, ruleset } from '@/types/rules'
 import { FindDiff } from '@/plugins/utils'
+import PageHero from '@/components/PageHero.vue'
+import EmptyState from '@/components/EmptyState.vue'
 
 const RuleVue = defineAsyncComponent(() => import('@/layouts/modals/Rule.vue'))
 const RulesetVue = defineAsyncComponent(() => import('@/layouts/modals/Ruleset.vue'))
@@ -318,3 +335,32 @@ function saveImportRulesets(items: any[]) {
   importRulesetsModal.value.visible = false
 }
 </script>
+
+<style scoped>
+.rules-section {
+  margin: 0 0 18px;
+  border: 1px solid var(--np-border);
+  border-radius: 26px;
+  background: var(--np-surface-muted);
+}
+
+.rules-section.np-section-card {
+  padding: 12px;
+}
+
+.rules-section__heading h2 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+}
+
+.rules-section__heading p {
+  margin: 5px 0 0;
+  color: var(--np-text-muted);
+  font-size: 13px;
+}
+
+@media (max-width: 599px) {
+  .rules-section { border-radius: 22px; }
+}
+</style>
