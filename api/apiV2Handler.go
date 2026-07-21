@@ -53,6 +53,8 @@ func (a *APIv2Handler) postHandler(c *gin.Context) {
 		a.ApiService.SaveAlertSettings(c)
 	case "alertTest":
 		a.ApiService.TestAlert(c)
+	case "repairPortIssue":
+		a.ApiService.RepairPortIssue(c)
 	case "restartSb":
 		a.ApiService.RestartSb(c)
 	case "linkConvert":

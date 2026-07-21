@@ -58,6 +58,8 @@ func (a *APIHandler) postHandler(c *gin.Context) {
 		a.ApiService.ValidateDb(c)
 	case "reconcilePorts":
 		a.ApiService.ReconcilePorts(c)
+	case "repairPortIssue":
+		a.ApiService.RepairPortIssue(c)
 	case "addToken":
 		a.ApiService.AddToken(c)
 		a.apiv2.ReloadTokens()

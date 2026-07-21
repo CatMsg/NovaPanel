@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/CatMsg/NovaPanel/config"
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
 	"github.com/CatMsg/NovaPanel/util/common"
@@ -68,11 +69,37 @@ type FleetServerView struct {
 	PortBackend     string                 `json:"portBackend,omitempty"`
 	Listeners       int                    `json:"listeners,omitempty"`
 	NatRules        int                    `json:"natRules,omitempty"`
+	Configuration   *FleetConfigProfile    `json:"configuration,omitempty"`
+	Drift           []FleetConfigDrift     `json:"drift,omitempty"`
+	DriftCount      int                    `json:"driftCount,omitempty"`
 }
 
 type FleetSnapshot struct {
-	Servers   []FleetServerView `json:"servers"`
-	CheckedAt time.Time         `json:"checkedAt"`
+	Servers    []FleetServerView `json:"servers"`
+	CheckedAt  time.Time         `json:"checkedAt"`
+	BaselineID string            `json:"baselineId"`
+}
+
+type FleetConfigProfile struct {
+	AppVersion  string `json:"appVersion"`
+	WebPort     int    `json:"webPort"`
+	WebPath     string `json:"webPath"`
+	WebTLS      string `json:"webTls"`
+	WebDomain   string `json:"webDomain,omitempty"`
+	SubPort     int    `json:"subPort"`
+	SubPath     string `json:"subPath"`
+	SubTLS      string `json:"subTls"`
+	SubDomain   string `json:"subDomain,omitempty"`
+	SubMode     string `json:"subMode"`
+	SubEncode   bool   `json:"subEncode"`
+	SubShowInfo bool   `json:"subShowInfo"`
+}
+
+type FleetConfigDrift struct {
+	Field    string      `json:"field"`
+	Label    string      `json:"label"`
+	Expected interface{} `json:"expected"`
+	Actual   interface{} `json:"actual"`
 }
 
 type fleetAPIResponse struct {
@@ -94,11 +121,12 @@ func (s *FleetService) GetFleetStatus() map[string]interface{} {
 	serverService := &ServerService{}
 	status := serverService.GetStatus("sys,sbd,db")
 	result := map[string]interface{}{
-		"system":   (*status)["sys"],
-		"core":     (*status)["sbd"],
-		"database": (*status)["db"],
-		"publicIp": serverService.GetPublicIP(),
-		"ports":    serverService.GetPortStatus(),
+		"system":        (*status)["sys"],
+		"core":          (*status)["sbd"],
+		"database":      (*status)["db"],
+		"publicIp":      serverService.GetPublicIP(),
+		"ports":         serverService.GetPortStatus(),
+		"configuration": s.getFleetConfigProfile(),
 	}
 
 	online, err := (&StatsService{}).GetOnlines()
@@ -145,8 +173,9 @@ func (s *FleetService) GetFleet() (*FleetSnapshot, error) {
 	}
 	waitGroup.Wait()
 	servers = append(servers, remoteViews...)
+	applyFleetConfigurationDrift(servers)
 
-	return &FleetSnapshot{Servers: servers, CheckedAt: time.Now()}, nil
+	return &FleetSnapshot{Servers: servers, CheckedAt: time.Now(), BaselineID: "local"}, nil
 }
 
 func (s *FleetService) GetFleetServer(id string) (*FleetServerView, error) {
@@ -162,6 +191,9 @@ func (s *FleetService) GetFleetServer(id string) (*FleetServerView, error) {
 	for _, config := range configs {
 		if config.ID == id {
 			view := s.fetchFleetServer(config)
+			pair := []FleetServerView{s.localFleetView(), view}
+			applyFleetConfigurationDrift(pair)
+			view = pair[1]
 			return &view, nil
 		}
 	}
@@ -423,6 +455,103 @@ func (s *FleetService) applyFleetStatus(view *FleetServerView, payload map[strin
 		view.PortBackend, _ = ports["backend"].(string)
 		view.Listeners = fleetSliceLength(ports["listeners"])
 		view.NatRules = fleetSliceLength(ports["nat_ipv4"]) + fleetSliceLength(ports["nat_ipv6"])
+	}
+	view.Configuration = fleetConfigProfileFromValue(payload["configuration"])
+}
+
+func (s *FleetService) getFleetConfigProfile() *FleetConfigProfile {
+	profile := &FleetConfigProfile{AppVersion: config.GetVersion()}
+	profile.WebPort, _ = s.GetPort()
+	profile.WebPath, _ = s.GetWebPath()
+	profile.WebDomain, _ = s.GetWebDomain()
+	webCert, _ := s.GetCertFile()
+	webKey, _ := s.GetKeyFile()
+	profile.WebTLS = fleetTLSState(webCert, webKey)
+	profile.SubPort, _ = s.GetSubPort()
+	profile.SubPath, _ = s.GetSubPath()
+	profile.SubDomain, _ = s.GetSubDomain()
+	subCert, _ := s.GetSubCertFile()
+	subKey, _ := s.GetSubKeyFile()
+	profile.SubTLS = fleetTLSState(subCert, subKey)
+	profile.SubMode, _ = s.GetSubMode()
+	profile.SubEncode, _ = s.GetSubEncode()
+	profile.SubShowInfo, _ = s.GetSubShowInfo()
+	return profile
+}
+
+func fleetTLSState(certFile, keyFile string) string {
+	certSet := strings.TrimSpace(certFile) != ""
+	keySet := strings.TrimSpace(keyFile) != ""
+	if certSet && keySet {
+		return "enabled"
+	}
+	if certSet || keySet {
+		return "partial"
+	}
+	return "disabled"
+}
+
+func fleetConfigProfileFromValue(value interface{}) *FleetConfigProfile {
+	if value == nil {
+		return nil
+	}
+	if profile, ok := value.(*FleetConfigProfile); ok {
+		copy := *profile
+		return &copy
+	}
+	if profile, ok := value.(FleetConfigProfile); ok {
+		copy := profile
+		return &copy
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var profile FleetConfigProfile
+	if err := json.Unmarshal(raw, &profile); err != nil {
+		return nil
+	}
+	return &profile
+}
+
+func applyFleetConfigurationDrift(servers []FleetServerView) {
+	if len(servers) == 0 || servers[0].Configuration == nil {
+		return
+	}
+	baseline := servers[0].Configuration
+	for index := range servers {
+		servers[index].Drift = nil
+		servers[index].DriftCount = 0
+		if index == 0 || !servers[index].Reachable || servers[index].LastKnown || servers[index].Configuration == nil {
+			continue
+		}
+		actual := servers[index].Configuration
+		comparisons := []struct {
+			field    string
+			label    string
+			expected interface{}
+			actual   interface{}
+		}{
+			{"appVersion", "NovaPanel 版本", baseline.AppVersion, actual.AppVersion},
+			{"webPort", "面板端口", baseline.WebPort, actual.WebPort},
+			{"webPath", "面板路径", baseline.WebPath, actual.WebPath},
+			{"webTls", "面板 TLS", baseline.WebTLS, actual.WebTLS},
+			{"subPort", "订阅端口", baseline.SubPort, actual.SubPort},
+			{"subPath", "订阅路径", baseline.SubPath, actual.SubPath},
+			{"subTls", "订阅 TLS", baseline.SubTLS, actual.SubTLS},
+			{"subEncode", "订阅 Base64", baseline.SubEncode, actual.SubEncode},
+			{"subShowInfo", "订阅用户信息", baseline.SubShowInfo, actual.SubShowInfo},
+		}
+		for _, comparison := range comparisons {
+			if fmt.Sprint(comparison.expected) == fmt.Sprint(comparison.actual) {
+				continue
+			}
+			servers[index].Drift = append(servers[index].Drift, FleetConfigDrift{
+				Field: comparison.field, Label: comparison.label,
+				Expected: comparison.expected, Actual: comparison.actual,
+			})
+		}
+		servers[index].DriftCount = len(servers[index].Drift)
 	}
 }
 

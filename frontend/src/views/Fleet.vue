@@ -102,6 +102,12 @@
             <div class="fleet-summary__value">{{ initialLoading ? '—' : endpointTotal }}</div>
           </v-card>
         </v-col>
+        <v-col cols="6" sm="3">
+          <v-card class="fleet-summary__card fleet-summary__card--seven" rounded="xl" variant="flat">
+            <div class="fleet-summary__label">配置差异</div>
+            <div class="fleet-summary__value">{{ initialLoading ? '—' : driftServerCount }}</div>
+          </v-card>
+        </v-col>
       </v-row>
 
       <v-alert v-if="!initialLoading && servers.length === 1" type="info" variant="tonal" rounded="xl" class="fleet-empty">
@@ -121,9 +127,12 @@
                   <div class="fleet-card__url">{{ server.url }}</div>
                 </div>
               </div>
-              <v-chip size="small" :color="server.reachable ? 'success' : server.enabled ? 'error' : 'secondary'" variant="flat">
-                {{ server.reachable ? '在线' : server.lastKnown ? '上次状态' : server.enabled ? '失联' : '已停用' }}
-              </v-chip>
+              <div class="fleet-card__chips">
+                <v-chip v-if="server.driftCount" size="small" color="warning" variant="tonal">{{ server.driftCount }} 项差异</v-chip>
+                <v-chip size="small" :color="server.reachable ? 'success' : server.enabled ? 'error' : 'secondary'" variant="flat">
+                  {{ server.reachable ? '在线' : server.lastKnown ? '上次状态' : server.enabled ? '失联' : '已停用' }}
+                </v-chip>
+              </div>
             </div>
 
             <v-divider />
@@ -262,6 +271,31 @@
             <div><span>入站 / 出站</span><strong>{{ selectedServer.Inbounds }} / {{ selectedServer.Outbounds }}</strong></div>
             <div><span>节点 / MASQUE</span><strong>{{ selectedServer.Endpoints }} / {{ selectedServer.MasqueRunning }} / {{ selectedServer.MasqueTotal }}</strong></div>
           </div>
+          <section v-if="selectedServer.configuration" class="fleet-config-compare">
+            <div class="fleet-detail__log-head">
+              <span>配置快照</span>
+              <v-chip size="small" :color="selectedServer.driftCount ? 'warning' : 'success'" variant="tonal">
+                {{ selectedServer.id === 'local' ? '对比基线' : selectedServer.driftCount ? `${selectedServer.driftCount} 项差异` : '与本机一致' }}
+              </v-chip>
+            </div>
+            <div class="fleet-config-snapshot">
+              <div><span>面板</span><strong>{{ selectedServer.configuration.webPort }} · {{ selectedServer.configuration.webPath }} · {{ tlsLabel(selectedServer.configuration.webTls) }}</strong></div>
+              <div><span>订阅</span><strong>{{ selectedServer.configuration.subPort }} · {{ selectedServer.configuration.subPath }} · {{ tlsLabel(selectedServer.configuration.subTls) }}</strong></div>
+              <div><span>面板域名</span><strong>{{ selectedServer.configuration.webDomain || '未设置' }}</strong></div>
+              <div><span>订阅域名</span><strong>{{ selectedServer.configuration.subDomain || '未设置' }}</strong></div>
+              <div><span>订阅角色</span><strong>{{ selectedServer.configuration.subMode === 'master' ? '主模式' : '从模式' }}</strong></div>
+              <div><span>订阅开关</span><strong>Base64 {{ boolLabel(selectedServer.configuration.subEncode) }} · 用户信息 {{ boolLabel(selectedServer.configuration.subShowInfo) }}</strong></div>
+            </div>
+            <div v-if="selectedServer.drift?.length" class="fleet-drift-list">
+              <div v-for="item in selectedServer.drift" :key="item.field" class="fleet-drift-item">
+                <span>{{ item.label }}</span>
+                <strong>{{ formatDriftValue(item.actual) }}</strong>
+                <v-icon icon="mdi-arrow-left" size="16" />
+                <small>基线 {{ formatDriftValue(item.expected) }}</small>
+              </div>
+            </div>
+          </section>
+          <v-alert v-else-if="selectedServer.reachable" type="info" variant="tonal" class="mt-4">远端版本尚未提供配置对比数据，更新后即可参与比较。</v-alert>
           <v-alert v-if="selectedServer.error" type="error" variant="tonal" class="mt-4">{{ selectedServer.error }}</v-alert>
           <div class="fleet-detail__log-head">
             <span>最近日志</span>
@@ -318,7 +352,27 @@ type FleetServer = {
   portBackend?: string
   listeners: number
   natRules: number
+  configuration?: FleetConfigProfile
+  drift?: FleetConfigDrift[]
+  driftCount: number
 }
+
+type FleetConfigProfile = {
+  appVersion: string
+  webPort: number
+  webPath: string
+  webTls: string
+  webDomain?: string
+  subPort: number
+  subPath: string
+  subTls: string
+  subDomain?: string
+  subMode: string
+  subEncode: boolean
+  subShowInfo: boolean
+}
+
+type FleetConfigDrift = { field: string; label: string; expected: unknown; actual: unknown }
 
 type FleetConfig = {
   id: string
@@ -364,6 +418,9 @@ const normalizeServer = (server: any): FleetServer => ({
   MasqueRunning: server.masqueRunning ?? server.MasqueRunning ?? 0,
   listeners: server.listeners ?? 0,
   natRules: server.natRules ?? 0,
+  configuration: server.configuration,
+  drift: Array.isArray(server.drift) ? server.drift : [],
+  driftCount: server.driftCount ?? 0,
 })
 
 const remoteServers = computed(() => servers.value.filter((server) => server.id !== 'local'))
@@ -373,6 +430,7 @@ const errorCount = computed(() => servers.value.filter((server) => server.error 
 const remoteCount = computed(() => remoteServers.value.length)
 const onlineUsersTotal = computed(() => servers.value.reduce((total, server) => total + server.OnlineUsers, 0))
 const endpointTotal = computed(() => servers.value.reduce((total, server) => total + server.Endpoints, 0))
+const driftServerCount = computed(() => servers.value.filter((server) => server.driftCount > 0).length)
 const initialLoading = computed(() => loading.value && servers.value.length === 0)
 const formattedCheckedAt = computed(() => {
   if (!checkedAt.value) return '-'
@@ -388,6 +446,13 @@ const formatUptime = (seconds: number) => {
   if (days > 0) return `${days}天 ${hours}时`
   if (hours > 0) return `${hours}时 ${minutes}分`
   return `${Math.max(minutes, 1)}分`
+}
+
+const tlsLabel = (state: string) => ({ enabled: 'TLS 已启用', disabled: 'TLS 未启用', partial: 'TLS 配置不完整' } as Record<string, string>)[state] ?? state
+const boolLabel = (value: boolean) => value ? '开' : '关'
+const formatDriftValue = (value: unknown) => {
+  if (typeof value === 'boolean') return boolLabel(value)
+  return String(value ?? '-')
 }
 
 const loadFleet = async () => {
@@ -634,11 +699,13 @@ onMounted(loadFleet)
 .fleet-summary__card--four { border-top: 3px solid #fb7185; }
 .fleet-summary__card--five { border-top: 3px solid #f59e0b; }
 .fleet-summary__card--six { border-top: 3px solid #14b8a6; }
+.fleet-summary__card--seven { border-top: 3px solid #f97316; }
 .fleet-empty { border: 1px solid var(--np-border); }
 
 .fleet-card { padding: 18px; height: 100%; }
 .fleet-card__header, .fleet-card__identity, .fleet-card__footer { display: flex; align-items: center; }
 .fleet-card__header { justify-content: space-between; gap: 12px; }
+.fleet-card__chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .fleet-card__identity { gap: 12px; min-width: 0; }
 .fleet-card__icon { width: 44px; height: 44px; flex: 0 0 auto; }
 .fleet-card__icon.is-online { color: #22c55e; background: rgba(34, 197, 94, 0.12); }
@@ -663,9 +730,18 @@ onMounted(loadFleet)
 .fleet-detail__grid strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fleet-detail__log-head { display: flex; align-items: center; justify-content: space-between; margin-top: 18px; }
 .fleet-detail__logs { max-height: 260px; margin: 8px 0 0; padding: 14px; overflow: auto; border: 1px solid var(--np-border); border-radius: 14px; background: var(--np-surface-muted); color: var(--np-text); white-space: pre-wrap; word-break: break-word; font: 0.76rem/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.fleet-config-compare { margin-top: 18px; }
+.fleet-config-snapshot { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 8px; }
+.fleet-config-snapshot > div { display: grid; gap: 4px; padding: 11px 12px; border: 1px solid var(--np-border); border-radius: 14px; background: var(--np-surface-muted); }
+.fleet-config-snapshot span, .fleet-drift-item span, .fleet-drift-item small { color: var(--np-text-muted); font-size: 0.75rem; }
+.fleet-config-snapshot strong { overflow-wrap: anywhere; font-size: 0.86rem; }
+.fleet-drift-list { display: grid; gap: 8px; margin-top: 10px; }
+.fleet-drift-item { display: grid; grid-template-columns: minmax(110px, .8fr) minmax(90px, 1fr) auto minmax(120px, 1fr); align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid rgba(249, 115, 22, .22); border-radius: 13px; background: rgba(249, 115, 22, .07); }
 
 @media (max-width: 600px) {
-  .fleet-detail__grid { grid-template-columns: 1fr; }
+  .fleet-detail__grid, .fleet-config-snapshot { grid-template-columns: 1fr; }
+  .fleet-drift-item { grid-template-columns: 1fr auto; }
+  .fleet-drift-item span, .fleet-drift-item strong { grid-column: 1 / -1; }
   .fleet-card__actions .v-btn { flex: 1 1 auto; }
 }
 

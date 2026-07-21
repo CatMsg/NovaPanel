@@ -9,7 +9,7 @@ protocols_csv="${5:-tcp,udp}"
 backend_override="${HY2_FORWARD_BACKEND:-auto}"
 
 if [[ -z "${action}" ]]; then
-  echo "usage: $0 <apply|remove|purge> [tag] [listen_port] [ports_csv] [protocols_csv]" >&2
+  echo "usage: $0 <apply|remove|purge|remove-chain> [tag_or_chain] [listen_port_or_family] [ports_csv] [protocols_csv]" >&2
   exit 1
 fi
 
@@ -21,6 +21,20 @@ case "${action}" in
     fi
     ;;
   purge)
+    ;;
+  remove-chain)
+    if [[ ! "${tag}" =~ ^NPHY2_[a-f0-9]{12}$ ]]; then
+      echo "invalid NovaPanel chain: ${tag}" >&2
+      exit 1
+    fi
+    case "${listen_port}" in
+      ipv4|ipv6|ip|ip6)
+        ;;
+      *)
+        echo "invalid address family: ${listen_port}" >&2
+        exit 1
+        ;;
+    esac
     ;;
   *)
     echo "invalid action: ${action}" >&2
@@ -73,7 +87,9 @@ fi
 chain=""
 begin_marker="# NOVAPANEL HY2 BEGIN"
 end_marker="# NOVAPANEL HY2 END"
-if [[ "${action}" != "purge" ]]; then
+if [[ "${action}" == "remove-chain" ]]; then
+  chain="${tag}"
+elif [[ "${action}" != "purge" ]]; then
   chain="NPHY2_$(printf '%s' "${tag}" | sha256sum | awk '{print substr($1, 1, 12)}')"
   begin_marker="# NOVAPANEL HY2 BEGIN ${chain}"
   end_marker="# NOVAPANEL HY2 END ${chain}"
@@ -426,6 +442,22 @@ purge_iptables_bin() {
   )
 }
 
+remove_iptables_chain() {
+  local bin="$1"
+  local protocol
+
+  if ! has_cmd "${bin}"; then
+    return 0
+  fi
+  for protocol in tcp udp; do
+    while "${bin}" -t nat -C PREROUTING -p "${protocol}" -j "${chain}" >/dev/null 2>&1; do
+      "${bin}" -t nat -D PREROUTING -p "${protocol}" -j "${chain}" || true
+    done
+  done
+  "${bin}" -t nat -F "${chain}" 2>/dev/null || true
+  "${bin}" -t nat -X "${chain}" 2>/dev/null || true
+}
+
 apply_iptables() {
   local bin="$1"
   local normalized_ports="${2:-}"
@@ -599,6 +631,20 @@ if [[ "${action}" == "purge" ]]; then
   purge_nftables_family ip6
   purge_iptables_bin iptables
   purge_iptables_bin ip6tables
+  exit 0
+fi
+
+if [[ "${action}" == "remove-chain" ]]; then
+  case "${listen_port}" in
+    ipv4|ip)
+      remove_iptables_chain iptables
+      remove_nftables_family ip
+      ;;
+    ipv6|ip6)
+      remove_iptables_chain ip6tables
+      remove_nftables_family ip6
+      ;;
+  esac
   exit 0
 fi
 

@@ -340,6 +340,11 @@ func (a *ApiService) ReconcilePorts(c *gin.Context) {
 	jsonMsg(c, "reconcilePorts", err)
 }
 
+func (a *ApiService) RepairPortIssue(c *gin.Context) {
+	err := service.RepairPortDriftIssue(c.Request.FormValue("issueId"))
+	jsonMsg(c, "repairPortIssue", err)
+}
+
 func (a *ApiService) GetOnlines(c *gin.Context) {
 	onlines, err := a.StatsService.GetOnlines()
 	jsonObj(c, onlines, err)

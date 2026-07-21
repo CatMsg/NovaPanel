@@ -3,6 +3,7 @@ package service
 import (
 	"crypto/sha256"
 	"fmt"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -23,16 +24,19 @@ type portDriftRule struct {
 }
 
 type PortDriftIssue struct {
-	Type     string `json:"type"`
-	Severity string `json:"severity"`
-	Family   string `json:"family,omitempty"`
-	Protocol string `json:"protocol,omitempty"`
-	Port     string `json:"port,omitempty"`
-	ToPorts  string `json:"to_ports,omitempty"`
-	Chain    string `json:"chain,omitempty"`
-	OwnerTag string `json:"owner_tag,omitempty"`
-	Count    int    `json:"count,omitempty"`
-	Detail   string `json:"detail"`
+	ID         string `json:"id"`
+	Type       string `json:"type"`
+	Severity   string `json:"severity"`
+	Scope      string `json:"scope,omitempty"`
+	Family     string `json:"family,omitempty"`
+	Protocol   string `json:"protocol,omitempty"`
+	Port       string `json:"port,omitempty"`
+	ToPorts    string `json:"to_ports,omitempty"`
+	Chain      string `json:"chain,omitempty"`
+	OwnerTag   string `json:"owner_tag,omitempty"`
+	Count      int    `json:"count,omitempty"`
+	Detail     string `json:"detail"`
+	Repairable bool   `json:"repairable"`
 }
 
 type PortDriftReport struct {
@@ -50,11 +54,11 @@ type PortDriftReport struct {
 
 func detectPortDrift(natIPv4, natIPv6 []PortNatEntry, backend string, collectionErrors []string) PortDriftReport {
 	if runtime.GOOS != "linux" {
-		return PortDriftReport{
+		return finalizePortDriftReport(PortDriftReport{
 			Status:    "unsupported",
 			CheckedAt: time.Now().Format(time.RFC3339),
 			Issues:    []PortDriftIssue{{Type: "unsupported", Severity: "info", Detail: "当前系统不是 Linux，跳过防火墙规则漂移检测"}},
-		}
+		})
 	}
 	desired, desiredErrors := loadDesiredPortDriftRules()
 	allErrors := append(append([]string(nil), collectionErrors...), desiredErrors...)
@@ -74,7 +78,7 @@ func detectPortDrift(natIPv4, natIPv6 []PortNatEntry, backend string, collection
 		report.Status = "unknown"
 	}
 	report.CheckedAt = time.Now().Format(time.RFC3339)
-	return report
+	return finalizePortDriftReport(report)
 }
 
 func buildPortDriftReport(desired []portDriftRule, natIPv4, natIPv6 []PortNatEntry, backend string) PortDriftReport {
@@ -92,6 +96,7 @@ func buildPortDriftReport(desired []portDriftRule, natIPv4, natIPv6 []PortNatEnt
 			report.Issues = append(report.Issues, PortDriftIssue{
 				Type:     "desired-duplicate",
 				Severity: "error",
+				Scope:    rule.scope,
 				Protocol: rule.protocol,
 				Port:     rule.dport,
 				ToPorts:  rule.toPorts,
@@ -138,6 +143,7 @@ func buildPortDriftReport(desired []portDriftRule, natIPv4, natIPv6 []PortNatEnt
 			report.Issues = append(report.Issues, PortDriftIssue{
 				Type:     "missing",
 				Severity: "error",
+				Scope:    rule.scope,
 				Protocol: rule.protocol,
 				Port:     rule.dport,
 				ToPorts:  rule.toPorts,
@@ -155,6 +161,7 @@ func buildPortDriftReport(desired []portDriftRule, natIPv4, natIPv6 []PortNatEnt
 			report.Issues = append(report.Issues, PortDriftIssue{
 				Type:     "duplicate",
 				Severity: "error",
+				Scope:    rule.scope,
 				Family:   family,
 				Protocol: rule.protocol,
 				Port:     rule.dport,
@@ -191,9 +198,9 @@ func buildPortDriftReport(desired []portDriftRule, natIPv4, natIPv6 []PortNatEnt
 
 	// A direct REDIRECT outside a NovaPanel chain is usually a stale rule left
 	// by an older implementation. Only report it when it targets a managed port.
-	managedPorts := make(map[string]struct{}, len(desired))
+	managedPorts := make(map[string]portDriftRule, len(desired))
 	for _, rule := range desired {
-		managedPorts[rule.protocol+"|"+rule.dport] = struct{}{}
+		managedPorts[rule.protocol+"|"+rule.dport] = rule
 	}
 	for _, entry := range actualRules {
 		if strings.HasPrefix(entry.Chain, "NPHY2_") || !strings.EqualFold(entry.Target, "REDIRECT") {
@@ -202,7 +209,8 @@ func buildPortDriftReport(desired []portDriftRule, natIPv4, natIPv6 []PortNatEnt
 		if _, expected := desiredKeys[portDriftActualComparisonKey(entry, backend)]; expected {
 			continue
 		}
-		if _, managed := managedPorts[entry.Protocol+"|"+entry.DPort]; !managed {
+		rule, managed := managedPorts[entry.Protocol+"|"+entry.DPort]
+		if !managed {
 			continue
 		}
 		report.UnexpectedCount++
@@ -214,11 +222,13 @@ func buildPortDriftReport(desired []portDriftRule, natIPv4, natIPv6 []PortNatEnt
 		report.Issues = append(report.Issues, PortDriftIssue{
 			Type:     "unexpected",
 			Severity: "warning",
+			Scope:    rule.scope,
 			Family:   entry.Family,
 			Protocol: entry.Protocol,
 			Port:     entry.DPort,
 			ToPorts:  entry.ToPorts,
 			Chain:    entry.Chain,
+			OwnerTag: rule.ownerTag,
 			Detail:   detail,
 		})
 	}
@@ -232,7 +242,133 @@ func buildPortDriftReport(desired []portDriftRule, natIPv4, natIPv6 []PortNatEnt
 		}
 		return report.Issues[i].Type < report.Issues[j].Type
 	})
+	return finalizePortDriftReport(report)
+}
+
+func finalizePortDriftReport(report PortDriftReport) PortDriftReport {
+	for index := range report.Issues {
+		issue := &report.Issues[index]
+		issue.Repairable = issue.Type == "missing" || issue.Type == "duplicate" || issue.Type == "unexpected" || issue.Type == "orphan"
+		sum := sha256.Sum256([]byte(strings.Join([]string{
+			issue.Type, issue.Scope, issue.Family, issue.Protocol, issue.Port,
+			issue.ToPorts, issue.Chain, issue.OwnerTag,
+		}, "|")))
+		issue.ID = fmt.Sprintf("%x", sum[:8])
+	}
+	report.IssueCount = len(report.Issues)
 	return report
+}
+
+var managedPortChainPattern = regexp.MustCompile(`^NPHY2_[a-f0-9]{12}$`)
+
+// RepairPortDriftIssue rechecks the requested issue before changing firewall
+// state. Desired-rule issues reapply only their owner; orphan cleanup can only
+// remove a chain created by NovaPanel.
+func RepairPortDriftIssue(issueID string) error {
+	if runtime.GOOS != "linux" {
+		return fmt.Errorf("当前系统不支持端口规则修复")
+	}
+	issueID = strings.TrimSpace(issueID)
+	if issueID == "" {
+		return fmt.Errorf("缺少端口问题 ID")
+	}
+
+	clearServerStatusCache("ports", "sys")
+	natIPv4, natIPv6, collectionErrors := collectNatEntries()
+	report := detectPortDrift(natIPv4, natIPv6, detectFirewallBackend(), collectionErrors)
+	var issue *PortDriftIssue
+	for index := range report.Issues {
+		if report.Issues[index].ID == issueID {
+			issue = &report.Issues[index]
+			break
+		}
+	}
+	if issue == nil {
+		return fmt.Errorf("端口问题已不存在，请刷新诊断结果")
+	}
+	if !issue.Repairable {
+		return fmt.Errorf("该问题不能自动修复: %s", issue.Detail)
+	}
+
+	if issue.Type == "orphan" {
+		if !managedPortChainPattern.MatchString(issue.Chain) {
+			return fmt.Errorf("拒绝删除非 NovaPanel 链: %s", issue.Chain)
+		}
+		if err := removeManagedOrphanChain(issue.Chain, issue.Family); err != nil {
+			return err
+		}
+	} else {
+		desired, loadErrors := loadDesiredPortDriftRules()
+		if len(loadErrors) > 0 {
+			return fmt.Errorf("读取期望端口规则失败: %s", strings.Join(loadErrors, "; "))
+		}
+		spec, err := managedForwardSpecForDriftIssue(desired, *issue)
+		if err != nil {
+			return err
+		}
+		if err := applyManagedForwardSpec(spec); err != nil {
+			return err
+		}
+	}
+
+	clearServerStatusCache("ports", "sys")
+	natIPv4, natIPv6, collectionErrors = collectNatEntries()
+	refreshed := detectPortDrift(natIPv4, natIPv6, detectFirewallBackend(), collectionErrors)
+	for _, current := range refreshed.Issues {
+		if current.ID == issueID {
+			return fmt.Errorf("单项修复后问题仍然存在，请使用全部重建: %s", current.Detail)
+		}
+	}
+	return nil
+}
+
+func managedForwardSpecForDriftIssue(desired []portDriftRule, issue PortDriftIssue) (managedForwardSpec, error) {
+	ownerTag := strings.TrimSpace(issue.OwnerTag)
+	if ownerTag == "" {
+		return managedForwardSpec{}, fmt.Errorf("端口问题缺少规则归属")
+	}
+	spec := managedForwardSpec{tag: ownerTag, active: true}
+	for _, rule := range desired {
+		if rule.ownerTag != ownerTag || (issue.Scope != "" && rule.scope != issue.Scope) {
+			continue
+		}
+		port, err := strconv.Atoi(rule.dport)
+		if err != nil {
+			return managedForwardSpec{}, fmt.Errorf("无效期望端口 %q: %w", rule.dport, err)
+		}
+		toPort, err := strconv.Atoi(rule.toPorts)
+		if err != nil {
+			return managedForwardSpec{}, fmt.Errorf("无效目标端口 %q: %w", rule.toPorts, err)
+		}
+		if spec.listenPort != 0 && spec.listenPort != toPort {
+			return managedForwardSpec{}, fmt.Errorf("规则归属 %s 存在多个目标端口", ownerTag)
+		}
+		spec.listenPort = toPort
+		spec.ports = append(spec.ports, port)
+		spec.protocols = append(spec.protocols, rule.protocol)
+	}
+	spec.removeProtocols = append([]string(nil), spec.protocols...)
+	spec = spec.normalized()
+	if !spec.active {
+		return managedForwardSpec{}, fmt.Errorf("未找到端口问题对应的期望规则")
+	}
+	return spec, nil
+}
+
+func removeManagedOrphanChain(chain, family string) error {
+	if !managedPortChainPattern.MatchString(chain) {
+		return fmt.Errorf("无效 NovaPanel 链: %s", chain)
+	}
+	if family != "ipv4" && family != "ipv6" && family != "ip" && family != "ip6" {
+		return fmt.Errorf("无效地址族: %s", family)
+	}
+	portForwardingMu.Lock()
+	defer portForwardingMu.Unlock()
+	_, err := runCommandOutput(externalCommandTimeout, "bash", hy2ForwardScript, "remove-chain", chain, family)
+	if err != nil {
+		return formatExternalCommandError("remove orphan port chain failed", err)
+	}
+	return nil
 }
 
 func portDriftDesiredRuleKey(rule portDriftRule, backend string) string {

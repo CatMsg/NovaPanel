@@ -26,8 +26,8 @@ func TestBuildPortDriftReportHealthy(t *testing.T) {
 
 func TestBuildPortDriftReportDetectsMissingDuplicateAndOrphan(t *testing.T) {
 	desired := []portDriftRule{
-		{chain: managedPortChain("inbound-a"), protocol: "tcp", dport: "443", toPorts: "443", ownerTag: "inbound-a"},
-		{chain: managedPortChain("inbound-b"), protocol: "udp", dport: "8443", toPorts: "8443", ownerTag: "inbound-b"},
+		{chain: managedPortChain("inbound-a"), protocol: "tcp", dport: "443", toPorts: "443", scope: managedPortScopeInbound, ownerTag: "inbound-a"},
+		{chain: managedPortChain("inbound-b"), protocol: "udp", dport: "8443", toPorts: "8443", scope: managedPortScopeInbound, ownerTag: "inbound-b"},
 	}
 	actual := []PortNatEntry{
 		{Family: "ipv4", Chain: desired[0].chain, Protocol: "tcp", DPort: "443", Target: "REDIRECT", ToPorts: "443"},
@@ -40,6 +40,11 @@ func TestBuildPortDriftReportDetectsMissingDuplicateAndOrphan(t *testing.T) {
 	}
 	if report.MissingCount != 1 || report.DuplicateCount != 1 || report.OrphanCount != 1 {
 		t.Fatalf("unexpected drift counts: %+v", report)
+	}
+	for _, issue := range report.Issues {
+		if issue.ID == "" || !issue.Repairable {
+			t.Fatalf("expected repairable issue with stable id: %+v", issue)
+		}
 	}
 }
 
@@ -101,5 +106,20 @@ func TestParseNftRedirectRule(t *testing.T) {
 	protocol, dport, toPorts := parseNftRedirectRule("udp dport 555 counter packets 0 bytes 0 redirect to :555")
 	if protocol != "udp" || dport != "555" || toPorts != "555" {
 		t.Fatalf("unexpected nft rule: %q %q %q", protocol, dport, toPorts)
+	}
+}
+
+func TestManagedForwardSpecForDriftIssueGroupsOwnerRules(t *testing.T) {
+	desired := []portDriftRule{
+		{protocol: "tcp", dport: "443", toPorts: "8443", scope: managedPortScopeInbound, ownerTag: "inbound-a"},
+		{protocol: "udp", dport: "444", toPorts: "8443", scope: managedPortScopeInbound, ownerTag: "inbound-a"},
+		{protocol: "tcp", dport: "9000", toPorts: "9000", scope: managedPortScopeEndpoint, ownerTag: "endpoint-a"},
+	}
+	spec, err := managedForwardSpecForDriftIssue(desired, PortDriftIssue{Scope: managedPortScopeInbound, OwnerTag: "inbound-a"})
+	if err != nil {
+		t.Fatalf("build owner spec: %v", err)
+	}
+	if spec.tag != "inbound-a" || spec.listenPort != 8443 || len(spec.ports) != 2 || len(spec.protocols) != 2 {
+		t.Fatalf("unexpected owner spec: %+v", spec)
 	}
 }

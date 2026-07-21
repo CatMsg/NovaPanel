@@ -64,8 +64,36 @@
           <h2>诊断说明</h2>
           <p>深度检查会绕过状态缓存，重新读取数据库、磁盘、监听端口和 NAT 规则。</p>
         </div>
-        <v-btn variant="tonal" prepend-icon="mdi-lan-check" :loading="reconciling" @click="reconcilePorts">重建端口规则</v-btn>
+        <v-btn variant="tonal" prepend-icon="mdi-lan-check" :loading="reconciling" @click="reconcilePorts">全部重建</v-btn>
       </div>
+      <div v-if="portIssues.length" class="port-issues">
+        <div v-for="issue in portIssues" :key="issue.id" class="port-issue">
+          <div class="port-issue__icon">
+            <v-icon :icon="portIssueIcon(issue.severity)" :color="portIssueColor(issue.severity)" />
+          </div>
+          <div class="port-issue__body">
+            <div class="port-issue__heading">
+              <strong>{{ portIssueLabel(issue.type) }}</strong>
+              <v-chip v-if="issue.owner_tag" size="x-small" variant="tonal">{{ portOwnerLabel(issue.scope) }} · {{ issue.owner_tag }}</v-chip>
+            </div>
+            <span>{{ issue.detail }}</span>
+            <small v-if="issue.port">{{ issue.family || '全部地址族' }} · {{ issue.protocol?.toUpperCase() }} {{ issue.port }} → {{ issue.to_ports || '-' }}</small>
+          </div>
+          <v-btn
+            v-if="issue.repairable"
+            size="small"
+            color="primary"
+            variant="tonal"
+            :loading="repairingIssueId === issue.id"
+            :disabled="repairingIssueId !== '' || reconciling"
+            @click="repairPortIssue(issue)"
+          >
+            修复此项
+          </v-btn>
+          <v-chip v-else size="small" color="secondary" variant="tonal">需手动处理</v-chip>
+        </div>
+      </div>
+      <v-alert v-else type="success" variant="tonal" class="mt-4" text="当前没有可修复的端口规则问题。" />
     </v-card>
 
     <v-card class="alert-settings glass-card" elevation="0">
@@ -108,10 +136,12 @@ import HttpUtils from '@/plugins/httputil'
 interface HealthCheck { id: string; title: string; status: string; summary: string; detail?: string; action?: string }
 interface HealthReport { status: string; checkedAt: string; durationMs: number; summary: Record<string, number>; checks: HealthCheck[]; diagnostics: Record<string, unknown> }
 interface AlertSettings { enabled: boolean; telegramToken: string; telegramTokenSet: boolean; telegramChatId: string; intervalMinutes: number; cooldownMinutes: number }
+interface PortDriftIssue { id: string; type: string; severity: string; scope?: string; family?: string; protocol?: string; port?: string; to_ports?: string; owner_tag?: string; detail: string; repairable: boolean }
 
 const router = useRouter()
 const loading = ref(false)
 const reconciling = ref(false)
+const repairingIssueId = ref('')
 const report = ref<HealthReport | null>(null)
 const savingAlerts = ref(false)
 const testingAlert = ref(false)
@@ -125,6 +155,10 @@ const summaryCards = computed(() => [
   { key: 'error', label: '异常', value: report.value?.summary?.error ?? 0, icon: 'mdi-close-circle-outline' },
   { key: 'info', label: '信息', value: report.value?.summary?.info ?? 0, icon: 'mdi-information-outline' },
 ])
+const portIssues = computed<PortDriftIssue[]>(() => {
+  const diagnostics = report.value?.diagnostics as any
+  return Array.isArray(diagnostics?.ports?.drift?.issues) ? diagnostics.ports.drift.issues : []
+})
 
 const loadHealth = async (force = false) => {
   loading.value = true
@@ -138,6 +172,16 @@ const reconcilePorts = async () => {
   const msg = await HttpUtils.post('api/reconcilePorts', {})
   reconciling.value = false
   if (msg.success) await loadHealth(true)
+}
+
+const repairPortIssue = async (issue: PortDriftIssue) => {
+  repairingIssueId.value = issue.id
+  const msg = await HttpUtils.post('api/repairPortIssue', { issueId: issue.id })
+  repairingIssueId.value = ''
+  if (msg.success) {
+    push.success({ message: '端口规则已修复' })
+    await loadHealth(true)
+  }
 }
 
 const loadAlerts = async () => {
@@ -183,6 +227,10 @@ const handleAction = async (action: string) => {
 const statusColor = (status: string) => ({ ok: 'success', warning: 'warning', error: 'error', info: 'info' } as Record<string, string>)[status] ?? 'info'
 const statusIcon = (status: string) => ({ ok: 'mdi-check-circle', warning: 'mdi-alert', error: 'mdi-close-circle', info: 'mdi-information' } as Record<string, string>)[status] ?? 'mdi-information'
 const checkStatusLabel = (status: string) => ({ ok: '正常', warning: '警告', error: '异常', info: '信息' } as Record<string, string>)[status] ?? status
+const portIssueLabel = (type: string) => ({ missing: '缺失规则', duplicate: '重复规则', orphan: '孤立规则', unexpected: '目标不匹配', 'desired-duplicate': '配置重复', 'inspection-error': '检查失败', unsupported: '当前平台不支持' } as Record<string, string>)[type] ?? type
+const portOwnerLabel = (scope?: string) => ({ inbound: '入站', endpoint: '节点', panel: '面板' } as Record<string, string>)[scope ?? ''] ?? '受管规则'
+const portIssueIcon = (severity: string) => ({ error: 'mdi-alert-circle-outline', warning: 'mdi-alert-outline', info: 'mdi-information-outline' } as Record<string, string>)[severity] ?? 'mdi-information-outline'
+const portIssueColor = (severity: string) => ({ error: 'error', warning: 'warning', info: 'info' } as Record<string, string>)[severity] ?? 'info'
 
 onMounted(() => {
   loadHealth(false)
@@ -229,6 +277,12 @@ onMounted(() => {
 .health-diagnostics { padding: 22px; border-radius: 24px; }
 .health-diagnostics__header { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .health-diagnostics p { margin: 8px 0 0; color: var(--np-text-muted); }
+.port-issues { display: grid; gap: 10px; margin-top: 18px; }
+.port-issue { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 13px 14px; border: 1px solid var(--np-border); border-radius: 16px; background: var(--np-surface-muted); }
+.port-issue__icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 12px; background: var(--np-surface); }
+.port-issue__body { display: grid; gap: 4px; min-width: 0; }
+.port-issue__heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.port-issue__body span, .port-issue__body small { color: var(--np-text-muted); overflow-wrap: anywhere; }
 .alert-settings { margin-top: 14px; padding: 24px; border-radius: 24px; }
 .alert-settings__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 .alert-settings__header h2 { margin: 3px 0 0; font-size: 20px; }
@@ -236,5 +290,5 @@ onMounted(() => {
 .alert-settings__eyebrow { color: rgb(var(--v-theme-primary)); font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .alert-settings__actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
 @media (max-width: 959px) { .health-hero__actions { justify-content: flex-start; } .health-grid { grid-template-columns: 1fr; } }
-@media (max-width: 599px) { .health-hero { border-radius: 24px; } .health-hero__title-row { align-items: center; } .health-hero__icon { width: 48px; height: 48px; } .health-summary__card { min-height: 96px; padding: 14px; gap: 10px; } .health-summary__icon { width: 36px; height: 36px; } .health-summary__value { font-size: 24px; } .health-check { flex-wrap: wrap; } .health-diagnostics__header, .alert-settings__header { align-items: stretch; flex-direction: column; } .alert-settings__actions { justify-content: stretch; } .alert-settings__actions .v-btn { flex: 1; } }
+@media (max-width: 599px) { .health-hero { border-radius: 24px; } .health-hero__title-row { align-items: center; } .health-hero__icon { width: 48px; height: 48px; } .health-summary__card { min-height: 96px; padding: 14px; gap: 10px; } .health-summary__icon { width: 36px; height: 36px; } .health-summary__value { font-size: 24px; } .health-check { flex-wrap: wrap; } .health-diagnostics__header, .alert-settings__header { align-items: stretch; flex-direction: column; } .port-issue { grid-template-columns: auto minmax(0, 1fr); } .port-issue > .v-btn, .port-issue > .v-chip { grid-column: 1 / -1; width: 100%; } .alert-settings__actions { justify-content: stretch; } .alert-settings__actions .v-btn { flex: 1; } }
 </style>
