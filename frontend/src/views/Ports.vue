@@ -45,25 +45,25 @@
       </v-card>
 
       <v-row class="ports-summary" dense>
-        <v-col cols="12" sm="6" lg="3">
+        <v-col cols="6" lg="3">
           <v-card class="ports-summary__card ports-summary__card--one" rounded="xl" variant="flat">
             <div class="ports-summary__label">监听端口</div>
             <div class="ports-summary__value">{{ listeners.length }}</div>
           </v-card>
         </v-col>
-        <v-col cols="12" sm="6" lg="3">
+        <v-col cols="6" lg="3">
           <v-card class="ports-summary__card ports-summary__card--two" rounded="xl" variant="flat">
             <div class="ports-summary__label">NAT IPv4</div>
             <div class="ports-summary__value">{{ natIpv4.length }}</div>
           </v-card>
         </v-col>
-        <v-col cols="12" sm="6" lg="3">
+        <v-col cols="6" lg="3">
           <v-card class="ports-summary__card ports-summary__card--three" rounded="xl" variant="flat">
             <div class="ports-summary__label">NAT IPv6</div>
             <div class="ports-summary__value">{{ natIpv6.length }}</div>
           </v-card>
         </v-col>
-        <v-col cols="12" sm="6" lg="3">
+        <v-col cols="6" lg="3">
           <v-card class="ports-summary__card ports-summary__card--four" rounded="xl" variant="flat">
             <div class="ports-summary__label">后端</div>
             <div class="ports-summary__value">{{ status.backend || $t('unknown') }}</div>
@@ -117,7 +117,27 @@
             </v-card-title>
             <v-divider />
             <div class="ports-panel__scroll">
-              <v-table density="compact" class="ports-table">
+              <div v-if="smAndDown" class="ports-mobile-list">
+                <article
+                  v-for="row in listeners"
+                  :key="`mobile-${row.protocol}-${row.local}-${row.pid}-${row.raw}`"
+                  class="ports-mobile-item"
+                >
+                  <div class="ports-mobile-item__head">
+                    <v-chip size="x-small" variant="flat" :color="row.protocol === 'tcp' ? 'primary' : 'info'">
+                      {{ row.protocol }}
+                    </v-chip>
+                    <strong>{{ row.port }}</strong>
+                  </div>
+                  <div class="ports-mobile-item__address ports-table__mono">{{ row.local }}</div>
+                  <div class="ports-mobile-item__meta">
+                    <span>{{ row.process || '未知进程' }}</span>
+                    <span>PID {{ row.pid || '-' }}</span>
+                  </div>
+                </article>
+                <div v-if="listeners.length === 0" class="ports-mobile-empty">没有检测到监听端口</div>
+              </div>
+              <v-table v-else density="compact" class="ports-table">
                 <thead>
                   <tr>
                     <th>协议</th>
@@ -163,7 +183,25 @@
             <div class="ports-panel__scroll">
               <v-window v-model="natTab">
                 <v-window-item value="ipv4">
-                  <v-table density="compact" class="ports-table">
+                  <div v-if="smAndDown" class="ports-mobile-list">
+                    <article
+                      v-for="row in natIpv4"
+                      :key="`mobile-ipv4-${row.chain}-${row.protocol}-${row.dport}-${row.raw}`"
+                      class="ports-mobile-item"
+                    >
+                      <div class="ports-mobile-item__head">
+                        <strong>{{ row.chain || '-' }}</strong>
+                        <v-chip size="x-small" variant="flat" color="primary">{{ row.protocol || '-' }}</v-chip>
+                      </div>
+                      <div class="ports-mobile-item__route">
+                        <span><small>入口</small>{{ row.dport || '-' }}</span>
+                        <v-icon icon="mdi-arrow-right" size="16" />
+                        <span><small>{{ row.target || '目标' }}</small>{{ row.to_ports || '-' }}</span>
+                      </div>
+                    </article>
+                    <div v-if="natIpv4.length === 0" class="ports-mobile-empty">没有检测到 IPv4 NAT 规则</div>
+                  </div>
+                  <v-table v-else density="compact" class="ports-table">
                     <thead>
                       <tr>
                         <th>链</th>
@@ -188,7 +226,25 @@
                   </v-table>
                 </v-window-item>
                 <v-window-item value="ipv6">
-                  <v-table density="compact" class="ports-table">
+                  <div v-if="smAndDown" class="ports-mobile-list">
+                    <article
+                      v-for="row in natIpv6"
+                      :key="`mobile-ipv6-${row.chain}-${row.protocol}-${row.dport}-${row.raw}`"
+                      class="ports-mobile-item"
+                    >
+                      <div class="ports-mobile-item__head">
+                        <strong>{{ row.chain || '-' }}</strong>
+                        <v-chip size="x-small" variant="flat" color="info">{{ row.protocol || '-' }}</v-chip>
+                      </div>
+                      <div class="ports-mobile-item__route">
+                        <span><small>入口</small>{{ row.dport || '-' }}</span>
+                        <v-icon icon="mdi-arrow-right" size="16" />
+                        <span><small>{{ row.target || '目标' }}</small>{{ row.to_ports || '-' }}</span>
+                      </div>
+                    </article>
+                    <div v-if="natIpv6.length === 0" class="ports-mobile-empty">没有检测到 IPv6 NAT 规则</div>
+                  </div>
+                  <v-table v-else density="compact" class="ports-table">
                     <thead>
                       <tr>
                         <th>链</th>
@@ -223,6 +279,7 @@
 
 <script lang="ts" setup>
 import { computed, onMounted, ref } from 'vue'
+import { useDisplay } from 'vuetify'
 import HttpUtils from '@/plugins/httputil'
 
 type PortListenEntry = {
@@ -281,6 +338,7 @@ const loading = ref(false)
 const repairing = ref(false)
 const natTab = ref<'ipv4' | 'ipv6'>('ipv4')
 const status = ref<PortStatus>({})
+const { smAndDown } = useDisplay()
 
 const listeners = computed(() => status.value.listeners ?? [])
 const natIpv4 = computed(() => status.value.nat_ipv4 ?? [])
@@ -579,6 +637,71 @@ onMounted(() => {
   max-height: 560px;
 }
 
+.ports-mobile-list {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.ports-mobile-item {
+  display: grid;
+  gap: 9px;
+  padding: 13px 14px;
+  border: 1px solid var(--np-border);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--np-surface-strong) 80%, transparent);
+}
+
+.ports-mobile-item__head,
+.ports-mobile-item__meta,
+.ports-mobile-item__route {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ports-mobile-item__head strong {
+  color: var(--np-text-main);
+  font-size: 16px;
+}
+
+.ports-mobile-item__address {
+  color: var(--np-text-main);
+  font-size: 13px;
+}
+
+.ports-mobile-item__meta {
+  color: var(--np-text-muted);
+  font-size: 12px;
+}
+
+.ports-mobile-item__route {
+  justify-content: flex-start;
+  color: var(--np-text-muted);
+}
+
+.ports-mobile-item__route > span {
+  min-width: 78px;
+  display: grid;
+  gap: 2px;
+  color: var(--np-text-main);
+  font-weight: 700;
+}
+
+.ports-mobile-item__route small {
+  color: var(--np-text-muted);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.ports-mobile-empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--np-text-muted);
+  font-size: 13px;
+}
+
 .ports-tabs {
   background: transparent;
 }
@@ -665,6 +788,92 @@ onMounted(() => {
 
   .ports-panel__scroll {
     max-height: 420px;
+  }
+}
+
+@media (max-width: 599px) {
+  .ports-shell {
+    padding: 12px !important;
+  }
+
+  .ports-shell__inner {
+    gap: 12px;
+  }
+
+  .ports-hero {
+    padding: 16px;
+  }
+
+  .ports-hero__topline {
+    margin-bottom: 14px;
+  }
+
+  .ports-hero__content {
+    min-height: 0;
+  }
+
+  .ports-hero__title-row {
+    gap: 11px;
+  }
+
+  .ports-hero__icon {
+    width: 44px;
+    height: 44px;
+    flex: 0 0 44px;
+    border-radius: 14px;
+  }
+
+  .ports-hero__title {
+    font-size: 27px;
+  }
+
+  .ports-hero__subtitle {
+    margin-top: 8px;
+    line-height: 1.55;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+
+  .ports-hero__meta {
+    margin-top: 12px;
+    gap: 5px 8px;
+    font-size: 12px;
+  }
+
+  .ports-hero__actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+    padding-top: 0;
+  }
+
+  .ports-hero__actions .v-btn,
+  .ports-hero__refresh {
+    min-width: 0;
+    width: 100%;
+    padding-inline: 10px;
+  }
+
+  .ports-summary__card {
+    min-height: 88px;
+    padding: 14px;
+  }
+
+  .ports-summary__value {
+    margin-top: 10px;
+    font-size: 22px;
+  }
+
+  .ports-panel__title {
+    min-height: 48px;
+    padding: 12px 14px;
+    font-size: 16px;
+  }
+
+  .ports-alert {
+    padding: 6px 6px 6px 12px;
   }
 }
 </style>
