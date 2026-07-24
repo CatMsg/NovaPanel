@@ -39,7 +39,7 @@
           <span>总数 {{ inbounds.length }}</span>
         </div>
       </v-col>
-      <v-col cols="12" lg="4" class="resource-hero__actions">
+      <v-col v-if="inbounds.length > 0" cols="12" lg="4" class="resource-hero__actions">
         <v-btn color="primary" size="large" @click="showModal(0)">
           <v-icon icon="mdi-plus" start />
           {{ $t('actions.add') }}
@@ -49,6 +49,15 @@
   </v-card>
 
   <v-row class="resource-grid">
+    <v-col v-if="inbounds.length === 0" cols="12">
+      <EmptyState
+        icon="mdi-cloud-download-outline"
+        title="暂无入站"
+        description="创建入站后，可在这里统一管理协议、监听端口和用户绑定。"
+        :action="$t('actions.add')"
+        @action="showModal(0)"
+      />
+    </v-col>
     <v-col cols="12" sm="6" md="4" lg="3" v-for="(item, index) in <any[]>inbounds" :key="item.tag">
       <v-card class="resource-card" rounded="xl" variant="flat" :title="item.tag">
         <v-card-subtitle style="margin-top: -15px;">
@@ -80,7 +89,7 @@
             <v-col>
               <template v-if="item.users">
                 <v-tooltip activator="parent" dir="ltr" location="bottom" v-if="item.users.length > 0">
-                  <span v-for="u in item.users">{{ u }}<br /></span>
+                  <span v-for="u in item.users" :key="u">{{ u }}<br /></span>
                 </v-tooltip>
                 {{ item.users.length }}
               </template>
@@ -141,6 +150,7 @@ import { Config } from '@/types/config'
 import { computed, defineAsyncComponent, ref } from 'vue'
 import { createInbound, Inbound } from '@/types/inbounds'
 import RandomUtil from '@/plugins/randomUtil'
+import EmptyState from '@/components/EmptyState.vue'
 
 const InboundVue = defineAsyncComponent(() => import('@/layouts/modals/Inbound.vue'))
 const Stats = defineAsyncComponent(() => import('@/layouts/modals/Stats.vue'))

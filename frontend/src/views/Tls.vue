@@ -30,7 +30,7 @@
           <span>已绑定入站 {{ tlsConfigs.filter(t => tlsInbounds(t.id).length > 0).length }}</span>
         </div>
       </v-col>
-      <v-col cols="12" lg="4" class="resource-hero__actions">
+      <v-col v-if="tlsConfigs.length > 0" cols="12" lg="4" class="resource-hero__actions">
         <v-btn color="primary" size="large" @click="showModal(0)">
           <v-icon icon="mdi-plus" start />
           {{ $t('actions.add') }}
@@ -40,6 +40,15 @@
   </v-card>
 
   <v-row class="resource-grid">
+    <v-col v-if="tlsConfigs.length === 0" cols="12">
+      <EmptyState
+        icon="mdi-certificate-outline"
+        title="暂无 TLS 配置"
+        description="添加证书配置后，可供入站和服务统一引用。"
+        :action="$t('actions.add')"
+        @action="showModal(0)"
+      />
+    </v-col>
     <v-col cols="12" sm="6" md="4" lg="3" v-for="(item, index) in <any[]>tlsConfigs" :key="item.id">
       <v-card class="resource-card" rounded="xl" variant="flat" :title="item.name">
         <v-card-subtitle style="margin-top: -15px;">
@@ -51,7 +60,7 @@
             <v-col>
               <template v-if="tlsInbounds(item.id).length>0">
                 <v-tooltip activator="parent" dir="ltr" location="bottom">
-                  <span v-for="i in tlsInbounds(item.id)">{{ i }}<br /></span>
+                  <span v-for="i in tlsInbounds(item.id)" :key="i">{{ i }}<br /></span>
                 </v-tooltip>
                 {{ tlsInbounds(item.id).length }}
               </template>
@@ -116,6 +125,7 @@ import Data from '@/store/modules/data'
 import { computed, defineAsyncComponent, ref } from 'vue'
 import { Inbound } from '@/types/inbounds'
 import { tls } from '@/types/tls'
+import EmptyState from '@/components/EmptyState.vue'
 
 const TlsVue = defineAsyncComponent(() => import('@/layouts/modals/Tls.vue'))
 

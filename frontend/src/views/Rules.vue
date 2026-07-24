@@ -113,12 +113,14 @@
           <v-row><v-col>{{ $t('actions.update') }}</v-col><v-col>{{ item.update_interval ?? '-' }}</v-col></v-row>
         </v-card-text>
         <v-divider></v-divider>
-        <v-card-actions style="padding: 0;">
-          <v-btn icon="mdi-file-edit" @click="showRulesetModal(index)">
-            <v-icon /><v-tooltip activator="parent" location="top" :text="$t('actions.edit')"></v-tooltip>
+        <v-card-actions class="np-resource-card__actions">
+          <v-btn class="np-card-action" variant="text" @click="showRulesetModal(index)">
+            <v-icon icon="mdi-file-edit" /><span>{{ $t('actions.edit') }}</span>
+            <v-tooltip activator="parent" location="top" :text="$t('actions.edit')"></v-tooltip>
           </v-btn>
-          <v-btn icon="mdi-file-remove" style="margin-inline-start:0;" color="warning" @click="delRulesetOverlay[index] = true">
-            <v-icon /><v-tooltip activator="parent" location="top" :text="$t('actions.del')"></v-tooltip>
+          <v-btn class="np-card-action" variant="text" color="warning" @click="delRulesetOverlay[index] = true">
+            <v-icon icon="mdi-file-remove" /><span>{{ $t('actions.del') }}</span>
+            <v-tooltip activator="parent" location="top" :text="$t('actions.del')"></v-tooltip>
           </v-btn>
           <v-overlay v-model="delRulesetOverlay[index]" contained class="align-center justify-center">
             <v-card :title="$t('actions.del')" rounded="lg">
@@ -143,7 +145,7 @@
       <EmptyState icon="mdi-routes" title="暂无路由规则" description="添加第一条规则后，流量会按列表顺序执行匹配。" />
     </v-col>
     <v-col cols="12" sm="6" md="4" lg="3" v-for="(item, index) in <any[]>rules"
-        :key="item.id" :draggable="true"
+        :key="item.id ?? index" :draggable="true"
         @dragstart="onDragStart(index)" @dragover.prevent @drop="onDrop(index)">
       <v-card class="np-resource-card" rounded="xl" variant="flat" :title="index+1">
         <v-card-subtitle style="margin-top: -15px;">
@@ -156,12 +158,14 @@
           <v-row><v-col>{{ $t('rule.invert') }}</v-col><v-col>{{ $t((item.invert ?? false) ? 'yes' : 'no') }}</v-col></v-row>
         </v-card-text>
         <v-divider></v-divider>
-        <v-card-actions style="padding: 0;">
-          <v-btn icon="mdi-file-edit" @click="showRuleModal(index)">
-            <v-icon /><v-tooltip activator="parent" location="top" :text="$t('actions.edit')"></v-tooltip>
+        <v-card-actions class="np-resource-card__actions">
+          <v-btn class="np-card-action" variant="text" @click="showRuleModal(index)">
+            <v-icon icon="mdi-file-edit" /><span>{{ $t('actions.edit') }}</span>
+            <v-tooltip activator="parent" location="top" :text="$t('actions.edit')"></v-tooltip>
           </v-btn>
-          <v-btn icon="mdi-file-remove" style="margin-inline-start:0;" color="warning" @click="delRuleOverlay[index] = true">
-            <v-icon /><v-tooltip activator="parent" location="top" :text="$t('actions.del')"></v-tooltip>
+          <v-btn class="np-card-action" variant="text" color="warning" @click="delRuleOverlay[index] = true">
+            <v-icon icon="mdi-file-remove" /><span>{{ $t('actions.del') }}</span>
+            <v-tooltip activator="parent" location="top" :text="$t('actions.del')"></v-tooltip>
           </v-btn>
           <v-overlay v-model="delRuleOverlay[index]" contained class="align-center justify-center">
             <v-card :title="$t('actions.del')" rounded="lg">
@@ -218,9 +222,12 @@ const stateChange = computed(() => FindDiff.deepCompare(appConfig.value, oldConf
 
 const saveConfig = async () => {
   loading.value = true
-  const success = await Data().save("config", "set", appConfig.value)
-  if (success) {
-    oldConfig.value = JSON.parse(JSON.stringify(Data().config))
+  try {
+    const success = await Data().save("config", "set", appConfig.value)
+    if (success) {
+      oldConfig.value = JSON.parse(JSON.stringify(Data().config))
+    }
+  } finally {
     loading.value = false
   }
 }

@@ -716,6 +716,19 @@ body::after {
   font-weight: 650;
 }
 
+.np-resource-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 8px !important;
+}
+
+.np-resource-card__actions .v-btn {
+  flex: 0 0 auto;
+  margin-inline-start: 0 !important;
+}
+
 .np-card-action {
   min-width: 40px !important;
   min-height: 38px !important;
@@ -745,7 +758,15 @@ body::after {
 }
 
 .np-card-action .v-btn__content > span {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 @media (max-width: 960px) {
@@ -789,14 +810,19 @@ body::after {
 @media (max-width: 600px) {
   .np-card-action {
     flex: 1 1 calc(50% - 4px) !important;
-    min-height: 42px;
+    min-height: 44px !important;
     border: 1px solid var(--np-border);
     border-radius: 14px !important;
     background: var(--np-surface-muted);
   }
 
   .np-card-action .v-btn__content > span {
-    display: inline;
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

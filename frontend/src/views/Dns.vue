@@ -122,13 +122,13 @@
           </v-row>
         </v-card-text>
         <v-divider></v-divider>
-        <v-card-actions style="padding: 0;">
-          <v-btn icon="mdi-file-edit" @click="showDnsModal(index)">
-            <v-icon />
+        <v-card-actions class="np-resource-card__actions">
+          <v-btn class="np-card-action" variant="text" @click="showDnsModal(index)">
+            <v-icon icon="mdi-file-edit" /><span>{{ $t('actions.edit') }}</span>
             <v-tooltip activator="parent" location="top" :text="$t('actions.edit')"></v-tooltip>
           </v-btn>
-          <v-btn icon="mdi-file-remove" style="margin-inline-start:0;" color="warning" @click="delDnsOverlay[index] = true">
-            <v-icon />
+          <v-btn class="np-card-action" variant="text" color="warning" @click="delDnsOverlay[index] = true">
+            <v-icon icon="mdi-file-remove" /><span>{{ $t('actions.del') }}</span>
             <v-tooltip activator="parent" location="top" :text="$t('actions.del')"></v-tooltip>
           </v-btn>
           <v-overlay
@@ -197,13 +197,13 @@
           </v-row>
         </v-card-text>
         <v-divider></v-divider>
-        <v-card-actions style="padding: 0;">
-          <v-btn icon="mdi-file-edit" @click="showDnsRuleModal(index)">
-            <v-icon />
+        <v-card-actions class="np-resource-card__actions">
+          <v-btn class="np-card-action" variant="text" @click="showDnsRuleModal(index)">
+            <v-icon icon="mdi-file-edit" /><span>{{ $t('actions.edit') }}</span>
             <v-tooltip activator="parent" location="top" :text="$t('actions.edit')"></v-tooltip>
           </v-btn>
-          <v-btn icon="mdi-file-remove" style="margin-inline-start:0;" color="warning" @click="delDnsRuleOverlay[index] = true">
-            <v-icon />
+          <v-btn class="np-card-action" variant="text" color="warning" @click="delDnsRuleOverlay[index] = true">
+            <v-icon icon="mdi-file-remove" /><span>{{ $t('actions.del') }}</span>
             <v-tooltip activator="parent" location="top" :text="$t('actions.del')"></v-tooltip>
           </v-btn>
           <v-overlay
