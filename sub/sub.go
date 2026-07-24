@@ -70,7 +70,7 @@ func (s *Server) Start() (err error) {
 	//This is an anonymous function, no function name
 	defer func() {
 		if err != nil {
-			s.Stop()
+			_ = s.Stop()
 		}
 	}()
 
@@ -105,7 +105,7 @@ func (s *Server) Start() (err error) {
 	if certFile != "" || keyFile != "" {
 		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {
-			listener.Close()
+			_ = listener.Close()
 			return err
 		}
 		c := &tls.Config{
@@ -123,11 +123,15 @@ func (s *Server) Start() (err error) {
 	s.listener = listener
 
 	s.httpServer = &http.Server{
-		Handler: engine,
+		Handler:           engine,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	go func() {
-		s.httpServer.Serve(listener)
+		if serveErr := s.httpServer.Serve(listener); serveErr != nil && serveErr != http.ErrServerClosed {
+			logger.Warning("sub server stopped unexpectedly:", serveErr)
+		}
 	}()
 
 	return nil

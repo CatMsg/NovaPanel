@@ -36,7 +36,7 @@ func initUser() error {
 
 func OpenDB(dbPath string) error {
 	dir := path.Dir(dbPath)
-	err := os.MkdirAll(dir, 01740)
+	err := os.MkdirAll(dir, 0o750)
 	if err != nil {
 		return err
 	}

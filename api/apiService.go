@@ -384,15 +384,6 @@ func (a *ApiService) GetDb(c *gin.Context) {
 	c.Writer.Write(db)
 }
 
-func (a *ApiService) postActions(c *gin.Context) (string, json.RawMessage, error) {
-	var data map[string]json.RawMessage
-	err := c.ShouldBind(&data)
-	if err != nil {
-		return "", nil, err
-	}
-	return string(data["action"]), data["data"], nil
-}
-
 func (a *ApiService) Login(c *gin.Context) {
 	remoteIP := getRemoteIp(c)
 	var payload struct {

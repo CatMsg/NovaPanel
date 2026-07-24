@@ -472,8 +472,10 @@ func (s *ClientService) DepleteClients() ([]uint, error) {
 		for _, client := range clients {
 			logger.Debug("Client ", client.Name, " is going to be disabled")
 			users = append(users, client.Name)
-			var userInbounds []uint
-			json.Unmarshal(client.Inbounds, &userInbounds)
+			userInbounds, err := decodeClientInboundIDs(client.Inbounds)
+			if err != nil {
+				return err
+			}
 			inboundIds = common.UnionUintArray(inboundIds, userInbounds)
 			changes = append(changes, model.Changes{
 				DateTime: dt,
@@ -568,8 +570,10 @@ func (s *ClientService) ResetClients(tx *gorm.DB, dt int64) ([]uint, error) {
 		client.Down = 0
 		if !client.Enable {
 			client.Enable = true
-			var clientInboundIds []uint
-			json.Unmarshal(client.Inbounds, &clientInboundIds)
+			clientInboundIds, err := decodeClientInboundIDs(client.Inbounds)
+			if err != nil {
+				return nil, err
+			}
 			inboundIds = common.UnionUintArray(inboundIds, clientInboundIds)
 		}
 	}

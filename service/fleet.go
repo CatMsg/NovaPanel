@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -700,6 +701,9 @@ func fleetInt64(value interface{}) int64 {
 	case uint32:
 		return int64(typed)
 	case uint64:
+		if typed > math.MaxInt64 {
+			return math.MaxInt64
+		}
 		return int64(typed)
 	case float64:
 		return int64(typed)

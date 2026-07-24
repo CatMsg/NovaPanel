@@ -895,24 +895,6 @@ func asInt(value interface{}) int {
 	return 0
 }
 
-func asBool(value interface{}) bool {
-	switch v := value.(type) {
-	case bool:
-		return v
-	case json.RawMessage:
-		var b bool
-		if err := json.Unmarshal(v, &b); err == nil {
-			return b
-		}
-	case []byte:
-		var b bool
-		if err := json.Unmarshal(v, &b); err == nil {
-			return b
-		}
-	}
-	return false
-}
-
 func asSlice(value interface{}) []interface{} {
 	switch v := value.(type) {
 	case []interface{}:
@@ -1013,13 +995,6 @@ func asSliceFromMap(value interface{}, key string) []interface{} {
 		return nil
 	}
 	return asSlice(m[key])
-}
-
-func (u *aggregateUsage) addClient(upload, download, total, expire int64) {
-	u.upload += upload
-	u.download += download
-	u.total += total
-	u.addExpire(expire)
 }
 
 func (u *aggregateUsage) addHeader(header string) {

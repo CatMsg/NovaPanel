@@ -27,10 +27,6 @@ func getCachedSubResult(key string) (*string, []string, bool) {
 	return getCachedSubResultWithExpiry(key, true)
 }
 
-func getCachedSubResultStale(key string) (*string, []string, bool) {
-	return getCachedSubResultWithExpiry(key, false)
-}
-
 func getCachedSubResultWithExpiry(key string, enforceTTL bool) (*string, []string, bool) {
 	now := time.Now()
 	version := service.LastUpdate

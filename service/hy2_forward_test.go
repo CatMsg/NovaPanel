@@ -441,14 +441,6 @@ func hy2ChainName(tag string) string {
 	return "NPHY2_" + fmt.Sprintf("%x", sum)[:12]
 }
 
-func writeMockBinary(t *testing.T, dir, name, content string) {
-	t.Helper()
-	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
-		t.Fatalf("write mock %s: %v", name, err)
-	}
-}
-
 func mockIptablesScript(t *testing.T) string {
 	t.Helper()
 	return `#!/usr/bin/env bash

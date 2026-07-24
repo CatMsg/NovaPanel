@@ -2,8 +2,6 @@ package core
 
 import (
 	"context"
-	"errors"
-	"io"
 	"net"
 	"sort"
 	"sync"
@@ -162,21 +160,6 @@ func sortedResourceNames(names map[string]struct{}) []string {
 	}
 	sort.Strings(result)
 	return result
-}
-
-// shouldUntrackIOErr reports whether err indicates the connection is done (peer closed, reset, etc.).
-func shouldUntrackIOErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, io.EOF) {
-		return true
-	}
-	var ne net.Error
-	if errors.As(err, &ne) {
-		return !ne.Temporary()
-	}
-	return true
 }
 
 func (c *ConnTracker) createWrappedConn(conn net.Conn, connID string) *wrappedConn {

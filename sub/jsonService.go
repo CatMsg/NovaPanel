@@ -89,12 +89,20 @@ func (j *JsonService) GetJson(subId string, format string) (*string, []string, e
 	jsonConfig["outbounds"] = outbounds
 
 	// Add other objects from settings
-	j.addOthers(&jsonConfig)
+	if err := j.addOthers(&jsonConfig); err != nil {
+		return nil, nil, err
+	}
 
-	result, _ := json.MarshalIndent(jsonConfig, "", "  ")
+	result, err := json.MarshalIndent(jsonConfig, "", "  ")
+	if err != nil {
+		return nil, nil, err
+	}
 	resultStr := string(result)
 
-	updateInterval, _ := j.SettingService.GetSubUpdates()
+	updateInterval, err := j.SettingService.GetSubUpdates()
+	if err != nil {
+		return nil, nil, err
+	}
 	headers := util.GetHeaders(client, updateInterval)
 
 	storeCachedSubResult(cacheKey, resultStr, headers)

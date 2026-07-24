@@ -167,7 +167,7 @@ func (s *AlertService) sendAlert(values map[string]string, message string) error
 	token := strings.TrimSpace(values["alertTelegramToken"])
 	chatID := strings.TrimSpace(values["alertTelegramChatID"])
 	if token == "" || chatID == "" {
-		return fmt.Errorf("Telegram Bot Token 或 Chat ID 未配置")
+		return fmt.Errorf("未配置 Telegram Bot Token 或 Chat ID")
 	}
 	endpoint := "https://api.telegram.org/bot" + url.PathEscape(token) + "/sendMessage"
 	if err := postAlertJSON(endpoint, map[string]string{"chat_id": chatID, "text": message}); err != nil {

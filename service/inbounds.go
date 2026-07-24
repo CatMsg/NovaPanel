@@ -104,10 +104,18 @@ func (s *InboundService) GetAll() (*[]map[string]interface{}, error) {
 			inbData["listen"] = restFields["listen"]
 			inbData["listen_port"] = restFields["listen_port"]
 			if inbound.Type == "shadowtls" {
-				json.Unmarshal(restFields["version"], &shadowtls_version)
+				if raw, ok := restFields["version"]; ok && len(raw) > 0 {
+					if err := json.Unmarshal(raw, &shadowtls_version); err != nil {
+						return nil, err
+					}
+				}
 			}
 			if inbound.Type == "shadowsocks" {
-				json.Unmarshal(restFields["managed"], &ss_managed)
+				if raw, ok := restFields["managed"]; ok && len(raw) > 0 {
+					if err := json.Unmarshal(raw, &ss_managed); err != nil {
+						return nil, err
+					}
+				}
 			}
 		}
 		if s.hasUser(inbound.Type) &&

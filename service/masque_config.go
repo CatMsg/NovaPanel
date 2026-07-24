@@ -76,17 +76,3 @@ func parseMasquePeerPrefix(raw string) (netip.Prefix, error) {
 	}
 	return prefix.Masked(), nil
 }
-
-func formatMasqueHost(host string) string {
-	host = strings.TrimSpace(host)
-	if host == "" {
-		return ""
-	}
-	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
-		return host
-	}
-	if strings.Count(host, ":") > 1 {
-		return "[" + host + "]"
-	}
-	return host
-}

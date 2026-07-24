@@ -100,6 +100,10 @@ func (s *ServerService) GetPublicIP() string {
 				return
 			}
 			defer resp.Body.Close()
+			if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+				ch <- result{"", errors.New("public IP service returned an unsuccessful status")}
+				return
+			}
 			body, err := io.ReadAll(resp.Body)
 			if err != nil {
 				ch <- result{"", err}
@@ -138,9 +142,12 @@ func (s *ServerService) GetCpuPercent() float64 {
 	if err != nil {
 		logger.Warning("get cpu percent failed:", err)
 		return 0
-	} else {
-		return percents[0]
 	}
+	if len(percents) == 0 {
+		logger.Warning("get cpu percent returned no data")
+		return 0
+	}
+	return percents[0]
 }
 
 func (s *ServerService) GetMemInfo() map[string]interface{} {
@@ -226,7 +233,7 @@ func (s *ServerService) GetSingboxInfo() map[string]interface{} {
 	return map[string]interface{}{
 		"running": isRunning,
 		"stats": map[string]interface{}{
-			"NumGoroutine": uint32(runtime.NumGoroutine()),
+			"NumGoroutine": runtime.NumGoroutine(),
 			"Alloc":        rtm.Alloc,
 			"Uptime":       uptime,
 		},
@@ -239,9 +246,9 @@ func (s *ServerService) GetSystemInfo() map[string]interface{} {
 	runtime.ReadMemStats(&rtm)
 
 	info["appMem"] = rtm.Sys
-	info["appThreads"] = uint32(runtime.NumGoroutine())
+	info["appThreads"] = runtime.NumGoroutine()
 	cpuInfo, err := cpu.Info()
-	if err == nil {
+	if err == nil && len(cpuInfo) > 0 {
 		info["cpuType"] = cpuInfo[0].ModelName
 	}
 	info["cpuCount"] = runtime.NumCPU()
@@ -259,7 +266,7 @@ func (s *ServerService) GetSystemInfo() map[string]interface{} {
 			for _, address := range addrs {
 				if strings.Contains(address.Addr, ".") {
 					ipv4 = append(ipv4, address.Addr)
-				} else if address.Addr[0:6] != "fe80::" {
+				} else if !strings.HasPrefix(address.Addr, "fe80::") {
 					ipv6 = append(ipv6, address.Addr)
 				}
 			}

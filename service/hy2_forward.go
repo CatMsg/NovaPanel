@@ -97,10 +97,6 @@ func (s *InboundService) syncInboundPortForwarding(oldInbound *model.Inbound, in
 	return syncManagedForwardSpecs(oldSpec, newSpec)
 }
 
-func (s *InboundService) syncHy2PortForwarding(oldInbound *model.Inbound, inbound *model.Inbound) error {
-	return s.syncInboundPortForwarding(oldInbound, inbound)
-}
-
 func collectInboundForwardPorts(inbound *model.Inbound) (int, []int, error) {
 	listenPort, err := getInboundListenPort(inbound)
 	if err != nil {
