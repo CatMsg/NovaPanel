@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/CatMsg/NovaPanel/database"
@@ -27,7 +28,7 @@ import (
 var masquePtr *MasqueService
 var masqueStatusCache = newTimedCache()
 
-const masqueStatusCacheTTL = 5 * time.Second
+const masqueStatusCacheTTL = 2 * time.Second
 
 type masqueRuntime struct {
 	tag         string
@@ -42,19 +43,35 @@ type masqueRuntime struct {
 	server      *mhttp3.Server
 	template    *uritemplate.Template
 	tun         *masqueTun
+	packetConn  net.PacketConn
+	certificate *masqueCertificateReloader
 	peerPrefix  netip.Prefix
 	sessionMu   sync.Mutex
 	active      *masqueSession
 	nextSession uint64
+	takeovers   uint64
+	lastConnect time.Time
+	lastClose   time.Time
+	lastError   string
+	running     atomic.Bool
+	rxBytes     atomic.Uint64
+	txBytes     atomic.Uint64
+	rxPackets   atomic.Uint64
+	txPackets   atomic.Uint64
 }
 
 type masqueSession struct {
 	id        uint64
 	startedAt time.Time
+	remote    string
 	ctx       context.Context
 	cancel    context.CancelFunc
 	conn      *connectip.Conn
 	closeOnce sync.Once
+	rxBytes   atomic.Uint64
+	txBytes   atomic.Uint64
+	rxPackets atomic.Uint64
+	txPackets atomic.Uint64
 }
 
 type MasqueService struct {
@@ -62,11 +79,13 @@ type MasqueService struct {
 
 	mu       sync.Mutex
 	runtimes map[string]*masqueRuntime
+	startErr map[string]string
 }
 
 func NewMasqueService() *MasqueService {
 	return &MasqueService{
 		runtimes: map[string]*masqueRuntime{},
+		startErr: map[string]string{},
 	}
 }
 
@@ -91,8 +110,11 @@ func (s *MasqueService) GetSummary() map[string]int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, endpoint := range endpoints {
-		if endpoint != nil && s.runtimes[endpoint.Tag] != nil {
-			result["running"]++
+		if endpoint != nil {
+			runtime := s.runtimes[endpoint.Tag]
+			if runtime != nil && runtime.running.Load() {
+				result["running"]++
+			}
 		}
 	}
 	return result
@@ -111,6 +133,7 @@ func (s *MasqueService) SyncFromDB() error {
 	s.mu.Lock()
 	oldRuntimes := s.runtimes
 	s.runtimes = map[string]*masqueRuntime{}
+	s.startErr = map[string]string{}
 	s.mu.Unlock()
 
 	for _, runtime := range oldRuntimes {
@@ -122,6 +145,9 @@ func (s *MasqueService) SyncFromDB() error {
 	for _, endpoint := range endpoints {
 		runtime, err := s.startEndpoint(endpoint)
 		if err != nil {
+			s.mu.Lock()
+			s.startErr[endpoint.Tag] = err.Error()
+			s.mu.Unlock()
 			errs = append(errs, fmt.Errorf("start masque endpoint %s failed: %w", endpoint.Tag, err))
 			continue
 		}
@@ -141,6 +167,7 @@ func (s *MasqueService) Stop() error {
 	s.mu.Lock()
 	runtimes := s.runtimes
 	s.runtimes = map[string]*masqueRuntime{}
+	s.startErr = map[string]string{}
 	s.mu.Unlock()
 
 	for _, runtime := range runtimes {
@@ -176,14 +203,9 @@ func (s *MasqueService) GetStatus(tag string) (map[string]interface{}, error) {
 		return nil, err
 	}
 
-	var certFile, keyFile string
-	var certErr error
-	if config.PrivateKey == "" {
-		certFile, keyFile, certErr = s.resolveMasqueCertFiles(config.Host)
-	}
-
 	s.mu.Lock()
 	runtime := s.runtimes[tag]
+	startError := s.startErr[tag]
 	s.mu.Unlock()
 
 	status := map[string]interface{}{
@@ -191,11 +213,16 @@ func (s *MasqueService) GetStatus(tag string) (map[string]interface{}, error) {
 		"host":      config.Host,
 		"port":      config.Port,
 		"network":   config.Network,
-		"running":   runtime != nil,
+		"running":   runtime != nil && runtime.running.Load(),
 		"bind_addr": net.JoinHostPort("0.0.0.0", strconv.Itoa(config.Port)),
 		"template":  masqueTemplateDescription(config),
 	}
+	if startError != "" {
+		status["start_error"] = startError
+	}
 
+	var certSnapshot masqueCertificateSnapshot
+	var certErr error
 	if runtime != nil {
 		if runtime.bindAddr != "" {
 			status["bind_addr"] = runtime.bindAddr
@@ -212,16 +239,28 @@ func (s *MasqueService) GetStatus(tag string) (map[string]interface{}, error) {
 		if runtime.certSource != "" {
 			status["cert_source"] = runtime.certSource
 		}
+		for key, value := range runtime.statusSnapshot() {
+			status[key] = value
+		}
+		if runtime.certificate != nil {
+			certSnapshot = runtime.certificate.snapshot()
+		}
+	} else {
+		cert, certFile, keyFile, certSource, err := s.loadMasqueTLSCertificate(config)
+		if err != nil {
+			certErr = err
+		} else {
+			certSnapshot = certificateSnapshot(cert, certFile, keyFile, certSource)
+		}
 	}
 
-	if config.PrivateKey != "" {
-		status["cert_source"] = "endpoint-key"
-	} else if certErr != nil {
+	if certErr != nil {
 		status["cert_error"] = certErr.Error()
-	} else {
-		status["cert_file"] = certFile
-		status["key_file"] = keyFile
 	}
+	for key, value := range certSnapshot.statusFields() {
+		status[key] = value
+	}
+	status["diagnostics"] = buildMasqueDiagnostics(config, runtime, certSnapshot, certErr, startError)
 
 	masqueStatusCache.set(tag, LastUpdate, masqueStatusCacheTTL, status)
 	return status, nil
@@ -258,8 +297,8 @@ func (s *MasqueService) startEndpoint(endpoint *model.Endpoint) (*masqueRuntime,
 	if config.Port < 1 || config.Port > 65535 {
 		return nil, fmt.Errorf("invalid masque port: %d", config.Port)
 	}
-	if config.Network != "" && config.Network != "quic" && config.Network != "h2" {
-		logger.Warning("masque service currently supports quic/h2 config preview; network=", config.Network)
+	if err := validateMasqueNetwork(config.Network); err != nil {
+		return nil, err
 	}
 	peerPrefix, err := parseMasquePeerPrefix(config.IP)
 	if err != nil {
@@ -299,6 +338,12 @@ func (s *MasqueService) startEndpoint(endpoint *model.Endpoint) (*masqueRuntime,
 	if err != nil {
 		return nil, fmt.Errorf("setup masque tun failed: %w", err)
 	}
+	packetConn, err := net.ListenPacket("udp", bindAddr)
+	if err != nil {
+		_ = tun.Close()
+		return nil, fmt.Errorf("listen masque udp %s failed: %w", bindAddr, err)
+	}
+	certificate := newMasqueCertificateReloader(cert, certFile, keyFile, certSource)
 
 	proxy := &connectip.Proxy{}
 	handle := &masqueRuntime{
@@ -313,6 +358,8 @@ func (s *MasqueService) startEndpoint(endpoint *model.Endpoint) (*masqueRuntime,
 		proxy:       proxy,
 		template:    template,
 		tun:         tun,
+		packetConn:  packetConn,
+		certificate: certificate,
 		peerPrefix:  peerPrefix,
 	}
 
@@ -343,15 +390,21 @@ func (s *MasqueService) startEndpoint(endpoint *model.Endpoint) (*masqueRuntime,
 			KeepAlivePeriod: time.Duration(keepAlive) * time.Second,
 			MaxIdleTimeout:  idleTimeout,
 		},
-		TLSConfig:       mhttp3.ConfigureTLSConfig(&mtls.Config{Certificates: []mtls.Certificate{cert}}),
+		TLSConfig: mhttp3.ConfigureTLSConfig(&mtls.Config{
+			GetCertificate: certificate.getCertificate,
+		}),
 		Handler:         mux,
 		EnableDatagrams: true,
 	}
 
 	handle.server = srv
+	handle.running.Store(true)
 
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, mhttp.ErrServerClosed) {
+		err := srv.Serve(packetConn)
+		handle.running.Store(false)
+		if err != nil && !errors.Is(err, mhttp.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
+			handle.setLastError(err)
 			logger.Warning("masque server stopped unexpectedly: ", endpoint.Tag, " err=", err)
 		}
 	}()
@@ -364,7 +417,11 @@ func (r *masqueRuntime) stop() {
 	if r == nil {
 		return
 	}
-	if old := r.swapActiveSession(nil); old != nil {
+	r.sessionMu.Lock()
+	old := r.active
+	r.active = nil
+	r.sessionMu.Unlock()
+	if old != nil {
 		old.close()
 	}
 	if r.server != nil {
@@ -372,6 +429,12 @@ func (r *masqueRuntime) stop() {
 			logger.Warning("masque server close failed: ", r.tag, " err=", err)
 		}
 	}
+	if r.packetConn != nil {
+		if err := r.packetConn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			logger.Warning("masque udp socket close failed: ", r.tag, " err=", err)
+		}
+	}
+	r.running.Store(false)
 	if r.tun != nil {
 		if err := r.tun.Close(); err != nil {
 			logger.Warning("masque tun close failed: ", r.tag, " err=", err)
@@ -391,30 +454,41 @@ func (s *masqueSession) close() {
 	})
 }
 
-func (r *masqueRuntime) swapActiveSession(next *masqueSession) *masqueSession {
-	r.sessionMu.Lock()
-	defer r.sessionMu.Unlock()
-
-	prev := r.active
-	r.active = next
-	return prev
-}
-
-func (r *masqueRuntime) reserveSession() uint64 {
+func (r *masqueRuntime) activateSession(next *masqueSession) *masqueSession {
 	r.sessionMu.Lock()
 	defer r.sessionMu.Unlock()
 
 	r.nextSession++
-	return r.nextSession
+	next.id = r.nextSession
+	prev := r.active
+	if prev != nil {
+		r.takeovers++
+	}
+	r.active = next
+	r.lastConnect = next.startedAt
+	return prev
 }
 
-func (r *masqueRuntime) clearActiveSession(sessionID uint64) {
+func (r *masqueRuntime) clearActiveSession(sessionID uint64, err error) {
 	r.sessionMu.Lock()
 	defer r.sessionMu.Unlock()
 
+	r.lastClose = time.Now()
+	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, net.ErrClosed) {
+		r.lastError = err.Error()
+	}
 	if r.active != nil && r.active.id == sessionID {
 		r.active = nil
 	}
+}
+
+func (r *masqueRuntime) setLastError(err error) {
+	if r == nil || err == nil {
+		return
+	}
+	r.sessionMu.Lock()
+	r.lastError = err.Error()
+	r.sessionMu.Unlock()
 }
 
 func (r *masqueRuntime) serveConnectIP(ctx context.Context, w mhttp.ResponseWriter, req *connectip.Request) error {
@@ -425,18 +499,21 @@ func (r *masqueRuntime) serveConnectIP(ctx context.Context, w mhttp.ResponseWrit
 
 	sessionCtx, sessionCancel := context.WithCancel(ctx)
 	session := &masqueSession{
-		id:        r.reserveSession(),
 		startedAt: time.Now(),
 		ctx:       sessionCtx,
 		cancel:    sessionCancel,
 		conn:      conn,
 	}
+	if remote, ok := ctx.Value(mhttp3.RemoteAddrContextKey).(net.Addr); ok && remote != nil {
+		session.remote = remote.String()
+	}
+	var sessionErr error
 	defer func() {
 		session.close()
-		r.clearActiveSession(session.id)
+		r.clearActiveSession(session.id, sessionErr)
 	}()
 
-	if prev := r.swapActiveSession(session); prev != nil {
+	if prev := r.activateSession(session); prev != nil {
 		logger.Info("masque connect-ip session takeover: ", r.tag, " old=", prev.id, " new=", session.id)
 		prev.close()
 	}
@@ -476,6 +553,11 @@ func (r *masqueRuntime) serveConnectIP(ctx context.Context, w mhttp.ResponseWrit
 			if len(packet) == 0 {
 				continue
 			}
+			size := uint64(len(packet))
+			session.rxBytes.Add(size)
+			session.rxPackets.Add(1)
+			r.rxBytes.Add(size)
+			r.rxPackets.Add(1)
 			if err := r.tun.WritePacket(packet); err != nil {
 				errc <- err
 				return
@@ -494,6 +576,11 @@ func (r *masqueRuntime) serveConnectIP(ctx context.Context, w mhttp.ResponseWrit
 			if n <= 0 {
 				continue
 			}
+			size := uint64(n)
+			session.txBytes.Add(size)
+			session.txPackets.Add(1)
+			r.txBytes.Add(size)
+			r.txPackets.Add(1)
 			if _, err := conn.WritePacket(append([]byte(nil), buf[:n]...)); err != nil {
 				errc <- err
 				return
@@ -502,9 +589,9 @@ func (r *masqueRuntime) serveConnectIP(ctx context.Context, w mhttp.ResponseWrit
 		errc <- sessionCtx.Err()
 	}()
 
-	err = <-errc
-	logger.Info("masque connect-ip session stopped: ", r.tag, " session=", session.id, " err=", err)
-	return err
+	sessionErr = <-errc
+	logger.Info("masque connect-ip session stopped: ", r.tag, " session=", session.id, " err=", sessionErr)
+	return sessionErr
 }
 
 func parseMasqueConnectIPRequest(r *mhttp.Request, template *uritemplate.Template) (*connectip.Request, error) {

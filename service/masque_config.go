@@ -55,6 +55,14 @@ func normalizeMasqueNetwork(network string) string {
 	return network
 }
 
+func validateMasqueNetwork(network string) error {
+	network = normalizeMasqueNetwork(network)
+	if network != "quic" {
+		return fmt.Errorf("unsupported masque network %q: only quic is currently available", network)
+	}
+	return nil
+}
+
 func masqueTemplateDescription(config *masqueEndpointConfig) string {
 	return "https://cloudflareaccess.com"
 }

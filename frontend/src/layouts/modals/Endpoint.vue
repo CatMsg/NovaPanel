@@ -166,6 +166,7 @@ export default {
       if (isDuplicatedTag) return
 
       if (this.endpoint.type == EpTypes.Masque) {
+        this.endpoint.network = 'quic'
         const preferredHost = await this.getMasqueServer()
         const currentHost = String(this.endpoint.server ?? '').trim()
         if (!currentHost || this.isIpLiteral(currentHost)) {

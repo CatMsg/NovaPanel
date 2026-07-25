@@ -217,6 +217,15 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 				return nil, ErrNoChanges
 			}
 		}
+		if endpoint.Type == "masque" {
+			config, parseErr := parseMasqueEndpoint(&endpoint)
+			if parseErr != nil {
+				return nil, parseErr
+			}
+			if err := validateMasqueNetwork(config.Network); err != nil {
+				return nil, err
+			}
+		}
 
 		if _, ports, _, active, err := collectEndpointForwardPorts(&endpoint); err == nil {
 			if active {

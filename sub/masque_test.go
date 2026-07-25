@@ -69,6 +69,20 @@ func TestBuildMasqueAggregateOutboundCanEnableRemoteDNSResolve(t *testing.T) {
 	}
 }
 
+func TestBuildMasqueAggregateOutboundRejectsUnsupportedNetwork(t *testing.T) {
+	node := buildMasqueAggregateOutbound(map[string]interface{}{
+		"tag":         "legacy-h2",
+		"server":      "masque.example.com",
+		"port":        443,
+		"network":     "h2",
+		"private_key": "private",
+		"public_key":  "public",
+	})
+	if node != nil {
+		t.Fatalf("unsupported h2 endpoint must not be published: %#v", *node)
+	}
+}
+
 func TestConvertToClashMetaPreservesMasquePerformanceDefaults(t *testing.T) {
 	svc := ClashService{}
 	outbounds := &[]map[string]interface{}{

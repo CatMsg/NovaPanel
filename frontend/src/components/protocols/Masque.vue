@@ -6,7 +6,7 @@
           <v-text-field v-model.number="data.port" label="Port" type="number" min="1" max="65535" hide-details></v-text-field>
         </v-col>
         <v-col cols="12" sm="6" md="4">
-          <v-select v-model="data.network" :items="networkItems" label="Network" hide-details></v-select>
+          <v-text-field model-value="HTTP/3 CONNECT-IP" label="Network" readonly hide-details></v-text-field>
         </v-col>
         <v-col cols="12" sm="6" md="4">
           <v-text-field v-model="data.ip" label="IP" hide-details></v-text-field>
@@ -105,11 +105,10 @@ export default {
   data() {
     return {
       loading: false,
-      networkItems: [
-        { title: 'quic', value: 'quic' },
-        { title: 'h2', value: 'h2' },
-      ],
     }
+  },
+  created() {
+    this.$props.data.network = 'quic'
   },
   computed: {
     masqueConfig() {

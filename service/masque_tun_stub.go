@@ -29,3 +29,10 @@ func (t *masqueTun) configureKernelForwarding() error {
 func (t *masqueTun) Close() error {
 	return nil
 }
+
+func masqueTunDiagnostics(runtime *masqueRuntime) []MasqueDiagnostic {
+	return []MasqueDiagnostic{
+		{ID: "tun", Status: "info", Title: "TUN 接口", Detail: "仅 Linux 服务器支持"},
+		{ID: "forwarding", Status: "info", Title: "IPv4 转发", Detail: "仅 Linux 服务器检查"},
+	}
+}

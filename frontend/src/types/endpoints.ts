@@ -62,7 +62,7 @@ export interface Tailscale extends EndpointBasics, Dial {
 export interface Masque extends EndpointBasics {
   server: string
   port: number
-  network: 'quic' | 'h2'
+  network: 'quic'
   private_key: string
   public_key: string
   sni?: string

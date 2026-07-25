@@ -195,13 +195,19 @@ func (s *HealthService) checkMasque(diagnostics map[string]interface{}) HealthCh
 	if masque == nil {
 		return HealthCheck{ID: "masque", Title: "MASQUE", Status: "info", Summary: "服务未初始化"}
 	}
-	summary := masque.GetSummary()
+	summary, details := masque.healthSummary()
 	diagnostics["masque"] = summary
 	if summary["total"] == 0 {
 		return HealthCheck{ID: "masque", Title: "MASQUE", Status: "info", Summary: "未配置 MASQUE 节点"}
 	}
 	if summary["running"] != summary["total"] {
 		return HealthCheck{ID: "masque", Title: "MASQUE", Status: "error", Summary: fmt.Sprintf("%d/%d 个节点运行", summary["running"], summary["total"]), Action: "endpoints"}
+	}
+	if summary["errors"] > 0 {
+		return HealthCheck{ID: "masque", Title: "MASQUE", Status: "error", Summary: fmt.Sprintf("发现 %d 个运行问题", summary["errors"]), Detail: strings.Join(details, "\n"), Action: "endpoints"}
+	}
+	if summary["warnings"] > 0 {
+		return HealthCheck{ID: "masque", Title: "MASQUE", Status: "warning", Summary: fmt.Sprintf("发现 %d 个注意项", summary["warnings"]), Detail: strings.Join(details, "\n"), Action: "endpoints"}
 	}
 	return HealthCheck{ID: "masque", Title: "MASQUE", Status: "ok", Summary: fmt.Sprintf("%d 个节点运行正常", summary["running"]), Action: "endpoints"}
 }

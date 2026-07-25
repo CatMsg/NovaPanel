@@ -663,7 +663,7 @@ func buildMasqueAggregateOutbound(endpoint map[string]interface{}) *map[string]i
 	network := normalizeEndpointMasqueNetwork(asString(endpoint["network"]))
 	keepAlive := asInt(endpoint["keepalive"])
 
-	if len(server) == 0 || port <= 0 || len(privateKey) == 0 || len(publicKey) == 0 {
+	if len(server) == 0 || port <= 0 || len(privateKey) == 0 || len(publicKey) == 0 || network != "quic" {
 		return nil
 	}
 	if keepAlive <= 0 {

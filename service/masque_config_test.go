@@ -51,6 +51,18 @@ func TestParseMasquePeerPrefixRequiresIPv4(t *testing.T) {
 	}
 }
 
+func TestValidateMasqueNetworkOnlyAllowsQUIC(t *testing.T) {
+	if err := validateMasqueNetwork(""); err != nil {
+		t.Fatalf("empty network should normalize to quic: %v", err)
+	}
+	if err := validateMasqueNetwork("quic"); err != nil {
+		t.Fatalf("quic should be accepted: %v", err)
+	}
+	if err := validateMasqueNetwork("h2"); err == nil {
+		t.Fatal("h2 must be rejected until a real HTTP/2 server is implemented")
+	}
+}
+
 func TestGenerateMasqueTLSCertificateFromPrivateKey(t *testing.T) {
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {

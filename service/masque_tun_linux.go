@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"hash/fnv"
+	"net"
 	"net/netip"
 	"os"
 	"strings"
@@ -155,4 +156,30 @@ func (t *masqueTun) Close() error {
 		return t.file.Close()
 	}
 	return nil
+}
+
+func masqueTunDiagnostics(runtime *masqueRuntime) []MasqueDiagnostic {
+	if runtime == nil || runtime.tun == nil {
+		return []MasqueDiagnostic{
+			{ID: "tun", Status: "error", Title: "TUN 接口", Detail: "接口未创建"},
+			{ID: "forwarding", Status: "error", Title: "IPv4 转发", Detail: "无法检查未运行的节点"},
+		}
+	}
+
+	checks := make([]MasqueDiagnostic, 0, 2)
+	if _, err := net.InterfaceByName(runtime.tun.name); err != nil {
+		checks = append(checks, MasqueDiagnostic{ID: "tun", Status: "error", Title: "TUN 接口", Detail: err.Error()})
+	} else {
+		checks = append(checks, MasqueDiagnostic{ID: "tun", Status: "ok", Title: "TUN 接口", Detail: runtime.tun.name})
+	}
+
+	raw, err := os.ReadFile("/proc/sys/net/ipv4/ip_forward")
+	if err != nil {
+		checks = append(checks, MasqueDiagnostic{ID: "forwarding", Status: "warning", Title: "IPv4 转发", Detail: err.Error()})
+	} else if strings.TrimSpace(string(raw)) != "1" {
+		checks = append(checks, MasqueDiagnostic{ID: "forwarding", Status: "error", Title: "IPv4 转发", Detail: "net.ipv4.ip_forward 未启用"})
+	} else {
+		checks = append(checks, MasqueDiagnostic{ID: "forwarding", Status: "ok", Title: "IPv4 转发", Detail: "已启用"})
+	}
+	return checks
 }
