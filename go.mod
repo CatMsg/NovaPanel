@@ -9,8 +9,8 @@ require (
 	github.com/gofrs/uuid/v5 v5.4.0
 	github.com/metacubex/connect-ip-go v0.0.0-20260412152424-e1625567920a
 	github.com/metacubex/http v0.1.6
-	github.com/metacubex/quic-go v0.59.1-0.20260520020949-fcd18c7b6ace
-	github.com/metacubex/tls v0.1.6
+	github.com/metacubex/quic-go v0.59.1-0.20260606115121-0662b57ad5bf
+	github.com/metacubex/tls v0.1.7
 	github.com/op/go-logging v0.0.0-20160315200505-970db520ece7
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/sagernet/sing v0.8.10
