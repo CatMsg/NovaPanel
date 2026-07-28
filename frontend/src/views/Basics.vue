@@ -294,7 +294,7 @@ const clientNames = computed((): string[] => {
 })
 
 const outboundTags = computed((): string[] => {
-  return [...Data().outbounds?.map((o:any) => o.tag), ...Data().endpoints?.filter((e:any) => e.type != "masque").map((e:any) => e.tag)]
+  return [...Data().outbounds?.map((o:any) => o.tag), ...Data().endpoints?.filter((e:any) => e.type != "masque" && e.type != "mieru").map((e:any) => e.tag)]
 })
 
 const levels = ["trace", "debug", "info", "warn", "error", "fatal", "panic"]

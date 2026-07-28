@@ -67,6 +67,8 @@ type FleetServerView struct {
 	Endpoints       int                    `json:"endpoints,omitempty"`
 	MasqueTotal     int                    `json:"masqueTotal,omitempty"`
 	MasqueRunning   int                    `json:"masqueRunning,omitempty"`
+	MieruTotal      int                    `json:"mieruTotal,omitempty"`
+	MieruRunning    int                    `json:"mieruRunning,omitempty"`
 	PortBackend     string                 `json:"portBackend,omitempty"`
 	Listeners       int                    `json:"listeners,omitempty"`
 	NatRules        int                    `json:"natRules,omitempty"`
@@ -140,6 +142,9 @@ func (s *FleetService) GetFleetStatus() map[string]interface{} {
 	}
 	if masque := GetMasqueService(); masque != nil {
 		result["masque"] = masque.GetSummary()
+	}
+	if mieru := GetMieruService(); mieru != nil {
+		result["mieru"] = mieru.GetSummary()
 	}
 	return result
 }
@@ -451,6 +456,10 @@ func (s *FleetService) applyFleetStatus(view *FleetServerView, payload map[strin
 	if masque, ok := payload["masque"].(map[string]interface{}); ok {
 		view.MasqueTotal = fleetInt(masque["total"])
 		view.MasqueRunning = fleetInt(masque["running"])
+	}
+	if mieru, ok := payload["mieru"].(map[string]interface{}); ok {
+		view.MieruTotal = fleetInt(mieru["total"])
+		view.MieruRunning = fleetInt(mieru["running"])
 	}
 	if ports, ok := payload["ports"].(map[string]interface{}); ok {
 		view.PortBackend, _ = ports["backend"].(string)

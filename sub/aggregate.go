@@ -419,6 +419,10 @@ func (a *AggregateService) collectLocalEndpointOutbounds(host string) ([]map[str
 			if ob := buildMasqueAggregateOutbound(endpoint); ob != nil {
 				outbounds = append(outbounds, *ob)
 			}
+		case "mieru":
+			if ob := buildMieruAggregateOutbound(endpoint); ob != nil {
+				outbounds = append(outbounds, *ob)
+			}
 		case "tailscale":
 			if ob := buildTailscaleAggregateOutbound(endpoint); ob != nil {
 				outbounds = append(outbounds, *ob)
@@ -700,6 +704,49 @@ func buildMasqueAggregateOutbound(endpoint map[string]interface{}) *map[string]i
 	} else {
 		node["udp"] = true
 	}
+	return &node
+}
+
+func buildMieruAggregateOutbound(endpoint map[string]interface{}) *map[string]interface{} {
+	server := asString(endpoint["server"])
+	port := asInt(endpoint["port"])
+	portRange := strings.TrimSpace(asString(endpoint["port_range"]))
+	transport := strings.ToUpper(strings.TrimSpace(asString(endpoint["transport"])))
+	username := asString(endpoint["username"])
+	password := asString(endpoint["password"])
+	if transport == "" {
+		transport = "TCP"
+	}
+	if server == "" || username == "" || password == "" || (port <= 0 && portRange == "") {
+		return nil
+	}
+	if transport != "TCP" && transport != "UDP" {
+		return nil
+	}
+
+	node := map[string]interface{}{
+		"type":      "mieru",
+		"tag":       asString(endpoint["tag"]),
+		"server":    server,
+		"transport": transport,
+		"username":  username,
+		"password":  password,
+	}
+	if portRange != "" {
+		node["port-range"] = portRange
+	} else {
+		node["server_port"] = port
+	}
+	multiplexing := strings.ToUpper(strings.TrimSpace(asString(endpoint["multiplexing"])))
+	if multiplexing == "" {
+		multiplexing = "MULTIPLEXING_LOW"
+	}
+	node["multiplexing"] = multiplexing
+	handshakeMode := strings.ToUpper(strings.TrimSpace(asString(endpoint["handshake_mode"])))
+	if handshakeMode == "" {
+		handshakeMode = "HANDSHAKE_STANDARD"
+	}
+	node["handshake-mode"] = handshakeMode
 	return &node
 }
 

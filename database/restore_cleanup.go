@@ -173,6 +173,23 @@ func collectEndpointPortsForRestore(endpoint *model.Endpoint) ([]int, bool, erro
 	if err := json.Unmarshal(full, &payload); err != nil {
 		return nil, false, err
 	}
+	if strings.EqualFold(endpoint.Type, "mieru") {
+		rawPortRange := strings.TrimSpace(fmt.Sprint(payload["port_range"]))
+		if rawPortRange != "" && rawPortRange != "<nil>" {
+			start, end, err := parseRestorePortRange(rawPortRange)
+			if err != nil {
+				return nil, false, err
+			}
+			if end-start+1 > 512 {
+				return nil, false, fmt.Errorf("mieru port range is too large: maximum 512 ports")
+			}
+			ports := make([]int, 0, end-start+1)
+			for port := start; port <= end; port++ {
+				ports = append(ports, port)
+			}
+			return ports, true, nil
+		}
+	}
 
 	portKey := model.EndpointPortKey(endpoint.Type)
 	rawPort, ok := payload[portKey]

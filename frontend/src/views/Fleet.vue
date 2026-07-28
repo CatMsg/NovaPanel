@@ -171,8 +171,16 @@
                 <strong>{{ server.Inbounds }} / {{ server.Outbounds }}</strong>
               </div>
               <div class="fleet-metric">
-                <span>节点 / MASQUE</span>
-                <strong>{{ server.Endpoints }} / {{ server.MasqueRunning }} / {{ server.MasqueTotal }}</strong>
+                <span>节点</span>
+                <strong>{{ server.Endpoints }}</strong>
+              </div>
+              <div class="fleet-metric">
+                <span>MASQUE</span>
+                <strong>{{ server.MasqueRunning }} / {{ server.MasqueTotal }}</strong>
+              </div>
+              <div class="fleet-metric">
+                <span>Mieru</span>
+                <strong>{{ server.MieruRunning }} / {{ server.MieruTotal }}</strong>
               </div>
             </div>
 
@@ -269,7 +277,9 @@
             <div><span>监听 / NAT</span><strong>{{ selectedServer.listeners }} / {{ selectedServer.natRules }}</strong></div>
             <div><span>用户 / 在线</span><strong>{{ selectedServer.Clients }} / {{ selectedServer.OnlineUsers }}</strong></div>
             <div><span>入站 / 出站</span><strong>{{ selectedServer.Inbounds }} / {{ selectedServer.Outbounds }}</strong></div>
-            <div><span>节点 / MASQUE</span><strong>{{ selectedServer.Endpoints }} / {{ selectedServer.MasqueRunning }} / {{ selectedServer.MasqueTotal }}</strong></div>
+            <div><span>节点</span><strong>{{ selectedServer.Endpoints }}</strong></div>
+            <div><span>MASQUE</span><strong>{{ selectedServer.MasqueRunning }} / {{ selectedServer.MasqueTotal }}</strong></div>
+            <div><span>Mieru</span><strong>{{ selectedServer.MieruRunning }} / {{ selectedServer.MieruTotal }}</strong></div>
           </div>
           <section v-if="selectedServer.configuration" class="fleet-config-compare">
             <div class="fleet-detail__log-head">
@@ -349,6 +359,8 @@ type FleetServer = {
   Endpoints: number
   MasqueTotal: number
   MasqueRunning: number
+  MieruTotal: number
+  MieruRunning: number
   portBackend?: string
   listeners: number
   natRules: number
@@ -416,6 +428,8 @@ const normalizeServer = (server: any): FleetServer => ({
   Endpoints: server.endpoints ?? server.Endpoints ?? 0,
   MasqueTotal: server.masqueTotal ?? server.MasqueTotal ?? 0,
   MasqueRunning: server.masqueRunning ?? server.MasqueRunning ?? 0,
+  MieruTotal: server.mieruTotal ?? server.MieruTotal ?? 0,
+  MieruRunning: server.mieruRunning ?? server.MieruRunning ?? 0,
   listeners: server.listeners ?? 0,
   natRules: server.natRules ?? 0,
   configuration: server.configuration,

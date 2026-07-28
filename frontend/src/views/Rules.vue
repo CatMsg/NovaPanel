@@ -253,12 +253,12 @@ const rulesetTags = computed((): string[] => rulesets.value.map((rs:any) => rs.t
 
 const outboundTags = computed((): string[] => [
   ...Data().outbounds?.map((o:any) => o.tag),
-  ...Data().endpoints?.filter((e:any) => e.type != "masque").map((e:any) => e.tag)
+  ...Data().endpoints?.filter((e:any) => e.type != "masque" && e.type != "mieru").map((e:any) => e.tag)
 ])
 
 const inboundTags = computed((): string[] => [
   ...Data().inbounds?.map((o:any) => o.tag),
-  ...Data().endpoints?.filter((e:any) => e.listen_port > 0 && e.type != "masque").map((e:any) => e.tag)
+  ...Data().endpoints?.filter((e:any) => e.listen_port > 0 && e.type != "masque" && e.type != "mieru").map((e:any) => e.tag)
 ])
 
 let delRuleOverlay = ref(new Array<boolean>)

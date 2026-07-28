@@ -20,6 +20,12 @@
     :data="masqueStatus.data"
     @close="closeMasqueStatus"
   />
+  <MieruStatus
+    v-model="mieruStatus.visible"
+    :visible="mieruStatus.visible"
+    :data="mieruStatus.data"
+    @close="closeMieruStatus"
+  />
   <QrCode
     v-model="qrcode.visible"
     :visible="qrcode.visible"
@@ -39,7 +45,7 @@
           <div>
             <h1 class="resource-hero__title">{{ $t('pages.endpoints') }}</h1>
             <p class="resource-hero__subtitle">
-              管理节点管理与 MASQUE、WireGuard 等端点，状态与复制入口聚合到一处。
+              管理 Mieru、MASQUE、WireGuard 等端点，状态与复制入口聚合到一处。
             </p>
           </div>
         </div>
@@ -49,6 +55,8 @@
           <span>总数 {{ endpoints.length }}</span>
           <span>•</span>
           <span>MASQUE {{ endpoints.filter(e => e.type == 'masque').length }}</span>
+          <span>•</span>
+          <span>Mieru {{ endpoints.filter(e => e.type == 'mieru').length }}</span>
         </div>
       </v-col>
       <v-col v-if="endpoints.length > 0" cols="12" lg="4" class="resource-hero__actions">
@@ -134,7 +142,7 @@
       <EmptyState
         icon="mdi-cloud-tags-outline"
         title="暂无节点"
-        description="添加 MASQUE、WireGuard 等节点后，可在这里查看状态并复制客户端配置。"
+        description="添加 Mieru、MASQUE、WireGuard 等节点后，可在这里查看状态并复制客户端配置。"
         :action="$t('actions.add')"
         @action="showModal(0)"
       />
@@ -163,6 +171,24 @@
             <v-row>
               <v-col>IP</v-col>
               <v-col>{{ item.ip ?? '-' }}</v-col>
+            </v-row>
+          </template>
+          <template v-else-if="item.type == 'mieru'">
+            <v-row>
+              <v-col>Server</v-col>
+              <v-col>{{ item.server ?? '-' }}</v-col>
+            </v-row>
+            <v-row>
+              <v-col>Port</v-col>
+              <v-col>{{ item.port_range || item.port || '-' }}</v-col>
+            </v-row>
+            <v-row>
+              <v-col>Transport</v-col>
+              <v-col>{{ item.transport ?? 'TCP' }}</v-col>
+            </v-row>
+            <v-row>
+              <v-col>User</v-col>
+              <v-col>{{ item.username ?? '-' }}</v-col>
             </v-row>
           </template>
           <template v-else>
@@ -213,6 +239,14 @@
             <v-icon icon="mdi-information-outline" /><span>{{ $t('status') }}</span>
             <v-tooltip activator="parent" location="top" text="MASQUE status"></v-tooltip>
           </v-btn>
+          <v-btn v-if="item.type == 'mieru'" class="np-card-action" variant="text" @click="copyMieru(item)">
+            <v-icon icon="mdi-content-copy" /><span>{{ $t('actions.copy') }}</span>
+            <v-tooltip activator="parent" location="top" text="Copy Mieru config"></v-tooltip>
+          </v-btn>
+          <v-btn v-if="item.type == 'mieru'" class="np-card-action" variant="text" @click="showMieruStatus(item.id)">
+            <v-icon icon="mdi-information-outline" /><span>{{ $t('status') }}</span>
+            <v-tooltip activator="parent" location="top" text="Mieru status"></v-tooltip>
+          </v-btn>
           <v-overlay
             v-model="delOverlay[index]"
             contained
@@ -236,7 +270,7 @@
             <v-icon icon="mdi-qrcode" /><span>QR</span>
             <v-tooltip activator="parent" location="top" text="WireGuard QR Code"></v-tooltip>
           </v-btn>
-          <v-btn class="np-card-action" variant="text" @click="showStats(item.tag)" v-if="Data().enableTraffic">
+          <v-btn class="np-card-action" variant="text" @click="showStats(item.tag)" v-if="Data().enableTraffic && item.type != 'masque' && item.type != 'mieru'">
             <v-icon icon="mdi-chart-line" /><span>{{ $t('stats.graphTitle') }}</span>
             <v-tooltip activator="parent" location="top" :text="$t('stats.graphTitle')"></v-tooltip>
           </v-btn>
@@ -250,6 +284,7 @@
 import Data from '@/store/modules/data'
 import { Endpoint } from '@/types/endpoints'
 import { buildMasqueConfig } from '@/plugins/masqueUtil'
+import { buildMieruConfig } from '@/plugins/mieruUtil'
 import HttpUtils from '@/plugins/httputil'
 import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
 import { push } from 'notivue'
@@ -259,6 +294,7 @@ import EmptyState from '@/components/EmptyState.vue'
 const EndpointVue = defineAsyncComponent(() => import('@/layouts/modals/Endpoint.vue'))
 const Stats = defineAsyncComponent(() => import('@/layouts/modals/Stats.vue'))
 const MasqueStatus = defineAsyncComponent(() => import('@/layouts/modals/MasqueStatus.vue'))
+const MieruStatus = defineAsyncComponent(() => import('@/layouts/modals/MieruStatus.vue'))
 const QrCode = defineAsyncComponent(() => import('@/layouts/modals/WgQrCode.vue'))
 const { smAndDown } = useDisplay()
 const showEndpointAggregate = ref(!smAndDown.value)
@@ -375,6 +411,20 @@ const closeMasqueStatus = () => {
   masqueStatus.value.visible = false
 }
 
+const mieruStatus = ref({
+  visible: false,
+  data: <any>{},
+})
+
+const showMieruStatus = (id: number) => {
+  mieruStatus.value.data = endpoints.value.findLast(o => o.id == id)
+  mieruStatus.value.visible = true
+}
+
+const closeMieruStatus = () => {
+  mieruStatus.value.visible = false
+}
+
 const loadEndpointAggregateConfig = async () => {
   const msg = await HttpUtils.get('api/settings')
   if (!msg.success || !msg.obj) return
@@ -458,6 +508,12 @@ const copyEndpointLink = async (text: string, label: string) => {
 const copyMasque = async (item: any) => {
   const text = buildMasqueConfig(item)
   await navigator.clipboard.writeText(text)
+}
+
+const copyMieru = async (item: any) => {
+  const text = buildMieruConfig(item)
+  await navigator.clipboard.writeText(text)
+  push.success({ message: '已复制 Mieru 节点配置' })
 }
 </script>
 

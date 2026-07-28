@@ -129,6 +129,11 @@ func (s *ConfigService) compensateFailedSave(snapshot *configSnapshot, obj strin
 			errs = append(errs, fmt.Errorf("restore masque service: %w", err))
 		}
 	}
+	if mieruPtr != nil {
+		if err := mieruPtr.SyncFromDB(); err != nil {
+			errs = append(errs, fmt.Errorf("restore mieru service: %w", err))
+		}
+	}
 	if corePtr != nil {
 		var err error
 		if corePtr.IsRunning() {

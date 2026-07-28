@@ -19,6 +19,7 @@ type APP struct {
 	service.SettingService
 	configService *service.ConfigService
 	masqueService *service.MasqueService
+	mieruService  *service.MieruService
 	webServer     *web.Server
 	subServer     *sub.Server
 	cronJob       *cronjob.CronJob
@@ -53,6 +54,8 @@ func (a *APP) Init() error {
 	a.core = core.NewCore()
 	a.masqueService = service.NewMasqueService()
 	service.SetMasqueService(a.masqueService)
+	a.mieruService = service.NewMieruService()
+	service.SetMieruService(a.mieruService)
 
 	a.cronJob = cronjob.NewCronJob()
 	a.webServer = web.NewServer()
@@ -106,6 +109,11 @@ func (a *APP) runDeferredStartupTasks() {
 			logger.Warning("rebuild masque service failed:", err)
 		}
 	}
+	if a.mieruService != nil {
+		if err := a.mieruService.SyncFromDB(); err != nil {
+			logger.Warning("rebuild mieru service failed:", err)
+		}
+	}
 
 	if err := a.SettingService.RebuildAllManagedPortForwarding(&a.configService.InboundService, &a.configService.EndpointService); err != nil {
 		logger.Warning("rebuild all managed port forwarding failed:", err)
@@ -130,6 +138,12 @@ func (a *APP) Stop() {
 		err = a.masqueService.Stop()
 		if err != nil {
 			logger.Warning("stop Masque Service err:", err)
+		}
+	}
+	if a.mieruService != nil {
+		err = a.mieruService.Stop()
+		if err != nil {
+			logger.Warning("stop Mieru Service err:", err)
 		}
 	}
 }

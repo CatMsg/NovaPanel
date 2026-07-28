@@ -5,6 +5,7 @@ export const EpTypes = {
   Warp: 'warp',
   Tailscale: 'tailscale',
   Masque: 'masque',
+  Mieru: 'mieru',
 }
 
 type EpType = typeof EpTypes[keyof typeof EpTypes]
@@ -73,6 +74,18 @@ export interface Masque extends EndpointBasics {
   udp?: boolean
 }
 
+export interface Mieru extends EndpointBasics {
+  server: string
+  port: number
+  port_range?: string
+  transport: 'TCP' | 'UDP'
+  username: string
+  password: string
+  multiplexing: 'MULTIPLEXING_OFF' | 'MULTIPLEXING_LOW' | 'MULTIPLEXING_MIDDLE' | 'MULTIPLEXING_HIGH'
+  handshake_mode: 'HANDSHAKE_STANDARD' | 'HANDSHAKE_NO_WAIT'
+  mtu: number
+}
+
 // Create interfaces dynamically based on EpTypes keys
 type InterfaceMap = {
   [Key in keyof typeof EpTypes]: {
@@ -90,6 +103,7 @@ const defaultValues: Record<EpType, Endpoint> = {
   warp: { type: EpTypes.Warp, address: [], private_key: '', listen_port: 0, mtu: 1420, peers: [{ address: '', port: 0, public_key: ''}] },
   tailscale: { type: EpTypes.Tailscale, domain_resolver: 'local' },
   masque: { type: EpTypes.Masque, server: '', port: 443, network: 'quic', private_key: '', public_key: '', sni: '', keepalive: 25, remote_dns_resolve: false, ip: '', mtu: 1380, udp: true },
+  mieru: { type: EpTypes.Mieru, server: '', port: 0, port_range: '', transport: 'TCP', username: '', password: '', multiplexing: 'MULTIPLEXING_LOW', handshake_mode: 'HANDSHAKE_STANDARD', mtu: 1400 },
 }
 
 export function createEndpoint<T extends Endpoint>(type: string,json?: Partial<T>): Endpoint {

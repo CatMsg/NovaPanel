@@ -102,6 +102,8 @@ func (a *APIv2Handler) getHandler(c *gin.Context) {
 		a.ApiService.GetUpdateStatus(c)
 	case "masque-status":
 		a.ApiService.GetMasqueStatus(c)
+	case "mieru-status":
+		a.ApiService.GetMieruStatus(c)
 	case "onlines":
 		a.ApiService.GetOnlines(c)
 	case "logs":

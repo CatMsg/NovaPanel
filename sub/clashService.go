@@ -235,6 +235,9 @@ func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, b
 			} else if server := asString(obMap["server"]); server != "" && !isIPLiteral(server) {
 				proxy["sni"] = server
 			}
+		case "mieru":
+			proxy["type"] = "mieru"
+			copyClashFields(proxy, obMap, "port-range", "transport", "username", "password", "multiplexing", "handshake-mode")
 		case "tailscale":
 			proxy["type"] = "tailscale"
 			copyClashFields(proxy, obMap,

@@ -298,6 +298,21 @@ func (a *ApiService) GetMasqueStatus(c *gin.Context) {
 	jsonObj(c, result, nil)
 }
 
+func (a *ApiService) GetMieruStatus(c *gin.Context) {
+	tag := c.Query("tag")
+	mieruService := service.GetMieruService()
+	if mieruService == nil {
+		jsonMsg(c, "", common.NewError("mieru service not initialized"))
+		return
+	}
+	result, err := mieruService.GetStatus(tag)
+	if err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
+	jsonObj(c, result, nil)
+}
+
 func (a *ApiService) GetFleet(c *gin.Context) {
 	result, err := a.FleetService.GetFleet()
 	jsonObj(c, result, err)

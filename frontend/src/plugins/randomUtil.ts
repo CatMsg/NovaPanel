@@ -19,7 +19,10 @@ const RandomUtil = {
     return Math.floor(random * (max - min + 1) + min)
   },
   randomInt(n: number) {
-    return this.randomIntRange(0, n)
+    if (!Number.isSafeInteger(n) || n <= 0) {
+      return 0
+    }
+    return this.randomIntRange(0, n - 1)
   },
   randomSeq(count: number): string {
     if (count <= 0) {

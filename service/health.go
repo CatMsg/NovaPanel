@@ -57,6 +57,7 @@ func (s *HealthService) GetHealthReport(force bool) *HealthReport {
 	report.add(s.checkTLS("subscription-tls", "订阅 TLS", s.GetSubCertFile, s.GetSubKeyFile))
 	report.add(s.checkSubscription())
 	report.add(s.checkMasque(report.Diagnostics))
+	report.add(s.checkMieru(report.Diagnostics))
 	report.add(s.checkDefaultCredentials())
 	report.add(s.checkUpdate(report.Diagnostics))
 
@@ -210,6 +211,22 @@ func (s *HealthService) checkMasque(diagnostics map[string]interface{}) HealthCh
 		return HealthCheck{ID: "masque", Title: "MASQUE", Status: "warning", Summary: fmt.Sprintf("发现 %d 个注意项", summary["warnings"]), Detail: strings.Join(details, "\n"), Action: "endpoints"}
 	}
 	return HealthCheck{ID: "masque", Title: "MASQUE", Status: "ok", Summary: fmt.Sprintf("%d 个节点运行正常", summary["running"]), Action: "endpoints"}
+}
+
+func (s *HealthService) checkMieru(diagnostics map[string]interface{}) HealthCheck {
+	mieru := GetMieruService()
+	if mieru == nil {
+		return HealthCheck{ID: "mieru", Title: "Mieru", Status: "info", Summary: "服务未初始化"}
+	}
+	summary, details := mieru.healthSummary()
+	diagnostics["mieru"] = summary
+	if summary["total"] == 0 {
+		return HealthCheck{ID: "mieru", Title: "Mieru", Status: "info", Summary: "未配置 Mieru 节点"}
+	}
+	if summary["running"] != summary["total"] {
+		return HealthCheck{ID: "mieru", Title: "Mieru", Status: "error", Summary: fmt.Sprintf("%d/%d 个节点运行", summary["running"], summary["total"]), Detail: strings.Join(details, "\n"), Action: "endpoints"}
+	}
+	return HealthCheck{ID: "mieru", Title: "Mieru", Status: "ok", Summary: fmt.Sprintf("%d 个节点运行正常", summary["running"]), Action: "endpoints"}
 }
 
 func (s *HealthService) checkDefaultCredentials() HealthCheck {

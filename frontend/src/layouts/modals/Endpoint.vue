@@ -39,7 +39,8 @@
         <Warp v-if="endpoint.type == epTypes.Warp" :data="endpoint" />
         <TailscaleVue v-if="endpoint.type == epTypes.Tailscale" :data="endpoint" />
         <Masque v-if="endpoint.type == epTypes.Masque" :data="endpoint" />
-        <Dial v-if="endpoint.type != epTypes.Masque" :dial="endpoint" />
+        <Mieru v-if="endpoint.type == epTypes.Mieru" :data="endpoint" />
+        <Dial v-if="endpoint.type != epTypes.Masque && endpoint.type != epTypes.Mieru" :dial="endpoint" />
       </v-card-text>
       <v-card-actions class="modal-shell__actions">
         <v-spacer></v-spacer>
@@ -71,6 +72,7 @@ import Wireguard from '@/components/protocols/Wireguard.vue'
 import Warp from '@/components/protocols/Warp.vue'
 import TailscaleVue from '@/components/protocols/Tailscale.vue'
 import Masque from '@/components/protocols/Masque.vue'
+import Mieru from '@/components/protocols/Mieru.vue'
 import HttpUtils from '@/plugins/httputil'
 import { push } from 'notivue'
 import { i18n } from '@/locales'
@@ -151,6 +153,22 @@ export default {
           }
           break
         }
+        case EpTypes.Mieru: {
+          const server = await this.getMieruServer()
+          prevConfig = {
+            tag,
+            server,
+            port: RandomUtil.randomIntRange(10000, 60000),
+            port_range: '',
+            transport: 'TCP',
+            username: 'mieru-' + RandomUtil.randomLowerAndNum(6),
+            password: RandomUtil.randomSeq(24),
+            multiplexing: 'MULTIPLEXING_LOW',
+            handshake_mode: 'HANDSHAKE_STANDARD',
+            mtu: 1400,
+          }
+          break
+        }
       }
       this.endpoint = createEndpoint(this.endpoint.type, prevConfig)
     },
@@ -194,6 +212,14 @@ export default {
           (this.endpoint as any).sni = resolvedHost
         }
         delete (this.endpoint as any).ipv6
+      }
+      if (this.endpoint.type == EpTypes.Mieru) {
+        const range = String((this.endpoint as any).port_range ?? '').trim()
+        if (range) {
+          ;(this.endpoint as any).port = 0
+        } else {
+          ;(this.endpoint as any).port_range = ''
+        }
       }
 
       // save data
@@ -260,6 +286,22 @@ export default {
         }
       } catch {
         // ignore and use fallback
+      }
+      return ''
+    },
+    async getMieruServer() {
+      try {
+        const settings = await HttpUtils.get('api/settings')
+        if (settings.success && settings.obj) {
+          const subDomain = String(settings.obj.subDomain ?? '').trim()
+          if (subDomain) return subDomain
+          const webDomain = String(settings.obj.webDomain ?? '').trim()
+          if (webDomain) return webDomain
+        }
+        const publicIp = await HttpUtils.get('api/public-ip')
+        if (publicIp.success) return String(publicIp.obj ?? '').trim()
+      } catch {
+        // Keep the field editable when automatic discovery is unavailable.
       }
       return ''
     },
@@ -331,7 +373,7 @@ export default {
       }
     },
   },
-  components: { Dial, Wireguard, Warp, TailscaleVue, Masque }
+  components: { Dial, Wireguard, Warp, TailscaleVue, Masque, Mieru }
 }
 </script>
 

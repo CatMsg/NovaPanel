@@ -299,6 +299,12 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 			run:  masquePtr.SyncFromDB,
 		})
 	}
+	if mieruPtr != nil && obj == "endpoints" {
+		actions = append(actions, postCommitAction{
+			name: "sync mieru service",
+			run:  mieruPtr.SyncFromDB,
+		})
+	}
 	if obj != "config" && corePtr != nil && !corePtr.IsRunning() {
 		actions = append(actions, postCommitAction{
 			name: "start core",

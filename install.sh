@@ -245,6 +245,7 @@ save_install_rollback() {
     mkdir -p "${backup_dir}" || return 1
     [[ -f "/usr/local/s-ui/sui" ]] && cp -a "/usr/local/s-ui/sui" "${backup_dir}/sui" || true
     [[ -f "/usr/local/s-ui/s-ui.sh" ]] && cp -a "/usr/local/s-ui/s-ui.sh" "${backup_dir}/s-ui.sh" || true
+    [[ -d "/usr/local/s-ui/bin" ]] && cp -a "/usr/local/s-ui/bin" "${backup_dir}/bin" || true
     [[ -d "/usr/local/s-ui/scripts" ]] && cp -a "/usr/local/s-ui/scripts" "${backup_dir}/scripts" || true
     [[ -f "/etc/systemd/system/s-ui.service" ]] && cp -a "/etc/systemd/system/s-ui.service" "${backup_dir}/s-ui.service" || true
     [[ -f "${backup_dir}/sui" || -f "${backup_dir}/s-ui.sh" ]]
@@ -256,6 +257,8 @@ restore_install_rollback() {
     systemctl stop s-ui 2>/dev/null || true
     [[ -f "${backup_dir}/sui" ]] && cp -f "${backup_dir}/sui" "/usr/local/s-ui/sui"
     [[ -f "${backup_dir}/s-ui.sh" ]] && cp -f "${backup_dir}/s-ui.sh" "/usr/local/s-ui/s-ui.sh"
+    rm -rf "/usr/local/s-ui/bin"
+    [[ -d "${backup_dir}/bin" ]] && cp -a "${backup_dir}/bin" "/usr/local/s-ui/bin"
     [[ -d "${backup_dir}/scripts" ]] && cp -rf "${backup_dir}/scripts" "/usr/local/s-ui/"
     [[ -f "${backup_dir}/s-ui.service" ]] && cp -f "${backup_dir}/s-ui.service" "/etc/systemd/system/s-ui.service"
     chmod +x "/usr/local/s-ui/sui" "/usr/local/s-ui/s-ui.sh" 2>/dev/null || true

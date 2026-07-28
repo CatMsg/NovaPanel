@@ -26,7 +26,7 @@
 
 | 能力 | 说明 |
 | --- | --- |
-| 多协议 | Mixed、SOCKS、HTTP、HTTPS、Direct、Redirect、TProxy、VLESS、VMess、Trojan、Shadowsocks、ShadowTLS、Hysteria、Hysteria2、Naive、TUIC、MASQUE |
+| 多协议 | Mixed、SOCKS、HTTP、HTTPS、Direct、Redirect、TProxy、VLESS、VMess、Trojan、Shadowsocks、ShadowTLS、Hysteria、Hysteria2、Naive、TUIC、MASQUE、Mieru |
 | 订阅输出 | `link`、`json`、`clash`、`info` |
 | 运维面板 | 入站、出站、端点、服务、规则、路由 |
 | 可视化 | 客户端、流量、在线状态、系统状态、访问记录 |
@@ -139,8 +139,9 @@ docker build -t novapanel .
 - 面板端口新增、修改会自动同步到本地端口转发规则，减少手工维护。
 - Hysteria2 的 `server_ports` 支持单端口、范围和组合写法，例如 `500,900,1000-1400`，恢复备份后会自动重建对应规则。
 - MASQUE 节点支持 HTTP/3 CONNECT-IP 服务、实时会话与流量统计、逐项运行诊断，以及 ACME 证书续签后的握手热重载。
+- Mieru 节点集成官方 `mita` Linux 服务端，支持 TCP / UDP、单端口或连续端口范围、多路复用、0-RTT 选项、运行状态查看和 Clash/Mihomo 节点聚合。
 - 备份恢复前会检查端口管理后端，自动适配 `ufw`、`nftables` 或 `iptables`，并在冲突场景下尽量保证恢复结果可用。
-- 服务器集合支持保存远端 NovaPanel 地址和加密令牌，可集中查看版本、核心、端口、用户、节点和 MASQUE 状态，并查看日志或重启面板。
+- 服务器集合支持保存远端 NovaPanel 地址和加密令牌，可集中查看版本、核心、端口、用户、节点、MASQUE 和 Mieru 状态，并查看日志或重启面板。
 - 服务器集合支持单台刷新、状态重试、断线保留上次状态，以及通过令牌远程执行脱离 SSH 的 `s-ui update`，可查看更新状态和最近日志。
 - 健康与诊断页集中检查核心、数据库、磁盘、端口、TLS、订阅和 MASQUE，并支持 Telegram 告警通知与重复冷却。
 - 后台更新采用全局互斥，重复点击只复用当前任务；配置保存采用串行协调和失败补偿，外部端口、核心或监听器应用失败时自动恢复数据库前态。
@@ -214,3 +215,4 @@ certbot certonly --standalone --register-unsafely-without-email --non-interactiv
 ## 致谢
 
 - [alireza0](https://github.com/alireza0/)
+- [enfein/mieru](https://github.com/enfein/mieru)

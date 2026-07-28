@@ -73,7 +73,7 @@ func marshalEndpointConfigForCore(endpoint *model.Endpoint) ([]byte, error) {
 	if endpoint == nil {
 		return nil, nil
 	}
-	if endpoint.Type == "masque" {
+	if endpoint.Type == "masque" || endpoint.Type == "mieru" {
 		return nil, nil
 	}
 
@@ -138,7 +138,7 @@ func rollbackEndpointCoreState(act string, oldEndpoint, newEndpoint *model.Endpo
 		if newEndpoint == nil {
 			return nil
 		}
-		if newEndpoint.Type == "masque" {
+		if newEndpoint.Type == "masque" || newEndpoint.Type == "mieru" {
 			return nil
 		}
 		if err := corePtr.RemoveEndpoint(newEndpoint.Tag); err != nil && err != os.ErrInvalid {
@@ -148,7 +148,7 @@ func rollbackEndpointCoreState(act string, oldEndpoint, newEndpoint *model.Endpo
 		if oldEndpoint == nil {
 			return nil
 		}
-		if oldEndpoint.Type == "masque" {
+		if oldEndpoint.Type == "masque" || oldEndpoint.Type == "mieru" {
 			return nil
 		}
 		configData, err := marshalEndpointConfigForCore(oldEndpoint)
@@ -226,6 +226,25 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 				return nil, err
 			}
 		}
+		if endpoint.Type == "mieru" {
+			config, parseErr := parseMieruEndpoint(&endpoint)
+			if parseErr != nil {
+				return nil, parseErr
+			}
+			var existing []*model.Endpoint
+			if err := tx.Model(&model.Endpoint{}).Where("type = ? AND id <> ?", "mieru", endpoint.Id).Find(&existing).Error; err != nil {
+				return nil, err
+			}
+			for _, other := range existing {
+				otherConfig, err := parseMieruEndpoint(other)
+				if err != nil {
+					return nil, err
+				}
+				if otherConfig.Username == config.Username {
+					return nil, fmt.Errorf("mieru username %q is already used by %s", config.Username, other.Tag)
+				}
+			}
+		}
 
 		if _, ports, _, active, err := collectEndpointForwardPorts(&endpoint); err == nil {
 			if active {
@@ -287,7 +306,7 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 			if !coreWasRunning {
 				return nil
 			}
-			if act == "edit" && oldSnapshot != nil && oldSnapshot.Type != "masque" {
+			if act == "edit" && oldSnapshot != nil && oldSnapshot.Type != "masque" && oldSnapshot.Type != "mieru" {
 				err := corePtr.RemoveEndpoint(oldSnapshot.Tag)
 				if err != nil && err != os.ErrInvalid {
 					return errors.Join(err, syncManagedEndpointPortForwarding(&endpointSnapshot, oldSnapshot))
@@ -325,7 +344,7 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 			if err := s.SyncManagedEndpointPortForwarding(oldSnapshot, nil); err != nil {
 				return err
 			}
-			if coreWasRunning && oldSnapshot.Type != "masque" {
+			if coreWasRunning && oldSnapshot.Type != "masque" && oldSnapshot.Type != "mieru" {
 				err := corePtr.RemoveEndpoint(tag)
 				if err != nil && err != os.ErrInvalid {
 					return errors.Join(err, syncManagedEndpointPortForwarding(nil, oldSnapshot))
