@@ -10,6 +10,17 @@
           <v-chip :color="status.running ? 'success' : 'error'" variant="tonal" size="small">
             {{ status.running ? '运行中' : '未运行' }}
           </v-chip>
+          <v-btn
+            color="warning"
+            variant="tonal"
+            size="small"
+            prepend-icon="mdi-bug-outline"
+            :loading="debugLoading"
+            :disabled="Boolean(status.debug_active)"
+            @click="enableDebug"
+          >
+            {{ status.debug_active ? debugLabel : '调试 10 分钟' }}
+          </v-btn>
           <v-btn icon="mdi-refresh" variant="text" :loading="loading" aria-label="刷新" @click="load" />
           <v-btn icon="mdi-close" variant="text" :aria-label="$t('actions.close')" @click="$emit('close')" />
         </div>
@@ -62,6 +73,10 @@
             <div class="mieru-status-details">
               <div><span>用户名</span><strong>{{ status.username || '-' }}</strong></div>
               <div><span>UDP MTU</span><strong>{{ status.mtu || '-' }}</strong></div>
+              <div><span>节点模式</span><strong>{{ trafficPatternLabel }}</strong></div>
+              <div><span>服务端模式</span><strong>{{ trafficPatternName(status.server_traffic_pattern) }}</strong></div>
+              <div><span>1 天配额</span><strong>{{ quotaLabel(status.quota_1d_gb) }}</strong></div>
+              <div><span>30 天配额</span><strong>{{ quotaLabel(status.quota_30d_gb) }}</strong></div>
               <div class="mieru-status-details__wide"><span>程序路径</span><strong>{{ status.binary || '-' }}</strong></div>
             </div>
           </section>
@@ -104,12 +119,14 @@
 
 <script lang="ts">
 import HttpUtils from '@/plugins/httputil'
+import { push } from 'notivue'
 
 export default {
   props: ['data', 'visible'],
   data() {
     return {
       loading: false,
+      debugLoading: false,
       alert: '',
       status: <Record<string, any>>{},
     }
@@ -126,8 +143,24 @@ export default {
       const logs = Array.isArray(this.status.logs) ? this.status.logs : []
       return logs.length ? logs.slice(-30).join('\n') : '暂无运行日志'
     },
+    debugLabel() {
+      const seconds = Math.max(0, Number(this.status.debug_remaining_seconds ?? 0))
+      return seconds > 0 ? `调试中 ${Math.ceil(seconds / 60)} 分` : '调试中'
+    },
+    trafficPatternLabel() {
+      return this.trafficPatternName(this.status.traffic_pattern)
+    },
   },
   methods: {
+    trafficPatternName(value?: string) {
+      const labels: Record<string, string> = {
+        DEFAULT: '默认',
+        BALANCED: '均衡',
+        ENHANCED: '增强伪装',
+        CUSTOM: '自定义',
+      }
+      return labels[String(value ?? 'DEFAULT')] ?? '默认'
+    },
     async load() {
       if (this.loading) return
       const tag = String(this.$props.data?.tag ?? '').trim()
@@ -146,6 +179,16 @@ export default {
       }
       this.loading = false
     },
+    async enableDebug() {
+      if (this.debugLoading || this.status.debug_active) return
+      this.debugLoading = true
+      const response = await HttpUtils.post('api/mieruDebug', null)
+      if (response.success) {
+        push.success({ message: 'Mieru DEBUG 日志已开启，10 分钟后自动恢复' })
+        await this.load()
+      }
+      this.debugLoading = false
+    },
     formatDuration(value?: number) {
       const seconds = Math.max(0, Number(value ?? 0))
       if (!seconds) return '-'
@@ -162,6 +205,10 @@ export default {
     },
     userStat(name: string) {
       return String(this.status.user_stats?.[name] ?? '').trim() || '-'
+    },
+    quotaLabel(value?: number) {
+      const quota = Number(value ?? 0)
+      return quota > 0 ? `${quota.toLocaleString()} GB` : '不限量'
     },
   },
   watch: {

@@ -83,6 +83,9 @@ export interface Mieru extends EndpointBasics {
   password: string
   multiplexing: 'MULTIPLEXING_OFF' | 'MULTIPLEXING_LOW' | 'MULTIPLEXING_MIDDLE' | 'MULTIPLEXING_HIGH'
   handshake_mode: 'HANDSHAKE_STANDARD' | 'HANDSHAKE_NO_WAIT'
+  traffic_pattern: 'DEFAULT' | 'BALANCED' | 'ENHANCED'
+  quota_1d_gb: number
+  quota_30d_gb: number
   mtu: number
 }
 
@@ -103,7 +106,7 @@ const defaultValues: Record<EpType, Endpoint> = {
   warp: { type: EpTypes.Warp, address: [], private_key: '', listen_port: 0, mtu: 1420, peers: [{ address: '', port: 0, public_key: ''}] },
   tailscale: { type: EpTypes.Tailscale, domain_resolver: 'local' },
   masque: { type: EpTypes.Masque, server: '', port: 443, network: 'quic', private_key: '', public_key: '', sni: '', keepalive: 25, remote_dns_resolve: false, ip: '', mtu: 1380, udp: true },
-  mieru: { type: EpTypes.Mieru, server: '', port: 0, port_range: '', transport: 'TCP', username: '', password: '', multiplexing: 'MULTIPLEXING_LOW', handshake_mode: 'HANDSHAKE_STANDARD', mtu: 1400 },
+  mieru: { type: EpTypes.Mieru, server: '', port: 0, port_range: '', transport: 'TCP', username: '', password: '', multiplexing: 'MULTIPLEXING_LOW', handshake_mode: 'HANDSHAKE_STANDARD', traffic_pattern: 'DEFAULT', quota_1d_gb: 0, quota_30d_gb: 0, mtu: 1400 },
 }
 
 export function createEndpoint<T extends Endpoint>(type: string,json?: Partial<T>): Endpoint {

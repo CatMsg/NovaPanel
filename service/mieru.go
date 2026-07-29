@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"strings"
@@ -30,6 +31,7 @@ const (
 	mieruStopTimeout    = 4 * time.Second
 	mieruQueryTimeout   = 4 * time.Second
 	mieruLogLimit       = 80
+	mieruDebugDuration  = 10 * time.Minute
 )
 
 var mieruRestartDelays = []time.Duration{
@@ -64,6 +66,7 @@ type MieruService struct {
 	appliedConfig    []byte
 	restartScheduled bool
 	lastError        string
+	debugUntil       time.Time
 }
 
 func NewMieruService() *MieruService {
@@ -110,6 +113,11 @@ func (s *MieruService) SyncFromDB() error {
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
+	if time.Now().Before(s.debugUntil) {
+		serverConfig.LoggingLevel = "DEBUG"
+	}
+	s.mu.Unlock()
 	payload, err := marshalMitaServerConfig(serverConfig)
 	if err != nil {
 		return err
@@ -147,32 +155,35 @@ func (s *MieruService) SyncFromDB() error {
 			}
 			return nil
 		}
-		if err := writeMitaServerConfigPayload(configPath, payload); err != nil {
-			return err
-		}
-		if _, err := runMitaQuery(binary, socketPath, "reload"); err != nil {
-			reloadErr := fmt.Errorf("reload mita config: %w", err)
-			if len(oldPayload) > 0 {
-				if rollbackErr := writeMitaServerConfigPayload(configPath, oldPayload); rollbackErr != nil {
-					return errors.Join(reloadErr, fmt.Errorf("restore previous mita config: %w", rollbackErr))
-				}
-				if _, rollbackErr := runMitaQuery(binary, socketPath, "reload"); rollbackErr != nil {
-					return errors.Join(reloadErr, fmt.Errorf("reload previous mita config: %w", rollbackErr))
-				}
+		if !requiresMitaRestart(oldPayload, payload) {
+			if err := writeMitaServerConfigPayload(configPath, payload); err != nil {
+				return err
 			}
-			return reloadErr
+			if _, err := runMitaQuery(binary, socketPath, "reload"); err != nil {
+				reloadErr := fmt.Errorf("reload mita config: %w", err)
+				if len(oldPayload) > 0 {
+					if rollbackErr := writeMitaServerConfigPayload(configPath, oldPayload); rollbackErr != nil {
+						return errors.Join(reloadErr, fmt.Errorf("restore previous mita config: %w", rollbackErr))
+					}
+					if _, rollbackErr := runMitaQuery(binary, socketPath, "reload"); rollbackErr != nil {
+						return errors.Join(reloadErr, fmt.Errorf("reload previous mita config: %w", rollbackErr))
+					}
+				}
+				return reloadErr
+			}
+			s.mu.Lock()
+			s.appliedHash = configHash
+			s.appliedConfig = append([]byte(nil), payload...)
+			s.restartScheduled = false
+			s.lastError = ""
+			s.mu.Unlock()
+			if !active.running.Load() {
+				s.handleRuntimeExit(active, common.NewError("mita exited after reload"))
+			}
+			logger.Info("mieru service reloaded with ", len(configs), " endpoint(s)")
+			return nil
 		}
-		s.mu.Lock()
-		s.appliedHash = configHash
-		s.appliedConfig = append([]byte(nil), payload...)
-		s.restartScheduled = false
-		s.lastError = ""
-		s.mu.Unlock()
-		if !active.running.Load() {
-			s.handleRuntimeExit(active, common.NewError("mita exited after reload"))
-		}
-		logger.Info("mieru service reloaded with ", len(configs), " endpoint(s)")
-		return nil
+		logger.Info("mieru traffic pattern changed; restarting shared mita service")
 	}
 
 	s.mu.Lock()
@@ -206,6 +217,41 @@ func (s *MieruService) SyncFromDB() error {
 	}
 	logger.Info("mieru service started with ", len(configs), " endpoint(s)")
 	return nil
+}
+
+func (s *MieruService) EnableTemporaryDebug() (time.Time, error) {
+	if s == nil {
+		return time.Time{}, common.NewError("mieru service not initialized")
+	}
+	deadline := time.Now().Add(mieruDebugDuration)
+	s.mu.Lock()
+	previous := s.debugUntil
+	s.debugUntil = deadline
+	s.mu.Unlock()
+	if err := s.SyncFromDB(); err != nil {
+		s.mu.Lock()
+		if s.debugUntil.Equal(deadline) {
+			s.debugUntil = previous
+		}
+		s.mu.Unlock()
+		return time.Time{}, err
+	}
+	go func(expected time.Time) {
+		timer := time.NewTimer(time.Until(expected))
+		defer timer.Stop()
+		<-timer.C
+		s.mu.Lock()
+		if !s.debugUntil.Equal(expected) {
+			s.mu.Unlock()
+			return
+		}
+		s.debugUntil = time.Time{}
+		s.mu.Unlock()
+		if err := s.SyncFromDB(); err != nil {
+			logger.Warning("restore Mieru INFO logging failed: ", err)
+		}
+	}(deadline)
+	return deadline, nil
 }
 
 func (s *MieruService) Stop() error {
@@ -247,27 +293,46 @@ func (s *MieruService) GetStatus(tag string) (map[string]interface{}, error) {
 	runtimeState := s.active
 	total := s.total
 	serviceError := s.lastError
+	appliedConfig := append([]byte(nil), s.appliedConfig...)
 	s.mu.Unlock()
 	running := runtimeState != nil && runtimeState.running.Load()
 	result := map[string]interface{}{
-		"tag":            config.Tag,
-		"server":         config.Server,
-		"port":           config.Port,
-		"port_range":     config.PortRange,
-		"transport":      config.Transport,
-		"username":       config.Username,
-		"multiplexing":   config.Multiplexing,
-		"handshake_mode": config.HandshakeMode,
-		"mtu":            config.MTU,
-		"running":        running,
-		"endpoint_count": total,
-		"binary":         "",
-		"version":        "",
-		"status":         "",
-		"connections":    "",
-		"users":          "",
-		"user_stats":     map[string]string{},
-		"metrics":        map[string]int64{},
+		"tag":                    config.Tag,
+		"server":                 config.Server,
+		"port":                   config.Port,
+		"port_range":             config.PortRange,
+		"transport":              config.Transport,
+		"username":               config.Username,
+		"multiplexing":           config.Multiplexing,
+		"handshake_mode":         config.HandshakeMode,
+		"traffic_pattern":        config.TrafficPattern,
+		"server_traffic_pattern": "DEFAULT",
+		"quota_1d_gb":            config.Quota1DayGB,
+		"quota_30d_gb":           config.Quota30DayGB,
+		"mtu":                    config.MTU,
+		"running":                running,
+		"endpoint_count":         total,
+		"binary":                 "",
+		"version":                "",
+		"status":                 "",
+		"connections":            "",
+		"users":                  "",
+		"user_stats":             map[string]string{},
+		"metrics":                map[string]int64{},
+	}
+	var runtimeConfig mitaServerConfig
+	if json.Unmarshal(appliedConfig, &runtimeConfig) == nil {
+		result["server_traffic_pattern"] = mieruTrafficPatternName(runtimeConfig.TrafficPattern)
+	}
+	s.mu.Lock()
+	debugUntil := s.debugUntil
+	s.mu.Unlock()
+	if time.Now().Before(debugUntil) {
+		result["debug_active"] = true
+		result["debug_until"] = debugUntil.Format(time.RFC3339)
+		result["debug_remaining_seconds"] = int64(time.Until(debugUntil).Seconds())
+	} else {
+		result["debug_active"] = false
 	}
 	if serviceError != "" {
 		result["last_error"] = serviceError
@@ -310,6 +375,9 @@ func (s *MieruService) GetStatus(tag string) (map[string]interface{}, error) {
 			usersOutput := strings.TrimSpace(string(output))
 			result["users"] = usersOutput
 			result["user_stats"] = parseMitaUserStats(usersOutput, config.Username)
+		}
+		if output, queryErr := runMitaQuery(binary, socketPath, "get", "quotas"); queryErr == nil {
+			result["quotas"] = strings.TrimSpace(string(output))
 		}
 		if output, queryErr := runMitaQuery(binary, socketPath, "get", "metrics"); queryErr == nil {
 			result["metrics"] = parseMitaMetrics(output)
@@ -387,6 +455,32 @@ func removeMitaRuntimeFiles() {
 
 func marshalMitaServerConfig(serverConfig *mitaServerConfig) ([]byte, error) {
 	return json.MarshalIndent(serverConfig, "", "  ")
+}
+
+func requiresMitaRestart(oldPayload, newPayload []byte) bool {
+	if len(oldPayload) == 0 {
+		return true
+	}
+	var oldConfig, newConfig mitaServerConfig
+	if json.Unmarshal(oldPayload, &oldConfig) != nil || json.Unmarshal(newPayload, &newConfig) != nil {
+		return true
+	}
+	return !reflect.DeepEqual(oldConfig.TrafficPattern, newConfig.TrafficPattern) ||
+		!reflect.DeepEqual(oldConfig.DNS, newConfig.DNS)
+}
+
+func mieruTrafficPatternName(pattern *mitaTrafficPattern) string {
+	if pattern == nil {
+		return "DEFAULT"
+	}
+	switch pattern.Seed {
+	case 1031:
+		return "BALANCED"
+	case 2053:
+		return "ENHANCED"
+	default:
+		return "CUSTOM"
+	}
 }
 
 func writeMitaServerConfigPayload(configPath string, payload []byte) error {

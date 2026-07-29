@@ -165,6 +165,9 @@ export default {
             password: RandomUtil.randomSeq(24),
             multiplexing: 'MULTIPLEXING_LOW',
             handshake_mode: 'HANDSHAKE_STANDARD',
+            traffic_pattern: 'DEFAULT',
+            quota_1d_gb: 0,
+            quota_30d_gb: 0,
             mtu: 1400,
           }
           break

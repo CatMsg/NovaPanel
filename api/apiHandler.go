@@ -76,6 +76,8 @@ func (a *APIHandler) postHandler(c *gin.Context) {
 		a.ApiService.SaveAlertSettings(c)
 	case "alertTest":
 		a.ApiService.TestAlert(c)
+	case "mieruDebug":
+		a.ApiService.EnableMieruDebug(c)
 	default:
 		jsonMsg(c, "failed", common.NewError("unknown action: ", action))
 	}

@@ -313,6 +313,22 @@ func (a *ApiService) GetMieruStatus(c *gin.Context) {
 	jsonObj(c, result, nil)
 }
 
+func (a *ApiService) EnableMieruDebug(c *gin.Context) {
+	mieruService := service.GetMieruService()
+	if mieruService == nil {
+		jsonMsg(c, "", common.NewError("mieru service not initialized"))
+		return
+	}
+	deadline, err := mieruService.EnableTemporaryDebug()
+	if err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
+	jsonObj(c, map[string]interface{}{
+		"debug_until": deadline.Format(time.RFC3339),
+	}, nil)
+}
+
 func (a *ApiService) GetFleet(c *gin.Context) {
 	result, err := a.FleetService.GetFleet()
 	jsonObj(c, result, err)

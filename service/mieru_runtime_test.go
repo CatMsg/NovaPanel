@@ -41,3 +41,15 @@ esac
 		t.Fatal("fake mita was still running after stop")
 	}
 }
+
+func TestRequiresMitaRestartOnlyForNonReloadableFields(t *testing.T) {
+	base := []byte(`{"portBindings":[{"port":20000,"protocol":"TCP"}],"users":[{"name":"one","hashedPassword":"abc"}],"loggingLevel":"INFO","mtu":1400,"dns":{"dualStack":"PREFER_IPv4"}}`)
+	reloadable := []byte(`{"portBindings":[{"port":20001,"protocol":"TCP"}],"users":[{"name":"one","hashedPassword":"def"}],"loggingLevel":"DEBUG","mtu":1380,"dns":{"dualStack":"PREFER_IPv4"}}`)
+	if requiresMitaRestart(base, reloadable) {
+		t.Fatal("reloadable Mieru changes unexpectedly require restart")
+	}
+	trafficPattern := []byte(`{"portBindings":[{"port":20001,"protocol":"TCP"}],"users":[{"name":"one","hashedPassword":"def"}],"loggingLevel":"INFO","trafficPattern":{"seed":1031},"mtu":1400,"dns":{"dualStack":"PREFER_IPv4"}}`)
+	if !requiresMitaRestart(base, trafficPattern) {
+		t.Fatal("Mieru traffic pattern change should require restart")
+	}
+}

@@ -748,6 +748,9 @@ func buildMieruAggregateOutbound(endpoint map[string]interface{}) *map[string]in
 		handshakeMode = "HANDSHAKE_STANDARD"
 	}
 	node["handshake-mode"] = handshakeMode
+	if trafficPattern := service.MieruTrafficPatternBase64(asString(endpoint["traffic_pattern"])); trafficPattern != "" {
+		node["traffic-pattern"] = trafficPattern
+	}
 	return &node
 }
 

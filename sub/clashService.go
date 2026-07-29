@@ -237,7 +237,7 @@ func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, b
 			}
 		case "mieru":
 			proxy["type"] = "mieru"
-			copyClashFields(proxy, obMap, "port-range", "transport", "udp", "username", "password", "multiplexing", "handshake-mode")
+			copyClashFields(proxy, obMap, "port-range", "transport", "udp", "username", "password", "multiplexing", "handshake-mode", "traffic-pattern")
 		case "tailscale":
 			proxy["type"] = "tailscale"
 			copyClashFields(proxy, obMap,

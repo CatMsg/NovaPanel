@@ -20,5 +20,13 @@ export function buildMieruConfig(endpoint: any): string {
     `multiplexing: ${yamlStr(endpoint.multiplexing ?? 'MULTIPLEXING_LOW')}`,
     `handshake-mode: ${yamlStr(endpoint.handshake_mode ?? 'HANDSHAKE_STANDARD')}`,
   )
+  const trafficPatterns: Record<string, string> = {
+    BALANCED: 'CIcIEAAaBAgAEAAiCAgCEAAYBCAGKgQIIBBA',
+    ENHANCED: 'CIUQEAEaBAgBEAUiCAgBEAEYBiAIKgUIQBCAAQ==',
+  }
+  const trafficPattern = trafficPatterns[String(endpoint.traffic_pattern ?? 'DEFAULT').toUpperCase()]
+  if (trafficPattern) {
+    fields.push(`traffic-pattern: ${yamlStr(trafficPattern)}`)
+  }
   return `- { ${fields.join(', ')} }`
 }

@@ -61,7 +61,46 @@
             hide-details
           />
         </v-col>
+        <v-col cols="12" sm="6" md="4">
+          <v-select
+            v-model="data.traffic_pattern"
+            :items="trafficPatternItems"
+            label="流量模式"
+            hint="增强伪装会增加少量延迟和带宽开销"
+            persistent-hint
+          />
+        </v-col>
+        <v-col cols="12" sm="6" md="4">
+          <v-text-field
+            v-model.number="data.quota_1d_gb"
+            label="1 天流量上限"
+            suffix="GB"
+            type="number"
+            min="0"
+            hint="0 表示不限量"
+            persistent-hint
+          />
+        </v-col>
+        <v-col cols="12" sm="6" md="4">
+          <v-text-field
+            v-model.number="data.quota_30d_gb"
+            label="30 天流量上限"
+            suffix="GB"
+            type="number"
+            min="0"
+            hint="0 表示不限量"
+            persistent-hint
+          />
+        </v-col>
       </v-row>
+
+      <v-alert
+        type="info"
+        variant="tonal"
+        density="compact"
+        class="mt-4"
+        text="多个 Mieru 节点共用 mita 服务；服务端采用最高级别的流量模式，订阅仍按每个节点各自设置输出。"
+      />
 
       <v-divider class="my-4" />
 
@@ -101,6 +140,11 @@ export default {
       handshakeItems: [
         { title: '标准握手（推荐）', value: 'HANDSHAKE_STANDARD' },
         { title: '0-RTT', value: 'HANDSHAKE_NO_WAIT' },
+      ],
+      trafficPatternItems: [
+        { title: '默认（性能优先）', value: 'DEFAULT' },
+        { title: '均衡', value: 'BALANCED' },
+        { title: '增强伪装', value: 'ENHANCED' },
       ],
     }
   },

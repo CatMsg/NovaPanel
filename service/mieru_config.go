@@ -1,6 +1,8 @@
 package service
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -24,26 +26,36 @@ var validMieruHandshakeModes = map[string]struct{}{
 	"HANDSHAKE_NO_WAIT":  {},
 }
 
+var validMieruTrafficPatterns = map[string]int{
+	"DEFAULT":  0,
+	"BALANCED": 1,
+	"ENHANCED": 2,
+}
+
 type mieruEndpointConfig struct {
-	Tag           string
-	Server        string
-	Port          int
-	PortRange     string
-	Ports         []int
-	Transport     string
-	Username      string
-	Password      string
-	Multiplexing  string
-	HandshakeMode string
-	MTU           int
+	Tag            string
+	Server         string
+	Port           int
+	PortRange      string
+	Ports          []int
+	Transport      string
+	Username       string
+	Password       string
+	Multiplexing   string
+	HandshakeMode  string
+	TrafficPattern string
+	Quota1DayGB    int
+	Quota30DayGB   int
+	MTU            int
 }
 
 type mitaServerConfig struct {
-	PortBindings []mitaPortBinding `json:"portBindings"`
-	Users        []mitaUser        `json:"users"`
-	LoggingLevel string            `json:"loggingLevel"`
-	MTU          int               `json:"mtu,omitempty"`
-	DNS          mitaDNS           `json:"dns"`
+	PortBindings   []mitaPortBinding   `json:"portBindings"`
+	Users          []mitaUser          `json:"users"`
+	LoggingLevel   string              `json:"loggingLevel"`
+	TrafficPattern *mitaTrafficPattern `json:"trafficPattern,omitempty"`
+	MTU            int                 `json:"mtu,omitempty"`
+	DNS            mitaDNS             `json:"dns"`
 }
 
 type mitaPortBinding struct {
@@ -53,8 +65,39 @@ type mitaPortBinding struct {
 }
 
 type mitaUser struct {
-	Name     string `json:"name"`
-	Password string `json:"password"`
+	Name           string      `json:"name"`
+	HashedPassword string      `json:"hashedPassword"`
+	Quotas         []mitaQuota `json:"quotas,omitempty"`
+}
+
+type mitaQuota struct {
+	Days      int `json:"days"`
+	Megabytes int `json:"megabytes"`
+}
+
+type mitaTrafficPattern struct {
+	Seed        int                `json:"seed"`
+	UnlockAll   bool               `json:"unlockAll"`
+	TCPFragment mitaTCPFragment    `json:"tcpFragment"`
+	Nonce       mitaNoncePattern   `json:"nonce"`
+	Padding     mitaPaddingPattern `json:"padding"`
+}
+
+type mitaTCPFragment struct {
+	Enable     bool `json:"enable"`
+	MaxSleepMs int  `json:"maxSleepMs"`
+}
+
+type mitaNoncePattern struct {
+	Type                string `json:"type"`
+	ApplyToAllUDPPacket bool   `json:"applyToAllUDPPacket"`
+	MinLen              int    `json:"minLen"`
+	MaxLen              int    `json:"maxLen"`
+}
+
+type mitaPaddingPattern struct {
+	MaxMiddlePaddingLen int `json:"maxMiddlePaddingLen"`
+	MaxEndPaddingLen    int `json:"maxEndPaddingLen"`
 }
 
 type mitaDNS struct {
@@ -75,15 +118,18 @@ func parseMieruEndpoint(endpoint *model.Endpoint) (*mieruEndpointConfig, error) 
 	}
 
 	config := &mieruEndpointConfig{
-		Tag:           strings.TrimSpace(endpoint.Tag),
-		Server:        mieruString(payload["server"]),
-		PortRange:     mieruString(payload["port_range"]),
-		Transport:     strings.ToUpper(mieruString(payload["transport"])),
-		Username:      mieruString(payload["username"]),
-		Password:      mieruString(payload["password"]),
-		Multiplexing:  strings.ToUpper(mieruString(payload["multiplexing"])),
-		HandshakeMode: strings.ToUpper(mieruString(payload["handshake_mode"])),
-		MTU:           mieruInt(payload["mtu"]),
+		Tag:            strings.TrimSpace(endpoint.Tag),
+		Server:         mieruString(payload["server"]),
+		PortRange:      mieruString(payload["port_range"]),
+		Transport:      strings.ToUpper(mieruString(payload["transport"])),
+		Username:       mieruString(payload["username"]),
+		Password:       mieruString(payload["password"]),
+		Multiplexing:   strings.ToUpper(mieruString(payload["multiplexing"])),
+		HandshakeMode:  strings.ToUpper(mieruString(payload["handshake_mode"])),
+		TrafficPattern: strings.ToUpper(mieruString(payload["traffic_pattern"])),
+		Quota1DayGB:    mieruInt(payload["quota_1d_gb"]),
+		Quota30DayGB:   mieruInt(payload["quota_30d_gb"]),
+		MTU:            mieruInt(payload["mtu"]),
 	}
 	if rawPort, ok := payload["port"]; ok && rawPort != nil && strings.TrimSpace(fmt.Sprint(rawPort)) != "" {
 		config.Port, err = normalizeManagedPort(rawPort)
@@ -99,6 +145,9 @@ func parseMieruEndpoint(endpoint *model.Endpoint) (*mieruEndpointConfig, error) 
 	}
 	if config.HandshakeMode == "" {
 		config.HandshakeMode = "HANDSHAKE_STANDARD"
+	}
+	if config.TrafficPattern == "" {
+		config.TrafficPattern = "DEFAULT"
 	}
 	if config.MTU == 0 {
 		config.MTU = 1400
@@ -162,6 +211,22 @@ func validateMieruEndpointConfig(config *mieruEndpointConfig) error {
 	if _, ok := validMieruHandshakeModes[config.HandshakeMode]; !ok {
 		return fmt.Errorf("unsupported mieru handshake mode %q", config.HandshakeMode)
 	}
+	if config.TrafficPattern == "" {
+		config.TrafficPattern = "DEFAULT"
+	}
+	if _, ok := validMieruTrafficPatterns[config.TrafficPattern]; !ok {
+		return fmt.Errorf("unsupported mieru traffic pattern %q", config.TrafficPattern)
+	}
+	if config.Quota1DayGB < 0 || config.Quota30DayGB < 0 {
+		return common.NewError("mieru traffic quotas cannot be negative")
+	}
+	if config.Quota1DayGB > 0 && config.Quota30DayGB > 0 && config.Quota30DayGB < config.Quota1DayGB {
+		return common.NewError("mieru 30-day quota cannot be lower than 1-day quota")
+	}
+	const maxQuotaGB = int(^uint32(0)>>1) / 1024
+	if config.Quota1DayGB > maxQuotaGB || config.Quota30DayGB > maxQuotaGB {
+		return fmt.Errorf("mieru traffic quota is too large: maximum %d GB", maxQuotaGB)
+	}
 	if config.MTU < 1280 || config.MTU > 1500 {
 		return fmt.Errorf("invalid mieru MTU %d: expected 1280-1500", config.MTU)
 	}
@@ -221,6 +286,7 @@ func buildMitaServerConfig(configs []*mieruEndpointConfig) (*mitaServerConfig, e
 		DNS:          mitaDNS{DualStack: "PREFER_IPv4"},
 	}
 	seenUsers := make(map[string]string)
+	trafficPatternLevel := 0
 	for _, config := range configs {
 		if err := validateMieruEndpointConfig(config); err != nil {
 			return nil, err
@@ -236,10 +302,75 @@ func buildMitaServerConfig(configs []*mieruEndpointConfig) (*mitaServerConfig, e
 			binding.Port = config.Port
 		}
 		result.PortBindings = append(result.PortBindings, binding)
-		result.Users = append(result.Users, mitaUser{Name: config.Username, Password: config.Password})
+		user := mitaUser{
+			Name:           config.Username,
+			HashedPassword: hashMieruPassword(config.Username, config.Password),
+		}
+		if config.Quota1DayGB > 0 {
+			user.Quotas = append(user.Quotas, mitaQuota{Days: 1, Megabytes: config.Quota1DayGB * 1024})
+		}
+		if config.Quota30DayGB > 0 {
+			user.Quotas = append(user.Quotas, mitaQuota{Days: 30, Megabytes: config.Quota30DayGB * 1024})
+		}
+		result.Users = append(result.Users, user)
+		if level := validMieruTrafficPatterns[config.TrafficPattern]; level > trafficPatternLevel {
+			trafficPatternLevel = level
+		}
 		if config.MTU < result.MTU {
 			result.MTU = config.MTU
 		}
 	}
+	result.TrafficPattern = buildMitaTrafficPattern(trafficPatternLevel)
 	return result, nil
+}
+
+func hashMieruPassword(username, password string) string {
+	payload := make([]byte, 0, len(password)+len(username)+1)
+	payload = append(payload, password...)
+	payload = append(payload, 0)
+	payload = append(payload, username...)
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:])
+}
+
+func buildMitaTrafficPattern(level int) *mitaTrafficPattern {
+	switch level {
+	case 1:
+		return &mitaTrafficPattern{
+			Seed:      1031,
+			UnlockAll: false,
+			TCPFragment: mitaTCPFragment{
+				Enable: false, MaxSleepMs: 0,
+			},
+			Nonce: mitaNoncePattern{
+				Type: "NONCE_TYPE_PRINTABLE_SUBSET", ApplyToAllUDPPacket: false, MinLen: 4, MaxLen: 6,
+			},
+			Padding: mitaPaddingPattern{MaxMiddlePaddingLen: 32, MaxEndPaddingLen: 64},
+		}
+	case 2:
+		return &mitaTrafficPattern{
+			Seed:      2053,
+			UnlockAll: true,
+			TCPFragment: mitaTCPFragment{
+				Enable: true, MaxSleepMs: 5,
+			},
+			Nonce: mitaNoncePattern{
+				Type: "NONCE_TYPE_PRINTABLE", ApplyToAllUDPPacket: true, MinLen: 6, MaxLen: 8,
+			},
+			Padding: mitaPaddingPattern{MaxMiddlePaddingLen: 64, MaxEndPaddingLen: 128},
+		}
+	default:
+		return nil
+	}
+}
+
+func MieruTrafficPatternBase64(preset string) string {
+	switch strings.ToUpper(strings.TrimSpace(preset)) {
+	case "BALANCED":
+		return "CIcIEAAaBAgAEAAiCAgCEAAYBCAGKgQIIBBA"
+	case "ENHANCED":
+		return "CIUQEAEaBAgBEAUiCAgBEAEYBiAIKgUIQBCAAQ=="
+	default:
+		return ""
+	}
 }

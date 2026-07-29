@@ -1,7 +1,10 @@
 package service
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -51,9 +54,12 @@ func TestParseMieruEndpointPortRange(t *testing.T) {
 			"transport":"udp",
 			"username":"bob",
 			"password":"secret",
-			"multiplexing":"multiplexing_middle",
-			"handshake_mode":"handshake_no_wait",
-			"mtu":1380
+				"multiplexing":"multiplexing_middle",
+				"handshake_mode":"handshake_no_wait",
+				"traffic_pattern":"balanced",
+				"quota_1d_gb":2,
+				"quota_30d_gb":20,
+				"mtu":1380
 		}`),
 	}
 
@@ -63,6 +69,9 @@ func TestParseMieruEndpointPortRange(t *testing.T) {
 	}
 	if config.Transport != "UDP" || config.HandshakeMode != "HANDSHAKE_NO_WAIT" {
 		t.Fatalf("unexpected normalized config: %#v", config)
+	}
+	if config.TrafficPattern != "BALANCED" || config.Quota1DayGB != 2 || config.Quota30DayGB != 20 {
+		t.Fatalf("unexpected traffic policy: %#v", config)
 	}
 	if !reflect.DeepEqual(config.Ports, []int{23000, 23001, 23002}) {
 		t.Fatalf("unexpected ports: %#v", config.Ports)
@@ -98,7 +107,8 @@ func TestBuildMitaServerConfigMergesEndpoints(t *testing.T) {
 		{
 			Tag: "two", Server: "two.example.com", PortRange: "20100-20102", Ports: []int{20100, 20101, 20102},
 			Transport: "UDP", Username: "bob", Password: "secret-two",
-			Multiplexing: "MULTIPLEXING_LOW", HandshakeMode: "HANDSHAKE_STANDARD", MTU: 1380,
+			Multiplexing: "MULTIPLEXING_LOW", HandshakeMode: "HANDSHAKE_STANDARD",
+			TrafficPattern: "ENHANCED", Quota1DayGB: 1, Quota30DayGB: 10, MTU: 1380,
 		},
 	})
 	if err != nil {
@@ -116,6 +126,22 @@ func TestBuildMitaServerConfigMergesEndpoints(t *testing.T) {
 	if config.DNS.DualStack != "PREFER_IPv4" {
 		t.Fatalf("unexpected DNS mode: %s", config.DNS.DualStack)
 	}
+	if config.Users[0].HashedPassword != hashMieruPassword("alice", "secret-one") {
+		t.Fatalf("unexpected hashed password: %s", config.Users[0].HashedPassword)
+	}
+	if len(config.Users[1].Quotas) != 2 || config.Users[1].Quotas[0].Megabytes != 1024 || config.Users[1].Quotas[1].Megabytes != 10240 {
+		t.Fatalf("unexpected Mieru quotas: %#v", config.Users[1].Quotas)
+	}
+	if config.TrafficPattern == nil || config.TrafficPattern.UnlockAll != true {
+		t.Fatalf("expected enhanced server traffic pattern: %#v", config.TrafficPattern)
+	}
+	payload, err := marshalMitaServerConfig(config)
+	if err != nil {
+		t.Fatalf("marshal Mieru config: %v", err)
+	}
+	if bytes.Contains(payload, []byte("secret-one")) || bytes.Contains(payload, []byte(`"password"`)) {
+		t.Fatalf("runtime config leaked plaintext password: %s", payload)
+	}
 }
 
 func TestBuildMitaServerConfigRejectsDuplicateUser(t *testing.T) {
@@ -128,6 +154,25 @@ func TestBuildMitaServerConfigRejectsDuplicateUser(t *testing.T) {
 	}
 	if _, err := buildMitaServerConfig([]*mieruEndpointConfig{base("one"), base("two")}); err == nil {
 		t.Fatal("expected duplicate Mieru username to be rejected")
+	}
+}
+
+func TestHashMieruPasswordMatchesProtocol(t *testing.T) {
+	sum := sha256.Sum256([]byte("secret\x00alice"))
+	if got, want := hashMieruPassword("alice", "secret"), fmt.Sprintf("%x", sum); got != want {
+		t.Fatalf("unexpected password hash: got %s want %s", got, want)
+	}
+}
+
+func TestMieruTrafficPatternBase64(t *testing.T) {
+	if got := MieruTrafficPatternBase64("balanced"); got != "CIcIEAAaBAgAEAAiCAgCEAAYBCAGKgQIIBBA" {
+		t.Fatalf("unexpected balanced traffic pattern: %q", got)
+	}
+	if got := MieruTrafficPatternBase64("enhanced"); got != "CIUQEAEaBAgBEAUiCAgBEAEYBiAIKgUIQBCAAQ==" {
+		t.Fatalf("unexpected enhanced traffic pattern: %q", got)
+	}
+	if got := MieruTrafficPatternBase64("default"); got != "" {
+		t.Fatalf("default traffic pattern should be omitted: %q", got)
 	}
 }
 

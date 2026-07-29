@@ -8,15 +8,16 @@ import (
 
 func TestBuildMieruAggregateOutbound(t *testing.T) {
 	node := buildMieruAggregateOutbound(map[string]interface{}{
-		"type":           "mieru",
-		"tag":            "mieru-main",
-		"server":         "proxy.example.com",
-		"port_range":     "22000-22010",
-		"transport":      "tcp",
-		"username":       "alice",
-		"password":       "secret",
-		"multiplexing":   "multiplexing_middle",
-		"handshake_mode": "handshake_no_wait",
+		"type":            "mieru",
+		"tag":             "mieru-main",
+		"server":          "proxy.example.com",
+		"port_range":      "22000-22010",
+		"transport":       "tcp",
+		"username":        "alice",
+		"password":        "secret",
+		"multiplexing":    "multiplexing_middle",
+		"handshake_mode":  "handshake_no_wait",
+		"traffic_pattern": "balanced",
 	})
 	if node == nil {
 		t.Fatal("expected Mieru outbound")
@@ -33,22 +34,26 @@ func TestBuildMieruAggregateOutbound(t *testing.T) {
 	if got := (*node)["udp"]; got != true {
 		t.Fatalf("expected UDP associate support, got %#v", got)
 	}
+	if got := (*node)["traffic-pattern"]; got != "CIcIEAAaBAgAEAAiCAgCEAAYBCAGKgQIIBBA" {
+		t.Fatalf("unexpected traffic pattern: %#v", got)
+	}
 }
 
 func TestConvertToClashMetaPreservesMieruFields(t *testing.T) {
 	service := ClashService{}
 	outbounds := &[]map[string]interface{}{
 		{
-			"type":           "mieru",
-			"tag":            "mieru-main",
-			"server":         "proxy.example.com",
-			"server_port":    22000,
-			"transport":      "TCP",
-			"udp":            true,
-			"username":       "alice",
-			"password":       "secret",
-			"multiplexing":   "MULTIPLEXING_LOW",
-			"handshake-mode": "HANDSHAKE_STANDARD",
+			"type":            "mieru",
+			"tag":             "mieru-main",
+			"server":          "proxy.example.com",
+			"server_port":     22000,
+			"transport":       "TCP",
+			"udp":             true,
+			"username":        "alice",
+			"password":        "secret",
+			"multiplexing":    "MULTIPLEXING_LOW",
+			"handshake-mode":  "HANDSHAKE_STANDARD",
+			"traffic-pattern": "CIcIEAAaBAgAEAAiCAgCEAAYBCAGKgQIIBBA",
 		},
 	}
 
@@ -76,5 +81,8 @@ func TestConvertToClashMetaPreservesMieruFields(t *testing.T) {
 	}
 	if proxy["port"] != 22000 {
 		t.Fatalf("unexpected Mieru port: %#v", proxy["port"])
+	}
+	if proxy["traffic-pattern"] != "CIcIEAAaBAgAEAAiCAgCEAAYBCAGKgQIIBBA" {
+		t.Fatalf("Mieru traffic pattern was not preserved: %#v", proxy)
 	}
 }
