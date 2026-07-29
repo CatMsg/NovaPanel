@@ -262,6 +262,11 @@ func (s *ClientService) updateLinksWithFixedInbounds(tx *gorm.DB, clients []*mod
 	if len(clients) == 0 {
 		return nil
 	}
+	for _, client := range clients {
+		if err := normalizeMieruClientConfig(client); err != nil {
+			return err
+		}
+	}
 
 	inboundIDSet := make(map[uint]struct{})
 	clientInboundIDs := make([][]uint, len(clients))

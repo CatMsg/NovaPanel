@@ -44,6 +44,7 @@ func (s *InboundService) rebuildInboundPortForwardingFromCurrentState() error {
 	}
 
 	var errs []error
+	mieruRemoved := false
 	for _, inbound := range inbounds {
 		if err := s.syncInboundPortForwarding(nil, inbound); err != nil {
 			var conflictErr *sshPortConflictError
@@ -54,11 +55,19 @@ func (s *InboundService) rebuildInboundPortForwardingFromCurrentState() error {
 					errs = append(errs, wrapped)
 					logger.Warning("remove conflicted inbound failed: ", wrapped)
 				}
+				if inbound.Type == "mieru" {
+					mieruRemoved = true
+				}
 				continue
 			}
 			wrapped := fmt.Errorf("rebuild %s: %w", inbound.Tag, err)
 			errs = append(errs, wrapped)
 			logger.Warning("inbound port forwarding rebuild failed: ", wrapped)
+		}
+	}
+	if mieruRemoved && mieruPtr != nil {
+		if err := mieruPtr.SyncFromDB(); err != nil {
+			errs = append(errs, fmt.Errorf("stop conflicted Mieru inbound: %w", err))
 		}
 	}
 
@@ -111,6 +120,13 @@ func collectInboundForwardPorts(inbound *model.Inbound) (int, []int, error) {
 		}
 		ports = mergeInboundForwardPorts(listenPort, extraPorts)
 	}
+	if inbound.Type == "mieru" {
+		config, err := parseMieruInbound(inbound)
+		if err != nil {
+			return 0, nil, err
+		}
+		return config.ListenPort, config.Ports, nil
+	}
 
 	return listenPort, ports, nil
 }
@@ -124,11 +140,19 @@ func collectInboundForwardSpec(inbound *model.Inbound) (managedForwardSpec, erro
 	if err != nil {
 		return managedForwardSpec{}, err
 	}
+	protocols := []string{"tcp", "udp"}
+	if inbound.Type == "mieru" {
+		config, err := parseMieruInbound(inbound)
+		if err != nil {
+			return managedForwardSpec{}, err
+		}
+		protocols = []string{strings.ToLower(config.Transport)}
+	}
 	return managedForwardSpec{
 		tag:             inbound.Tag,
 		listenPort:      listenPort,
 		ports:           ports,
-		protocols:       []string{"tcp", "udp"},
+		protocols:       protocols,
 		removeProtocols: []string{"tcp", "udp"},
 		active:          true,
 	}.normalized(), nil

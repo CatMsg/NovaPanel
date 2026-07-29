@@ -11,8 +11,6 @@ func EndpointPortKey(endpointType string) string {
 		return "relay_server_port"
 	case "masque":
 		return "port"
-	case "mieru":
-		return "port"
 	default:
 		return "listen_port"
 	}

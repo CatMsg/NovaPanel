@@ -159,6 +159,28 @@ func collectInboundPortsForRestore(inbound *model.Inbound) ([]int, bool, error) 
 		}
 		ports = mergeRestorePorts(listenPort, extraPorts)
 	}
+	if inbound.Type == "mieru" {
+		if listenPort < 1025 {
+			return nil, false, fmt.Errorf("invalid Mieru listen port %d: expected 1025-65535", listenPort)
+		}
+		rawPortRange := strings.TrimSpace(fmt.Sprint((*full)["port_range"]))
+		if rawPortRange != "" && rawPortRange != "<nil>" {
+			start, end, err := parseRestorePortRange(rawPortRange)
+			if err != nil {
+				return nil, false, err
+			}
+			if start < 1025 || listenPort != start {
+				return nil, false, fmt.Errorf("invalid Mieru port range %q", rawPortRange)
+			}
+			if end-start+1 > 512 {
+				return nil, false, fmt.Errorf("Mieru port range is too large: maximum 512 ports")
+			}
+			ports = make([]int, 0, end-start+1)
+			for port := start; port <= end; port++ {
+				ports = append(ports, port)
+			}
+		}
+	}
 
 	return ports, true, nil
 }
@@ -173,27 +195,6 @@ func collectEndpointPortsForRestore(endpoint *model.Endpoint) ([]int, bool, erro
 	if err := json.Unmarshal(full, &payload); err != nil {
 		return nil, false, err
 	}
-	if strings.EqualFold(endpoint.Type, "mieru") {
-		rawPortRange := strings.TrimSpace(fmt.Sprint(payload["port_range"]))
-		if rawPortRange != "" && rawPortRange != "<nil>" {
-			start, end, err := parseRestorePortRange(rawPortRange)
-			if err != nil {
-				return nil, false, err
-			}
-			if start < 1025 {
-				return nil, false, fmt.Errorf("invalid mieru port range %q: expected 1025-65535", rawPortRange)
-			}
-			if end-start+1 > 512 {
-				return nil, false, fmt.Errorf("mieru port range is too large: maximum 512 ports")
-			}
-			ports := make([]int, 0, end-start+1)
-			for port := start; port <= end; port++ {
-				ports = append(ports, port)
-			}
-			return ports, true, nil
-		}
-	}
-
 	portKey := model.EndpointPortKey(endpoint.Type)
 	rawPort, ok := payload[portKey]
 	if !ok || rawPort == nil {
@@ -204,10 +205,6 @@ func collectEndpointPortsForRestore(endpoint *model.Endpoint) ([]int, bool, erro
 	if err != nil {
 		return nil, false, err
 	}
-	if strings.EqualFold(endpoint.Type, "mieru") && listenPort < 1025 {
-		return nil, false, fmt.Errorf("invalid mieru port %d: expected 1025-65535", listenPort)
-	}
-
 	return []int{listenPort}, true, nil
 }
 

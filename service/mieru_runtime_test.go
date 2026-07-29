@@ -44,9 +44,17 @@ esac
 
 func TestRequiresMitaRestartOnlyForNonReloadableFields(t *testing.T) {
 	base := []byte(`{"portBindings":[{"port":20000,"protocol":"TCP"}],"users":[{"name":"one","hashedPassword":"abc"}],"loggingLevel":"INFO","mtu":1400,"dns":{"dualStack":"PREFER_IPv4"}}`)
-	reloadable := []byte(`{"portBindings":[{"port":20001,"protocol":"TCP"}],"users":[{"name":"one","hashedPassword":"def"}],"loggingLevel":"DEBUG","mtu":1380,"dns":{"dualStack":"PREFER_IPv4"}}`)
+	reloadable := []byte(`{"portBindings":[{"port":20001,"protocol":"TCP"}],"users":[{"name":"one","hashedPassword":"abc"},{"name":"two","hashedPassword":"def"}],"loggingLevel":"DEBUG","mtu":1380,"dns":{"dualStack":"PREFER_IPv4"}}`)
 	if requiresMitaRestart(base, reloadable) {
 		t.Fatal("reloadable Mieru changes unexpectedly require restart")
+	}
+	credentialChanged := []byte(`{"portBindings":[{"port":20001,"protocol":"TCP"}],"users":[{"name":"one","hashedPassword":"def"}],"loggingLevel":"INFO","mtu":1400,"dns":{"dualStack":"PREFER_IPv4"}}`)
+	if !requiresMitaRestart(base, credentialChanged) {
+		t.Fatal("Mieru credential changes should restart the service to close existing sessions")
+	}
+	userRemoved := []byte(`{"portBindings":[{"port":20001,"protocol":"TCP"}],"users":[],"loggingLevel":"INFO","mtu":1400,"dns":{"dualStack":"PREFER_IPv4"}}`)
+	if !requiresMitaRestart(base, userRemoved) {
+		t.Fatal("removing a Mieru user should restart the service to enforce access immediately")
 	}
 	trafficPattern := []byte(`{"portBindings":[{"port":20001,"protocol":"TCP"}],"users":[{"name":"one","hashedPassword":"def"}],"loggingLevel":"INFO","trafficPattern":{"seed":1031},"mtu":1400,"dns":{"dualStack":"PREFER_IPv4"}}`)
 	if !requiresMitaRestart(base, trafficPattern) {

@@ -354,12 +354,7 @@ func collectEndpointForwardPorts(endpoint *model.Endpoint) (int, []int, []string
 		protocols = []string{"udp"}
 	}
 	if strings.EqualFold(endpoint.Type, "mieru") {
-		config, err := parseMieruEndpoint(endpoint)
-		if err != nil {
-			return 0, nil, nil, false, err
-		}
-		protocol := strings.ToLower(config.Transport)
-		return config.Ports[0], config.Ports, []string{protocol}, true, nil
+		return 0, nil, nil, false, nil
 	}
 
 	rawPort, ok := payload[portKey]

@@ -28,11 +28,17 @@ func (s *InboundService) rollbackInboundCoreState(act string, oldInbound, newInb
 		if newInbound == nil {
 			return nil
 		}
+		if newInbound.Type == "mieru" {
+			return nil
+		}
 		if err := corePtr.RemoveInbound(newInbound.Tag); err != nil && !errors.Is(err, os.ErrInvalid) {
 			return err
 		}
 	case "edit", "del":
 		if oldInbound == nil {
+			return nil
+		}
+		if oldInbound.Type == "mieru" {
 			return nil
 		}
 		configData, err := oldInbound.MarshalJSON()
@@ -103,6 +109,10 @@ func (s *InboundService) GetAll() (*[]map[string]interface{}, error) {
 			}
 			inbData["listen"] = restFields["listen"]
 			inbData["listen_port"] = restFields["listen_port"]
+			if inbound.Type == "mieru" {
+				inbData["port_range"] = restFields["port_range"]
+				inbData["transport"] = restFields["transport"]
+			}
 			if inbound.Type == "shadowtls" {
 				if raw, ok := restFields["version"]; ok && len(raw) > 0 {
 					if err := json.Unmarshal(raw, &shadowtls_version); err != nil {
@@ -186,6 +196,20 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 				return nil, err
 			}
 		}
+		if inbound.Type == "mieru" {
+			if _, err := parseMieruInbound(&inbound); err != nil {
+				return nil, err
+			}
+			var count int64
+			if err := tx.Model(&model.Inbound{}).
+				Where("type = ? AND id <> ?", "mieru", inbound.Id).
+				Count(&count).Error; err != nil {
+				return nil, err
+			}
+			if count > 0 {
+				return nil, common.NewError("每台服务器只能创建一个 Mieru 入站")
+			}
+		}
 
 		if _, ports, err := collectInboundForwardPorts(&inbound); err == nil {
 			if err := validateInboundPortsAgainstSSH(&inbound, ports); err != nil {
@@ -230,7 +254,7 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		}
 
 		var inboundConfig []byte
-		if corePtr.IsRunning() {
+		if corePtr.IsRunning() && inbound.Type != "mieru" {
 			inboundConfig, err = inbound.MarshalJSON()
 			if err != nil {
 				return nil, err
@@ -252,7 +276,7 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		postCommit = func() error {
 			coreChanged := false
 			if corePtr.IsRunning() {
-				if act == "edit" {
+				if act == "edit" && oldSnapshot != nil && oldSnapshot.Type != "mieru" {
 					if err := corePtr.RemoveInbound(oldSnapshot.Tag); err != nil && err != os.ErrInvalid {
 						return err
 					}
@@ -272,6 +296,11 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 					return errors.Join(err, s.rollbackInboundCoreState(act, oldSnapshot, &inboundSnapshot))
 				}
 				return err
+			}
+			if mieruPtr != nil && (inboundSnapshot.Type == "mieru" || (oldSnapshot != nil && oldSnapshot.Type == "mieru")) {
+				if err := mieruPtr.SyncFromDB(); err != nil {
+					return err
+				}
 			}
 			return nil
 		}
@@ -305,7 +334,7 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		oldSnapshot := oldInbound
 		postCommit = func() error {
 			coreChanged := false
-			if corePtr.IsRunning() {
+			if corePtr.IsRunning() && oldSnapshot.Type != "mieru" {
 				if err := corePtr.RemoveInbound(tag); err != nil && err != os.ErrInvalid {
 					return err
 				}
@@ -316,6 +345,11 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 					return errors.Join(err, s.rollbackInboundCoreState(act, oldSnapshot, nil))
 				}
 				return err
+			}
+			if mieruPtr != nil && oldSnapshot.Type == "mieru" {
+				if err := mieruPtr.SyncFromDB(); err != nil {
+					return err
+				}
 			}
 			return nil
 		}
@@ -328,12 +362,12 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 func (s *InboundService) removeInboundByTag(tag string) error {
 	return retryWriteTx(func(tx *gorm.DB) error {
 		oldInbound := &model.Inbound{}
-		err := tx.Model(model.Inbound{}).Select("id", "tag").Where("tag = ?", tag).First(oldInbound).Error
+		err := tx.Model(model.Inbound{}).Select("id", "tag", "type").Where("tag = ?", tag).First(oldInbound).Error
 		if err != nil {
 			return err
 		}
 
-		if corePtr.IsRunning() {
+		if corePtr.IsRunning() && oldInbound.Type != "mieru" {
 			err = corePtr.RemoveInbound(tag)
 			if err != nil && err != os.ErrInvalid {
 				return err
@@ -347,7 +381,10 @@ func (s *InboundService) removeInboundByTag(tag string) error {
 			return err
 		}
 
-		return tx.Where("tag = ?", tag).Delete(model.Inbound{}).Error
+		if err := tx.Where("tag = ?", tag).Delete(model.Inbound{}).Error; err != nil {
+			return err
+		}
+		return nil
 	})
 }
 
@@ -379,6 +416,9 @@ func (s *InboundService) GetAllConfig(db *gorm.DB) ([]json.RawMessage, error) {
 		return nil, err
 	}
 	for _, inbound := range inbounds {
+		if inbound.Type == "mieru" {
+			continue
+		}
 		inboundJson, err := inbound.MarshalJSON()
 		if err != nil {
 			return nil, err
@@ -394,7 +434,7 @@ func (s *InboundService) GetAllConfig(db *gorm.DB) ([]json.RawMessage, error) {
 
 func (s *InboundService) hasUser(inboundType string) bool {
 	switch inboundType {
-	case "mixed", "socks", "http", "shadowsocks", "vmess", "trojan", "naive", "hysteria", "shadowtls", "tuic", "hysteria2", "vless", "anytls":
+	case "mixed", "socks", "http", "shadowsocks", "vmess", "trojan", "naive", "hysteria", "shadowtls", "tuic", "hysteria2", "vless", "anytls", "mieru":
 		return true
 	}
 	return false
@@ -479,7 +519,7 @@ func (s *InboundService) initUsers(db *gorm.DB, inboundJson []byte, clientIds st
 }
 
 func (s *InboundService) BuildRestartInboundsAction(tx *gorm.DB, ids []uint) (func() error, error) {
-	if !corePtr.IsRunning() || len(ids) == 0 {
+	if len(ids) == 0 {
 		return nil, nil
 	}
 	var inbounds []*model.Inbound
@@ -489,7 +529,15 @@ func (s *InboundService) BuildRestartInboundsAction(tx *gorm.DB, ids []uint) (fu
 	}
 
 	restartConfigs := make([]taggedConfig, 0, len(inbounds))
+	mieruChanged := false
 	for _, inbound := range inbounds {
+		if inbound.Type == "mieru" {
+			mieruChanged = true
+			continue
+		}
+		if corePtr == nil || !corePtr.IsRunning() {
+			continue
+		}
 		inboundConfig, err := inbound.MarshalJSON()
 		if err != nil {
 			return nil, err
@@ -503,11 +551,28 @@ func (s *InboundService) BuildRestartInboundsAction(tx *gorm.DB, ids []uint) (fu
 			config: inboundConfig,
 		})
 	}
-	snapshots := buildCoreReplaceSnapshots(restartConfigs, func(currentTag string) error {
-		corePtr.GetInstance().ConnTracker().CloseConnByInbound(currentTag)
+	var coreAction func() error
+	if len(restartConfigs) > 0 {
+		snapshots := buildCoreReplaceSnapshots(restartConfigs, func(currentTag string) error {
+			corePtr.GetInstance().ConnTracker().CloseConnByInbound(currentTag)
+			return nil
+		})
+		coreAction = buildCoreReplaceAction(snapshots, corePtr.RemoveInbound, corePtr.AddInbound)
+	}
+	if coreAction == nil && !mieruChanged {
+		return nil, nil
+	}
+	return func() error {
+		if coreAction != nil {
+			if err := coreAction(); err != nil {
+				return err
+			}
+		}
+		if mieruChanged && mieruPtr != nil {
+			return mieruPtr.SyncFromDB()
+		}
 		return nil
-	})
-	return buildCoreReplaceAction(snapshots, corePtr.RemoveInbound, corePtr.AddInbound), nil
+	}, nil
 }
 
 func (s *InboundService) RestartInbounds(tx *gorm.DB, ids []uint) error {

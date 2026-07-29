@@ -22,7 +22,7 @@ type EndpointService struct {
 func (o *EndpointService) GetAll() (*[]map[string]interface{}, error) {
 	db := database.GetDB()
 	endpoints := []*model.Endpoint{}
-	err := db.Model(model.Endpoint{}).Scan(&endpoints).Error
+	err := db.Model(model.Endpoint{}).Where("type <> ?", "mieru").Scan(&endpoints).Error
 	if err != nil {
 		return nil, err
 	}
@@ -202,6 +202,9 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 		if err != nil {
 			return nil, err
 		}
+		if endpoint.Type == "mieru" {
+			return nil, common.NewError("Mieru 已迁移到入站管理，节点管理不再支持该类型")
+		}
 
 		var oldEndpoint *model.Endpoint
 		if act == "edit" {
@@ -226,26 +229,6 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 				return nil, err
 			}
 		}
-		if endpoint.Type == "mieru" {
-			config, parseErr := parseMieruEndpoint(&endpoint)
-			if parseErr != nil {
-				return nil, parseErr
-			}
-			var existing []*model.Endpoint
-			if err := tx.Model(&model.Endpoint{}).Where("type = ? AND id <> ?", "mieru", endpoint.Id).Find(&existing).Error; err != nil {
-				return nil, err
-			}
-			for _, other := range existing {
-				otherConfig, err := parseMieruEndpoint(other)
-				if err != nil {
-					return nil, err
-				}
-				if otherConfig.Username == config.Username {
-					return nil, fmt.Errorf("mieru username %q is already used by %s", config.Username, other.Tag)
-				}
-			}
-		}
-
 		if _, ports, _, active, err := collectEndpointForwardPorts(&endpoint); err == nil {
 			if active {
 				if err := validateInboundPortsAgainstSSH(nil, ports); err != nil {

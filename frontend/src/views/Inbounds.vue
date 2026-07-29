@@ -14,6 +14,12 @@
     :tag="stats.tag"
     @close="closeStats"
   />
+  <MieruStatus
+    v-model="mieruStatus.visible"
+    :visible="mieruStatus.visible"
+    :data="mieruStatus.data"
+    @close="closeMieruStatus"
+  />
   <v-card class="resource-hero resource-hero--inbounds" rounded="xl" variant="flat">
     <div class="resource-hero__topline">
       <span class="resource-hero__badge">{{ $t('pages.inbounds') }}</span>
@@ -75,13 +81,13 @@
           <v-row>
             <v-col>{{ $t('in.port') }}</v-col>
             <v-col>
-              {{ item.listen_port }}
+              {{ item.type == 'mieru' ? (item.port_range || item.listen_port) : item.listen_port }}
             </v-col>
           </v-row>
           <v-row>
             <v-col>{{ $t('objects.tls') }}</v-col>
             <v-col>
-              {{ item.tls_id > 0 ? $t('enable') : $t('disable') }}
+              {{ item.type == 'mieru' ? '不适用' : (item.tls_id > 0 ? $t('enable') : $t('disable')) }}
             </v-col>
           </v-row>
           <v-row>
@@ -130,9 +136,13 @@
               </v-card-actions>
             </v-card>
           </v-overlay>
-          <v-btn class="np-card-action" variant="text" :loading="cloneLoading" @click="clone(item.id)">
+          <v-btn v-if="item.type != 'mieru'" class="np-card-action" variant="text" :loading="cloneLoading" @click="clone(item.id)">
             <v-icon icon="mdi-content-duplicate" /><span>{{ $t('actions.clone') }}</span>
             <v-tooltip activator="parent" location="top" :text="$t('actions.clone')"></v-tooltip>
+          </v-btn>
+          <v-btn v-if="item.type == 'mieru'" class="np-card-action" variant="text" @click="showMieruStatus(item)">
+            <v-icon icon="mdi-information-outline" /><span>{{ $t('status') }}</span>
+            <v-tooltip activator="parent" location="top" text="Mieru status"></v-tooltip>
           </v-btn>
           <v-btn class="np-card-action" variant="text" @click="showStats(item.tag)" v-if="Data().enableTraffic">
             <v-icon icon="mdi-chart-line" /><span>{{ $t('stats.graphTitle') }}</span>
@@ -154,6 +164,7 @@ import EmptyState from '@/components/EmptyState.vue'
 
 const InboundVue = defineAsyncComponent(() => import('@/layouts/modals/Inbound.vue'))
 const Stats = defineAsyncComponent(() => import('@/layouts/modals/Stats.vue'))
+const MieruStatus = defineAsyncComponent(() => import('@/layouts/modals/MieruStatus.vue'))
 
 const appConfig = computed((): Config => {
   return <Config> Data().config
@@ -168,7 +179,7 @@ const tlsConfigs = computed((): any[] => {
 })
 
 const inTags = computed((): string[] => {
-  return [...inbounds.value?.map(i => i.tag), ...Data().endpoints?.filter((e:any) => e.listen_port > 0 && e.type != "masque" && e.type != "mieru").map((e:any) => e.tag)]
+  return [...inbounds.value?.map(i => i.tag), ...Data().endpoints?.filter((e:any) => e.listen_port > 0 && e.type != "masque").map((e:any) => e.tag)]
 })
 
 const onlines = computed(() => {
@@ -226,6 +237,20 @@ const showStats = (tag: string) => {
 }
 const closeStats = () => {
   stats.value.visible = false
+}
+
+const mieruStatus = ref({
+  visible: false,
+  data: <any>{},
+})
+
+const showMieruStatus = (item: any) => {
+  mieruStatus.value.data = item
+  mieruStatus.value.visible = true
+}
+
+const closeMieruStatus = () => {
+  mieruStatus.value.visible = false
 }
 </script>
 

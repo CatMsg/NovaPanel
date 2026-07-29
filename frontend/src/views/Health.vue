@@ -226,7 +226,7 @@ const copyReport = async () => {
 }
 
 const handleAction = async (action: string) => {
-  const routes: Record<string, string> = { ports: '/ports', settings: '/settings', endpoints: '/endpoints', admins: '/admins', fleet: '/fleet' }
+  const routes: Record<string, string> = { ports: '/ports', settings: '/settings', inbounds: '/inbounds', endpoints: '/endpoints', admins: '/admins', fleet: '/fleet' }
   if (action === 'reconcile-ports') return reconcilePorts()
   if (action === 'restart-core') {
     const msg = await HttpUtils.post('api/restartSb', {})

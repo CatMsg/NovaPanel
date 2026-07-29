@@ -57,16 +57,17 @@
               <Tuic v-if="inbound.type == inTypes.TUIC" direction="in" :data="inbound" />
               <Tun v-if="inbound.type == inTypes.Tun" :data="inbound" />
               <AnyTls v-if="inbound.type == inTypes.AnyTls" :data="inbound" direction="in" />
+              <Mieru v-if="inbound.type == inTypes.Mieru" :data="inbound" />
               <TProxy v-if="inbound.type == inTypes.TProxy" :inbound="inbound" />
-              <Transport v-if="Object.hasOwn(inbound,'transport')" :data="inbound" />
+              <Transport v-if="inbound.type != inTypes.Mieru && Object.hasOwn(inbound,'transport')" :data="inbound" />
               <Users v-if="hasUser" :clients="clients" :data="initUsers" />
               <InTls v-if="HasTls.includes(inbound.type)"  :inbound="inbound" :tlsConfigs="tlsConfigs" :tls_id="inbound.tls_id" />
               <Multiplex v-if="MuxAvailable.includes(inbound.type)" direction="in" :data="inbound" />
             </v-window-item>
             <v-window-item value="c">
-              <OutJsonVue :inData="inbound" :type="inbound.type" />
-              <Multiplex v-if="Object.hasOwn(inbound,'multiplex')" direction="out" :data="inbound.out_json" />
-              <Dial v-if="inbound.out_json" :dial="inbound.out_json" mode="client" />
+              <OutJsonVue v-if="inbound.type != inTypes.Mieru" :inData="inbound" :type="inbound.type" />
+              <Multiplex v-if="inbound.type != inTypes.Mieru && Object.hasOwn(inbound,'multiplex')" direction="out" :data="inbound.out_json" />
+              <Dial v-if="inbound.type != inTypes.Mieru && inbound.out_json" :dial="inbound.out_json" mode="client" />
               <v-card>
                 <v-card-text>
                   <v-card-subtitle>{{ $t('in.multiDomain') }}
@@ -120,6 +121,7 @@ import ShadowTls from '@/components/protocols/ShadowTls.vue'
 import Tuic from '@/components/protocols/Tuic.vue'
 import Tun from '@/components/protocols/Tun.vue'
 import AnyTls from '@/components/protocols/AnyTls.vue'
+import Mieru from '@/components/protocols/Mieru.vue'
 import InTls from '@/components/tls/InTLS.vue'
 import TProxy from '@/components/protocols/TProxy.vue'
 import Multiplex from '@/components/Multiplex.vue'
@@ -127,6 +129,7 @@ import Transport from '@/components/Transport.vue'
 import AddrVue from '@/components/Addr.vue'
 import OutJsonVue from '@/components/OutJson.vue'
 import Data from '@/store/modules/data'
+import { push } from 'notivue'
 export default {
   props: ['visible', 'id', 'inTags', 'tlsConfigs'],
   emits: ['close'],
@@ -137,7 +140,7 @@ export default {
       loading: false,
       side: "s",
       inTypes: InTypes,
-      inboundWithUsers: ['mixed', 'socks', 'http', 'shadowsocks', 'vmess', 'trojan', 'naive', 'hysteria', 'shadowtls', 'tuic', 'hysteria2', 'vless', 'anytls'],
+      inboundWithUsers: ['mixed', 'socks', 'http', 'shadowsocks', 'vmess', 'trojan', 'naive', 'hysteria', 'shadowtls', 'tuic', 'hysteria2', 'vless', 'anytls', 'mieru'],
       initUsers: {
         model: 'none',
         values: <any>[],
@@ -156,6 +159,7 @@ export default {
         InTypes.TUIC,
         InTypes.Hysteria2,
         InTypes.Naive,
+        InTypes.Mieru,
       ],
       HasTls: [
         InTypes.HTTP,
@@ -239,6 +243,23 @@ export default {
       // check duplicate tag
       const isDuplicatedTag = Data().checkTag("inbound", this.inbound.id, this.inbound.tag)
       if (isDuplicatedTag) return
+      if (this.inbound.type == InTypes.Mieru) {
+        const duplicate = Data().inbounds?.some((item: any) => item.type == InTypes.Mieru && item.id != this.inbound.id)
+        if (duplicate) {
+          push.error({ message: '每台服务器只能创建一个 Mieru 入站' })
+          return
+        }
+        const range = String((this.inbound as any).port_range ?? '').trim()
+        if (range) {
+          const match = range.match(/^(\d+)-(\d+)$/)
+          const start = Number(match?.[1])
+          const end = Number(match?.[2])
+          if (!match || start != Number(this.inbound.listen_port) || start < 1025 || end > 65535 || end < start || end - start + 1 > 512) {
+            push.error({ message: 'Mieru 端口范围必须从监听端口开始，且最多连续 512 个端口' })
+            return
+          }
+        }
+      }
 
       // save data
       this.loading = true
@@ -289,7 +310,7 @@ export default {
   components: {
     Listen, InTls, Hysteria2, Naive, Direct, Shadowsocks,
     Users, Hysteria, ShadowTls, TProxy, Multiplex, Tuic, Tun,
-    AnyTls, Transport, AddrVue, OutJsonVue, Dial
+    AnyTls, Mieru, Transport, AddrVue, OutJsonVue, Dial
   }
 }
 </script>

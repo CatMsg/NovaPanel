@@ -34,31 +34,29 @@ func TestValidateManagedPanelPorts(t *testing.T) {
 	}
 }
 
-func TestCollectMieruEndpointForwardPortsUsesConfiguredTransport(t *testing.T) {
-	endpoint := &model.Endpoint{
+func TestCollectMieruInboundForwardPortsUsesConfiguredTransport(t *testing.T) {
+	inbound := &model.Inbound{
 		Type: "mieru",
 		Tag:  "mieru-range",
 		Options: json.RawMessage(`{
-			"server":"proxy.example.com",
+			"listen_port":24000,
 			"port_range":"24000-24002",
-			"transport":"UDP",
-			"username":"alice",
-			"password":"secret"
+			"transport":"UDP"
 		}`),
 	}
 
-	listenPort, ports, protocols, active, err := collectEndpointForwardPorts(endpoint)
+	spec, err := collectInboundForwardSpec(inbound)
 	if err != nil {
 		t.Fatalf("collect Mieru ports: %v", err)
 	}
-	if !active || listenPort != 24000 {
-		t.Fatalf("unexpected Mieru forwarding state: active=%v listen=%d", active, listenPort)
+	if !spec.active || spec.listenPort != 24000 {
+		t.Fatalf("unexpected Mieru forwarding state: active=%v listen=%d", spec.active, spec.listenPort)
 	}
-	if got := len(ports); got != 3 || ports[0] != 24000 || ports[2] != 24002 {
-		t.Fatalf("unexpected Mieru ports: %#v", ports)
+	if got := len(spec.ports); got != 3 || spec.ports[0] != 24000 || spec.ports[2] != 24002 {
+		t.Fatalf("unexpected Mieru ports: %#v", spec.ports)
 	}
-	if len(protocols) != 1 || protocols[0] != "udp" {
-		t.Fatalf("unexpected Mieru protocols: %#v", protocols)
+	if len(spec.protocols) != 1 || spec.protocols[0] != "udp" {
+		t.Fatalf("unexpected Mieru protocols: %#v", spec.protocols)
 	}
 }
 

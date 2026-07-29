@@ -33,9 +33,79 @@ func GetOutbound(uri string, i int) (*map[string]interface{}, string, error) {
 			return ss(u, i)
 		case "naive+https", "naive+quic", "http1", "http2", "http3":
 			return parseNaiveLink(u, i)
+		case "mierus":
+			return mieru(u, i)
 		}
 	}
 	return nil, "", common.NewError("Unsupported link format")
+}
+
+func mieru(u *url.URL, i int) (*map[string]interface{}, string, error) {
+	query := u.Query()
+	username := strings.TrimSpace(u.User.Username())
+	password, _ := u.User.Password()
+	server := strings.TrimSpace(u.Hostname())
+	tag := strings.TrimSpace(query.Get("profile"))
+	if tag == "" {
+		tag = strings.TrimSpace(u.Fragment)
+	}
+	if i > 0 {
+		tag = fmt.Sprintf("%d.%s", i, tag)
+	}
+	if server == "" || username == "" || password == "" || tag == "" {
+		return nil, "", common.NewError("Invalid Mieru link")
+	}
+
+	transport := strings.ToUpper(strings.TrimSpace(query.Get("protocol")))
+	if transport == "" {
+		transport = "TCP"
+	}
+	if transport != "TCP" && transport != "UDP" {
+		return nil, "", common.NewError("Invalid Mieru transport")
+	}
+
+	portValue := strings.TrimSpace(query.Get("port"))
+	if portValue == "" {
+		portValue = strings.TrimSpace(u.Port())
+	}
+	if portValue == "" {
+		return nil, "", common.NewError("Missing Mieru port")
+	}
+
+	outbound := map[string]interface{}{
+		"type":           "mieru",
+		"tag":            tag,
+		"server":         server,
+		"transport":      transport,
+		"udp":            true,
+		"username":       username,
+		"password":       password,
+		"multiplexing":   defaultString(strings.ToUpper(query.Get("multiplexing")), "MULTIPLEXING_LOW"),
+		"handshake-mode": defaultString(strings.ToUpper(query.Get("handshake-mode")), "HANDSHAKE_STANDARD"),
+	}
+	if strings.Contains(portValue, "-") {
+		outbound["port-range"] = portValue
+	} else {
+		port, err := strconv.Atoi(portValue)
+		if err != nil || port < 1 || port > 65535 {
+			return nil, "", common.NewError("Invalid Mieru port")
+		}
+		outbound["server_port"] = port
+	}
+	if mtu, err := strconv.Atoi(query.Get("mtu")); err == nil && mtu > 0 {
+		outbound["mtu"] = mtu
+	}
+	if trafficPattern := strings.TrimSpace(query.Get("traffic-pattern")); trafficPattern != "" {
+		outbound["traffic-pattern"] = trafficPattern
+	}
+	return &outbound, tag, nil
+}
+
+func defaultString(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 func vmess(data string, i int) (*map[string]interface{}, string, error) {

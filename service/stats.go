@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -24,33 +25,38 @@ type StatsService struct {
 }
 
 func (s *StatsService) SaveStats(enableTraffic bool) error {
-	if corePtr == nil || !corePtr.IsRunning() {
-		return nil
-	}
-	box := corePtr.GetInstance()
-	if box == nil {
-		return nil
-	}
-	st := box.StatsTracker()
-	if st == nil {
-		return nil
-	}
-	stats := st.GetStats()
-
-	// Reset the sampled fallback. GetOnlines prefers the live connection tracker.
-	onlineResourcesMu.Lock()
-	onlineResources.Inbound = nil
-	onlineResources.Outbound = nil
-	onlineResources.User = nil
-	onlineResourcesMu.Unlock()
-
-	if len(*stats) == 0 {
-		return nil
+	stats := make([]model.Stats, 0)
+	if corePtr != nil && corePtr.IsRunning() {
+		box := corePtr.GetInstance()
+		if box != nil && box.StatsTracker() != nil {
+			coreStats := box.StatsTracker().GetStats()
+			if coreStats != nil {
+				stats = append(stats, (*coreStats)...)
+			}
+		}
 	}
 
 	sampled := onlines{}
+	var collectionErr error
+	if mieru := GetMieruService(); mieru != nil {
+		mieruStats, mieruOnline, err := mieru.CollectStats()
+		if err != nil {
+			collectionErr = err
+		} else {
+			stats = append(stats, mieruStats...)
+			sampled = mergeOnlines(sampled, mieruOnline)
+		}
+	}
+
+	if len(stats) == 0 {
+		onlineResourcesMu.Lock()
+		*onlineResources = sampled
+		onlineResourcesMu.Unlock()
+		return collectionErr
+	}
+
 	err := retryWriteTx(func(tx *gorm.DB) error {
-		for _, stat := range *stats {
+		for _, stat := range stats {
 			if stat.Resource == "user" {
 				var err error
 				if stat.Direction {
@@ -86,7 +92,7 @@ func (s *StatsService) SaveStats(enableTraffic bool) error {
 		*onlineResources = sampled
 		onlineResourcesMu.Unlock()
 	}
-	return err
+	return errors.Join(err, collectionErr)
 }
 
 func (s *StatsService) GetStats(resource string, tag string, limit int) ([]model.Stats, error) {
@@ -156,25 +162,51 @@ func (s *StatsService) downsampleStats(stats []model.Stats, maxRows int) []model
 }
 
 func (s *StatsService) GetOnlines() (onlines, error) {
+	onlineResourcesMu.RLock()
+	sampled := onlines{
+		Inbound:  append([]string(nil), onlineResources.Inbound...),
+		Outbound: append([]string(nil), onlineResources.Outbound...),
+		User:     append([]string(nil), onlineResources.User...),
+	}
+	onlineResourcesMu.RUnlock()
 	if corePtr != nil && corePtr.IsRunning() {
 		box := corePtr.GetInstance()
 		if box != nil && box.ConnTracker() != nil {
 			active := box.ConnTracker().Snapshot()
-			return onlines{
+			return mergeOnlines(onlines{
 				Inbound:  active.Inbound,
 				Outbound: active.Outbound,
 				User:     active.User,
-			}, nil
+			}, sampled), nil
 		}
 	}
+	return sampled, nil
+}
 
-	onlineResourcesMu.RLock()
-	defer onlineResourcesMu.RUnlock()
+func mergeOnlines(left, right onlines) onlines {
 	return onlines{
-		Inbound:  append([]string(nil), onlineResources.Inbound...),
-		Outbound: append([]string(nil), onlineResources.Outbound...),
-		User:     append([]string(nil), onlineResources.User...),
-	}, nil
+		Inbound:  mergeOnlineTags(left.Inbound, right.Inbound),
+		Outbound: mergeOnlineTags(left.Outbound, right.Outbound),
+		User:     mergeOnlineTags(left.User, right.User),
+	}
+}
+
+func mergeOnlineTags(groups ...[]string) []string {
+	seen := make(map[string]struct{})
+	result := make([]string, 0)
+	for _, group := range groups {
+		for _, tag := range group {
+			if tag == "" {
+				continue
+			}
+			if _, exists := seen[tag]; exists {
+				continue
+			}
+			seen[tag] = struct{}{}
+			result = append(result, tag)
+		}
+	}
+	return result
 }
 func (s *StatsService) DelOldStats(days int) error {
 	oldTime := time.Now().AddDate(0, 0, -(days)).Unix()

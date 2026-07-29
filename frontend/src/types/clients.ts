@@ -92,6 +92,7 @@ export function shuffleConfigs(configs: Config, key?: string) {
       case "trojan":
       case "naive":
       case "hysteria2":
+      case "mieru":
         configs[k].password = RandomUtil.randomSeq(10)
         break
       case "shadowsocks":
@@ -180,6 +181,10 @@ export function randomConfigs(user: string): Config {
       password: mixedPassword,
     },
     hysteria2: {
+      name: user,
+      password: mixedPassword,
+    },
+    mieru: {
       name: user,
       password: mixedPassword,
     },

@@ -3,24 +3,20 @@ package sub
 import (
 	"testing"
 
+	"github.com/CatMsg/NovaPanel/util"
 	"gopkg.in/yaml.v3"
 )
 
-func TestBuildMieruAggregateOutbound(t *testing.T) {
-	node := buildMieruAggregateOutbound(map[string]interface{}{
-		"type":            "mieru",
-		"tag":             "mieru-main",
-		"server":          "proxy.example.com",
-		"port_range":      "22000-22010",
-		"transport":       "tcp",
-		"username":        "alice",
-		"password":        "secret",
-		"multiplexing":    "multiplexing_middle",
-		"handshake_mode":  "handshake_no_wait",
-		"traffic_pattern": "balanced",
-	})
-	if node == nil {
-		t.Fatal("expected Mieru outbound")
+func TestMieruLinkParsesForOrdinaryAggregate(t *testing.T) {
+	node, tag, err := util.GetOutbound(
+		"mierus://alice:secret@proxy.example.com?profile=mieru-main&port=22000-22010&protocol=TCP&multiplexing=MULTIPLEXING_MIDDLE&handshake-mode=HANDSHAKE_NO_WAIT&mtu=1380&traffic-pattern=CIcIEAAaBAgAEAAiCAgCEAAYBCAGKgQIIBBA",
+		0,
+	)
+	if err != nil {
+		t.Fatalf("parse Mieru link: %v", err)
+	}
+	if tag != "mieru-main" {
+		t.Fatalf("unexpected tag: %q", tag)
 	}
 	if got := (*node)["port-range"]; got != "22000-22010" {
 		t.Fatalf("unexpected port range: %#v", got)
@@ -36,6 +32,9 @@ func TestBuildMieruAggregateOutbound(t *testing.T) {
 	}
 	if got := (*node)["traffic-pattern"]; got != "CIcIEAAaBAgAEAAiCAgCEAAYBCAGKgQIIBBA" {
 		t.Fatalf("unexpected traffic pattern: %#v", got)
+	}
+	if got := (*node)["mtu"]; got != 1380 {
+		t.Fatalf("unexpected MTU: %#v", got)
 	}
 }
 
@@ -54,6 +53,7 @@ func TestConvertToClashMetaPreservesMieruFields(t *testing.T) {
 			"multiplexing":    "MULTIPLEXING_LOW",
 			"handshake-mode":  "HANDSHAKE_STANDARD",
 			"traffic-pattern": "CIcIEAAaBAgAEAAiCAgCEAAYBCAGKgQIIBBA",
+			"mtu":             1380,
 		},
 	}
 
@@ -84,5 +84,8 @@ func TestConvertToClashMetaPreservesMieruFields(t *testing.T) {
 	}
 	if proxy["traffic-pattern"] != "CIcIEAAaBAgAEAAiCAgCEAAYBCAGKgQIIBBA" {
 		t.Fatalf("Mieru traffic pattern was not preserved: %#v", proxy)
+	}
+	if proxy["mtu"] != 1380 {
+		t.Fatalf("Mieru MTU was not preserved: %#v", proxy)
 	}
 }

@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/CatMsg/NovaPanel/database/model"
 	"github.com/CatMsg/NovaPanel/util/common"
 )
 
-var InboundTypeWithLink = []string{"socks", "http", "mixed", "shadowsocks", "naive", "hysteria", "hysteria2", "anytls", "tuic", "vless", "trojan", "vmess"}
+var InboundTypeWithLink = []string{"socks", "http", "mixed", "shadowsocks", "naive", "hysteria", "hysteria2", "anytls", "tuic", "vless", "trojan", "vmess", "mieru"}
 
 type LinkParam struct {
 	Key   string
@@ -102,9 +103,93 @@ func LinkGenerator(clientConfig json.RawMessage, i *model.Inbound, hostname stri
 		return trojanLink(userConfig["trojan"], *inbound, Addrs)
 	case "vmess":
 		return vmessLink(userConfig["vmess"], *inbound, Addrs)
+	case "mieru":
+		return mieruLink(userConfig["mieru"], *inbound, Addrs)
 	}
 
 	return []string{}
+}
+
+func mieruLink(
+	userConfig map[string]interface{},
+	inbound map[string]interface{},
+	addrs []map[string]interface{}) []string {
+	username, _ := userConfig["name"].(string)
+	password, _ := userConfig["password"].(string)
+	if strings.TrimSpace(username) == "" || strings.TrimSpace(password) == "" {
+		return nil
+	}
+	transport, _ := inbound["transport"].(string)
+	transport = strings.ToUpper(strings.TrimSpace(transport))
+	if transport == "" {
+		transport = "TCP"
+	}
+	portRange, _ := inbound["port_range"].(string)
+	multiplexing, _ := inbound["multiplexing"].(string)
+	handshakeMode, _ := inbound["handshake_mode"].(string)
+	trafficPattern, _ := inbound["traffic_pattern"].(string)
+
+	links := make([]string, 0, len(addrs))
+	for _, addr := range addrs {
+		server, _ := addr["server"].(string)
+		if strings.TrimSpace(server) == "" {
+			continue
+		}
+		query := url.Values{}
+		remark, _ := addr["remark"].(string)
+		if remark == "" {
+			remark, _ = inbound["tag"].(string)
+		}
+		query.Set("profile", remark)
+		if strings.TrimSpace(portRange) != "" {
+			query.Add("port", strings.TrimSpace(portRange))
+		} else {
+			query.Add("port", fmt.Sprintf("%.0f", numberAsFloat64(addr["server_port"])))
+		}
+		query.Add("protocol", transport)
+		if mtu := int(numberAsFloat64(inbound["mtu"])); mtu > 0 {
+			query.Set("mtu", fmt.Sprint(mtu))
+		}
+		if multiplexing != "" {
+			query.Set("multiplexing", strings.ToUpper(multiplexing))
+		}
+		if handshakeMode != "" {
+			query.Set("handshake-mode", strings.ToUpper(handshakeMode))
+		}
+		switch strings.ToUpper(strings.TrimSpace(trafficPattern)) {
+		case "BALANCED":
+			query.Set("traffic-pattern", "CIcIEAAaBAgAEAAiCAgCEAAYBCAGKgQIIBBA")
+		case "ENHANCED":
+			query.Set("traffic-pattern", "CIUQEAEaBAgBEAUiCAgBEAEYBiAIKgUIQBCAAQ==")
+		}
+		link := &url.URL{
+			Scheme:   "mierus",
+			User:     url.UserPassword(username, password),
+			Host:     server,
+			RawQuery: query.Encode(),
+		}
+		links = append(links, link.String())
+	}
+	return links
+}
+
+func numberAsFloat64(value interface{}) float64 {
+	switch typed := value.(type) {
+	case float64:
+		return typed
+	case int:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	case uint:
+		return float64(typed)
+	case json.Number:
+		result, _ := typed.Float64()
+		return result
+	default:
+		result, _ := strconv.ParseFloat(fmt.Sprint(value), 64)
+		return result
+	}
 }
 
 func prepareTls(t *model.Tls) map[string]interface{} {

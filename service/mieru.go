@@ -24,6 +24,7 @@ import (
 	"github.com/CatMsg/NovaPanel/database/model"
 	"github.com/CatMsg/NovaPanel/logger"
 	"github.com/CatMsg/NovaPanel/util/common"
+	"gorm.io/gorm"
 )
 
 const (
@@ -62,6 +63,10 @@ type MieruService struct {
 	mu               sync.Mutex
 	active           *mieruRuntime
 	total            int
+	inboundTag       string
+	users            map[string]struct{}
+	trafficBaseline  map[string]mieruTrafficCounters
+	recentUsers      map[string]time.Time
 	appliedHash      string
 	appliedConfig    []byte
 	restartScheduled bool
@@ -70,7 +75,11 @@ type MieruService struct {
 }
 
 func NewMieruService() *MieruService {
-	return &MieruService{}
+	return &MieruService{
+		users:           make(map[string]struct{}),
+		trafficBaseline: make(map[string]mieruTrafficCounters),
+		recentUsers:     make(map[string]time.Time),
+	}
 }
 
 func SetMieruService(service *MieruService) {
@@ -88,15 +97,19 @@ func (s *MieruService) SyncFromDB() error {
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
 
-	configs, err := loadMieruEndpointConfigs()
+	inboundConfig, credentials, err := loadMieruInboundConfig()
 	if err != nil {
 		return err
 	}
-	if len(configs) == 0 {
+	if inboundConfig == nil {
 		s.mu.Lock()
 		oldRuntime := s.active
 		s.active = nil
 		s.total = 0
+		s.inboundTag = ""
+		s.users = make(map[string]struct{})
+		s.trafficBaseline = make(map[string]mieruTrafficCounters)
+		s.recentUsers = make(map[string]time.Time)
 		s.appliedHash = ""
 		s.appliedConfig = nil
 		s.restartScheduled = false
@@ -108,8 +121,29 @@ func (s *MieruService) SyncFromDB() error {
 		removeMitaRuntimeFiles()
 		return nil
 	}
+	if len(credentials) == 0 {
+		s.mu.Lock()
+		oldRuntime := s.active
+		s.active = nil
+		s.total = 1
+		s.inboundTag = inboundConfig.Tag
+		s.users = make(map[string]struct{})
+		s.trafficBaseline = make(map[string]mieruTrafficCounters)
+		s.recentUsers = make(map[string]time.Time)
+		s.appliedHash = ""
+		s.appliedConfig = nil
+		s.restartScheduled = false
+		s.lastError = ""
+		s.mu.Unlock()
+		if oldRuntime != nil {
+			stopMieruRuntime(oldRuntime)
+		}
+		removeMitaRuntimeFiles()
+		logger.Info("mieru inbound ", inboundConfig.Tag, " has no enabled users; mita service stopped")
+		return nil
+	}
 
-	serverConfig, err := buildMitaServerConfig(configs)
+	serverConfig, err := buildMitaServerConfig(inboundConfig, credentials)
 	if err != nil {
 		return err
 	}
@@ -128,7 +162,18 @@ func (s *MieruService) SyncFromDB() error {
 	active := s.active
 	appliedHash := s.appliedHash
 	oldPayload := append([]byte(nil), s.appliedConfig...)
-	s.total = len(configs)
+	s.total = 1
+	s.inboundTag = inboundConfig.Tag
+	s.users = make(map[string]struct{}, len(credentials))
+	for _, credential := range credentials {
+		s.users[credential.Name] = struct{}{}
+	}
+	for username := range s.trafficBaseline {
+		if _, exists := s.users[username]; !exists {
+			delete(s.trafficBaseline, username)
+			delete(s.recentUsers, username)
+		}
+	}
 	s.mu.Unlock()
 	if runtime.GOOS != "linux" {
 		s.mu.Lock()
@@ -180,10 +225,10 @@ func (s *MieruService) SyncFromDB() error {
 			if !active.running.Load() {
 				s.handleRuntimeExit(active, common.NewError("mita exited after reload"))
 			}
-			logger.Info("mieru service reloaded with ", len(configs), " endpoint(s)")
+			logger.Info("mieru service reloaded for inbound ", inboundConfig.Tag, " with ", len(credentials), " user(s)")
 			return nil
 		}
-		logger.Info("mieru traffic pattern changed; restarting shared mita service")
+		logger.Info("non-reloadable mieru config changed; restarting shared mita service")
 	}
 
 	s.mu.Lock()
@@ -215,7 +260,7 @@ func (s *MieruService) SyncFromDB() error {
 	if !runtimeState.running.Load() {
 		s.handleRuntimeExit(runtimeState, common.NewError("mita exited after startup"))
 	}
-	logger.Info("mieru service started with ", len(configs), " endpoint(s)")
+	logger.Info("mieru service started for inbound ", inboundConfig.Tag, " with ", len(credentials), " user(s)")
 	return nil
 }
 
@@ -264,6 +309,10 @@ func (s *MieruService) Stop() error {
 	runtimeState := s.active
 	s.active = nil
 	s.total = 0
+	s.inboundTag = ""
+	s.users = make(map[string]struct{})
+	s.trafficBaseline = make(map[string]mieruTrafficCounters)
+	s.recentUsers = make(map[string]time.Time)
 	s.appliedHash = ""
 	s.appliedConfig = nil
 	s.restartScheduled = false
@@ -278,15 +327,23 @@ func (s *MieruService) Stop() error {
 func (s *MieruService) GetStatus(tag string) (map[string]interface{}, error) {
 	tag = strings.TrimSpace(tag)
 	if tag == "" {
-		return nil, common.NewError("missing endpoint tag")
+		return nil, common.NewError("missing inbound tag")
 	}
-	endpoint := &model.Endpoint{}
-	if err := database.GetDB().Model(&model.Endpoint{}).Where("tag = ? AND type = ?", tag, "mieru").First(endpoint).Error; err != nil {
+	inbound := &model.Inbound{}
+	if err := database.GetDB().Model(&model.Inbound{}).Where("tag = ? AND type = ?", tag, "mieru").First(inbound).Error; err != nil {
 		return nil, err
 	}
-	config, err := parseMieruEndpoint(endpoint)
+	config, err := parseMieruInbound(inbound)
 	if err != nil {
 		return nil, err
+	}
+	credentials, err := loadMieruClientCredentials(database.GetDB(), inbound.Id)
+	if err != nil {
+		return nil, err
+	}
+	usernames := make([]string, 0, len(credentials))
+	for _, credential := range credentials {
+		usernames = append(usernames, credential.Name)
 	}
 
 	s.mu.Lock()
@@ -298,26 +355,24 @@ func (s *MieruService) GetStatus(tag string) (map[string]interface{}, error) {
 	running := runtimeState != nil && runtimeState.running.Load()
 	result := map[string]interface{}{
 		"tag":                    config.Tag,
-		"server":                 config.Server,
-		"port":                   config.Port,
+		"port":                   config.ListenPort,
 		"port_range":             config.PortRange,
 		"transport":              config.Transport,
-		"username":               config.Username,
+		"user_count":             len(usernames),
+		"usernames":              usernames,
 		"multiplexing":           config.Multiplexing,
 		"handshake_mode":         config.HandshakeMode,
 		"traffic_pattern":        config.TrafficPattern,
 		"server_traffic_pattern": "DEFAULT",
-		"quota_1d_gb":            config.Quota1DayGB,
-		"quota_30d_gb":           config.Quota30DayGB,
 		"mtu":                    config.MTU,
 		"running":                running,
-		"endpoint_count":         total,
+		"inbound_count":          total,
 		"binary":                 "",
 		"version":                "",
 		"status":                 "",
 		"connections":            "",
 		"users":                  "",
-		"user_stats":             map[string]string{},
+		"user_stats":             map[string]map[string]string{},
 		"metrics":                map[string]int64{},
 	}
 	var runtimeConfig mitaServerConfig
@@ -374,10 +429,7 @@ func (s *MieruService) GetStatus(tag string) (map[string]interface{}, error) {
 		if output, queryErr := runMitaQuery(binary, socketPath, "get", "users"); queryErr == nil {
 			usersOutput := strings.TrimSpace(string(output))
 			result["users"] = usersOutput
-			result["user_stats"] = parseMitaUserStats(usersOutput, config.Username)
-		}
-		if output, queryErr := runMitaQuery(binary, socketPath, "get", "quotas"); queryErr == nil {
-			result["quotas"] = strings.TrimSpace(string(output))
+			result["user_stats"] = parseMitaAllUserStats(usersOutput)
 		}
 		if output, queryErr := runMitaQuery(binary, socketPath, "get", "metrics"); queryErr == nil {
 			result["metrics"] = parseMitaMetrics(output)
@@ -404,7 +456,14 @@ func (s *MieruService) healthSummary() (map[string]int, []string) {
 	summary := s.GetSummary()
 	details := make([]string, 0, 1)
 	if summary["total"] > 0 && summary["running"] != summary["total"] {
-		details = append(details, "mita 服务未运行")
+		s.mu.Lock()
+		userCount := len(s.users)
+		s.mu.Unlock()
+		if userCount == 0 {
+			details = append(details, "未绑定启用用户")
+		} else {
+			details = append(details, "mita 服务未运行")
+		}
 	}
 	s.mu.Lock()
 	runtimeState := s.active
@@ -423,23 +482,51 @@ func (s *MieruService) healthSummary() (map[string]int, []string) {
 	return summary, details
 }
 
-func loadMieruEndpointConfigs() ([]*mieruEndpointConfig, error) {
-	var endpoints []*model.Endpoint
-	if err := database.GetDB().Model(&model.Endpoint{}).Where("type = ?", "mieru").Order("id ASC").Find(&endpoints).Error; err != nil {
+func loadMieruInboundConfig() (*mieruInboundConfig, []mieruClientCredential, error) {
+	var inbounds []*model.Inbound
+	db := database.GetDB()
+	if err := db.Model(&model.Inbound{}).Where("type = ?", "mieru").Order("id ASC").Find(&inbounds).Error; err != nil {
+		return nil, nil, err
+	}
+	if len(inbounds) == 0 {
+		return nil, nil, nil
+	}
+	if len(inbounds) > 1 {
+		return nil, nil, common.NewError("only one Mieru inbound is allowed per server")
+	}
+	config, err := parseMieruInbound(inbounds[0])
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse mieru inbound %s: %w", inbounds[0].Tag, err)
+	}
+	credentials, err := loadMieruClientCredentials(db, inbounds[0].Id)
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, err := buildMitaServerConfig(config, credentials); err != nil {
+		return nil, nil, err
+	}
+	return config, credentials, nil
+}
+
+func loadMieruClientCredentials(db *gorm.DB, inboundID uint) ([]mieruClientCredential, error) {
+	var clients []*model.Client
+	if err := db.Raw(`
+		SELECT clients.*
+		FROM clients, json_each(clients.inbounds) AS je
+		WHERE clients.enable = true AND CAST(je.value AS INTEGER) = ?
+		ORDER BY clients.id ASC
+	`, inboundID).Scan(&clients).Error; err != nil {
 		return nil, err
 	}
-	configs := make([]*mieruEndpointConfig, 0, len(endpoints))
-	for _, endpoint := range endpoints {
-		config, err := parseMieruEndpoint(endpoint)
+	credentials := make([]mieruClientCredential, 0, len(clients))
+	for _, client := range clients {
+		credential, err := parseMieruClientCredential(client)
 		if err != nil {
-			return nil, fmt.Errorf("parse mieru endpoint %s: %w", endpoint.Tag, err)
+			return nil, err
 		}
-		configs = append(configs, config)
+		credentials = append(credentials, credential)
 	}
-	if _, err := buildMitaServerConfig(configs); err != nil {
-		return nil, err
-	}
-	return configs, nil
+	return credentials, nil
 }
 
 func mitaRuntimePaths() (string, string) {
@@ -466,7 +553,21 @@ func requiresMitaRestart(oldPayload, newPayload []byte) bool {
 		return true
 	}
 	return !reflect.DeepEqual(oldConfig.TrafficPattern, newConfig.TrafficPattern) ||
-		!reflect.DeepEqual(oldConfig.DNS, newConfig.DNS)
+		!reflect.DeepEqual(oldConfig.DNS, newConfig.DNS) ||
+		mitaUsersRequireRestart(oldConfig.Users, newConfig.Users)
+}
+
+func mitaUsersRequireRestart(oldUsers, newUsers []mitaUser) bool {
+	newHashes := make(map[string]string, len(newUsers))
+	for _, user := range newUsers {
+		newHashes[user.Name] = user.HashedPassword
+	}
+	for _, user := range oldUsers {
+		if newHashes[user.Name] != user.HashedPassword {
+			return true
+		}
+	}
+	return false
 }
 
 func mieruTrafficPatternName(pattern *mitaTrafficPattern) string {
@@ -706,40 +807,144 @@ func (s *MieruService) handleRuntimeExit(runtimeState *mieruRuntime, waitErr err
 	}()
 }
 
-func parseMitaUserStats(output, username string) map[string]string {
-	result := map[string]string{}
-	username = strings.TrimSpace(username)
-	for _, line := range strings.Split(output, "\n") {
-		fields := mitaTableColumns.Split(strings.TrimSpace(line), -1)
-		if len(fields) < 8 || fields[0] != username {
+type mieruTrafficCounters struct {
+	Upload   int64
+	Download int64
+}
+
+func (s *MieruService) CollectStats() ([]model.Stats, onlines, error) {
+	if s == nil || runtime.GOOS != "linux" {
+		return nil, onlines{}, nil
+	}
+	s.mu.Lock()
+	runtimeState := s.active
+	inboundTag := s.inboundTag
+	users := make(map[string]struct{}, len(s.users))
+	for username := range s.users {
+		users[username] = struct{}{}
+	}
+	s.mu.Unlock()
+	if runtimeState == nil || !runtimeState.running.Load() || inboundTag == "" || len(users) == 0 {
+		return nil, onlines{}, nil
+	}
+
+	binary, err := mieruBinaryPath()
+	if err != nil {
+		return nil, onlines{}, err
+	}
+	_, socketPath := mitaRuntimePaths()
+	output, err := runMitaQuery(binary, socketPath, "get", "metrics")
+	if err != nil {
+		return nil, onlines{}, err
+	}
+	current := parseMitaTrafficCounters(output)
+	now := time.Now()
+	stats := make([]model.Stats, 0, len(users)*2+2)
+	var inboundUpload, inboundDownload int64
+
+	s.mu.Lock()
+	if s.trafficBaseline == nil {
+		s.trafficBaseline = make(map[string]mieruTrafficCounters)
+	}
+	if s.recentUsers == nil {
+		s.recentUsers = make(map[string]time.Time)
+	}
+	for username := range users {
+		counter := current[username]
+		previous := s.trafficBaseline[username]
+		uploadDelta := counter.Upload - previous.Upload
+		if uploadDelta < 0 {
+			uploadDelta = counter.Upload
+		}
+		downloadDelta := counter.Download - previous.Download
+		if downloadDelta < 0 {
+			downloadDelta = counter.Download
+		}
+		s.trafficBaseline[username] = counter
+		if uploadDelta > 0 || downloadDelta > 0 {
+			s.recentUsers[username] = now
+		}
+		if uploadDelta > 0 {
+			stats = append(stats, model.Stats{
+				DateTime: now.Unix(), Resource: "user", Tag: username, Direction: true, Traffic: uploadDelta,
+			})
+			inboundUpload += uploadDelta
+		}
+		if downloadDelta > 0 {
+			stats = append(stats, model.Stats{
+				DateTime: now.Unix(), Resource: "user", Tag: username, Direction: false, Traffic: downloadDelta,
+			})
+			inboundDownload += downloadDelta
+		}
+	}
+	sampled := onlines{}
+	for username, lastSeen := range s.recentUsers {
+		if _, exists := users[username]; !exists {
+			delete(s.recentUsers, username)
+			delete(s.trafficBaseline, username)
 			continue
 		}
-		result["last_active"] = fields[1]
-		result["day_download"] = fields[2]
-		result["day_upload"] = fields[3]
-		result["week_download"] = fields[4]
-		result["week_upload"] = fields[5]
-		result["month_download"] = fields[6]
-		result["month_upload"] = fields[7]
-		break
+		if now.Sub(lastSeen) <= 35*time.Second {
+			sampled.User = append(sampled.User, username)
+		}
+	}
+	if len(sampled.User) > 0 {
+		sampled.Inbound = append(sampled.Inbound, inboundTag)
+	}
+	s.mu.Unlock()
+
+	if inboundUpload > 0 {
+		stats = append(stats, model.Stats{
+			DateTime: now.Unix(), Resource: "inbound", Tag: inboundTag, Direction: true, Traffic: inboundUpload,
+		})
+	}
+	if inboundDownload > 0 {
+		stats = append(stats, model.Stats{
+			DateTime: now.Unix(), Resource: "inbound", Tag: inboundTag, Direction: false, Traffic: inboundDownload,
+		})
+	}
+	return stats, sampled, nil
+}
+
+func parseMitaUserStats(output, username string) map[string]string {
+	return parseMitaAllUserStats(output)[strings.TrimSpace(username)]
+}
+
+func parseMitaAllUserStats(output string) map[string]map[string]string {
+	result := make(map[string]map[string]string)
+	for _, line := range strings.Split(output, "\n") {
+		fields := mitaTableColumns.Split(strings.TrimSpace(line), -1)
+		if len(fields) < 8 || fields[0] == "User" {
+			continue
+		}
+		result[fields[0]] = map[string]string{
+			"last_active":    fields[1],
+			"day_download":   fields[2],
+			"day_upload":     fields[3],
+			"week_download":  fields[4],
+			"week_upload":    fields[5],
+			"month_download": fields[6],
+			"month_upload":   fields[7],
+		}
 	}
 	return result
 }
 
 func parseMitaMetrics(output []byte) map[string]int64 {
-	if start := strings.IndexByte(string(output), '{'); start >= 0 {
-		if end := strings.LastIndexByte(string(output), '}'); end >= start {
-			output = output[start : end+1]
-		}
-	}
-	var groups map[string]map[string]int64
+	output = extractMitaJSON(output)
+	var groups map[string]json.RawMessage
 	if err := json.Unmarshal(output, &groups); err != nil {
 		return map[string]int64{}
 	}
 	result := map[string]int64{}
 	copyMetric := func(resultName, groupName, metricName string) {
-		if group, ok := groups[groupName]; ok {
-			if value, exists := group[metricName]; exists {
+		if raw, ok := groups[groupName]; ok {
+			var group map[string]int64
+			if json.Unmarshal(raw, &group) == nil {
+				value, exists := group[metricName]
+				if !exists {
+					return
+				}
 				result[resultName] = value
 			}
 		}
@@ -750,4 +955,31 @@ func parseMitaMetrics(output []byte) map[string]int64 {
 	copyMetric("unsolicited_udp", "underlay", "UnsolicitedUDP")
 	copyMetric("failed_decrypt", "cipher - server", "FailedDirectDecrypt")
 	return result
+}
+
+func parseMitaTrafficCounters(output []byte) map[string]mieruTrafficCounters {
+	result := make(map[string]mieruTrafficCounters)
+	var payload struct {
+		Users map[string]map[string]int64 `json:"users"`
+	}
+	if err := json.Unmarshal(extractMitaJSON(output), &payload); err != nil {
+		return result
+	}
+	for username, metrics := range payload.Users {
+		result[username] = mieruTrafficCounters{
+			Upload:   metrics["UploadBytes"],
+			Download: metrics["DownloadBytes"],
+		}
+	}
+	return result
+}
+
+func extractMitaJSON(output []byte) []byte {
+	text := string(output)
+	if start := strings.IndexByte(text, '{'); start >= 0 {
+		if end := strings.LastIndexByte(text, '}'); end >= start {
+			return []byte(text[start : end+1])
+		}
+	}
+	return output
 }

@@ -221,12 +221,12 @@ func (s *HealthService) checkMieru(diagnostics map[string]interface{}) HealthChe
 	summary, details := mieru.healthSummary()
 	diagnostics["mieru"] = summary
 	if summary["total"] == 0 {
-		return HealthCheck{ID: "mieru", Title: "Mieru", Status: "info", Summary: "未配置 Mieru 节点"}
+		return HealthCheck{ID: "mieru", Title: "Mieru", Status: "info", Summary: "未配置 Mieru 入站"}
 	}
 	if summary["running"] != summary["total"] {
-		return HealthCheck{ID: "mieru", Title: "Mieru", Status: "error", Summary: fmt.Sprintf("%d/%d 个节点运行", summary["running"], summary["total"]), Detail: strings.Join(details, "\n"), Action: "endpoints"}
+		return HealthCheck{ID: "mieru", Title: "Mieru", Status: "error", Summary: fmt.Sprintf("%d/%d 个入站运行", summary["running"], summary["total"]), Detail: strings.Join(details, "\n"), Action: "inbounds"}
 	}
-	return HealthCheck{ID: "mieru", Title: "Mieru", Status: "ok", Summary: fmt.Sprintf("%d 个节点运行正常", summary["running"]), Action: "endpoints"}
+	return HealthCheck{ID: "mieru", Title: "Mieru", Status: "ok", Summary: fmt.Sprintf("%d 个入站运行正常", summary["running"]), Action: "inbounds"}
 }
 
 func (s *HealthService) checkDefaultCredentials() HealthCheck {

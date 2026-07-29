@@ -32,21 +32,22 @@ var validMieruTrafficPatterns = map[string]int{
 	"ENHANCED": 2,
 }
 
-type mieruEndpointConfig struct {
+type mieruInboundConfig struct {
+	ID             uint
 	Tag            string
-	Server         string
-	Port           int
+	ListenPort     int
 	PortRange      string
 	Ports          []int
 	Transport      string
-	Username       string
-	Password       string
 	Multiplexing   string
 	HandshakeMode  string
 	TrafficPattern string
-	Quota1DayGB    int
-	Quota30DayGB   int
 	MTU            int
+}
+
+type mieruClientCredential struct {
+	Name     string
+	Password string
 }
 
 type mitaServerConfig struct {
@@ -65,14 +66,8 @@ type mitaPortBinding struct {
 }
 
 type mitaUser struct {
-	Name           string      `json:"name"`
-	HashedPassword string      `json:"hashedPassword"`
-	Quotas         []mitaQuota `json:"quotas,omitempty"`
-}
-
-type mitaQuota struct {
-	Days      int `json:"days"`
-	Megabytes int `json:"megabytes"`
+	Name           string `json:"name"`
+	HashedPassword string `json:"hashedPassword"`
 }
 
 type mitaTrafficPattern struct {
@@ -104,38 +99,25 @@ type mitaDNS struct {
 	DualStack string `json:"dualStack"`
 }
 
-func parseMieruEndpoint(endpoint *model.Endpoint) (*mieruEndpointConfig, error) {
-	if endpoint == nil {
-		return nil, common.NewError("missing mieru endpoint")
+func parseMieruInbound(inbound *model.Inbound) (*mieruInboundConfig, error) {
+	if inbound == nil {
+		return nil, common.NewError("missing mieru inbound")
 	}
-	full, err := endpoint.MarshalJSON()
+	full, err := inbound.MarshalFull()
 	if err != nil {
 		return nil, err
 	}
-	var payload map[string]interface{}
-	if err := json.Unmarshal(full, &payload); err != nil {
-		return nil, err
-	}
 
-	config := &mieruEndpointConfig{
-		Tag:            strings.TrimSpace(endpoint.Tag),
-		Server:         mieruString(payload["server"]),
-		PortRange:      mieruString(payload["port_range"]),
-		Transport:      strings.ToUpper(mieruString(payload["transport"])),
-		Username:       mieruString(payload["username"]),
-		Password:       mieruString(payload["password"]),
-		Multiplexing:   strings.ToUpper(mieruString(payload["multiplexing"])),
-		HandshakeMode:  strings.ToUpper(mieruString(payload["handshake_mode"])),
-		TrafficPattern: strings.ToUpper(mieruString(payload["traffic_pattern"])),
-		Quota1DayGB:    mieruInt(payload["quota_1d_gb"]),
-		Quota30DayGB:   mieruInt(payload["quota_30d_gb"]),
-		MTU:            mieruInt(payload["mtu"]),
-	}
-	if rawPort, ok := payload["port"]; ok && rawPort != nil && strings.TrimSpace(fmt.Sprint(rawPort)) != "" {
-		config.Port, err = normalizeManagedPort(rawPort)
-		if err != nil {
-			return nil, fmt.Errorf("invalid mieru port: %w", err)
-		}
+	config := &mieruInboundConfig{
+		ID:             inbound.Id,
+		Tag:            strings.TrimSpace(inbound.Tag),
+		ListenPort:     mieruInt((*full)["listen_port"]),
+		PortRange:      mieruString((*full)["port_range"]),
+		Transport:      strings.ToUpper(mieruString((*full)["transport"])),
+		Multiplexing:   strings.ToUpper(mieruString((*full)["multiplexing"])),
+		HandshakeMode:  strings.ToUpper(mieruString((*full)["handshake_mode"])),
+		TrafficPattern: strings.ToUpper(mieruString((*full)["traffic_pattern"])),
+		MTU:            mieruInt((*full)["mtu"]),
 	}
 	if config.Transport == "" {
 		config.Transport = "TCP"
@@ -153,14 +135,41 @@ func parseMieruEndpoint(endpoint *model.Endpoint) (*mieruEndpointConfig, error) 
 		config.MTU = 1400
 	}
 
-	config.Ports, err = parseMieruPorts(config.Port, config.PortRange)
+	config.Ports, err = parseMieruInboundPorts(config.ListenPort, config.PortRange)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateMieruEndpointConfig(config); err != nil {
+	if err := validateMieruInboundConfig(config); err != nil {
 		return nil, err
 	}
 	return config, nil
+}
+
+func parseMieruClientCredential(client *model.Client) (mieruClientCredential, error) {
+	if client == nil {
+		return mieruClientCredential{}, common.NewError("missing Mieru client")
+	}
+	var configs map[string]json.RawMessage
+	if err := json.Unmarshal(client.Config, &configs); err != nil {
+		return mieruClientCredential{}, fmt.Errorf("parse client %s config: %w", client.Name, err)
+	}
+	raw, ok := configs["mieru"]
+	if !ok || len(raw) == 0 {
+		return mieruClientCredential{}, fmt.Errorf("client %s has no Mieru credentials", client.Name)
+	}
+	var credential mieruClientCredential
+	if err := json.Unmarshal(raw, &credential); err != nil {
+		return mieruClientCredential{}, fmt.Errorf("parse client %s Mieru credentials: %w", client.Name, err)
+	}
+	credential.Name = strings.TrimSpace(client.Name)
+	credential.Password = strings.TrimSpace(credential.Password)
+	if credential.Name == "" {
+		return mieruClientCredential{}, common.NewError("Mieru username is empty")
+	}
+	if credential.Password == "" {
+		return mieruClientCredential{}, fmt.Errorf("client %s has an empty Mieru password", client.Name)
+	}
+	return credential, nil
 }
 
 func mieruString(value interface{}) string {
@@ -186,21 +195,12 @@ func mieruInt(value interface{}) int {
 	}
 }
 
-func validateMieruEndpointConfig(config *mieruEndpointConfig) error {
+func validateMieruInboundConfig(config *mieruInboundConfig) error {
 	if config == nil {
 		return common.NewError("missing mieru config")
 	}
 	if config.Tag == "" {
 		return common.NewError("mieru tag is required")
-	}
-	if config.Server == "" {
-		return common.NewError("mieru server is required")
-	}
-	if config.Username == "" {
-		return common.NewError("mieru username is required")
-	}
-	if config.Password == "" {
-		return common.NewError("mieru password is required")
 	}
 	if config.Transport != "TCP" && config.Transport != "UDP" {
 		return fmt.Errorf("unsupported mieru transport %q", config.Transport)
@@ -211,46 +211,22 @@ func validateMieruEndpointConfig(config *mieruEndpointConfig) error {
 	if _, ok := validMieruHandshakeModes[config.HandshakeMode]; !ok {
 		return fmt.Errorf("unsupported mieru handshake mode %q", config.HandshakeMode)
 	}
-	if config.TrafficPattern == "" {
-		config.TrafficPattern = "DEFAULT"
-	}
 	if _, ok := validMieruTrafficPatterns[config.TrafficPattern]; !ok {
 		return fmt.Errorf("unsupported mieru traffic pattern %q", config.TrafficPattern)
-	}
-	if config.Quota1DayGB < 0 || config.Quota30DayGB < 0 {
-		return common.NewError("mieru traffic quotas cannot be negative")
-	}
-	if config.Quota1DayGB > 0 && config.Quota30DayGB > 0 && config.Quota30DayGB < config.Quota1DayGB {
-		return common.NewError("mieru 30-day quota cannot be lower than 1-day quota")
-	}
-	const maxQuotaGB = int(^uint32(0)>>1) / 1024
-	if config.Quota1DayGB > maxQuotaGB || config.Quota30DayGB > maxQuotaGB {
-		return fmt.Errorf("mieru traffic quota is too large: maximum %d GB", maxQuotaGB)
 	}
 	if config.MTU < 1280 || config.MTU > 1500 {
 		return fmt.Errorf("invalid mieru MTU %d: expected 1280-1500", config.MTU)
 	}
-	for _, port := range config.Ports {
-		if port < 1025 || port > 65535 {
-			return fmt.Errorf("invalid mieru port %d: expected 1025-65535", port)
-		}
-	}
 	return nil
 }
 
-func parseMieruPorts(port int, portRange string) ([]int, error) {
+func parseMieruInboundPorts(listenPort int, portRange string) ([]int, error) {
+	if listenPort < 1025 || listenPort > 65535 {
+		return nil, fmt.Errorf("invalid mieru listen port %d: expected 1025-65535", listenPort)
+	}
 	portRange = strings.TrimSpace(portRange)
-	if port > 0 && portRange != "" {
-		return nil, common.NewError("mieru port and port range cannot be used together")
-	}
-	if port > 0 {
-		if port < 1025 || port > 65535 {
-			return nil, fmt.Errorf("invalid mieru port %d: expected 1025-65535", port)
-		}
-		return []int{port}, nil
-	}
 	if portRange == "" {
-		return nil, common.NewError("mieru port or port range is required")
+		return []int{listenPort}, nil
 	}
 	parts := strings.Split(portRange, "-")
 	if len(parts) != 2 {
@@ -267,6 +243,9 @@ func parseMieruPorts(port int, portRange string) ([]int, error) {
 	if start < 1025 || end > 65535 || start > end {
 		return nil, fmt.Errorf("invalid mieru port range %q", portRange)
 	}
+	if listenPort != start {
+		return nil, fmt.Errorf("mieru listen port must match the first port in range %q", portRange)
+	}
 	if end-start+1 > maxMieruPortRangeSize {
 		return nil, fmt.Errorf("mieru port range is too large: maximum %d ports", maxMieruPortRangeSize)
 	}
@@ -277,50 +256,42 @@ func parseMieruPorts(port int, portRange string) ([]int, error) {
 	return ports, nil
 }
 
-func buildMitaServerConfig(configs []*mieruEndpointConfig) (*mitaServerConfig, error) {
+func buildMitaServerConfig(config *mieruInboundConfig, credentials []mieruClientCredential) (*mitaServerConfig, error) {
+	if err := validateMieruInboundConfig(config); err != nil {
+		return nil, err
+	}
 	result := &mitaServerConfig{
-		PortBindings: make([]mitaPortBinding, 0, len(configs)),
-		Users:        make([]mitaUser, 0, len(configs)),
+		PortBindings: make([]mitaPortBinding, 0, 1),
+		Users:        make([]mitaUser, 0, len(credentials)),
 		LoggingLevel: "INFO",
-		MTU:          1400,
+		MTU:          config.MTU,
 		DNS:          mitaDNS{DualStack: "PREFER_IPv4"},
 	}
-	seenUsers := make(map[string]string)
-	trafficPatternLevel := 0
-	for _, config := range configs {
-		if err := validateMieruEndpointConfig(config); err != nil {
-			return nil, err
-		}
-		if owner, exists := seenUsers[config.Username]; exists {
-			return nil, fmt.Errorf("mieru username %q is already used by %s", config.Username, owner)
-		}
-		seenUsers[config.Username] = config.Tag
-		binding := mitaPortBinding{Protocol: config.Transport}
-		if config.PortRange != "" {
-			binding.PortRange = config.PortRange
-		} else {
-			binding.Port = config.Port
-		}
-		result.PortBindings = append(result.PortBindings, binding)
-		user := mitaUser{
-			Name:           config.Username,
-			HashedPassword: hashMieruPassword(config.Username, config.Password),
-		}
-		if config.Quota1DayGB > 0 {
-			user.Quotas = append(user.Quotas, mitaQuota{Days: 1, Megabytes: config.Quota1DayGB * 1024})
-		}
-		if config.Quota30DayGB > 0 {
-			user.Quotas = append(user.Quotas, mitaQuota{Days: 30, Megabytes: config.Quota30DayGB * 1024})
-		}
-		result.Users = append(result.Users, user)
-		if level := validMieruTrafficPatterns[config.TrafficPattern]; level > trafficPatternLevel {
-			trafficPatternLevel = level
-		}
-		if config.MTU < result.MTU {
-			result.MTU = config.MTU
-		}
+	binding := mitaPortBinding{Protocol: config.Transport}
+	if config.PortRange != "" {
+		binding.PortRange = config.PortRange
+	} else {
+		binding.Port = config.ListenPort
 	}
-	result.TrafficPattern = buildMitaTrafficPattern(trafficPatternLevel)
+	result.PortBindings = append(result.PortBindings, binding)
+
+	seenUsers := make(map[string]struct{}, len(credentials))
+	for _, credential := range credentials {
+		credential.Name = strings.TrimSpace(credential.Name)
+		credential.Password = strings.TrimSpace(credential.Password)
+		if credential.Name == "" || credential.Password == "" {
+			return nil, common.NewError("Mieru username and password are required")
+		}
+		if _, exists := seenUsers[credential.Name]; exists {
+			return nil, fmt.Errorf("duplicate Mieru username %q", credential.Name)
+		}
+		seenUsers[credential.Name] = struct{}{}
+		result.Users = append(result.Users, mitaUser{
+			Name:           credential.Name,
+			HashedPassword: hashMieruPassword(credential.Name, credential.Password),
+		})
+	}
+	result.TrafficPattern = buildMitaTrafficPattern(validMieruTrafficPatterns[config.TrafficPattern])
 	return result, nil
 }
 

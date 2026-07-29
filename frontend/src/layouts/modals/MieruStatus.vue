@@ -30,9 +30,9 @@
         <template v-else>
           <section class="mieru-status-hero">
             <div>
-              <span>节点</span>
+              <span>入站</span>
               <h3>{{ status.tag || '-' }}</h3>
-              <p>{{ status.server || '-' }} · {{ endpointPort }} · {{ status.transport || 'TCP' }}</p>
+              <p>{{ endpointPort }} · {{ status.transport || 'TCP' }}</p>
             </div>
             <div class="mieru-status-hero__state">
               <span class="mieru-status-hero__dot" :class="{ 'mieru-status-hero__dot--online': status.running }" />
@@ -45,7 +45,7 @@
 
           <section class="mieru-status-metrics">
             <article><span>运行时间</span><strong>{{ formatDuration(status.uptime_seconds) }}</strong></article>
-            <article><span>节点数量</span><strong>{{ status.endpoint_count ?? 0 }}</strong></article>
+            <article><span>绑定用户</span><strong>{{ status.user_count ?? 0 }}</strong></article>
             <article><span>多路复用</span><strong>{{ compactMode(status.multiplexing) }}</strong></article>
             <article><span>握手模式</span><strong>{{ status.handshake_mode === 'HANDSHAKE_NO_WAIT' ? '0-RTT' : '标准' }}</strong></article>
           </section>
@@ -71,28 +71,29 @@
               <v-chip color="primary" variant="tonal" size="small">{{ shortVersion }}</v-chip>
             </div>
             <div class="mieru-status-details">
-              <div><span>用户名</span><strong>{{ status.username || '-' }}</strong></div>
-              <div><span>UDP MTU</span><strong>{{ status.mtu || '-' }}</strong></div>
-              <div><span>节点模式</span><strong>{{ trafficPatternLabel }}</strong></div>
+              <div><span>监听端口</span><strong>{{ endpointPort }}</strong></div>
+              <div><span>传输协议</span><strong>{{ status.transport || 'TCP' }}</strong></div>
+              <div><span>MTU</span><strong>{{ status.mtu || '-' }}</strong></div>
+              <div><span>入站模式</span><strong>{{ trafficPatternLabel }}</strong></div>
               <div><span>服务端模式</span><strong>{{ trafficPatternName(status.server_traffic_pattern) }}</strong></div>
-              <div><span>1 天配额</span><strong>{{ quotaLabel(status.quota_1d_gb) }}</strong></div>
-              <div><span>30 天配额</span><strong>{{ quotaLabel(status.quota_30d_gb) }}</strong></div>
+              <div><span>用户数量</span><strong>{{ status.user_count ?? 0 }}</strong></div>
               <div class="mieru-status-details__wide"><span>程序路径</span><strong>{{ status.binary || '-' }}</strong></div>
             </div>
           </section>
 
           <section class="mieru-status-section">
             <div class="mieru-status-section__heading">
-              <div><span>ENDPOINT USER</span><h4>当前节点流量</h4></div>
-              <v-chip color="primary" variant="tonal" size="small">{{ status.username || '-' }}</v-chip>
+              <div><span>BOUND USERS</span><h4>用户流量</h4></div>
+              <v-chip color="primary" variant="tonal" size="small">{{ status.user_count ?? 0 }} 位</v-chip>
             </div>
-            <div class="mieru-status-traffic">
-              <div><span>最后活跃</span><strong>{{ userStat('last_active') }}</strong></div>
-              <div><span>1 天下载</span><strong>{{ userStat('day_download') }}</strong></div>
-              <div><span>1 天上传</span><strong>{{ userStat('day_upload') }}</strong></div>
-              <div><span>7 天下载 / 上传</span><strong>{{ userStat('week_download') }} / {{ userStat('week_upload') }}</strong></div>
-              <div><span>30 天下载</span><strong>{{ userStat('month_download') }}</strong></div>
-              <div><span>30 天上传</span><strong>{{ userStat('month_upload') }}</strong></div>
+            <div v-if="usernames.length" class="mieru-status-output">
+              <div v-for="username in usernames" :key="username">
+                <span>{{ username }}</span>
+                <pre>{{ userSummary(username) }}</pre>
+              </div>
+            </div>
+            <div v-else class="mieru-status-output mieru-status-output--single">
+              <div><pre>当前未绑定用户</pre></div>
             </div>
           </section>
 
@@ -150,6 +151,9 @@ export default {
     trafficPatternLabel() {
       return this.trafficPatternName(this.status.traffic_pattern)
     },
+    usernames() {
+      return Array.isArray(this.status.usernames) ? this.status.usernames : []
+    },
   },
   methods: {
     trafficPatternName(value?: string) {
@@ -165,7 +169,7 @@ export default {
       if (this.loading) return
       const tag = String(this.$props.data?.tag ?? '').trim()
       if (!tag) {
-        this.alert = '缺少 Mieru 节点标识'
+        this.alert = '缺少 Mieru 入站标识'
         return
       }
       this.loading = true
@@ -203,12 +207,12 @@ export default {
       const value = this.status.metrics?.[name]
       return Number.isFinite(Number(value)) ? Number(value).toLocaleString() : '-'
     },
-    userStat(name: string) {
-      return String(this.status.user_stats?.[name] ?? '').trim() || '-'
-    },
-    quotaLabel(value?: number) {
-      const quota = Number(value ?? 0)
-      return quota > 0 ? `${quota.toLocaleString()} GB` : '不限量'
+    userSummary(username: string) {
+      const stats = this.status.user_stats?.[username] ?? {}
+      const active = String(stats.last_active ?? '-')
+      const day = `${stats.day_download ?? '-'} ↓ / ${stats.day_upload ?? '-'} ↑`
+      const month = `${stats.month_download ?? '-'} ↓ / ${stats.month_upload ?? '-'} ↑`
+      return `最后活跃 ${active}\n1 天 ${day}\n30 天 ${month}`
     },
   },
   watch: {

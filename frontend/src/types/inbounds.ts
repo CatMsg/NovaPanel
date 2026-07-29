@@ -18,6 +18,7 @@ export const InTypes = {
   Hysteria2: 'hysteria2',
   VLESS: 'vless',
   AnyTls: 'anytls',
+  Mieru: 'mieru',
   Tun: 'tun',
   Redirect: 'redirect',
   TProxy: 'tproxy',
@@ -148,6 +149,14 @@ export interface Hysteria2 extends InboundBasics {
   }
   brutal_debug?: boolean
 }
+export interface Mieru extends InboundBasics {
+  port_range?: string
+  transport: 'TCP' | 'UDP'
+  multiplexing: 'MULTIPLEXING_OFF' | 'MULTIPLEXING_LOW' | 'MULTIPLEXING_MIDDLE' | 'MULTIPLEXING_HIGH'
+  handshake_mode: 'HANDSHAKE_STANDARD' | 'HANDSHAKE_NO_WAIT'
+  traffic_pattern: 'DEFAULT' | 'BALANCED' | 'ENHANCED'
+  mtu: number
+}
 export interface Tun extends InboundBasics {
   interface_name?: string
   address?: string[]
@@ -195,6 +204,7 @@ type InterfaceMap = {
   hysteria2: Hysteria2
   vless: VLESS
   anytls: AnyTls
+  mieru: Mieru
   tun: Tun
   redirect: Redirect
   tproxy: TProxy
@@ -229,6 +239,15 @@ const defaultValues: Record<InType, Inbound> = {
     "6=500-1000",
     "7=500-1000"
   ]},
+  mieru: <Mieru>{
+    type: InTypes.Mieru,
+    port_range: '',
+    transport: 'TCP',
+    multiplexing: 'MULTIPLEXING_LOW',
+    handshake_mode: 'HANDSHAKE_STANDARD',
+    traffic_pattern: 'DEFAULT',
+    mtu: 1400,
+  },
   tun: <Tun>{ type: InTypes.Tun, mtu: 9000, stack: 'system', udp_timeout: '5m', auto_route: false },
   redirect: <Redirect>{ type: InTypes.Redirect },
   tproxy: <TProxy>{ type: InTypes.TProxy },

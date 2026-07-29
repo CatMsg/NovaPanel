@@ -11,21 +11,19 @@ import (
 	"github.com/CatMsg/NovaPanel/database/model"
 )
 
-func TestParseMieruEndpointDefaults(t *testing.T) {
-	endpoint := &model.Endpoint{
+func TestParseMieruInboundDefaults(t *testing.T) {
+	inbound := &model.Inbound{
 		Type: "mieru",
 		Tag:  "mieru-main",
 		Options: json.RawMessage(`{
-			"server":"proxy.example.com",
-			"port":23456,
-			"username":"alice",
-			"password":"secret"
+			"listen":"::",
+			"listen_port":23456
 		}`),
 	}
 
-	config, err := parseMieruEndpoint(endpoint)
+	config, err := parseMieruInbound(inbound)
 	if err != nil {
-		t.Fatalf("parse mieru endpoint: %v", err)
+		t.Fatalf("parse Mieru inbound: %v", err)
 	}
 	if config.Transport != "TCP" {
 		t.Fatalf("unexpected transport: %s", config.Transport)
@@ -44,33 +42,29 @@ func TestParseMieruEndpointDefaults(t *testing.T) {
 	}
 }
 
-func TestParseMieruEndpointPortRange(t *testing.T) {
-	endpoint := &model.Endpoint{
+func TestParseMieruInboundPortRange(t *testing.T) {
+	inbound := &model.Inbound{
 		Type: "mieru",
 		Tag:  "mieru-range",
 		Options: json.RawMessage(`{
-			"server":"proxy.example.com",
+			"listen_port":23000,
 			"port_range":"23000-23002",
 			"transport":"udp",
-			"username":"bob",
-			"password":"secret",
-				"multiplexing":"multiplexing_middle",
-				"handshake_mode":"handshake_no_wait",
-				"traffic_pattern":"balanced",
-				"quota_1d_gb":2,
-				"quota_30d_gb":20,
-				"mtu":1380
+			"multiplexing":"multiplexing_middle",
+			"handshake_mode":"handshake_no_wait",
+			"traffic_pattern":"balanced",
+			"mtu":1380
 		}`),
 	}
 
-	config, err := parseMieruEndpoint(endpoint)
+	config, err := parseMieruInbound(inbound)
 	if err != nil {
-		t.Fatalf("parse mieru range endpoint: %v", err)
+		t.Fatalf("parse Mieru range inbound: %v", err)
 	}
 	if config.Transport != "UDP" || config.HandshakeMode != "HANDSHAKE_NO_WAIT" {
 		t.Fatalf("unexpected normalized config: %#v", config)
 	}
-	if config.TrafficPattern != "BALANCED" || config.Quota1DayGB != 2 || config.Quota30DayGB != 20 {
+	if config.TrafficPattern != "BALANCED" {
 		t.Fatalf("unexpected traffic policy: %#v", config)
 	}
 	if !reflect.DeepEqual(config.Ports, []int{23000, 23001, 23002}) {
@@ -78,61 +72,97 @@ func TestParseMieruEndpointPortRange(t *testing.T) {
 	}
 }
 
-func TestParseMieruPortsRejectsInvalidRanges(t *testing.T) {
+func TestParseMieruInboundPortsRejectsInvalidRanges(t *testing.T) {
 	tests := []struct {
 		port      int
 		portRange string
 	}{
 		{port: 443, portRange: "500-510"},
 		{port: 1024},
-		{portRange: "1024-1030"},
-		{portRange: "510-500"},
-		{portRange: "1000-1512"},
-		{portRange: "invalid"},
+		{port: 1025, portRange: "1024-1030"},
+		{port: 510, portRange: "510-500"},
+		{port: 1000, portRange: "1000-1512"},
+		{port: 20000, portRange: "invalid"},
 	}
 	for _, test := range tests {
-		if _, err := parseMieruPorts(test.port, test.portRange); err == nil {
+		if _, err := parseMieruInboundPorts(test.port, test.portRange); err == nil {
 			t.Fatalf("expected invalid port selection to fail: port=%d range=%q", test.port, test.portRange)
 		}
 	}
 }
 
-func TestBuildMitaServerConfigMergesEndpoints(t *testing.T) {
-	config, err := buildMitaServerConfig([]*mieruEndpointConfig{
-		{
-			Tag: "one", Server: "one.example.com", Port: 20001, Ports: []int{20001},
-			Transport: "TCP", Username: "alice", Password: "secret-one",
-			Multiplexing: "MULTIPLEXING_LOW", HandshakeMode: "HANDSHAKE_STANDARD", MTU: 1400,
+func TestParseMieruClientCredentialUsesClientName(t *testing.T) {
+	client := &model.Client{
+		Name:   "alice",
+		Config: json.RawMessage(`{"mieru":{"name":"stale-name","password":"secret"}}`),
+	}
+	credential, err := parseMieruClientCredential(client)
+	if err != nil {
+		t.Fatalf("parse Mieru client credential: %v", err)
+	}
+	if credential.Name != "alice" || credential.Password != "secret" {
+		t.Fatalf("unexpected credential: %#v", credential)
+	}
+}
+
+func TestNormalizeMieruClientConfigPreservesPasswordAndRenamesUser(t *testing.T) {
+	client := &model.Client{
+		Name:   "renamed",
+		Config: json.RawMessage(`{"mieru":{"name":"old","password":"keep-me"},"tuic":{"name":"old","password":"other"}}`),
+	}
+	if err := normalizeMieruClientConfig(client); err != nil {
+		t.Fatalf("normalize Mieru client config: %v", err)
+	}
+	credential, err := parseMieruClientCredential(client)
+	if err != nil {
+		t.Fatalf("parse normalized credential: %v", err)
+	}
+	if credential.Name != "renamed" || credential.Password != "keep-me" {
+		t.Fatalf("unexpected normalized credential: %#v", credential)
+	}
+	var configs map[string]map[string]interface{}
+	if err := json.Unmarshal(client.Config, &configs); err != nil {
+		t.Fatalf("parse normalized client config: %v", err)
+	}
+	if configs["tuic"]["password"] != "other" {
+		t.Fatalf("normalization modified unrelated protocol config: %#v", configs)
+	}
+}
+
+func TestBuildMitaServerConfigUsesOneInboundAndManyUsers(t *testing.T) {
+	config, err := buildMitaServerConfig(
+		&mieruInboundConfig{
+			Tag:            "mieru-main",
+			ListenPort:     20100,
+			PortRange:      "20100-20102",
+			Ports:          []int{20100, 20101, 20102},
+			Transport:      "UDP",
+			Multiplexing:   "MULTIPLEXING_LOW",
+			HandshakeMode:  "HANDSHAKE_STANDARD",
+			TrafficPattern: "ENHANCED",
+			MTU:            1380,
 		},
-		{
-			Tag: "two", Server: "two.example.com", PortRange: "20100-20102", Ports: []int{20100, 20101, 20102},
-			Transport: "UDP", Username: "bob", Password: "secret-two",
-			Multiplexing: "MULTIPLEXING_LOW", HandshakeMode: "HANDSHAKE_STANDARD",
-			TrafficPattern: "ENHANCED", Quota1DayGB: 1, Quota30DayGB: 10, MTU: 1380,
+		[]mieruClientCredential{
+			{Name: "alice", Password: "secret-one"},
+			{Name: "bob", Password: "secret-two"},
 		},
-	})
+	)
 	if err != nil {
 		t.Fatalf("build mita config: %v", err)
 	}
-	if len(config.PortBindings) != 2 || len(config.Users) != 2 {
-		t.Fatalf("unexpected merged config: %#v", config)
+	if len(config.PortBindings) != 1 || len(config.Users) != 2 {
+		t.Fatalf("unexpected shared config: %#v", config)
 	}
-	if config.PortBindings[1].PortRange != "20100-20102" {
-		t.Fatalf("unexpected range binding: %#v", config.PortBindings[1])
+	if config.PortBindings[0].PortRange != "20100-20102" {
+		t.Fatalf("unexpected range binding: %#v", config.PortBindings[0])
 	}
-	if config.MTU != 1380 {
-		t.Fatalf("expected minimum configured MTU, got %d", config.MTU)
-	}
-	if config.DNS.DualStack != "PREFER_IPv4" {
-		t.Fatalf("unexpected DNS mode: %s", config.DNS.DualStack)
+	if config.MTU != 1380 || config.DNS.DualStack != "PREFER_IPv4" {
+		t.Fatalf("unexpected runtime defaults: %#v", config)
 	}
 	if config.Users[0].HashedPassword != hashMieruPassword("alice", "secret-one") {
 		t.Fatalf("unexpected hashed password: %s", config.Users[0].HashedPassword)
 	}
-	if len(config.Users[1].Quotas) != 2 || config.Users[1].Quotas[0].Megabytes != 1024 || config.Users[1].Quotas[1].Megabytes != 10240 {
-		t.Fatalf("unexpected Mieru quotas: %#v", config.Users[1].Quotas)
-	}
-	if config.TrafficPattern == nil || config.TrafficPattern.UnlockAll != true {
+	if config.TrafficPattern == nil || !config.TrafficPattern.UnlockAll {
 		t.Fatalf("expected enhanced server traffic pattern: %#v", config.TrafficPattern)
 	}
 	payload, err := marshalMitaServerConfig(config)
@@ -142,17 +172,22 @@ func TestBuildMitaServerConfigMergesEndpoints(t *testing.T) {
 	if bytes.Contains(payload, []byte("secret-one")) || bytes.Contains(payload, []byte(`"password"`)) {
 		t.Fatalf("runtime config leaked plaintext password: %s", payload)
 	}
+	if bytes.Contains(payload, []byte(`"quota"`)) {
+		t.Fatalf("runtime config must use NovaPanel client quotas instead of native Mieru quotas: %s", payload)
+	}
 }
 
 func TestBuildMitaServerConfigRejectsDuplicateUser(t *testing.T) {
-	base := func(tag string) *mieruEndpointConfig {
-		return &mieruEndpointConfig{
-			Tag: tag, Server: "proxy.example.com", Port: 20000, Ports: []int{20000},
-			Transport: "TCP", Username: "duplicate", Password: "secret",
-			Multiplexing: "MULTIPLEXING_LOW", HandshakeMode: "HANDSHAKE_STANDARD", MTU: 1400,
-		}
+	config := &mieruInboundConfig{
+		Tag: "mieru-main", ListenPort: 20000, Ports: []int{20000},
+		Transport: "TCP", Multiplexing: "MULTIPLEXING_LOW",
+		HandshakeMode: "HANDSHAKE_STANDARD", TrafficPattern: "DEFAULT", MTU: 1400,
 	}
-	if _, err := buildMitaServerConfig([]*mieruEndpointConfig{base("one"), base("two")}); err == nil {
+	credentials := []mieruClientCredential{
+		{Name: "duplicate", Password: "one"},
+		{Name: "duplicate", Password: "two"},
+	}
+	if _, err := buildMitaServerConfig(config, credentials); err == nil {
 		t.Fatal("expected duplicate Mieru username to be rejected")
 	}
 }
@@ -176,23 +211,24 @@ func TestMieruTrafficPatternBase64(t *testing.T) {
 	}
 }
 
-func TestParseMitaUserStatsSelectsEndpointUser(t *testing.T) {
+func TestParseMitaAllUserStats(t *testing.T) {
 	output := `User   LastActive                  1DayDown  1DayUp  7DaysDown  7DaysUp  30DaysDown  30DaysUp
 alice  2026-07-29T10:20:30+08:00  10 MiB    2 MiB   40 MiB     8 MiB    90 MiB      20 MiB
 bob    -                           1 KiB     2 KiB   3 KiB      4 KiB    5 KiB       6 KiB`
 
-	stats := parseMitaUserStats(output, "bob")
-	if stats["last_active"] != "-" || stats["day_download"] != "1 KiB" || stats["month_upload"] != "6 KiB" {
+	stats := parseMitaAllUserStats(output)
+	if stats["bob"]["last_active"] != "-" || stats["bob"]["day_download"] != "1 KiB" || stats["bob"]["month_upload"] != "6 KiB" {
 		t.Fatalf("unexpected user stats: %#v", stats)
 	}
 }
 
-func TestParseMitaMetricsExtractsRuntimeSignals(t *testing.T) {
+func TestParseMitaMetricsAndTrafficCounters(t *testing.T) {
 	output := []byte(`INFO metrics:
 	{
 		"connections":{"CurrEstablished":3,"MaxConn":9},
 		"underlay":{"CurrEstablished":2,"UnsolicitedUDP":4},
-		"cipher - server":{"FailedDirectDecrypt":7}
+		"cipher - server":{"FailedDirectDecrypt":7},
+		"users":{"alice":{"DownloadBytes":1000,"UploadBytes":250}}
 	}
 	`)
 
@@ -206,5 +242,9 @@ func TestParseMitaMetricsExtractsRuntimeSignals(t *testing.T) {
 	}
 	if !reflect.DeepEqual(metrics, want) {
 		t.Fatalf("unexpected metrics: got %#v want %#v", metrics, want)
+	}
+	counters := parseMitaTrafficCounters(output)
+	if counters["alice"].Download != 1000 || counters["alice"].Upload != 250 {
+		t.Fatalf("unexpected traffic counters: %#v", counters)
 	}
 }
