@@ -2,6 +2,7 @@ package sub
 
 import (
 	"encoding/json"
+	"net/url"
 	"strings"
 
 	"github.com/CatMsg/NovaPanel/logger"
@@ -68,6 +69,21 @@ func (s *LinkService) addClientInfo(uri string, clientInfo string) string {
 			return uri
 		}
 		return "vmess://" + util.ByteToB64Str(result)
+	case "mierus":
+		parsed, err := url.Parse(uri)
+		if err != nil {
+			logger.Warning("sub: Error parsing Mieru link:", err)
+			return uri
+		}
+		query := parsed.Query()
+		profile := query.Get("profile")
+		if profile != "" {
+			query.Set("profile", profile+clientInfo)
+			parsed.RawQuery = query.Encode()
+		} else {
+			parsed.Fragment += clientInfo
+		}
+		return parsed.String()
 	default:
 		return uri + clientInfo
 	}
