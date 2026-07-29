@@ -42,11 +42,11 @@ func (s *LinkService) GetLinks(linkJson *json.RawMessage, types string, clientIn
 }
 
 func (s *LinkService) addClientInfo(uri string, clientInfo string) string {
-	if len(clientInfo) == 0 {
-		return uri
-	}
 	protocol := strings.Split(uri, "://")
 	if len(protocol) < 2 {
+		return uri
+	}
+	if len(clientInfo) == 0 && protocol[0] != "mierus" {
 		return uri
 	}
 	switch protocol[0] {
@@ -79,7 +79,7 @@ func (s *LinkService) addClientInfo(uri string, clientInfo string) string {
 		profile := query.Get("profile")
 		if profile != "" {
 			query.Set("profile", profile+clientInfo)
-			parsed.RawQuery = query.Encode()
+			parsed.RawQuery = util.EncodeMieruQuery(query)
 		} else {
 			parsed.Fragment += clientInfo
 		}

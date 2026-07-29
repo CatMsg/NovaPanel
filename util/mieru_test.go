@@ -3,6 +3,7 @@ package util
 import (
 	"encoding/json"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/CatMsg/NovaPanel/database/model"
@@ -11,7 +12,7 @@ import (
 func TestMieruLinkGeneratorUsesClientCredentialAndInboundSettings(t *testing.T) {
 	inbound := &model.Inbound{
 		Type:  "mieru",
-		Tag:   "mieru-main",
+		Tag:   "mieru main",
 		Addrs: json.RawMessage(`[]`),
 		Options: json.RawMessage(`{
 			"listen":"::",
@@ -42,8 +43,11 @@ func TestMieruLinkGeneratorUsesClientCredentialAndInboundSettings(t *testing.T) 
 		t.Fatalf("unexpected generated password: %q", password)
 	}
 	query := parsed.Query()
-	if query.Get("profile") != "mieru-main" || query.Get("port") != "22000-22010" || query.Get("protocol") != "TCP" {
+	if query.Get("profile") != "mieru main" || query.Get("port") != "22000-22010" || query.Get("protocol") != "TCP" {
 		t.Fatalf("unexpected generated query: %#v", query)
+	}
+	if strings.Contains(parsed.RawQuery, "+") || !strings.Contains(parsed.RawQuery, "profile=mieru%20main") {
+		t.Fatalf("Mieru profile space must use percent encoding: %q", parsed.RawQuery)
 	}
 	if query.Get("multiplexing") != "MULTIPLEXING_MIDDLE" ||
 		query.Get("handshake-mode") != "HANDSHAKE_NO_WAIT" ||

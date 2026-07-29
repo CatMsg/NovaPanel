@@ -166,11 +166,17 @@ func mieruLink(
 			Scheme:   "mierus",
 			User:     url.UserPassword(username, password),
 			Host:     server,
-			RawQuery: query.Encode(),
+			RawQuery: EncodeMieruQuery(query),
 		}
 		links = append(links, link.String())
 	}
 	return links
+}
+
+// EncodeMieruQuery uses percent-encoded spaces for clients that don't decode
+// application/x-www-form-urlencoded '+' characters in Mieru profile names.
+func EncodeMieruQuery(query url.Values) string {
+	return strings.ReplaceAll(query.Encode(), "+", "%20")
 }
 
 func numberAsFloat64(value interface{}) float64 {
