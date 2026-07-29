@@ -130,3 +130,36 @@ func TestBuildMitaServerConfigRejectsDuplicateUser(t *testing.T) {
 		t.Fatal("expected duplicate Mieru username to be rejected")
 	}
 }
+
+func TestParseMitaUserStatsSelectsEndpointUser(t *testing.T) {
+	output := `User   LastActive                  1DayDown  1DayUp  7DaysDown  7DaysUp  30DaysDown  30DaysUp
+alice  2026-07-29T10:20:30+08:00  10 MiB    2 MiB   40 MiB     8 MiB    90 MiB      20 MiB
+bob    -                           1 KiB     2 KiB   3 KiB      4 KiB    5 KiB       6 KiB`
+
+	stats := parseMitaUserStats(output, "bob")
+	if stats["last_active"] != "-" || stats["day_download"] != "1 KiB" || stats["month_upload"] != "6 KiB" {
+		t.Fatalf("unexpected user stats: %#v", stats)
+	}
+}
+
+func TestParseMitaMetricsExtractsRuntimeSignals(t *testing.T) {
+	output := []byte(`INFO metrics:
+	{
+		"connections":{"CurrEstablished":3,"MaxConn":9},
+		"underlay":{"CurrEstablished":2,"UnsolicitedUDP":4},
+		"cipher - server":{"FailedDirectDecrypt":7}
+	}
+	`)
+
+	metrics := parseMitaMetrics(output)
+	want := map[string]int64{
+		"active_connections":   3,
+		"max_connections":      9,
+		"underlay_connections": 2,
+		"unsolicited_udp":      4,
+		"failed_decrypt":       7,
+	}
+	if !reflect.DeepEqual(metrics, want) {
+		t.Fatalf("unexpected metrics: got %#v want %#v", metrics, want)
+	}
+}

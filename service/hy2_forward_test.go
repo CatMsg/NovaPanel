@@ -260,7 +260,10 @@ func TestRunHy2ForwardScriptUFW(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read ufw log: %v", err)
 	}
-	if !bytes.Contains(ufwLog, []byte("ufw allow 443 comment NovaPanel ")) || !bytes.Contains(ufwLog, []byte("ufw allow 8443 comment NovaPanel ")) {
+	if !bytes.Contains(ufwLog, []byte("ufw allow 443/tcp comment NovaPanel ")) ||
+		!bytes.Contains(ufwLog, []byte("ufw allow 443/udp comment NovaPanel ")) ||
+		!bytes.Contains(ufwLog, []byte("ufw allow 8443/tcp comment NovaPanel ")) ||
+		!bytes.Contains(ufwLog, []byte("ufw allow 8443/udp comment NovaPanel ")) {
 		t.Fatalf("ufw apply did not add allow rules:\n%s", string(ufwLog))
 	}
 
@@ -281,7 +284,7 @@ func TestRunHy2ForwardScriptUFW(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read ufw log after remove: %v", err)
 	}
-	if !bytes.Contains(ufwLog, []byte("ufw --force delete allow 443")) || !bytes.Contains(ufwLog, []byte("ufw --force delete allow 8443")) {
+	if !bytes.Contains(ufwLog, []byte("ufw --force delete ")) {
 		t.Fatalf("ufw remove did not delete allow rules:\n%s", string(ufwLog))
 	}
 }
@@ -548,11 +551,29 @@ func mockUfwScript(t *testing.T) string {
 set -euo pipefail
 
 log_file="${HY2_MOCK_LOG:?}"
+state_file="${log_file}.state"
 printf '%s %s\n' "$(basename "$0")" "$*" >> "$log_file"
 
 case "${1:-}" in
   status)
     printf 'Status: active\n'
+    if [[ "${2:-}" == "numbered" && -f "$state_file" ]]; then
+      number=0
+      while IFS='|' read -r target marker; do
+        [[ -n "$target" ]] || continue
+        number=$((number + 1))
+        printf '[ %d] %s ALLOW IN Anywhere # %s\n' "$number" "$target" "$marker"
+      done < "$state_file"
+    fi
+    ;;
+  allow)
+    printf '%s|%s\n' "${2:-}" "${4:-}" >> "$state_file"
+    ;;
+  --force)
+    if [[ "${2:-}" == "delete" && "${3:-}" =~ ^[0-9]+$ && -f "$state_file" ]]; then
+      awk -v number="${3}" 'NR != number' "$state_file" > "${state_file}.tmp"
+      mv "${state_file}.tmp" "$state_file"
+    fi
     ;;
   reload)
     :

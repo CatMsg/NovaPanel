@@ -26,7 +26,7 @@
             <div class="mieru-status-hero__state">
               <span class="mieru-status-hero__dot" :class="{ 'mieru-status-hero__dot--online': status.running }" />
               <div>
-                <strong>{{ status.running ? 'mita 正在提供服务' : 'mita 未启动' }}</strong>
+                <strong>{{ status.running ? '共享 mita 服务运行中' : 'mita 未启动' }}</strong>
                 <small>{{ status.status || status.platform_note || '等待状态信息' }}</small>
               </div>
             </div>
@@ -37,6 +37,13 @@
             <article><span>节点数量</span><strong>{{ status.endpoint_count ?? 0 }}</strong></article>
             <article><span>多路复用</span><strong>{{ compactMode(status.multiplexing) }}</strong></article>
             <article><span>握手模式</span><strong>{{ status.handshake_mode === 'HANDSHAKE_NO_WAIT' ? '0-RTT' : '标准' }}</strong></article>
+          </section>
+
+          <section class="mieru-status-metrics mieru-status-metrics--runtime">
+            <article><span>当前连接</span><strong>{{ runtimeMetric('active_connections') }}</strong></article>
+            <article><span>底层连接</span><strong>{{ runtimeMetric('underlay_connections') }}</strong></article>
+            <article><span>解密失败</span><strong>{{ runtimeMetric('failed_decrypt') }}</strong></article>
+            <article><span>异常 UDP</span><strong>{{ runtimeMetric('unsolicited_udp') }}</strong></article>
           </section>
 
           <v-alert
@@ -61,11 +68,25 @@
 
           <section class="mieru-status-section">
             <div class="mieru-status-section__heading">
-              <div><span>SESSIONS</span><h4>连接与用户</h4></div>
+              <div><span>ENDPOINT USER</span><h4>当前节点流量</h4></div>
+              <v-chip color="primary" variant="tonal" size="small">{{ status.username || '-' }}</v-chip>
             </div>
-            <div class="mieru-status-output">
-              <div><span>活动连接</span><pre>{{ status.connections || '当前没有活动连接' }}</pre></div>
-              <div><span>用户流量</span><pre>{{ status.users || '暂无用户统计' }}</pre></div>
+            <div class="mieru-status-traffic">
+              <div><span>最后活跃</span><strong>{{ userStat('last_active') }}</strong></div>
+              <div><span>1 天下载</span><strong>{{ userStat('day_download') }}</strong></div>
+              <div><span>1 天上传</span><strong>{{ userStat('day_upload') }}</strong></div>
+              <div><span>7 天下载 / 上传</span><strong>{{ userStat('week_download') }} / {{ userStat('week_upload') }}</strong></div>
+              <div><span>30 天下载</span><strong>{{ userStat('month_download') }}</strong></div>
+              <div><span>30 天上传</span><strong>{{ userStat('month_upload') }}</strong></div>
+            </div>
+          </section>
+
+          <section class="mieru-status-section">
+            <div class="mieru-status-section__heading">
+              <div><span>SHARED SESSIONS</span><h4>mita 全局连接</h4></div>
+            </div>
+            <div class="mieru-status-output mieru-status-output--single">
+              <div><pre>{{ status.connections || '当前没有活动连接' }}</pre></div>
             </div>
           </section>
 
@@ -134,6 +155,13 @@ export default {
     },
     compactMode(value?: string) {
       return String(value ?? 'MULTIPLEXING_LOW').replace('MULTIPLEXING_', '')
+    },
+    runtimeMetric(name: string) {
+      const value = this.status.metrics?.[name]
+      return Number.isFinite(Number(value)) ? Number(value).toLocaleString() : '-'
+    },
+    userStat(name: string) {
+      return String(this.status.user_stats?.[name] ?? '').trim() || '-'
     },
   },
   watch: {
@@ -252,7 +280,8 @@ export default {
 }
 
 .mieru-status-metrics article,
-.mieru-status-section {
+.mieru-status-section,
+.mieru-status-traffic div {
   border: 1px solid rgba(var(--v-theme-outline), .13);
   background: rgba(var(--v-theme-surface), .68);
 }
@@ -275,6 +304,11 @@ export default {
   align-self: end;
   overflow-wrap: anywhere;
   font-size: 18px;
+}
+
+.mieru-status-metrics--runtime article {
+  min-height: 82px;
+  background: rgba(var(--v-theme-primary), .045);
 }
 
 .mieru-status-section {
@@ -319,6 +353,34 @@ export default {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.mieru-status-output--single {
+  grid-template-columns: 1fr;
+}
+
+.mieru-status-traffic {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.mieru-status-traffic div {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 12px;
+  border-radius: 14px;
+}
+
+.mieru-status-traffic span {
+  color: rgba(var(--v-theme-on-surface), .52);
+  font-size: 12px;
+}
+
+.mieru-status-traffic strong {
+  overflow-wrap: anywhere;
+  font-size: 14px;
 }
 
 .mieru-status-output div {
@@ -366,7 +428,8 @@ export default {
 
   .mieru-status-metrics,
   .mieru-status-details,
-  .mieru-status-output {
+  .mieru-status-output,
+  .mieru-status-traffic {
     grid-template-columns: 1fr;
   }
 

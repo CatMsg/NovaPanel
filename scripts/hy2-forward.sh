@@ -372,31 +372,48 @@ reload_ufw() {
 apply_ufw_allow_rules() {
   local normalized_ports="${1:-}"
   local port
+  local protocol
 
   if ! has_cmd ufw; then
     return 0
   fi
 
+  remove_ufw_allow_rules
   while IFS= read -r port; do
     if [[ -n "${port}" ]]; then
-      ufw allow "${port}" comment "NovaPanel ${chain}" >/dev/null
+      for protocol in "${protocols[@]}"; do
+        ufw allow "${port}/${protocol}" comment "NovaPanel ${chain}" >/dev/null
+      done
     fi
   done <<< "${normalized_ports}"
 }
 
 remove_ufw_allow_rules() {
-  local normalized_ports="${1:-}"
-  local port
+  local marker="NovaPanel ${chain}"
+  local rule_number
 
   if ! has_cmd ufw; then
     return 0
   fi
 
-  while IFS= read -r port; do
-    if [[ -n "${port}" ]]; then
-      ufw --force delete allow "${port}" >/dev/null 2>&1 || true
-    fi
-  done <<< "${normalized_ports}"
+  while :; do
+    rule_number="$(
+      ufw status numbered 2>/dev/null | awk -v marker="${marker}" '
+        index($0, marker) {
+          line = $0
+          sub(/^[^[]*\[/, "", line)
+          sub(/\].*$/, "", line)
+          gsub(/[[:space:]]/, "", line)
+          if (line ~ /^[0-9]+$/) {
+            found = line
+          }
+        }
+        END { print found }
+      '
+    )"
+    [[ -n "${rule_number}" ]] || break
+    ufw --force delete "${rule_number}" >/dev/null 2>&1 || break
+  done
 }
 
 remove_iptables() {

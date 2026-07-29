@@ -3,12 +3,14 @@ package service
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -24,29 +26,44 @@ import (
 )
 
 const (
-	mieruStartupTimeout = 800 * time.Millisecond
+	mieruStartupTimeout = 6 * time.Second
 	mieruStopTimeout    = 4 * time.Second
 	mieruQueryTimeout   = 4 * time.Second
 	mieruLogLimit       = 80
 )
 
+var mieruRestartDelays = []time.Duration{
+	time.Second,
+	2 * time.Second,
+	5 * time.Second,
+	10 * time.Second,
+	30 * time.Second,
+}
+
+var mitaTableColumns = regexp.MustCompile(`[[:space:]]{2,}`)
+
 var mieruPtr *MieruService
 
 type mieruRuntime struct {
-	cmd       *exec.Cmd
-	done      chan error
-	startedAt time.Time
-	running   atomic.Bool
-	mu        sync.Mutex
-	lastError string
-	logs      []string
+	cmd             *exec.Cmd
+	done            chan error
+	startedAt       time.Time
+	running         atomic.Bool
+	intentionalStop atomic.Bool
+	mu              sync.Mutex
+	lastError       string
+	logs            []string
 }
 
 type MieruService struct {
-	syncMu sync.Mutex
-	mu     sync.Mutex
-	active *mieruRuntime
-	total  int
+	syncMu           sync.Mutex
+	mu               sync.Mutex
+	active           *mieruRuntime
+	total            int
+	appliedHash      string
+	appliedConfig    []byte
+	restartScheduled bool
+	lastError        string
 }
 
 func NewMieruService() *MieruService {
@@ -72,19 +89,20 @@ func (s *MieruService) SyncFromDB() error {
 	if err != nil {
 		return err
 	}
-	s.mu.Lock()
-	oldRuntime := s.active
-	s.active = nil
-	s.total = len(configs)
-	s.mu.Unlock()
-	if oldRuntime != nil {
-		stopMieruRuntime(oldRuntime)
-	}
 	if len(configs) == 0 {
+		s.mu.Lock()
+		oldRuntime := s.active
+		s.active = nil
+		s.total = 0
+		s.appliedHash = ""
+		s.appliedConfig = nil
+		s.restartScheduled = false
+		s.lastError = ""
+		s.mu.Unlock()
+		if oldRuntime != nil {
+			stopMieruRuntime(oldRuntime)
+		}
 		removeMitaRuntimeFiles()
-		return nil
-	}
-	if runtime.GOOS != "linux" {
 		return nil
 	}
 
@@ -92,21 +110,100 @@ func (s *MieruService) SyncFromDB() error {
 	if err != nil {
 		return err
 	}
-	configPath, socketPath, err := writeMitaServerConfig(serverConfig)
+	payload, err := marshalMitaServerConfig(serverConfig)
 	if err != nil {
 		return err
 	}
+	configHash := fmt.Sprintf("%x", sha256.Sum256(payload))
+
+	s.mu.Lock()
+	active := s.active
+	appliedHash := s.appliedHash
+	oldPayload := append([]byte(nil), s.appliedConfig...)
+	s.total = len(configs)
+	s.mu.Unlock()
+	if runtime.GOOS != "linux" {
+		s.mu.Lock()
+		s.appliedHash = configHash
+		s.appliedConfig = append([]byte(nil), payload...)
+		s.lastError = ""
+		s.mu.Unlock()
+		return nil
+	}
+
 	binary, err := mieruBinaryPath()
 	if err != nil {
 		return err
 	}
-	runtimeState, err := startMieruRuntime(binary, configPath, socketPath)
+	configPath, socketPath := mitaRuntimePaths()
+	if active != nil && active.running.Load() {
+		if appliedHash == configHash {
+			s.mu.Lock()
+			s.restartScheduled = false
+			s.lastError = ""
+			s.mu.Unlock()
+			if !active.running.Load() {
+				s.handleRuntimeExit(active, common.NewError("mita exited after config check"))
+			}
+			return nil
+		}
+		if err := writeMitaServerConfigPayload(configPath, payload); err != nil {
+			return err
+		}
+		if _, err := runMitaQuery(binary, socketPath, "reload"); err != nil {
+			reloadErr := fmt.Errorf("reload mita config: %w", err)
+			if len(oldPayload) > 0 {
+				if rollbackErr := writeMitaServerConfigPayload(configPath, oldPayload); rollbackErr != nil {
+					return errors.Join(reloadErr, fmt.Errorf("restore previous mita config: %w", rollbackErr))
+				}
+				if _, rollbackErr := runMitaQuery(binary, socketPath, "reload"); rollbackErr != nil {
+					return errors.Join(reloadErr, fmt.Errorf("reload previous mita config: %w", rollbackErr))
+				}
+			}
+			return reloadErr
+		}
+		s.mu.Lock()
+		s.appliedHash = configHash
+		s.appliedConfig = append([]byte(nil), payload...)
+		s.restartScheduled = false
+		s.lastError = ""
+		s.mu.Unlock()
+		if !active.running.Load() {
+			s.handleRuntimeExit(active, common.NewError("mita exited after reload"))
+		}
+		logger.Info("mieru service reloaded with ", len(configs), " endpoint(s)")
+		return nil
+	}
+
+	s.mu.Lock()
+	if s.active == active {
+		s.active = nil
+	}
+	s.mu.Unlock()
+	if active != nil {
+		stopMieruRuntime(active)
+	}
+	if err := writeMitaServerConfigPayload(configPath, payload); err != nil {
+		return err
+	}
+	_ = os.Remove(socketPath)
+	runtimeState, err := startMieruRuntime(binary, configPath, socketPath, s.handleRuntimeExit)
 	if err != nil {
+		s.mu.Lock()
+		s.lastError = err.Error()
+		s.mu.Unlock()
 		return err
 	}
 	s.mu.Lock()
 	s.active = runtimeState
+	s.appliedHash = configHash
+	s.appliedConfig = append([]byte(nil), payload...)
+	s.restartScheduled = false
+	s.lastError = ""
 	s.mu.Unlock()
+	if !runtimeState.running.Load() {
+		s.handleRuntimeExit(runtimeState, common.NewError("mita exited after startup"))
+	}
 	logger.Info("mieru service started with ", len(configs), " endpoint(s)")
 	return nil
 }
@@ -121,6 +218,10 @@ func (s *MieruService) Stop() error {
 	runtimeState := s.active
 	s.active = nil
 	s.total = 0
+	s.appliedHash = ""
+	s.appliedConfig = nil
+	s.restartScheduled = false
+	s.lastError = ""
 	s.mu.Unlock()
 	if runtimeState != nil {
 		stopMieruRuntime(runtimeState)
@@ -145,6 +246,7 @@ func (s *MieruService) GetStatus(tag string) (map[string]interface{}, error) {
 	s.mu.Lock()
 	runtimeState := s.active
 	total := s.total
+	serviceError := s.lastError
 	s.mu.Unlock()
 	running := runtimeState != nil && runtimeState.running.Load()
 	result := map[string]interface{}{
@@ -164,10 +266,17 @@ func (s *MieruService) GetStatus(tag string) (map[string]interface{}, error) {
 		"status":         "",
 		"connections":    "",
 		"users":          "",
+		"user_stats":     map[string]string{},
+		"metrics":        map[string]int64{},
+	}
+	if serviceError != "" {
+		result["last_error"] = serviceError
 	}
 	if runtimeState != nil {
 		runtimeState.mu.Lock()
-		result["last_error"] = runtimeState.lastError
+		if runtimeState.lastError != "" && serviceError == "" {
+			result["last_error"] = runtimeState.lastError
+		}
 		result["logs"] = append([]string(nil), runtimeState.logs...)
 		runtimeState.mu.Unlock()
 		if !runtimeState.startedAt.IsZero() {
@@ -198,7 +307,12 @@ func (s *MieruService) GetStatus(tag string) (map[string]interface{}, error) {
 			result["connections"] = strings.TrimSpace(string(output))
 		}
 		if output, queryErr := runMitaQuery(binary, socketPath, "get", "users"); queryErr == nil {
-			result["users"] = strings.TrimSpace(string(output))
+			usersOutput := strings.TrimSpace(string(output))
+			result["users"] = usersOutput
+			result["user_stats"] = parseMitaUserStats(usersOutput, config.Username)
+		}
+		if output, queryErr := runMitaQuery(binary, socketPath, "get", "metrics"); queryErr == nil {
+			result["metrics"] = parseMitaMetrics(output)
 		}
 	}
 	return result, nil
@@ -226,10 +340,14 @@ func (s *MieruService) healthSummary() (map[string]int, []string) {
 	}
 	s.mu.Lock()
 	runtimeState := s.active
+	serviceError := s.lastError
 	s.mu.Unlock()
+	if serviceError != "" {
+		details = append(details, serviceError)
+	}
 	if runtimeState != nil {
 		runtimeState.mu.Lock()
-		if runtimeState.lastError != "" {
+		if runtimeState.lastError != "" && runtimeState.lastError != serviceError {
 			details = append(details, runtimeState.lastError)
 		}
 		runtimeState.mu.Unlock()
@@ -267,24 +385,23 @@ func removeMitaRuntimeFiles() {
 	_ = os.Remove(socketPath)
 }
 
-func writeMitaServerConfig(serverConfig *mitaServerConfig) (string, string, error) {
-	configPath, socketPath := mitaRuntimePaths()
+func marshalMitaServerConfig(serverConfig *mitaServerConfig) ([]byte, error) {
+	return json.MarshalIndent(serverConfig, "", "  ")
+}
+
+func writeMitaServerConfigPayload(configPath string, payload []byte) error {
 	if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
-		return "", "", err
-	}
-	payload, err := json.MarshalIndent(serverConfig, "", "  ")
-	if err != nil {
-		return "", "", err
+		return err
 	}
 	tempPath := configPath + ".tmp"
 	if err := os.WriteFile(tempPath, payload, 0600); err != nil {
-		return "", "", err
+		return err
 	}
 	if err := os.Rename(tempPath, configPath); err != nil {
-		return "", "", err
+		_ = os.Remove(tempPath)
+		return err
 	}
-	_ = os.Remove(socketPath)
-	return configPath, socketPath, nil
+	return nil
 }
 
 func mieruBinaryPath() (string, error) {
@@ -308,7 +425,7 @@ func mieruBinaryPath() (string, error) {
 	return "", common.NewError("mita binary is not installed; update NovaPanel or place mita in bin/mita")
 }
 
-func startMieruRuntime(binary, configPath, socketPath string) (*mieruRuntime, error) {
+func startMieruRuntime(binary, configPath, socketPath string, onExit func(*mieruRuntime, error)) (*mieruRuntime, error) {
 	command := exec.Command(binary, "run")
 	command.Env = append(os.Environ(),
 		"MITA_CONFIG_JSON_FILE="+configPath,
@@ -343,19 +460,32 @@ func startMieruRuntime(binary, configPath, socketPath string) (*mieruRuntime, er
 			runtimeState.setError(waitErr.Error())
 		}
 		runtimeState.done <- waitErr
+		if onExit != nil {
+			onExit(runtimeState, waitErr)
+		}
 	}()
 
-	timer := time.NewTimer(mieruStartupTimeout)
-	defer timer.Stop()
-	select {
-	case waitErr := <-runtimeState.done:
-		if waitErr == nil {
-			waitErr = common.NewError("mita exited during startup")
+	deadline := time.Now().Add(mieruStartupTimeout)
+	var lastQueryErr error
+	for time.Now().Before(deadline) {
+		if !runtimeState.running.Load() {
+			if lastError := runtimeState.getError(); lastError != "" {
+				return nil, common.NewError(lastError)
+			}
+			return nil, common.NewError("mita exited during startup")
 		}
-		return nil, waitErr
-	case <-timer.C:
-		return runtimeState, nil
+		output, queryErr := runMitaQueryWithTimeout(750*time.Millisecond, binary, socketPath, "status")
+		if queryErr == nil && strings.Contains(strings.ToUpper(string(output)), "RUNNING") {
+			return runtimeState, nil
+		}
+		lastQueryErr = queryErr
+		time.Sleep(120 * time.Millisecond)
 	}
+	stopMieruRuntime(runtimeState)
+	if lastQueryErr != nil {
+		return nil, fmt.Errorf("mita did not become ready: %w", lastQueryErr)
+	}
+	return nil, common.NewError("mita did not become ready before timeout")
 }
 
 func stopMieruRuntime(runtimeState *mieruRuntime) {
@@ -365,6 +495,7 @@ func stopMieruRuntime(runtimeState *mieruRuntime) {
 	if !runtimeState.running.Load() {
 		return
 	}
+	runtimeState.intentionalStop.Store(true)
 	_ = runtimeState.cmd.Process.Signal(syscall.SIGTERM)
 	timer := time.NewTimer(mieruStopTimeout)
 	defer timer.Stop()
@@ -406,11 +537,23 @@ func (r *mieruRuntime) setError(message string) {
 	r.mu.Unlock()
 }
 
+func (r *mieruRuntime) getError() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lastError
+}
+
 func runMitaQuery(binary, socketPath string, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), mieruQueryTimeout)
+	return runMitaQueryWithTimeout(mieruQueryTimeout, binary, socketPath, args...)
+}
+
+func runMitaQueryWithTimeout(timeout time.Duration, binary, socketPath string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, binary, args...)
+	configPath, _ := mitaRuntimePaths()
 	command.Env = append(os.Environ(),
+		"MITA_CONFIG_JSON_FILE="+configPath,
 		"MITA_UDS_PATH="+socketPath,
 		"MITA_INSECURE_UDS=1",
 	)
@@ -422,4 +565,95 @@ func runMitaQuery(binary, socketPath string, args ...string) ([]byte, error) {
 		return output, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return output, nil
+}
+
+func (s *MieruService) handleRuntimeExit(runtimeState *mieruRuntime, waitErr error) {
+	if s == nil || runtimeState == nil || runtimeState.intentionalStop.Load() {
+		return
+	}
+	message := "mita exited unexpectedly"
+	if waitErr != nil {
+		message += ": " + waitErr.Error()
+	}
+	s.mu.Lock()
+	if s.active != runtimeState || s.total == 0 || s.restartScheduled {
+		s.mu.Unlock()
+		return
+	}
+	s.lastError = message
+	s.restartScheduled = true
+	s.mu.Unlock()
+	logger.Warning(message, "; scheduling automatic restart")
+
+	go func() {
+		for attempt := 0; ; attempt++ {
+			delayIndex := attempt
+			if delayIndex >= len(mieruRestartDelays) {
+				delayIndex = len(mieruRestartDelays) - 1
+			}
+			delay := mieruRestartDelays[delayIndex]
+			time.Sleep(delay)
+			s.mu.Lock()
+			if !s.restartScheduled || s.total == 0 {
+				s.mu.Unlock()
+				return
+			}
+			s.mu.Unlock()
+			if err := s.SyncFromDB(); err == nil {
+				logger.Info("mieru service recovered automatically")
+				return
+			} else {
+				s.mu.Lock()
+				s.lastError = "automatic mita restart failed: " + err.Error()
+				s.mu.Unlock()
+				logger.Warning("automatic mita restart failed: ", err)
+			}
+		}
+	}()
+}
+
+func parseMitaUserStats(output, username string) map[string]string {
+	result := map[string]string{}
+	username = strings.TrimSpace(username)
+	for _, line := range strings.Split(output, "\n") {
+		fields := mitaTableColumns.Split(strings.TrimSpace(line), -1)
+		if len(fields) < 8 || fields[0] != username {
+			continue
+		}
+		result["last_active"] = fields[1]
+		result["day_download"] = fields[2]
+		result["day_upload"] = fields[3]
+		result["week_download"] = fields[4]
+		result["week_upload"] = fields[5]
+		result["month_download"] = fields[6]
+		result["month_upload"] = fields[7]
+		break
+	}
+	return result
+}
+
+func parseMitaMetrics(output []byte) map[string]int64 {
+	if start := strings.IndexByte(string(output), '{'); start >= 0 {
+		if end := strings.LastIndexByte(string(output), '}'); end >= start {
+			output = output[start : end+1]
+		}
+	}
+	var groups map[string]map[string]int64
+	if err := json.Unmarshal(output, &groups); err != nil {
+		return map[string]int64{}
+	}
+	result := map[string]int64{}
+	copyMetric := func(resultName, groupName, metricName string) {
+		if group, ok := groups[groupName]; ok {
+			if value, exists := group[metricName]; exists {
+				result[resultName] = value
+			}
+		}
+	}
+	copyMetric("active_connections", "connections", "CurrEstablished")
+	copyMetric("max_connections", "connections", "MaxConn")
+	copyMetric("underlay_connections", "underlay", "CurrEstablished")
+	copyMetric("unsolicited_udp", "underlay", "UnsolicitedUDP")
+	copyMetric("failed_decrypt", "cipher - server", "FailedDirectDecrypt")
+	return result
 }
