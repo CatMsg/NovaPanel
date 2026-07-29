@@ -391,14 +391,16 @@ apply_ufw_allow_rules() {
 remove_ufw_allow_rules() {
   local marker="NovaPanel ${chain}"
   local rule_number
+  local status
 
   if ! has_cmd ufw; then
     return 0
   fi
 
   while :; do
+    status="$(ufw status numbered 2>/dev/null || true)"
     rule_number="$(
-      ufw status numbered 2>/dev/null | awk -v marker="${marker}" '
+      printf '%s\n' "${status}" | awk -v marker="${marker}" '
         index($0, marker) {
           line = $0
           sub(/^[^[]*\[/, "", line)

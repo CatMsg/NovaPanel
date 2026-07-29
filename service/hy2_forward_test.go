@@ -105,6 +105,9 @@ func TestRunHy2ForwardScriptIptables(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(binDir, "ip6tables"), []byte(mockIptables), 0o755); err != nil {
 		t.Fatalf("write mock ip6tables: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(binDir, "ufw"), []byte("#!/usr/bin/env bash\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("write unavailable ufw mock: %v", err)
+	}
 
 	env := append(os.Environ(),
 		"PATH="+binDir+":"+os.Getenv("PATH"),
@@ -176,6 +179,9 @@ func TestRunHy2ForwardScriptNftables(t *testing.T) {
 	mockNft := mockNftScript(t)
 	if err := os.WriteFile(filepath.Join(binDir, "nft"), []byte(mockNft), 0o755); err != nil {
 		t.Fatalf("write mock nft: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "ufw"), []byte("#!/usr/bin/env bash\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("write unavailable ufw mock: %v", err)
 	}
 
 	env := append(os.Environ(),
