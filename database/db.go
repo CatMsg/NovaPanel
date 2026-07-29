@@ -108,9 +108,6 @@ func InitDB(dbPath string) error {
 	if err != nil {
 		return err
 	}
-	if err := cleanupLegacyMieruEndpoints(); err != nil {
-		return err
-	}
 	if err := ensureIndexes(); err != nil {
 		return err
 	}
@@ -120,25 +117,6 @@ func InitDB(dbPath string) error {
 	}
 
 	return nil
-}
-
-func cleanupLegacyMieruEndpoints() error {
-	return db.Transaction(func(tx *gorm.DB) error {
-		var endpointIDs []uint
-		if err := tx.Model(&model.Endpoint{}).
-			Where("LOWER(TRIM(type)) = ?", "mieru").
-			Pluck("id", &endpointIDs).Error; err != nil {
-			return err
-		}
-		if len(endpointIDs) == 0 {
-			return nil
-		}
-		if err := tx.Where("scope = ? AND owner_id IN ?", "endpoint", endpointIDs).
-			Delete(&model.ManagedPortEntry{}).Error; err != nil {
-			return err
-		}
-		return tx.Where("id IN ?", endpointIDs).Delete(&model.Endpoint{}).Error
-	})
 }
 
 func ensureIndexes() error {
