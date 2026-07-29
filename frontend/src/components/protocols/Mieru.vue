@@ -19,7 +19,7 @@
           <v-switch v-model="usePortRange" color="primary" label="使用端口范围" hide-details />
         </v-col>
         <v-col v-if="!usePortRange" cols="12" sm="6" md="4">
-          <v-text-field v-model.number="data.port" label="端口" type="number" min="1" max="65535" hide-details />
+          <v-text-field v-model.number="data.port" label="端口" type="number" min="1025" max="65535" hide-details />
         </v-col>
         <v-col v-else cols="12" sm="6" md="4">
           <v-text-field

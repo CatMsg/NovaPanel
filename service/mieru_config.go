@@ -165,6 +165,11 @@ func validateMieruEndpointConfig(config *mieruEndpointConfig) error {
 	if config.MTU < 1280 || config.MTU > 1500 {
 		return fmt.Errorf("invalid mieru MTU %d: expected 1280-1500", config.MTU)
 	}
+	for _, port := range config.Ports {
+		if port < 1025 || port > 65535 {
+			return fmt.Errorf("invalid mieru port %d: expected 1025-65535", port)
+		}
+	}
 	return nil
 }
 
@@ -174,6 +179,9 @@ func parseMieruPorts(port int, portRange string) ([]int, error) {
 		return nil, common.NewError("mieru port and port range cannot be used together")
 	}
 	if port > 0 {
+		if port < 1025 || port > 65535 {
+			return nil, fmt.Errorf("invalid mieru port %d: expected 1025-65535", port)
+		}
 		return []int{port}, nil
 	}
 	if portRange == "" {
@@ -191,7 +199,7 @@ func parseMieruPorts(port int, portRange string) ([]int, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid mieru port range %q", portRange)
 	}
-	if start < 1 || end > 65535 || start > end {
+	if start < 1025 || end > 65535 || start > end {
 		return nil, fmt.Errorf("invalid mieru port range %q", portRange)
 	}
 	if end-start+1 > maxMieruPortRangeSize {

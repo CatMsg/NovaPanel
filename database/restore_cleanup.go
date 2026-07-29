@@ -180,6 +180,9 @@ func collectEndpointPortsForRestore(endpoint *model.Endpoint) ([]int, bool, erro
 			if err != nil {
 				return nil, false, err
 			}
+			if start < 1025 {
+				return nil, false, fmt.Errorf("invalid mieru port range %q: expected 1025-65535", rawPortRange)
+			}
 			if end-start+1 > 512 {
 				return nil, false, fmt.Errorf("mieru port range is too large: maximum 512 ports")
 			}
@@ -200,6 +203,9 @@ func collectEndpointPortsForRestore(endpoint *model.Endpoint) ([]int, bool, erro
 	listenPort, err := normalizeRestorePort(rawPort)
 	if err != nil {
 		return nil, false, err
+	}
+	if strings.EqualFold(endpoint.Type, "mieru") && listenPort < 1025 {
+		return nil, false, fmt.Errorf("invalid mieru port %d: expected 1025-65535", listenPort)
 	}
 
 	return []int{listenPort}, true, nil

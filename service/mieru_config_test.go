@@ -75,6 +75,8 @@ func TestParseMieruPortsRejectsInvalidRanges(t *testing.T) {
 		portRange string
 	}{
 		{port: 443, portRange: "500-510"},
+		{port: 1024},
+		{portRange: "1024-1030"},
 		{portRange: "510-500"},
 		{portRange: "1000-1512"},
 		{portRange: "invalid"},

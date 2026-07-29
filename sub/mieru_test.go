@@ -30,6 +30,9 @@ func TestBuildMieruAggregateOutbound(t *testing.T) {
 	if got := (*node)["handshake-mode"]; got != "HANDSHAKE_NO_WAIT" {
 		t.Fatalf("unexpected handshake mode: %#v", got)
 	}
+	if got := (*node)["udp"]; got != true {
+		t.Fatalf("expected UDP associate support, got %#v", got)
+	}
 }
 
 func TestConvertToClashMetaPreservesMieruFields(t *testing.T) {
@@ -41,6 +44,7 @@ func TestConvertToClashMetaPreservesMieruFields(t *testing.T) {
 			"server":         "proxy.example.com",
 			"server_port":    22000,
 			"transport":      "TCP",
+			"udp":            true,
 			"username":       "alice",
 			"password":       "secret",
 			"multiplexing":   "MULTIPLEXING_LOW",
@@ -66,6 +70,9 @@ func TestConvertToClashMetaPreservesMieruFields(t *testing.T) {
 	}
 	if proxy["type"] != "mieru" || proxy["username"] != "alice" {
 		t.Fatalf("Mieru fields were not preserved: %#v", proxy)
+	}
+	if proxy["udp"] != true {
+		t.Fatalf("expected UDP associate support: %#v", proxy)
 	}
 	if proxy["port"] != 22000 {
 		t.Fatalf("unexpected Mieru port: %#v", proxy["port"])

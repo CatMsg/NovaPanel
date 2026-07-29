@@ -729,6 +729,7 @@ func buildMieruAggregateOutbound(endpoint map[string]interface{}) *map[string]in
 		"tag":       asString(endpoint["tag"]),
 		"server":    server,
 		"transport": transport,
+		"udp":       true,
 		"username":  username,
 		"password":  password,
 	}

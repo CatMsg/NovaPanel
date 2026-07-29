@@ -14,6 +14,7 @@ export function buildMieruConfig(endpoint: any): string {
   }
   fields.push(
     `transport: ${yamlStr(transport)}`,
+    'udp: true',
     `username: ${yamlStr(endpoint.username ?? '')}`,
     `password: ${yamlStr(endpoint.password ?? '')}`,
     `multiplexing: ${yamlStr(endpoint.multiplexing ?? 'MULTIPLEXING_LOW')}`,
