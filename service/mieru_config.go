@@ -57,6 +57,7 @@ type mitaServerConfig struct {
 	TrafficPattern *mitaTrafficPattern `json:"trafficPattern,omitempty"`
 	MTU            int                 `json:"mtu,omitempty"`
 	DNS            mitaDNS             `json:"dns"`
+	Egress         mitaEgress          `json:"egress"`
 }
 
 type mitaPortBinding struct {
@@ -97,6 +98,25 @@ type mitaPaddingPattern struct {
 
 type mitaDNS struct {
 	DualStack string `json:"dualStack"`
+}
+
+type mitaEgress struct {
+	Proxies []mitaEgressProxy `json:"proxies"`
+	Rules   []mitaEgressRule  `json:"rules"`
+}
+
+type mitaEgressProxy struct {
+	Name     string `json:"name"`
+	Protocol string `json:"protocol"`
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+}
+
+type mitaEgressRule struct {
+	IPRanges    []string `json:"ipRanges"`
+	DomainNames []string `json:"domainNames"`
+	Action      string   `json:"action"`
+	ProxyNames  []string `json:"proxyNames"`
 }
 
 func parseMieruInbound(inbound *model.Inbound) (*mieruInboundConfig, error) {
@@ -260,12 +280,30 @@ func buildMitaServerConfig(config *mieruInboundConfig, credentials []mieruClient
 	if err := validateMieruInboundConfig(config); err != nil {
 		return nil, err
 	}
+	bridgePort, err := getMieruBridgePort()
+	if err != nil {
+		return nil, err
+	}
 	result := &mitaServerConfig{
 		PortBindings: make([]mitaPortBinding, 0, 1),
 		Users:        make([]mitaUser, 0, len(credentials)),
 		LoggingLevel: "INFO",
 		MTU:          config.MTU,
 		DNS:          mitaDNS{DualStack: "PREFER_IPv4"},
+		Egress: mitaEgress{
+			Proxies: []mitaEgressProxy{{
+				Name:     mieruBridgeProxyName,
+				Protocol: "SOCKS5_PROXY_PROTOCOL",
+				Host:     mieruBridgeHost,
+				Port:     bridgePort,
+			}},
+			Rules: []mitaEgressRule{{
+				IPRanges:    []string{"*"},
+				DomainNames: []string{"*"},
+				Action:      "PROXY",
+				ProxyNames:  []string{mieruBridgeProxyName},
+			}},
+		},
 	}
 	binding := mitaPortBinding{Protocol: config.Transport}
 	if config.PortRange != "" {

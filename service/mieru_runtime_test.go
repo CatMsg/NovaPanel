@@ -44,7 +44,7 @@ esac
 
 func TestRequiresMitaRestartOnlyForNonReloadableFields(t *testing.T) {
 	base := []byte(`{"portBindings":[{"port":20000,"protocol":"TCP"}],"users":[{"name":"one","hashedPassword":"abc"}],"loggingLevel":"INFO","mtu":1400,"dns":{"dualStack":"PREFER_IPv4"}}`)
-	reloadable := []byte(`{"portBindings":[{"port":20001,"protocol":"TCP"}],"users":[{"name":"one","hashedPassword":"abc"},{"name":"two","hashedPassword":"def"}],"loggingLevel":"DEBUG","mtu":1380,"dns":{"dualStack":"PREFER_IPv4"}}`)
+	reloadable := []byte(`{"portBindings":[{"port":20000,"protocol":"TCP"}],"users":[{"name":"one","hashedPassword":"abc"},{"name":"two","hashedPassword":"def"}],"loggingLevel":"DEBUG","mtu":1400,"dns":{"dualStack":"PREFER_IPv4"}}`)
 	if requiresMitaRestart(base, reloadable) {
 		t.Fatal("reloadable Mieru changes unexpectedly require restart")
 	}
@@ -59,5 +59,17 @@ func TestRequiresMitaRestartOnlyForNonReloadableFields(t *testing.T) {
 	trafficPattern := []byte(`{"portBindings":[{"port":20001,"protocol":"TCP"}],"users":[{"name":"one","hashedPassword":"def"}],"loggingLevel":"INFO","trafficPattern":{"seed":1031},"mtu":1400,"dns":{"dualStack":"PREFER_IPv4"}}`)
 	if !requiresMitaRestart(base, trafficPattern) {
 		t.Fatal("Mieru traffic pattern change should require restart")
+	}
+	portChanged := []byte(`{"portBindings":[{"port":20001,"protocol":"TCP"}],"users":[{"name":"one","hashedPassword":"abc"}],"loggingLevel":"INFO","mtu":1400,"dns":{"dualStack":"PREFER_IPv4"}}`)
+	if !requiresMitaRestart(base, portChanged) {
+		t.Fatal("Mieru listen port change should require restart")
+	}
+	mtuChanged := []byte(`{"portBindings":[{"port":20000,"protocol":"TCP"}],"users":[{"name":"one","hashedPassword":"abc"}],"loggingLevel":"INFO","mtu":1380,"dns":{"dualStack":"PREFER_IPv4"}}`)
+	if !requiresMitaRestart(base, mtuChanged) {
+		t.Fatal("Mieru MTU change should require restart")
+	}
+	egressChanged := []byte(`{"portBindings":[{"port":20000,"protocol":"TCP"}],"users":[{"name":"one","hashedPassword":"abc"}],"loggingLevel":"INFO","mtu":1400,"dns":{"dualStack":"PREFER_IPv4"},"egress":{"proxies":[{"name":"novapanel","protocol":"SOCKS5_PROXY_PROTOCOL","host":"127.0.0.1","port":39000}],"rules":[{"ipRanges":["*"],"domainNames":["*"],"action":"PROXY","proxyNames":["novapanel"]}]}}`)
+	if !requiresMitaRestart(base, egressChanged) {
+		t.Fatal("Mieru egress bridge change should require restart")
 	}
 }

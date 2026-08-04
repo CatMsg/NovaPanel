@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,11 +29,13 @@ import (
 )
 
 const (
-	mieruStartupTimeout = 6 * time.Second
-	mieruStopTimeout    = 4 * time.Second
-	mieruQueryTimeout   = 4 * time.Second
-	mieruLogLimit       = 80
-	mieruDebugDuration  = 10 * time.Minute
+	mieruStartupTimeout  = 6 * time.Second
+	mieruStopTimeout     = 4 * time.Second
+	mieruQueryTimeout    = 4 * time.Second
+	mieruLogLimit        = 80
+	mieruDebugDuration   = 10 * time.Minute
+	mieruBridgeHost      = "127.0.0.1"
+	mieruBridgeProxyName = "novapanel"
 )
 
 var mieruRestartDelays = []time.Duration{
@@ -41,6 +44,11 @@ var mieruRestartDelays = []time.Duration{
 	5 * time.Second,
 	10 * time.Second,
 	30 * time.Second,
+}
+
+var mieruBridgeState struct {
+	sync.Mutex
+	port int
 }
 
 var mitaTableColumns = regexp.MustCompile(`[[:space:]]{2,}`)
@@ -88,6 +96,37 @@ func SetMieruService(service *MieruService) {
 
 func GetMieruService() *MieruService {
 	return mieruPtr
+}
+
+func getMieruBridgePort() (int, error) {
+	mieruBridgeState.Lock()
+	defer mieruBridgeState.Unlock()
+	if mieruBridgeState.port != 0 {
+		return mieruBridgeState.port, nil
+	}
+	listener, err := net.Listen("tcp4", net.JoinHostPort(mieruBridgeHost, "0"))
+	if err != nil {
+		return 0, fmt.Errorf("allocate Mieru routing bridge port: %w", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		return 0, fmt.Errorf("release Mieru routing bridge port: %w", err)
+	}
+	mieruBridgeState.port = port
+	return port, nil
+}
+
+func buildMieruBridgeInbound(tag string) ([]byte, error) {
+	port, err := getMieruBridgePort()
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(map[string]interface{}{
+		"type":        "socks",
+		"tag":         strings.TrimSpace(tag),
+		"listen":      mieruBridgeHost,
+		"listen_port": port,
+	})
 }
 
 func (s *MieruService) SyncFromDB() error {
@@ -182,6 +221,9 @@ func (s *MieruService) SyncFromDB() error {
 		s.lastError = ""
 		s.mu.Unlock()
 		return nil
+	}
+	if corePtr == nil || !corePtr.IsRunning() {
+		return common.NewError("sing-box is not running; Mieru routing bridge unavailable")
 	}
 
 	binary, err := mieruBinaryPath()
@@ -554,6 +596,9 @@ func requiresMitaRestart(oldPayload, newPayload []byte) bool {
 	}
 	return !reflect.DeepEqual(oldConfig.TrafficPattern, newConfig.TrafficPattern) ||
 		!reflect.DeepEqual(oldConfig.DNS, newConfig.DNS) ||
+		!reflect.DeepEqual(oldConfig.PortBindings, newConfig.PortBindings) ||
+		oldConfig.MTU != newConfig.MTU ||
+		!reflect.DeepEqual(oldConfig.Egress, newConfig.Egress) ||
 		mitaUsersRequireRestart(oldConfig.Users, newConfig.Users)
 }
 
@@ -839,8 +884,7 @@ func (s *MieruService) CollectStats() ([]model.Stats, onlines, error) {
 	}
 	current := parseMitaTrafficCounters(output)
 	now := time.Now()
-	stats := make([]model.Stats, 0, len(users)*2+2)
-	var inboundUpload, inboundDownload int64
+	stats := make([]model.Stats, 0, len(users)*2)
 
 	s.mu.Lock()
 	if s.trafficBaseline == nil {
@@ -868,13 +912,11 @@ func (s *MieruService) CollectStats() ([]model.Stats, onlines, error) {
 			stats = append(stats, model.Stats{
 				DateTime: now.Unix(), Resource: "user", Tag: username, Direction: true, Traffic: uploadDelta,
 			})
-			inboundUpload += uploadDelta
 		}
 		if downloadDelta > 0 {
 			stats = append(stats, model.Stats{
 				DateTime: now.Unix(), Resource: "user", Tag: username, Direction: false, Traffic: downloadDelta,
 			})
-			inboundDownload += downloadDelta
 		}
 	}
 	sampled := onlines{}
@@ -893,16 +935,6 @@ func (s *MieruService) CollectStats() ([]model.Stats, onlines, error) {
 	}
 	s.mu.Unlock()
 
-	if inboundUpload > 0 {
-		stats = append(stats, model.Stats{
-			DateTime: now.Unix(), Resource: "inbound", Tag: inboundTag, Direction: true, Traffic: inboundUpload,
-		})
-	}
-	if inboundDownload > 0 {
-		stats = append(stats, model.Stats{
-			DateTime: now.Unix(), Resource: "inbound", Tag: inboundTag, Direction: false, Traffic: inboundDownload,
-		})
-	}
 	return stats, sampled, nil
 }
 

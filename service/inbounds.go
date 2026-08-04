@@ -28,9 +28,6 @@ func (s *InboundService) rollbackInboundCoreState(act string, oldInbound, newInb
 		if newInbound == nil {
 			return nil
 		}
-		if newInbound.Type == "mieru" {
-			return nil
-		}
 		if err := corePtr.RemoveInbound(newInbound.Tag); err != nil && !errors.Is(err, os.ErrInvalid) {
 			return err
 		}
@@ -38,14 +35,16 @@ func (s *InboundService) rollbackInboundCoreState(act string, oldInbound, newInb
 		if oldInbound == nil {
 			return nil
 		}
+		var configData []byte
+		var err error
 		if oldInbound.Type == "mieru" {
-			return nil
+			configData, err = buildMieruBridgeInbound(oldInbound.Tag)
+		} else {
+			configData, err = oldInbound.MarshalJSON()
+			if err == nil {
+				configData, err = s.addUsers(database.GetDB(), configData, oldInbound.Id, oldInbound.Type)
+			}
 		}
-		configData, err := oldInbound.MarshalJSON()
-		if err != nil {
-			return err
-		}
-		configData, err = s.addUsers(database.GetDB(), configData, oldInbound.Id, oldInbound.Type)
 		if err != nil {
 			return err
 		}
@@ -254,16 +253,18 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		}
 
 		var inboundConfig []byte
-		if corePtr.IsRunning() && inbound.Type != "mieru" {
-			inboundConfig, err = inbound.MarshalJSON()
-			if err != nil {
-				return nil, err
-			}
-
-			if act == "edit" {
-				inboundConfig, err = s.addUsers(tx, inboundConfig, inbound.Id, inbound.Type)
+		if corePtr.IsRunning() {
+			if inbound.Type == "mieru" {
+				inboundConfig, err = buildMieruBridgeInbound(inbound.Tag)
 			} else {
-				inboundConfig, err = s.initUsers(tx, inboundConfig, initUserIds, inbound.Type)
+				inboundConfig, err = inbound.MarshalJSON()
+				if err == nil {
+					if act == "edit" {
+						inboundConfig, err = s.addUsers(tx, inboundConfig, inbound.Id, inbound.Type)
+					} else {
+						inboundConfig, err = s.initUsers(tx, inboundConfig, initUserIds, inbound.Type)
+					}
+				}
 			}
 			if err != nil {
 				return nil, err
@@ -276,7 +277,7 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		postCommit = func() error {
 			coreChanged := false
 			if corePtr.IsRunning() {
-				if act == "edit" && oldSnapshot != nil && oldSnapshot.Type != "mieru" {
+				if act == "edit" && oldSnapshot != nil {
 					if err := corePtr.RemoveInbound(oldSnapshot.Tag); err != nil && err != os.ErrInvalid {
 						return err
 					}
@@ -334,7 +335,7 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		oldSnapshot := oldInbound
 		postCommit = func() error {
 			coreChanged := false
-			if corePtr.IsRunning() && oldSnapshot.Type != "mieru" {
+			if corePtr.IsRunning() {
 				if err := corePtr.RemoveInbound(tag); err != nil && err != os.ErrInvalid {
 					return err
 				}
@@ -367,7 +368,7 @@ func (s *InboundService) removeInboundByTag(tag string) error {
 			return err
 		}
 
-		if corePtr.IsRunning() && oldInbound.Type != "mieru" {
+		if corePtr.IsRunning() {
 			err = corePtr.RemoveInbound(tag)
 			if err != nil && err != os.ErrInvalid {
 				return err
@@ -417,6 +418,11 @@ func (s *InboundService) GetAllConfig(db *gorm.DB) ([]json.RawMessage, error) {
 	}
 	for _, inbound := range inbounds {
 		if inbound.Type == "mieru" {
+			inboundJson, err := buildMieruBridgeInbound(inbound.Tag)
+			if err != nil {
+				return nil, err
+			}
+			inboundsJson = append(inboundsJson, inboundJson)
 			continue
 		}
 		inboundJson, err := inbound.MarshalJSON()

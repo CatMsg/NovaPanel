@@ -8,7 +8,9 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/CatMsg/NovaPanel/core"
 	"github.com/CatMsg/NovaPanel/database/model"
+	"github.com/sagernet/sing-box/option"
 )
 
 func TestParseMieruInboundDefaults(t *testing.T) {
@@ -159,6 +161,20 @@ func TestBuildMitaServerConfigUsesOneInboundAndManyUsers(t *testing.T) {
 	if config.MTU != 1380 || config.DNS.DualStack != "PREFER_IPv4" {
 		t.Fatalf("unexpected runtime defaults: %#v", config)
 	}
+	if len(config.Egress.Proxies) != 1 || len(config.Egress.Rules) != 1 {
+		t.Fatalf("Mieru must route through the NovaPanel bridge: %#v", config.Egress)
+	}
+	proxy := config.Egress.Proxies[0]
+	if proxy.Name != mieruBridgeProxyName || proxy.Protocol != "SOCKS5_PROXY_PROTOCOL" ||
+		proxy.Host != mieruBridgeHost || proxy.Port <= 0 {
+		t.Fatalf("unexpected Mieru routing bridge: %#v", proxy)
+	}
+	rule := config.Egress.Rules[0]
+	if rule.Action != "PROXY" || !reflect.DeepEqual(rule.IPRanges, []string{"*"}) ||
+		!reflect.DeepEqual(rule.DomainNames, []string{"*"}) ||
+		!reflect.DeepEqual(rule.ProxyNames, []string{mieruBridgeProxyName}) {
+		t.Fatalf("unexpected Mieru catch-all egress rule: %#v", rule)
+	}
 	if config.Users[0].HashedPassword != hashMieruPassword("alice", "secret-one") {
 		t.Fatalf("unexpected hashed password: %s", config.Users[0].HashedPassword)
 	}
@@ -174,6 +190,27 @@ func TestBuildMitaServerConfigUsesOneInboundAndManyUsers(t *testing.T) {
 	}
 	if bytes.Contains(payload, []byte(`"quota"`)) {
 		t.Fatalf("runtime config must use NovaPanel client quotas instead of native Mieru quotas: %s", payload)
+	}
+}
+
+func TestBuildMieruBridgeInboundUsesOriginalTagAndLoopback(t *testing.T) {
+	payload, err := buildMieruBridgeInbound("mieru-main")
+	if err != nil {
+		t.Fatalf("build Mieru bridge inbound: %v", err)
+	}
+	var inbound map[string]interface{}
+	if err := json.Unmarshal(payload, &inbound); err != nil {
+		t.Fatalf("decode Mieru bridge inbound: %v", err)
+	}
+	if inbound["type"] != "socks" || inbound["tag"] != "mieru-main" || inbound["listen"] != mieruBridgeHost {
+		t.Fatalf("unexpected Mieru bridge inbound: %#v", inbound)
+	}
+	if port, ok := inbound["listen_port"].(float64); !ok || port <= 0 {
+		t.Fatalf("invalid Mieru bridge port: %#v", inbound["listen_port"])
+	}
+	var parsed option.Inbound
+	if err := parsed.UnmarshalJSONContext(core.NewCore().GetCtx(), payload); err != nil {
+		t.Fatalf("sing-box rejected Mieru bridge inbound: %v", err)
 	}
 }
 
