@@ -16,13 +16,12 @@ import (
 )
 
 var (
-	LastUpdate          int64
-	corePtr             *core.Core
-	startCoreMu         sync.Mutex
-	startCoreInProgress bool
-	lastStartFailTime   time.Time
-	startCooldown       = 15 * time.Second
-	saveConfigMu        sync.Mutex
+	LastUpdate        int64
+	corePtr           *core.Core
+	startCoreMu       sync.Mutex
+	lastStartFailTime time.Time
+	startCooldown     = 15 * time.Second
+	saveConfigMu      sync.Mutex
 )
 
 type ConfigService struct {
@@ -58,9 +57,13 @@ func NewConfigService(core *core.Core) *ConfigService {
 }
 
 func (s *ConfigService) GetConfig(data string) (*[]byte, error) {
+	return s.getConfig(database.GetDB(), data)
+}
+
+func (s *ConfigService) getConfig(db *gorm.DB, data string) (*[]byte, error) {
 	var err error
 	if len(data) == 0 {
-		data, err = s.SettingService.GetConfig()
+		data, err = s.SettingService.getStringTx(db, "config")
 		if err != nil {
 			return nil, err
 		}
@@ -71,19 +74,19 @@ func (s *ConfigService) GetConfig(data string) (*[]byte, error) {
 		return nil, err
 	}
 
-	singboxConfig.Inbounds, err = s.InboundService.GetAllConfig(database.GetDB())
+	singboxConfig.Inbounds, err = s.InboundService.GetAllConfig(db)
 	if err != nil {
 		return nil, err
 	}
-	singboxConfig.Outbounds, err = s.OutboundService.GetAllConfig(database.GetDB())
+	singboxConfig.Outbounds, err = s.OutboundService.GetAllConfig(db)
 	if err != nil {
 		return nil, err
 	}
-	singboxConfig.Services, err = s.ServicesService.GetAllConfig(database.GetDB())
+	singboxConfig.Services, err = s.ServicesService.GetAllConfig(db)
 	if err != nil {
 		return nil, err
 	}
-	singboxConfig.Endpoints, err = s.EndpointService.GetAllConfig(database.GetDB())
+	singboxConfig.Endpoints, err = s.EndpointService.GetAllConfig(db)
 	if err != nil {
 		return nil, err
 	}
@@ -95,12 +98,9 @@ func (s *ConfigService) GetConfig(data string) (*[]byte, error) {
 }
 
 func (s *ConfigService) StartCore() error {
-	if corePtr.IsRunning() {
-		return nil
-	}
 	startCoreMu.Lock()
-	if startCoreInProgress {
-		startCoreMu.Unlock()
+	defer startCoreMu.Unlock()
+	if corePtr.IsRunning() {
 		return nil
 	}
 	if time.Since(lastStartFailTime) < startCooldown {
@@ -109,16 +109,8 @@ func (s *ConfigService) StartCore() error {
 			remaining = 0
 		}
 		logger.Info("start core cooldown ", remaining.Round(time.Second))
-		startCoreMu.Unlock()
-		return nil
+		return common.NewErrorf("sing-box 启动冷却中，请在 %s 后重试", remaining.Round(time.Second))
 	}
-	startCoreInProgress = true
-	startCoreMu.Unlock()
-	defer func() {
-		startCoreMu.Lock()
-		startCoreInProgress = false
-		startCoreMu.Unlock()
-	}()
 
 	logger.Info("starting core")
 	var rawConfig *[]byte
@@ -130,11 +122,13 @@ func (s *ConfigService) StartCore() error {
 	if err != nil {
 		return err
 	}
+	if err = validateRuntimeConfig(*rawConfig); err != nil {
+		logger.Error("start sing-box err (validate config):", err.Error())
+		return err
+	}
 	err = corePtr.Start(*rawConfig)
 	if err != nil {
-		startCoreMu.Lock()
 		lastStartFailTime = time.Now()
-		startCoreMu.Unlock()
 		logger.Error("start sing-box err:", err.Error())
 		return err
 	}
@@ -143,33 +137,13 @@ func (s *ConfigService) StartCore() error {
 }
 
 func (s *ConfigService) RestartCore() error {
-	err := s.StopCore()
-	if err != nil {
-		return err
-	}
-	return s.StartCore()
+	return s.restartCoreWithConfig(nil)
 }
 
 func (s *ConfigService) restartCoreWithConfig(config json.RawMessage) error {
 	startCoreMu.Lock()
-	if startCoreInProgress {
-		startCoreMu.Unlock()
-		return nil
-	}
-	startCoreInProgress = true
-	startCoreMu.Unlock()
-	defer func() {
-		startCoreMu.Lock()
-		startCoreInProgress = false
-		startCoreMu.Unlock()
-	}()
+	defer startCoreMu.Unlock()
 
-	if corePtr.IsRunning() {
-		if err := corePtr.Stop(); err != nil {
-			logger.Error("restart sing-box err (stop):", err.Error())
-			return err
-		}
-	}
 	var rawConfig *[]byte
 	err := database.RetryOnLocked(3, 100*time.Millisecond, func() error {
 		var err error
@@ -179,6 +153,16 @@ func (s *ConfigService) restartCoreWithConfig(config json.RawMessage) error {
 	if err != nil {
 		logger.Error("restart sing-box err (get config):", err.Error())
 		return err
+	}
+	if err := validateRuntimeConfig(*rawConfig); err != nil {
+		logger.Error("restart sing-box err (validate config):", err.Error())
+		return err
+	}
+	if corePtr.IsRunning() {
+		if err := corePtr.Stop(); err != nil {
+			logger.Error("restart sing-box err (stop):", err.Error())
+			return err
+		}
 	}
 	if err := corePtr.Start(*rawConfig); err != nil {
 		logger.Error("restart sing-box err (start):", err.Error())
@@ -240,7 +224,10 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 			postCommit, err = s.InboundService.Save(tx, act, data, initUsers, hostname)
 			objs = append(objs, "clients")
 		case "outbounds":
-			postCommit, err = s.OutboundService.Save(tx, act, data)
+			_, err = s.OutboundService.Save(tx, act, data)
+			if err == nil && corePtr != nil && corePtr.IsRunning() {
+				postCommit = func() error { return s.restartCoreWithConfig(nil) }
+			}
 		case "services":
 			postCommit, err = s.ServicesService.Save(tx, act, data)
 		case "endpoints":
@@ -263,6 +250,19 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 		}
 		if err != nil {
 			return err
+		}
+		if obj != "settings" {
+			configData := ""
+			if obj == "config" {
+				configData = string(data)
+			}
+			rawConfig, configErr := s.getConfig(tx, configData)
+			if configErr != nil {
+				return configErr
+			}
+			if configErr = validateRuntimeConfig(*rawConfig); configErr != nil {
+				return common.NewErrorf("Sing-Box 配置校验失败: %v", configErr)
+			}
 		}
 
 		dt := time.Now().Unix()

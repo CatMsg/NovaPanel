@@ -68,9 +68,7 @@ func (s *OutboundService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 			return nil, err
 		}
 
-		var oldTag string
 		var oldOutbound *model.Outbound
-		var configData []byte
 		if act == "edit" {
 			oldOutbound = &model.Outbound{}
 			if err = tx.Model(model.Outbound{}).Where("id = ?", outbound.Id).First(oldOutbound).Error; err != nil {
@@ -82,47 +80,32 @@ func (s *OutboundService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 				return nil, ErrNoChanges
 			}
 		}
-		if corePtr.IsRunning() {
-			configData, err = outbound.MarshalJSON()
-			if err != nil {
-				return nil, err
-			}
-			if act == "edit" {
-				oldTag = oldOutbound.Tag
-			}
+		if outbound.Type == "" || outbound.Tag == "" {
+			return nil, common.NewError("出站类型和标签不能为空")
 		}
 
 		err = tx.Save(&outbound).Error
 		if err != nil {
 			return nil, err
 		}
-		if !corePtr.IsRunning() {
-			return nil, nil
-		}
-		removeTag := ""
-		if act == "edit" {
-			removeTag = oldTag
-		}
-		return buildCoreReplaceAction([]coreReplaceSnapshot{{
-			removeTag: removeTag,
-			config:    configData,
-		}}, corePtr.RemoveOutbound, corePtr.AddOutbound), nil
+		return nil, nil
 	case "del":
 		var tag string
 		err = json.Unmarshal(data, &tag)
 		if err != nil {
 			return nil, err
 		}
-		err = tx.Where("tag = ?", tag).Delete(model.Outbound{}).Error
+		result := tx.Where("tag = ?", tag).Delete(model.Outbound{})
+		if result.Error != nil {
+			return nil, result.Error
+		}
+		if result.RowsAffected == 0 {
+			err = common.NewError("出站不存在: ", tag)
+		}
 		if err != nil {
 			return nil, err
 		}
-		if !corePtr.IsRunning() {
-			return nil, nil
-		}
-		return buildCoreReplaceAction([]coreReplaceSnapshot{{
-			removeTag: tag,
-		}}, corePtr.RemoveOutbound, corePtr.AddOutbound), nil
+		return nil, nil
 	default:
 		return nil, common.NewErrorf("unknown action: %s", act)
 	}

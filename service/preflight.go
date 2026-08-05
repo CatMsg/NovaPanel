@@ -67,12 +67,6 @@ func (s *ConfigService) PreflightSave(obj, act string, data json.RawMessage, ini
 	if err != nil {
 		return preflightFailure(report, "业务校验", err.Error(), err)
 	}
-	if obj == "config" {
-		if _, err := s.GetConfig(string(data)); err != nil {
-			return preflightFailure(report, "Sing-Box 配置", err.Error(), err)
-		}
-	}
-
 	report.Valid = true
 	report.Changed = true
 	report.Checks = append(report.Checks,
@@ -84,22 +78,18 @@ func (s *ConfigService) PreflightSave(obj, act string, data json.RawMessage, ini
 }
 
 func (s *ConfigService) preflightSaveTx(tx *gorm.DB, obj, act string, data json.RawMessage, initUsers, hostname string, report *PreflightReport) error {
+	var err error
 	switch obj {
 	case "clients":
-		_, err := s.ClientService.Save(tx, act, data, hostname)
-		return err
+		_, err = s.ClientService.Save(tx, act, data, hostname)
 	case "tls":
-		_, err := s.TlsService.Save(tx, act, data, hostname)
-		return err
+		_, err = s.TlsService.Save(tx, act, data, hostname)
 	case "inbounds":
-		_, err := s.InboundService.Save(tx, act, data, initUsers, hostname)
-		return err
+		_, err = s.InboundService.Save(tx, act, data, initUsers, hostname)
 	case "outbounds":
-		_, err := s.OutboundService.Save(tx, act, data)
-		return err
+		_, err = s.OutboundService.Save(tx, act, data)
 	case "services":
-		_, err := s.ServicesService.Save(tx, act, data)
-		return err
+		_, err = s.ServicesService.Save(tx, act, data)
 	case "endpoints":
 		if act == "new" || act == "edit" {
 			var endpoint model.Endpoint
@@ -114,16 +104,29 @@ func (s *ConfigService) preflightSaveTx(tx *gorm.DB, obj, act string, data json.
 				return nil
 			}
 		}
-		_, err := s.EndpointService.Save(tx, act, data)
-		return err
+		_, err = s.EndpointService.Save(tx, act, data)
 	case "config":
-		return s.SettingService.SaveConfig(tx, data)
+		err = s.SettingService.SaveConfig(tx, data)
 	case "settings":
-		_, err := s.SettingService.Save(tx, data)
-		return err
+		_, err = s.SettingService.Save(tx, data)
 	default:
 		return common.NewError("unknown object: ", obj)
 	}
+	if err != nil {
+		return err
+	}
+	if obj == "settings" {
+		return nil
+	}
+	configData := ""
+	if obj == "config" {
+		configData = string(data)
+	}
+	rawConfig, err := s.getConfig(tx, configData)
+	if err != nil {
+		return err
+	}
+	return validateRuntimeConfig(*rawConfig)
 }
 
 func preflightWarpEndpoint(tx *gorm.DB, endpoint *model.Endpoint) error {

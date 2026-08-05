@@ -144,14 +144,17 @@
 import Data from '@/store/modules/data'
 
 export default {
-  props: ['dial', 'mode'],
+  props: ['dial', 'mode', 'excludeTag'],
   data() {
     return {
       menu: false
     }
   },
   computed: {
-    outTags() { return [...Data().outbounds?.map((o:any) => o.tag), ...Data().endpoints?.filter((e:any) => e.type != "masque").map((e:any) => e.tag)] },
+    outTags() {
+      return [...Data().outbounds?.map((o:any) => o.tag), ...Data().endpoints?.filter((e:any) => e.type != "masque").map((e:any) => e.tag)]
+        .filter((tag:string) => tag !== this.$props.excludeTag)
+    },
     connectTimeout: {
       get() { return this.$props.dial.connect_timeout ? parseInt(this.$props.dial.connect_timeout.replace('s','')) : 5 },
       set(newValue:number) { this.$props.dial.connect_timeout = newValue > 0 ? newValue + 's' : '5s' }

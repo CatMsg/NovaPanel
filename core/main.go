@@ -52,6 +52,7 @@ func (c *Core) Start(sbConfig []byte) error {
 	err := opt.UnmarshalJSONContext(globalCtx, sbConfig)
 	if err != nil {
 		logger.Error("Unmarshal config err:", err.Error())
+		return err
 	}
 
 	c.instance, err = NewBox(Options{
@@ -78,6 +79,18 @@ func (c *Core) Start(sbConfig []byte) error {
 
 	c.isRunning = true
 	return nil
+}
+
+// ValidateConfig parses a complete sing-box configuration without changing the
+// running instance. Runtime references are validated separately by the service
+// layer because some of them are only resolved when sing-box starts.
+func (c *Core) ValidateConfig(sbConfig []byte) error {
+	ctx := globalCtx
+	if ctx == nil {
+		ctx = sb.Context(context.Background(), InboundRegistry(), OutboundRegistry(), EndpointRegistry(), DNSTransportRegistry(), ServiceRegistry())
+	}
+	var opt option.Options
+	return opt.UnmarshalJSONContext(ctx, sbConfig)
 }
 
 func (c *Core) Stop() error {

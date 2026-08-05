@@ -62,13 +62,13 @@
               <AnyTls v-if="outbound.type == outTypes.AnyTls" :data="outbound" direction="out" />
               <Tor v-if="outbound.type == outTypes.Tor" :data="outbound" />
               <Ssh v-if="outbound.type == outTypes.SSH" :data="outbound" />
-              <Selector v-if="outbound.type == outTypes.Selector" :data="outbound" :tags="tags" />
-              <UrlTest v-if="outbound.type == outTypes.URLTest" :data="outbound" :tags="tags" />
+              <Selector v-if="outbound.type == outTypes.Selector" :data="outbound" :tags="availableTags" />
+              <UrlTest v-if="outbound.type == outTypes.URLTest" :data="outbound" :tags="availableTags" />
 
               <Transport v-if="Object.hasOwn(outbound,'transport')" :data="outbound" />
               <OutTLS v-if="Object.hasOwn(outbound,'tls')" :outbound="outbound" />
               <Multiplex v-if="Object.hasOwn(outbound,'multiplex')" direction="out" :data="outbound" />
-              <Dial v-if="!NoDial.includes(outbound.type)" :dial="outbound" />
+              <Dial v-if="!NoDial.includes(outbound.type)" :dial="outbound" :exclude-tag="outbound.tag" />
             </v-window-item>
             <v-window-item value="t2">
               <v-row>
@@ -118,7 +118,6 @@ import Http from '@/components/protocols/Http.vue'
 import Shadowsocks from '@/components/protocols/Shadowsocks.vue'
 import Vmess from '@/components/protocols/Vmess.vue'
 import Trojan from '@/components/protocols/Trojan.vue'
-import Wireguard from '@/components/protocols/Wireguard.vue'
 import Hysteria from '@/components/protocols/Hysteria.vue'
 import Naive from '@/components/protocols/Naive.vue'
 import ShadowTls from '@/components/protocols/OutShadowTls.vue'
@@ -204,9 +203,14 @@ export default {
       }
     },
   },
+  computed: {
+    availableTags(): string[] {
+      return (this.$props.tags ?? []).filter((tag:string) => tag !== this.outbound.tag)
+    }
+  },
   components: { Dial, Multiplex, Transport, OutTLS,
     Direct, Socks, Http, Shadowsocks, Vmess, Trojan,
-    Wireguard, Hysteria, Naive, ShadowTls, Vless, Tuic,
+    Hysteria, Naive, ShadowTls, Vless, Tuic,
     Hysteria2, AnyTls, Tor, Ssh, Selector, UrlTest }
 }
 </script>

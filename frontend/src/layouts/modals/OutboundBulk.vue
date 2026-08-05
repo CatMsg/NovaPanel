@@ -122,21 +122,26 @@ export default {
     async saveChanges() {
       if (!this.$props.visible) return
       // check duplicate tag
+      const seenTags = new Set(this.$props.outboundTags ?? [])
       this.outbounds.forEach((o:Outbound, index:number) => {
-        const isDuplicatedTag = Data().checkTag("outbound",0, o.tag)
-        this.outChecks[index] = isDuplicatedTag ? 2 : 0
+        const isDuplicatedTag = seenTags.has(o.tag)
+		this.outChecks[index] = isDuplicatedTag ? 2 : 0
+        seenTags.add(o.tag)
       })
 
       // save data
       this.loading = true
-      this.outbounds.forEach(async (o:Outbound, index:number) => {
-        if (this.outChecks[index] == 2) return
-        this.outChecks[index] = 3
-        const success = await Data().save("outbounds",  "new", o)
-        if (success) this.outChecks[index] = 1
-        else this.outChecks[index] = 2
-      })
-      this.loading = false
+      try {
+        for (const [index, o] of this.outbounds.entries()) {
+          if (this.outChecks[index] == 2) continue
+          this.outChecks[index] = 3
+          const success = await Data().save("outbounds",  "new", o)
+          if (success) this.outChecks[index] = 1
+          else this.outChecks[index] = 2
+        }
+      } finally {
+        this.loading = false
+      }
     }
   },
   computed: {
