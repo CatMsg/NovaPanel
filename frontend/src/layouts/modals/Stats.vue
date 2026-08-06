@@ -1,32 +1,35 @@
 <template>
-  <v-dialog transition="dialog-bottom-transition" width="800">
-    <v-card class="rounded-lg" :loading="loading">
-      <v-card-title>
-        <v-row>
-          <v-col cols="auto">
-            {{ $t('stats.graphTitle') }}
-          </v-col>
-          <v-spacer></v-spacer>
-          <v-col cols="auto"><v-btn icon="mdi-close" variant="text" :aria-label="$t('actions.close')" @click="$emit('close')" /></v-col>
-        </v-row>
+  <v-dialog transition="dialog-bottom-transition" width="90%" max-width="800">
+    <v-card class="rounded-lg stats-dialog" :loading="loading">
+      <v-card-title class="stats-dialog__title">
+        <span>{{ $t('stats.graphTitle') }}</span>
+        <v-btn icon="mdi-close" variant="text" :aria-label="$t('actions.close')" @click="$emit('close')" />
       </v-card-title>
       <v-divider></v-divider>
-      <v-card-text style="padding: 0 16px;">
-        <div style="text-align: center; margin: 5px;">
+      <v-card-text class="stats-dialog__body">
+        <div class="stats-dialog__resource">
           {{ $t('objects.' + resource) + " : " + tag }}
         </div>
-        <v-radio-group v-model="limit" @change="loadData" density="compact" :loading="loading" inline hide-details>
-          <v-radio v-for="p in periods" :label="p.title" :value="p.value"></v-radio>
+        <v-radio-group
+          v-model="limit"
+          class="stats-dialog__periods"
+          @update:model-value="loadData"
+          density="compact"
+          :loading="loading"
+          inline
+          hide-details
+        >
+          <v-radio v-for="p in periods" :key="p.value" :label="p.title" :value="p.value" />
         </v-radio-group>
-          <v-container id="container" style="height:40vh;">
-            <v-skeleton-loader
+        <v-container class="stats-dialog__chart">
+          <v-skeleton-loader
             class="mx-auto border"
             width="95%"
             type="image"
             v-if="loading"
-          ></v-skeleton-loader>
+          />
           <template v-else>
-            <v-alert :text="$t('noData')" type="warning" variant="outlined" v-if="alert"></v-alert>
+            <v-alert :text="$t('noData')" type="warning" variant="outlined" v-if="alert" />
             <Line v-if="loaded" :data="usage" :options="<any>options" />
           </template>
         </v-container>
@@ -100,9 +103,8 @@ export default {
         plugins: {
           tooltip: {
             callbacks: {
-              text: (ctx:any) => {
-                const {axis = 'xy', intersect, mode} = ctx.chart.options.interaction
-                return 'Mode: ' + mode + ', axis: ' + axis + ', intersect: ' + intersect
+              label: (ctx:any) => {
+                return `${ctx.dataset.label}: ${HumanReadable.sizeFormat(Number(ctx.raw || 0))}`
               },
               footer: (items:any[]) => {
                 return HumanReadable.sizeFormat(items.reduce((acc, c) => acc + c.raw, 0))
@@ -144,47 +146,38 @@ export default {
       if (data.success && data.obj) {
         const obj = <any[]>data.obj
         const l = String(i18n.global.locale) == 'fa' ? "fa-IR" : "en-US"
-        const oneStep = this.limit * 3600 * 1000 / 360 // Each 10 sec
-        const now = new Date().getTime()
-        const steps = <number[]>[]
-        for (let i = 360; i >= 0; i--) {
-          steps.push(now - (oneStep * i))
-        }
-        const labels = <string[]>[]
-        const uplinkData = <number[]>[]
-        const downlinkData = <number[]>[]
-        for (let i = 1; i<360; i++) {
-          labels.push(this.genLable(steps[i],l))
-          let upSum:number
-          let downSum:number
-          const upTraffics = obj.filter(o => o.direction && o.dateTime*1000 < steps[i] && o.dateTime*1000 > steps[i-1]).map((o:any) => o.traffic)
-          upSum = upTraffics.length > 0 ? upTraffics.reduce((sum, traffic) => sum + traffic, 0) : null
-          const downTraffics = obj.filter(o => !o.direction && o.dateTime*1000 < steps[i] && o.dateTime*1000 > steps[i-1]).map((o:any) => o.traffic)
-          downSum = downTraffics.length > 0 ? downTraffics.reduce((sum, traffic) => sum + traffic, 0) : null
-          uplinkData.push(upSum)
-          downlinkData.push(downSum)
-        }
+        const points = new Map<number, { up: number | null; down: number | null }>()
+        obj.forEach(row => {
+          const dateTime = Number(row.dateTime)
+          if (!Number.isFinite(dateTime)) return
+
+          const point = points.get(dateTime) || { up: null, down: null }
+          const key = row.direction ? 'up' : 'down'
+          point[key] = (point[key] || 0) + Number(row.traffic || 0)
+          points.set(dateTime, point)
+        })
+        const dates = [...points.keys()].sort((a, b) => a - b)
         this.usage = {
-          labels: labels,
+          labels: dates.map(dateTime => this.genLable(dateTime * 1000, l)),
           datasets: [
             {
               label: i18n.global.t('stats.upload'),
               backgroundColor: 'rgba(255, 165, 0, 0.4)',
               borderColor: 'rgba(255, 165, 0)',
               fill: true,
-              data: uplinkData
+              data: dates.map(dateTime => points.get(dateTime)?.up ?? null),
             },
             {
               label: i18n.global.t('stats.download'),
               backgroundColor: 'rgba(0, 128, 0, 0.2)',
               borderColor: 'rgba(0, 128, 0)',
               fill: true,
-              data: downlinkData
+              data: dates.map(dateTime => points.get(dateTime)?.down ?? null),
             }
           ],
         }
-        this.loaded = true
-        this.alert = false
+        this.loaded = dates.length > 0
+        this.alert = dates.length === 0
       } else {
         this.alert = true
         this.loaded = false
@@ -224,3 +217,57 @@ export default {
   }
 }
 </script>
+
+<style scoped lang="scss">
+.stats-dialog__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.stats-dialog__body {
+  display: grid;
+  gap: 10px;
+  padding: 10px 16px 16px;
+}
+
+.stats-dialog__resource {
+  min-width: 0;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats-dialog__periods {
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.stats-dialog__periods :deep(.v-selection-control-group) {
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.stats-dialog__chart {
+  height: clamp(280px, 40vh, 430px);
+  padding: 8px;
+}
+
+@media (max-width: 600px) {
+  .stats-dialog__body {
+    padding-inline: 10px;
+  }
+
+  .stats-dialog__periods :deep(.v-selection-control) {
+    flex: 0 0 20%;
+    min-width: 64px;
+  }
+
+  .stats-dialog__chart {
+    height: 320px;
+    padding-inline: 0;
+  }
+}
+</style>
