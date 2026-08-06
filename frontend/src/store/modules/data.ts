@@ -30,6 +30,7 @@ interface LoadDataPayload {
   subMode?: string
   subAggregateURI?: string
   enableTraffic?: boolean
+  lastUpdate?: number
 }
 
 export const defaultReloadItems = [
@@ -86,6 +87,8 @@ const Data = defineStore('Data', {
     async loadData() {
       const msg = await HttpUtils.get('api/load', this.lastLoad >0 ? {lu: this.lastLoad} : {} )
       if(msg.success) {
+        const serverVersion = Number(msg.obj?.lastUpdate ?? 0)
+        if (serverVersion > 0) this.lastLoad = serverVersion
         this.onlines = msg.obj.onlines
         if (msg.obj.lastLog) {
           push.error({
@@ -101,7 +104,7 @@ const Data = defineStore('Data', {
       }
     },
     setNewData(data: LoadDataPayload) {
-      this.lastLoad = Math.floor((new Date()).getTime()/1000)
+      if (!data.lastUpdate) this.lastLoad = Math.floor((new Date()).getTime()/1000)
       if (data.subURI) this.subURI = data.subURI
       if (data.subMode) this.subMode = data.subMode
       if (Object.hasOwn(data, 'subAggregateURI')) this.subAggregateURI = data.subAggregateURI ?? ''

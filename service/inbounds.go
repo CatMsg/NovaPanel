@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/CatMsg/NovaPanel/database"
@@ -446,7 +447,7 @@ func (s *InboundService) hasUser(inboundType string) bool {
 	return false
 }
 
-func (s *InboundService) fetchUsers(db *gorm.DB, inboundType string, condition string, inbound map[string]interface{}) ([]json.RawMessage, error) {
+func (s *InboundService) fetchUsers(db *gorm.DB, inboundType string, condition string, args []interface{}, inbound map[string]interface{}) ([]json.RawMessage, error) {
 	if inboundType == "shadowtls" {
 		version, _ := inbound["version"].(float64)
 		if int(version) < 3 {
@@ -464,8 +465,8 @@ func (s *InboundService) fetchUsers(db *gorm.DB, inboundType string, condition s
 
 	err := db.Raw(
 		fmt.Sprintf(`SELECT json_extract(clients.config, "$.%s")
-		FROM clients WHERE enable = true AND %s`,
-			inboundType, condition)).Scan(&users).Error
+			FROM clients WHERE enable = true AND %s`,
+			inboundType, condition), args...).Scan(&users).Error
 	if err != nil {
 		return nil, err
 	}
@@ -490,8 +491,8 @@ func (s *InboundService) addUsers(db *gorm.DB, inboundJson []byte, inboundId uin
 		return nil, err
 	}
 
-	condition := fmt.Sprintf("%d IN (SELECT json_each.value FROM json_each(clients.inbounds))", inboundId)
-	inbound["users"], err = s.fetchUsers(db, inboundType, condition, inbound)
+	condition := "? IN (SELECT json_each.value FROM json_each(clients.inbounds))"
+	inbound["users"], err = s.fetchUsers(db, inboundType, condition, []interface{}{inboundId}, inbound)
 	if err != nil {
 		return nil, err
 	}
@@ -500,8 +501,11 @@ func (s *InboundService) addUsers(db *gorm.DB, inboundJson []byte, inboundId uin
 }
 
 func (s *InboundService) initUsers(db *gorm.DB, inboundJson []byte, clientIds string, inboundType string) ([]byte, error) {
-	ClientIds := strings.Split(clientIds, ",")
-	if len(ClientIds) == 0 {
+	clientIDList, err := parseClientIDs(clientIds)
+	if err != nil {
+		return nil, err
+	}
+	if len(clientIDList) == 0 {
 		return inboundJson, nil
 	}
 
@@ -510,18 +514,34 @@ func (s *InboundService) initUsers(db *gorm.DB, inboundJson []byte, clientIds st
 	}
 
 	var inbound map[string]interface{}
-	err := json.Unmarshal(inboundJson, &inbound)
+	err = json.Unmarshal(inboundJson, &inbound)
 	if err != nil {
 		return nil, err
 	}
 
-	condition := fmt.Sprintf("id IN (%s)", strings.Join(ClientIds, ","))
-	inbound["users"], err = s.fetchUsers(db, inboundType, condition, inbound)
+	condition := "id IN ?"
+	inbound["users"], err = s.fetchUsers(db, inboundType, condition, []interface{}{clientIDList}, inbound)
 	if err != nil {
 		return nil, err
 	}
 
 	return json.Marshal(inbound)
+}
+
+func parseClientIDs(raw string) ([]uint, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	ids := make([]uint, 0, len(parts))
+	for _, part := range parts {
+		value, err := strconv.ParseUint(strings.TrimSpace(part), 10, 64)
+		if err != nil || value == 0 {
+			return nil, common.NewErrorf("invalid client id: %q", strings.TrimSpace(part))
+		}
+		ids = append(ids, uint(value))
+	}
+	return ids, nil
 }
 
 func (s *InboundService) BuildRestartInboundsAction(tx *gorm.DB, ids []uint) (func() error, error) {

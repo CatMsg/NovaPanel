@@ -3,6 +3,14 @@ import axios from 'axios'
 const api = axios.create()
 const pendingRequests = new Map()
 
+const clearPendingRequest = (config: any) => {
+    const requestKey = getRequestKey(config)
+    const current = pendingRequests.get(requestKey)
+    if (current?.token === config?.cancelToken) {
+        pendingRequests.delete(requestKey)
+    }
+}
+
 const stringifyRequestPart = (value: unknown) => {
     if (value instanceof FormData) {
         return '[form-data]'
@@ -51,16 +59,13 @@ api.interceptors.request.use(
 
 api.interceptors.response.use(
     (response) => {
-        const requestKey = getRequestKey(response.config)
-        pendingRequests.delete(requestKey)
+        clearPendingRequest(response.config)
         return response
     },
     (error) => {
+        if (error?.config) clearPendingRequest(error.config)
         if (axios.isCancel(error)) {
             console.warn(error.message)
-        } else if (error?.config) {
-            const requestKey = getRequestKey(error.config)
-            pendingRequests.delete(requestKey)
         }
         return Promise.reject(error)
     }

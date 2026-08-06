@@ -260,9 +260,18 @@ func (s *FleetService) SaveFleet(inputs []FleetServerInput) error {
 	if err != nil {
 		return err
 	}
-	return database.WithRetryTx(5, 100*time.Millisecond, func(tx *gorm.DB) error {
+	if err := database.WithRetryTx(5, 100*time.Millisecond, func(tx *gorm.DB) error {
 		return tx.Where("key = ?", fleetSettingKey).Assign(model.Setting{Key: fleetSettingKey, Value: string(raw)}).FirstOrCreate(&model.Setting{}).Error
-	})
+	}); err != nil {
+		return err
+	}
+
+	// Endpoints, URLs, or credentials may have changed. Never reuse status
+	// snapshots collected with the previous configuration.
+	fleetLastKnown.Lock()
+	fleetLastKnown.views = make(map[string]FleetServerView)
+	fleetLastKnown.Unlock()
+	return nil
 }
 
 func (s *FleetService) loadFleetServers() ([]FleetServer, error) {

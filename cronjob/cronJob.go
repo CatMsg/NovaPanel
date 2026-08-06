@@ -16,24 +16,28 @@ func NewCronJob() *CronJob {
 
 func (c *CronJob) Start(loc *time.Location, trafficAge int) error {
 	c.cron = cron.New(cron.WithLocation(loc), cron.WithSeconds())
-	c.cron.Start()
-
-	go func() {
-		// Start stats job
-		c.cron.AddJob("@every 10s", NewStatsJob(trafficAge > 0))
-		// Start expiry job
-		c.cron.AddJob("@every 1m", NewDepleteJob())
-		// Start deleting old stats
-		if trafficAge > 0 {
-			c.cron.AddJob("@daily", NewDelStatsJob(trafficAge))
+	jobs := []struct {
+		spec string
+		job  cron.Job
+	}{
+		{"@every 10s", NewStatsJob(trafficAge > 0)},
+		{"@every 1m", NewDepleteJob()},
+		{"@every 5s", NewCheckCoreJob()},
+		{"@every 10m", NewWALCheckpointJob()},
+		{"@every 1m", NewAlertJob()},
+	}
+	if trafficAge > 0 {
+		jobs = append(jobs, struct {
+			spec string
+			job  cron.Job
+		}{"@daily", NewDelStatsJob(trafficAge)})
+	}
+	for _, scheduled := range jobs {
+		if _, err := c.cron.AddJob(scheduled.spec, scheduled.job); err != nil {
+			return err
 		}
-		// Start core if it is not running
-		c.cron.AddJob("@every 5s", NewCheckCoreJob())
-		// database WAL checkpoint
-		c.cron.AddJob("@every 10m", NewWALCheckpointJob())
-		// AlertService applies its own configured interval and deduplication.
-		c.cron.AddJob("@every 1m", NewAlertJob())
-	}()
+	}
+	c.cron.Start()
 
 	return nil
 }

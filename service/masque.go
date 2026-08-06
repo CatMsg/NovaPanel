@@ -186,7 +186,8 @@ func (s *MasqueService) GetStatus(tag string) (map[string]interface{}, error) {
 	if tag == "" {
 		return nil, common.NewError("missing endpoint tag")
 	}
-	if cached, ok := masqueStatusCache.get(tag, LastUpdate); ok {
+	version := CurrentDataVersion()
+	if cached, ok := masqueStatusCache.get(tag, version); ok {
 		if status, ok := cached.(map[string]interface{}); ok {
 			return status, nil
 		}
@@ -262,7 +263,7 @@ func (s *MasqueService) GetStatus(tag string) (map[string]interface{}, error) {
 	}
 	status["diagnostics"] = buildMasqueDiagnostics(config, runtime, certSnapshot, certErr, startError)
 
-	masqueStatusCache.set(tag, LastUpdate, masqueStatusCacheTTL, status)
+	masqueStatusCache.set(tag, version, masqueStatusCacheTTL, status)
 	return status, nil
 }
 

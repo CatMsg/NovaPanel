@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"sync"
 	"time"
 
 	"github.com/CatMsg/NovaPanel/logger"
@@ -18,7 +19,8 @@ type TokenInMemory struct {
 
 type APIv2Handler struct {
 	ApiService
-	tokens *[]TokenInMemory
+	tokensMu sync.Mutex
+	tokens   []TokenInMemory
 }
 
 func NewAPIv2Handler(g *gin.RouterGroup) *APIv2Handler {
@@ -125,14 +127,18 @@ func (a *APIv2Handler) getHandler(c *gin.Context) {
 
 func (a *APIv2Handler) findUsername(c *gin.Context) string {
 	token := c.Request.Header.Get("Token")
-	for index, t := range *a.tokens {
+	a.tokensMu.Lock()
+	defer a.tokensMu.Unlock()
+	for index := 0; index < len(a.tokens); {
+		t := a.tokens[index]
 		if t.Expiry > 0 && t.Expiry < time.Now().Unix() {
-			(*a.tokens) = append((*a.tokens)[:index], (*a.tokens)[index+1:]...)
+			a.tokens = append(a.tokens[:index], a.tokens[index+1:]...)
 			continue
 		}
 		if t.Token == token {
 			return t.Username
 		}
+		index++
 	}
 	return ""
 }
@@ -154,8 +160,11 @@ func (a *APIv2Handler) ReloadTokens() {
 		err = json.Unmarshal(tokens, &newTokens)
 		if err != nil {
 			logger.Error("unable to load tokens: ", err)
+			return
 		}
-		a.tokens = &newTokens
+		a.tokensMu.Lock()
+		a.tokens = newTokens
+		a.tokensMu.Unlock()
 	} else {
 		logger.Error("unable to load tokens: ", err)
 	}

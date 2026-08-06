@@ -2,11 +2,7 @@ package cmd
 
 import (
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/CatMsg/NovaPanel/config"
 	"github.com/CatMsg/NovaPanel/database"
@@ -237,51 +233,7 @@ func showSetting() {
 }
 
 func getPublicIP() string {
-	apis := []string{
-		"https://api64.ipify.org",
-		"https://ip.sb",
-		"https://icanhazip.com",
-		"https://ipinfo.io/ip",
-		"https://checkip.amazonaws.com",
-	}
-	type result struct {
-		ip  string
-		err error
-	}
-	ch := make(chan result, len(apis))
-	var wg sync.WaitGroup
-	client := &http.Client{Timeout: 3 * time.Second}
-
-	for _, api := range apis {
-		wg.Add(1)
-		go func(url string) {
-			defer wg.Done()
-			resp, err := client.Get(url)
-			if err != nil {
-				ch <- result{"", err}
-				return
-			}
-			defer resp.Body.Close()
-			body, err := io.ReadAll(resp.Body)
-			if err != nil {
-				ch <- result{"", err}
-				return
-			}
-			ch <- result{string(body), nil}
-		}(api)
-	}
-
-	go func() {
-		wg.Wait()
-		close(ch)
-	}()
-
-	for res := range ch {
-		if res.err == nil && res.ip != "" {
-			return strings.TrimSpace(res.ip)
-		}
-	}
-	return ""
+	return (&service.ServerService{}).GetPublicIP()
 }
 
 func getPanelURI() {
@@ -322,13 +274,13 @@ func getPanelURI() {
 	fmt.Println("Local address:")
 	netInterfaces, _ := net.Interfaces()
 	for i := 0; i < len(netInterfaces); i++ {
-		if len(netInterfaces[i].Flags) > 2 && netInterfaces[i].Flags[0] == "up" && netInterfaces[i].Flags[1] != "loopback" {
+		if interfaceIsUp(netInterfaces[i].Flags) {
 			addrs := netInterfaces[i].Addrs
 			for _, address := range addrs {
 				IP := strings.Split(address.Addr, "/")[0]
 				if strings.Contains(address.Addr, ".") {
 					fmt.Println(Proto + IP + PortText + BasePath)
-				} else if address.Addr[0:6] != "fe80::" {
+				} else if !strings.HasPrefix(address.Addr, "fe80::") {
 					fmt.Println(Proto + "[" + IP + "]" + PortText + BasePath)
 				}
 			}
@@ -338,4 +290,16 @@ func getPanelURI() {
 	if pubIP != "" {
 		fmt.Printf("\nGlobal address:\n%s%s%s\n", Proto, pubIP, PortText+BasePath)
 	}
+}
+
+func interfaceIsUp(flags []string) bool {
+	up, loopback := false, false
+	for _, flag := range flags {
+		if flag == "up" {
+			up = true
+		} else if flag == "loopback" {
+			loopback = true
+		}
+	}
+	return up && !loopback
 }

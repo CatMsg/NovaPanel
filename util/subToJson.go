@@ -12,6 +12,16 @@ import (
 	"github.com/CatMsg/NovaPanel/util/common"
 )
 
+const maxExternalSubscriptionSize = 16 << 20
+
+var externalSubscriptionTransport = func() *http.Transport {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// Upstream subscription aggregation intentionally tolerates private and
+	// mismatched certificates configured by the panel owner.
+	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	return transport
+}()
+
 func GetExternalLink(url string) string {
 	data, _ := GetExternalLinkWithHeadersTimeout(url, 15*time.Second)
 	return data
@@ -22,11 +32,7 @@ func GetExternalLinkWithHeaders(url string) (string, http.Header) {
 }
 
 func GetExternalLinkWithHeadersTimeout(url string, timeout time.Duration) (string, http.Header) {
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-
-	client := &http.Client{Transport: tr, Timeout: timeout}
+	client := &http.Client{Transport: externalSubscriptionTransport, Timeout: timeout}
 
 	response, err := client.Get(url)
 	if err != nil {
@@ -34,11 +40,19 @@ func GetExternalLinkWithHeadersTimeout(url string, timeout time.Duration) (strin
 		return "", nil
 	}
 	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		logger.Warning("sub: Upstream returned HTTP status:", response.StatusCode)
+		return "", response.Header.Clone()
+	}
 
-	body, err := io.ReadAll(response.Body)
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxExternalSubscriptionSize+1))
 	if err != nil {
 		logger.Warning("sub: Error reading response body:", err)
 		return "", nil
+	}
+	if len(body) > maxExternalSubscriptionSize {
+		logger.Warning("sub: Upstream response exceeds 16 MiB limit")
+		return "", response.Header.Clone()
 	}
 
 	data := StrOrBase64Encoded(string(body))

@@ -128,7 +128,16 @@ export default {
       usage: ref(<any>{}),
     }
   },
+  beforeUnmount() {
+    this.stopPolling()
+  },
   methods: {
+    stopPolling() {
+      if (this.intervalId) {
+        clearInterval(this.intervalId)
+        this.intervalId = 0
+      }
+    },
     async loadData() {
       this.loading = true
       const data = await HttpUtils.get('api/stats', { resource: this.resource, tag: this.tag, limit: this.limit })
@@ -149,9 +158,9 @@ export default {
           let upSum:number
           let downSum:number
           const upTraffics = obj.filter(o => o.direction && o.dateTime*1000 < steps[i] && o.dateTime*1000 > steps[i-1]).map((o:any) => o.traffic)
-          upSum = upTraffics.length>0 ? upTraffics.reduce(u => u) : null
+          upSum = upTraffics.length > 0 ? upTraffics.reduce((sum, traffic) => sum + traffic, 0) : null
           const downTraffics = obj.filter(o => !o.direction && o.dateTime*1000 < steps[i] && o.dateTime*1000 > steps[i-1]).map((o:any) => o.traffic)
-          downSum = downTraffics.length>0 ? downTraffics.reduce(d => d) : null
+          downSum = downTraffics.length > 0 ? downTraffics.reduce((sum, traffic) => sum + traffic, 0) : null
           uplinkData.push(upSum)
           downlinkData.push(downSum)
         }
@@ -197,6 +206,7 @@ export default {
       if (v) {
         this.limit = 1
         this.loadData()
+        this.stopPolling()
         this.intervalId = setInterval(() => {
           this.loadData()
         }, 10000)
@@ -208,9 +218,7 @@ export default {
           this.usage.datasets[0].data = []
           this.usage.datasets[1].data = []
         }
-        if (this.intervalId && this.intervalId != 0) {
-          clearInterval(this.intervalId)
-        }
+        this.stopPolling()
       }
     }
   }

@@ -29,7 +29,7 @@ func getCachedSubResult(key string) (*string, []string, bool) {
 
 func getCachedSubResultWithExpiry(key string, enforceTTL bool) (*string, []string, bool) {
 	now := time.Now()
-	version := service.LastUpdate
+	version := service.CurrentDataVersion()
 
 	subResultCache.mu.RLock()
 	entry, ok := subResultCache.entries[key]
@@ -47,7 +47,7 @@ func storeCachedSubResult(key string, body string, headers []string) {
 	subResultCache.mu.Lock()
 	subResultCache.entries[key] = cachedResult{
 		expiresAt: time.Now().Add(subCacheTTL),
-		version:   service.LastUpdate,
+		version:   service.CurrentDataVersion(),
 		body:      body,
 		headers:   append([]string(nil), headers...),
 	}

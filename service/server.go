@@ -104,7 +104,7 @@ func (s *ServerService) GetPublicIP() string {
 				ch <- result{"", errors.New("public IP service returned an unsuccessful status")}
 				return
 			}
-			body, err := io.ReadAll(resp.Body)
+			body, err := io.ReadAll(io.LimitReader(resp.Body, 128))
 			if err != nil {
 				ch <- result{"", err}
 				return
@@ -260,7 +260,7 @@ func (s *ServerService) GetSystemInfo() map[string]interface{} {
 	// get ip address
 	netInterfaces, _ := net.Interfaces()
 	for i := 0; i < len(netInterfaces); i++ {
-		if len(netInterfaces[i].Flags) > 2 && netInterfaces[i].Flags[0] == "up" && netInterfaces[i].Flags[1] != "loopback" {
+		if interfaceIsUp(netInterfaces[i].Flags) {
 			addrs := netInterfaces[i].Addrs
 
 			for _, address := range addrs {
@@ -277,6 +277,19 @@ func (s *ServerService) GetSystemInfo() map[string]interface{} {
 	info["bootTime"], _ = host.BootTime()
 
 	return info
+}
+
+func interfaceIsUp(flags []string) bool {
+	up, loopback := false, false
+	for _, flag := range flags {
+		switch flag {
+		case "up":
+			up = true
+		case "loopback":
+			loopback = true
+		}
+	}
+	return up && !loopback
 }
 
 func (s *ServerService) GetLogs(count string, level string) []string {

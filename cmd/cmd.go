@@ -100,7 +100,9 @@ func ParseCmd() {
 		getPanelURI()
 
 	case "migrate":
-		migration.MigrateDb()
+		if err := migration.MigrateDb(); err != nil {
+			fmt.Println("Database migration failed:", err)
+		}
 
 	case "setting":
 		err := settingCmd.Parse(os.Args[2:])

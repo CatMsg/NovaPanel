@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/CatMsg/NovaPanel/core"
@@ -16,13 +17,33 @@ import (
 )
 
 var (
-	LastUpdate        int64
+	lastUpdate        atomic.Int64
 	corePtr           *core.Core
 	startCoreMu       sync.Mutex
 	lastStartFailTime time.Time
 	startCooldown     = 15 * time.Second
 	saveConfigMu      sync.Mutex
 )
+
+func CurrentDataVersion() int64 {
+	now := time.Now().UnixMilli()
+	lastUpdate.CompareAndSwap(0, now)
+	return lastUpdate.Load()
+}
+
+func markDataUpdated() {
+	timestamp := time.Now().UnixMilli()
+	for {
+		current := lastUpdate.Load()
+		next := timestamp
+		if next <= current {
+			next = current + 1
+		}
+		if lastUpdate.CompareAndSwap(current, next) {
+			return
+		}
+	}
+}
 
 type ConfigService struct {
 	ClientService
@@ -314,7 +335,7 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 		return nil, false, common.NewErrorf("保存失败，配置已自动回滚: %v", err)
 	}
 
-	LastUpdate = time.Now().Unix()
+	markDataUpdated()
 
 	return objs, true, nil
 }
@@ -339,21 +360,16 @@ func (s *ConfigService) CheckChanges(lu string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if LastUpdate == 0 {
-		db := database.GetDB()
-		var count int64
-		err = db.Model(model.Changes{}).Where("date_time > ?", intLu).Count(&count).Error
-		if err == nil {
-			LastUpdate = time.Now().Unix()
-		}
-		return count > 0, err
-	} else {
-		return LastUpdate > intLu, err
-	}
+	return CurrentDataVersion() > intLu, nil
 }
 
 func (s *ConfigService) GetChanges(actor string, chngKey string, count string) []model.Changes {
 	c, _ := strconv.Atoi(count)
+	if c < 1 {
+		c = 100
+	} else if c > 1000 {
+		c = 1000
+	}
 	db := database.GetDB()
 	var chngs []model.Changes
 	query := db.Model(model.Changes{})

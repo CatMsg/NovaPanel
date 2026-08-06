@@ -126,6 +126,7 @@ func (s *Server) Start() (err error) {
 		Handler:           engine,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	go func() {

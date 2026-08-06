@@ -162,9 +162,12 @@ func (s *SubHandler) subHeaders(c *gin.Context) {
 }
 
 func (s *SubHandler) addHeaders(c *gin.Context, headers []string) {
-	c.Writer.Header().Set("Subscription-Userinfo", headers[0])
-	c.Writer.Header().Set("Profile-Update-Interval", headers[1])
-	c.Writer.Header().Set("Profile-Title", headers[2])
+	keys := []string{"Subscription-Userinfo", "Profile-Update-Interval", "Profile-Title"}
+	for index, key := range keys {
+		if index < len(headers) && strings.TrimSpace(headers[index]) != "" {
+			c.Writer.Header().Set(key, headers[index])
+		}
+	}
 }
 
 func requestHost(c *gin.Context) string {

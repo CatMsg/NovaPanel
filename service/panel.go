@@ -19,13 +19,14 @@ func (s *PanelService) RestartPanel(delay time.Duration) error {
 	}
 	go func() {
 		time.Sleep(delay)
+		var signalErr error
 		if runtime.GOOS == "windows" {
-			err = p.Kill()
+			signalErr = p.Kill()
 		} else {
-			err = p.Signal(syscall.SIGHUP)
+			signalErr = p.Signal(syscall.SIGHUP)
 		}
-		if err != nil {
-			logger.Error("send signal SIGHUP failed:", err)
+		if signalErr != nil {
+			logger.Error("send signal SIGHUP failed:", signalErr)
 		}
 	}()
 	return nil

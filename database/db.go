@@ -84,11 +84,15 @@ func InitDB(dbPath string) error {
 
 	// Default Outbounds
 	if !db.Migrator().HasTable(&model.Outbound{}) {
-		db.Migrator().CreateTable(&model.Outbound{})
+		if err := db.Migrator().CreateTable(&model.Outbound{}); err != nil {
+			return err
+		}
 		defaultOutbound := []model.Outbound{
 			{Type: "direct", Tag: "direct", Options: json.RawMessage(`{}`)},
 		}
-		db.Create(&defaultOutbound)
+		if err := db.Create(&defaultOutbound).Error; err != nil {
+			return err
+		}
 	}
 
 	err = db.AutoMigrate(
@@ -151,7 +155,7 @@ func GetDB() *gorm.DB {
 }
 
 func IsNotFound(err error) bool {
-	return err == gorm.ErrRecordNotFound
+	return errors.Is(err, gorm.ErrRecordNotFound)
 }
 
 func IsLockedError(err error) bool {

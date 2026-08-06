@@ -457,13 +457,14 @@ func (s *ClientService) DepleteClients() ([]uint, error) {
 	var changes []model.Changes
 	var users []string
 	var inboundIds []uint
+	var resetChanged bool
 
 	dt := time.Now().Unix()
 	err := retryWriteTx(func(tx *gorm.DB) error {
 		var err error
 
 		// Reset clients
-		inboundIds, err = s.ResetClients(tx, dt)
+		inboundIds, resetChanged, err = s.ResetClients(tx, dt)
 		if err != nil {
 			return err
 		}
@@ -500,13 +501,15 @@ func (s *ClientService) DepleteClients() ([]uint, error) {
 			if err != nil {
 				return err
 			}
-			LastUpdate = dt
 		}
 
 		return nil
 	})
 	if err != nil {
 		return nil, err
+	}
+	if resetChanged || len(changes) > 0 {
+		markDataUpdated()
 	}
 
 	if err := retryWrite(func(db *gorm.DB) error {
@@ -518,7 +521,7 @@ func (s *ClientService) DepleteClients() ([]uint, error) {
 	return inboundIds, nil
 }
 
-func (s *ClientService) ResetClients(tx *gorm.DB, dt int64) ([]uint, error) {
+func (s *ClientService) ResetClients(tx *gorm.DB, dt int64) ([]uint, bool, error) {
 	var err error
 	var resetClients, allClients []*model.Client
 	var changes []model.Changes
@@ -527,7 +530,7 @@ func (s *ClientService) ResetClients(tx *gorm.DB, dt int64) ([]uint, error) {
 	err = tx.Model(model.Client{}).
 		Where("enable = true AND delay_start = true AND auto_reset = false AND (Up + Down) > 0").Find(&resetClients).Error
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	for _, client := range resetClients {
 		client.Expiry = dt + (int64(client.ResetDays) * 86400)
@@ -546,7 +549,7 @@ func (s *ClientService) ResetClients(tx *gorm.DB, dt int64) ([]uint, error) {
 	err = tx.Model(model.Client{}).
 		Where("enable = true AND delay_start = true AND auto_reset = true AND (Up + Down) > 0").Find(&resetClients).Error
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	for _, client := range resetClients {
 		client.NextReset = dt + (int64(client.ResetDays) * 86400)
@@ -565,7 +568,7 @@ func (s *ClientService) ResetClients(tx *gorm.DB, dt int64) ([]uint, error) {
 	err = tx.Model(model.Client{}).
 		Where("delay_start = false AND auto_reset = true AND next_reset < ?", dt).Find(&resetClients).Error
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	for _, client := range resetClients {
 		client.NextReset = dt + (int64(client.ResetDays) * 86400)
@@ -577,7 +580,7 @@ func (s *ClientService) ResetClients(tx *gorm.DB, dt int64) ([]uint, error) {
 			client.Enable = true
 			clientInboundIds, err := decodeClientInboundIDs(client.Inbounds)
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
 			inboundIds = common.UnionUintArray(inboundIds, clientInboundIds)
 		}
@@ -588,7 +591,7 @@ func (s *ClientService) ResetClients(tx *gorm.DB, dt int64) ([]uint, error) {
 	if len(allClients) > 0 {
 		err = tx.Save(allClients).Error
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
 
@@ -596,11 +599,10 @@ func (s *ClientService) ResetClients(tx *gorm.DB, dt int64) ([]uint, error) {
 	if len(changes) > 0 {
 		err = tx.Model(model.Changes{}).Create(&changes).Error
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		LastUpdate = dt
 	}
-	return inboundIds, nil
+	return inboundIds, len(allClients) > 0 || len(changes) > 0, nil
 }
 
 func (s *ClientService) findInboundsChanges(tx *gorm.DB, client *model.Client, fillOmitted bool) ([]uint, error) {

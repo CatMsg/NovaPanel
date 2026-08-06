@@ -62,7 +62,8 @@ func (s *LinkService) addClientInfo(uri string, clientInfo string) string {
 			logger.Warning("sub: Error decoding vmess content:", err)
 			return uri
 		}
-		vmessJson["ps"] = vmessJson["ps"].(string) + clientInfo
+		remark, _ := vmessJson["ps"].(string)
+		vmessJson["ps"] = remark + clientInfo
 		result, err := json.MarshalIndent(vmessJson, "", "  ")
 		if err != nil {
 			logger.Warning("sub: Error decoding vmess + clientInfo content:", err)

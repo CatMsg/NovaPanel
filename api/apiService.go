@@ -66,6 +66,7 @@ func (a *ApiService) getData(c *gin.Context) (interface{}, error) {
 		cacheKey := "load:" + getHostname(c)
 		if cached, ok := getCachedLoadData(cacheKey); ok {
 			cached["onlines"] = onlines
+			cached["lastUpdate"] = service.CurrentDataVersion()
 			if _, ok := data["lastLog"]; ok {
 				cached["lastLog"] = data["lastLog"]
 			}
@@ -132,6 +133,7 @@ func (a *ApiService) getData(c *gin.Context) (interface{}, error) {
 	} else {
 		data["onlines"] = onlines
 	}
+	data["lastUpdate"] = service.CurrentDataVersion()
 
 	return data, nil
 }
@@ -219,8 +221,10 @@ func (a *ApiService) GetStats(c *gin.Context) {
 	resource := c.Query("resource")
 	tag := c.Query("tag")
 	limit, err := strconv.Atoi(c.Query("limit"))
-	if err != nil {
+	if err != nil || limit < 1 {
 		limit = 100
+	} else if limit > 8760 {
+		limit = 8760
 	}
 	data, err := a.StatsService.GetStats(resource, tag, limit)
 	if err != nil {

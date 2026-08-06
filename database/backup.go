@@ -3,6 +3,7 @@ package database
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -23,6 +24,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const maxDatabaseBackupSize int64 = 1 << 30
+
 func GetDb(exclude string) ([]byte, error) {
 	exclude_changes, exclude_stats := false, false
 	for _, table := range strings.Split(exclude, ",") {
@@ -37,7 +40,14 @@ func GetDb(exclude string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	dbPath := dir + config.GetName() + "_" + time.Now().Format("20060102-200203") + ".db"
+	tempFile, err := os.CreateTemp(dir, "."+config.GetName()+"-backup-*.db")
+	if err != nil {
+		return nil, err
+	}
+	dbPath := tempFile.Name()
+	if err := tempFile.Close(); err != nil {
+		return nil, err
+	}
 
 	backupDb, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
 	if err != nil {
@@ -175,8 +185,13 @@ func GetDb(exclude string) ([]byte, error) {
 		return nil, err
 	}
 
-	bdb, _ := backupDb.DB()
-	bdb.Close()
+	bdb, err := backupDb.DB()
+	if err != nil {
+		return nil, err
+	}
+	if err := bdb.Close(); err != nil {
+		return nil, err
+	}
 
 	// Open the file for reading
 	file, err := os.Open(dbPath)
@@ -231,9 +246,12 @@ func ImportDB(file multipart.File) error {
 	defer os.Remove(tempPath)
 
 	// Save uploaded file to temporary file
-	_, err = io.Copy(tempFile, file)
+	written, err := io.Copy(tempFile, io.LimitReader(file, maxDatabaseBackupSize+1))
 	if err != nil {
 		return common.NewErrorf("Error saving db: %v", err)
+	}
+	if written > maxDatabaseBackupSize {
+		return common.NewError("Database backup exceeds 1 GiB limit")
 	}
 	if err := tempFile.Sync(); err != nil {
 		return common.NewErrorf("Error syncing temporary db: %v", err)
@@ -254,7 +272,10 @@ func ImportDB(file multipart.File) error {
 	newDb_db, _ := newDb.DB()
 	newDb_db.Close()
 
-	// Close the live DB only after the replacement has passed all validation.
+	// Flush and close the live DB only after the replacement has passed all validation.
+	if err := db.Exec("PRAGMA wal_checkpoint(TRUNCATE)").Error; err != nil {
+		return common.NewErrorf("Error checkpointing current db: %v", err)
+	}
 	oldDB, oldDBErr := db.DB()
 	if oldDBErr != nil {
 		return common.NewErrorf("Error opening current db: %v", oldDBErr)
@@ -262,6 +283,7 @@ func ImportDB(file multipart.File) error {
 	if err := oldDB.Close(); err != nil {
 		return common.NewErrorf("Error closing current db: %v", err)
 	}
+	removeSQLiteSidecars(config.GetDBPath())
 
 	// Backup the current database for fallback
 	fallbackPath := fmt.Sprintf("%s.backup", config.GetDBPath())
@@ -270,34 +292,34 @@ func ImportDB(file multipart.File) error {
 	if err == nil {
 		errRemove := os.Remove(fallbackPath)
 		if errRemove != nil {
-			return common.NewErrorf("Error removing existing fallback db file: %v", errRemove)
+			reopenErr := InitDB(config.GetDBPath())
+			return errors.Join(common.NewErrorf("Error removing existing fallback db file: %v", errRemove), reopenErr)
 		}
 	}
+	removeSQLiteSidecars(fallbackPath)
 	// Move the current database to the fallback location
 	err = os.Rename(config.GetDBPath(), fallbackPath)
 	if err != nil {
-		return common.NewErrorf("Error backing up temporary db file: %v", err)
+		reopenErr := InitDB(config.GetDBPath())
+		return errors.Join(common.NewErrorf("Error backing up current db file: %v", err), reopenErr)
 	}
 
 	// Move temp to DB path
 	err = os.Rename(tempPath, config.GetDBPath())
 	if err != nil {
-		errRename := os.Rename(fallbackPath, config.GetDBPath())
-		if errRename != nil {
-			return common.NewErrorf("Error moving db file and restoring fallback: %v", errRename)
-		}
-		return common.NewErrorf("Error moving db file: %v", err)
+		restoreErr := restoreFallbackDatabase(config.GetDBPath(), fallbackPath)
+		return errors.Join(common.NewErrorf("Error moving db file: %v", err), restoreErr)
 	}
 
 	// Migrate DB
-	migration.MigrateDb()
+	if err := migration.MigrateDb(); err != nil {
+		restoreErr := restoreFallbackDatabase(config.GetDBPath(), fallbackPath)
+		return errors.Join(common.NewErrorf("Error migrating db: %v", err), restoreErr)
+	}
 	err = InitDB(config.GetDBPath())
 	if err != nil {
-		errRename := os.Rename(fallbackPath, config.GetDBPath())
-		if errRename != nil {
-			return common.NewErrorf("Error migrating db and restoring fallback: %v", errRename)
-		}
-		return common.NewErrorf("Error migrating db: %v", err)
+		restoreErr := restoreFallbackDatabase(config.GetDBPath(), fallbackPath)
+		return errors.Join(common.NewErrorf("Error opening restored db: %v", err), restoreErr)
 	}
 
 	if err := cleanupRestoredInboundConflicts(); err != nil {
@@ -314,6 +336,33 @@ func ImportDB(file multipart.File) error {
 		return common.NewErrorf("Error restarting app: %v", err)
 	}
 
+	return nil
+}
+
+func removeSQLiteSidecars(path string) {
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if err := os.Remove(path + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
+			logger.Warning("remove sqlite sidecar failed:", err)
+		}
+	}
+}
+
+func restoreFallbackDatabase(dbPath, fallbackPath string) error {
+	if db != nil {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	}
+	if err := os.Remove(dbPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return common.NewErrorf("Error removing failed restored db: %v", err)
+	}
+	removeSQLiteSidecars(dbPath)
+	if err := os.Rename(fallbackPath, dbPath); err != nil {
+		return common.NewErrorf("Error restoring fallback db: %v", err)
+	}
+	if err := InitDB(dbPath); err != nil {
+		return common.NewErrorf("Error reopening fallback db: %v", err)
+	}
 	return nil
 }
 
@@ -423,9 +472,14 @@ func ValidateDB(file multipart.File) (map[string]interface{}, error) {
 	}
 	tempPath := tempFile.Name()
 	defer os.Remove(tempPath)
-	if _, err := io.Copy(tempFile, file); err != nil {
+	written, err := io.Copy(tempFile, io.LimitReader(file, maxDatabaseBackupSize+1))
+	if err != nil {
 		_ = tempFile.Close()
 		return nil, err
+	}
+	if written > maxDatabaseBackupSize {
+		_ = tempFile.Close()
+		return nil, common.NewError("Database backup exceeds 1 GiB limit")
 	}
 	if err := tempFile.Sync(); err != nil {
 		_ = tempFile.Close()
@@ -485,13 +539,14 @@ func SendSighup() error {
 	// Send SIGHUP to the current process
 	go func() {
 		time.Sleep(3 * time.Second)
+		var signalErr error
 		if runtime.GOOS == "windows" {
-			err = process.Kill()
+			signalErr = process.Kill()
 		} else {
-			err = process.Signal(syscall.SIGHUP)
+			signalErr = process.Signal(syscall.SIGHUP)
 		}
-		if err != nil {
-			logger.Error("send signal SIGHUP failed:", err)
+		if signalErr != nil {
+			logger.Error("send signal SIGHUP failed:", signalErr)
 		}
 	}()
 	return nil

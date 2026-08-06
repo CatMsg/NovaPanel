@@ -8,7 +8,10 @@ import (
 	"github.com/CatMsg/NovaPanel/service"
 )
 
-const loadDataCacheTTL = 3 * time.Second
+const (
+	loadDataCacheTTL        = 3 * time.Second
+	loadDataCacheMaxEntries = 64
+)
 
 type apiCacheEntry struct {
 	expiresAt time.Time
@@ -25,12 +28,20 @@ var loadDataCache = struct {
 
 func getCachedLoadData(key string) (map[string]interface{}, bool) {
 	now := time.Now()
-	version := service.LastUpdate
+	version := service.CurrentDataVersion()
 
 	loadDataCache.mu.RLock()
 	entry, ok := loadDataCache.entries[key]
 	loadDataCache.mu.RUnlock()
 	if !ok || entry.version != version || now.After(entry.expiresAt) {
+		if ok {
+			loadDataCache.mu.Lock()
+			if current, exists := loadDataCache.entries[key]; exists &&
+				(current.version != version || now.After(current.expiresAt)) {
+				delete(loadDataCache.entries, key)
+			}
+			loadDataCache.mu.Unlock()
+		}
 		return nil, false
 	}
 
@@ -48,11 +59,33 @@ func storeCachedLoadData(key string, value map[string]interface{}) error {
 	}
 
 	loadDataCache.mu.Lock()
+	pruneLoadDataCache(time.Now())
 	loadDataCache.entries[key] = apiCacheEntry{
 		expiresAt: time.Now().Add(loadDataCacheTTL),
-		version:   service.LastUpdate,
+		version:   service.CurrentDataVersion(),
 		payload:   payload,
 	}
 	loadDataCache.mu.Unlock()
 	return nil
+}
+
+// pruneLoadDataCache removes expired entries and bounds the cache even when a
+// reverse proxy forwards arbitrary Host headers. The caller must hold the lock.
+func pruneLoadDataCache(now time.Time) {
+	for key, entry := range loadDataCache.entries {
+		if now.After(entry.expiresAt) {
+			delete(loadDataCache.entries, key)
+		}
+	}
+	for len(loadDataCache.entries) >= loadDataCacheMaxEntries {
+		var oldestKey string
+		var oldestExpiry time.Time
+		for key, entry := range loadDataCache.entries {
+			if oldestKey == "" || entry.expiresAt.Before(oldestExpiry) {
+				oldestKey = key
+				oldestExpiry = entry.expiresAt
+			}
+		}
+		delete(loadDataCache.entries, oldestKey)
+	}
 }

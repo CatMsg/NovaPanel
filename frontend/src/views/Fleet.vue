@@ -329,7 +329,7 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import HttpUtils from '@/plugins/httputil'
 
 type FleetServer = {
@@ -412,6 +412,15 @@ const batchMessageType = ref<'info' | 'success' | 'warning' | 'error'>('info')
 const updateLoadingId = ref('')
 const refreshLoadingId = ref('')
 const updateStates = ref<Record<string, any>>({})
+const pendingTimers = new Set<number>()
+
+const schedule = (callback: () => void, delay: number) => {
+  const timer = window.setTimeout(() => {
+    pendingTimers.delete(timer)
+    callback()
+  }, delay)
+  pendingTimers.add(timer)
+}
 
 const normalizeServer = (server: any): FleetServer => ({
   ...server,
@@ -606,7 +615,7 @@ const runBatchAction = async (action: 'update' | 'restart') => {
     ? `远端服务器已优先${action === 'update' ? '提交更新' : '完成重启'}，本机已最后执行`
     : `远端服务器已${action === 'update' ? '提交更新' : '完成重启'}`
   if (localTarget) {
-    window.setTimeout(loadFleet, 4500)
+    schedule(loadFleet, 4500)
   }
 }
 
@@ -615,7 +624,7 @@ const restartServer = async (server: FleetServer) => {
   const response = await HttpUtils.post('api/fleetAction', { id: server.id, action: 'restart' })
   if (response.success) {
     showDetails.value = false
-    window.setTimeout(loadFleet, 4500)
+    schedule(loadFleet, 4500)
   }
   actionLoading.value = false
 }
@@ -625,8 +634,8 @@ const updateServer = async (server: FleetServer) => {
   const response = await HttpUtils.post('api/fleetAction', { id: server.id, action: 'update' })
   if (response.success) {
     updateStates.value = { ...updateStates.value, [server.id]: response.obj ?? { state: 'queued' } }
-    window.setTimeout(() => loadUpdateStatus(server), 1500)
-    window.setTimeout(loadFleet, 4500)
+    schedule(() => loadUpdateStatus(server), 1500)
+    schedule(loadFleet, 4500)
   }
   updateLoadingId.value = ''
 }
@@ -650,6 +659,10 @@ const statusClass = (server: FleetServer) => {
 }
 
 onMounted(loadFleet)
+onBeforeUnmount(() => {
+  pendingTimers.forEach(timer => window.clearTimeout(timer))
+  pendingTimers.clear()
+})
 </script>
 
 <style scoped lang="scss">

@@ -60,7 +60,9 @@
         </v-row>
         <v-alert v-if="!loading && filteredLines.length === 0" type="warning" variant="outlined" :text="$t('noData')" />
         <v-sheet v-else class="log-dialog__viewer" rounded="lg" dir="ltr">
-          <div class="log-dialog__content" v-html="filteredLines.join('<br />')"></div>
+          <div class="log-dialog__content">
+            <span v-for="(line, index) in filteredLines" :key="index" class="log-dialog__line">{{ line }}</span>
+          </div>
         </v-sheet>
       </v-card-text>
     </v-card>
@@ -175,6 +177,11 @@ export default {
   line-height: 1.6;
   word-break: break-word;
   white-space: normal;
+}
+
+.log-dialog__line {
+  display: block;
+  min-height: 1.6em;
 }
 
 @media (max-width: 600px) {
