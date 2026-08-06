@@ -26,7 +26,7 @@ import (
 
 const maxDatabaseBackupSize int64 = 1 << 30
 
-func GetDb(exclude string) ([]byte, error) {
+func CreateDBBackup(exclude string) (string, func(), error) {
 	exclude_changes, exclude_stats := false, false
 	for _, table := range strings.Split(exclude, ",") {
 		if table == "changes" {
@@ -36,177 +36,68 @@ func GetDb(exclude string) ([]byte, error) {
 		}
 	}
 
-	dir, err := filepath.Abs(filepath.Dir(os.Args[0]))
+	tempFile, err := os.CreateTemp("", "."+config.GetName()+"-backup-*.db")
 	if err != nil {
-		return nil, err
-	}
-	tempFile, err := os.CreateTemp(dir, "."+config.GetName()+"-backup-*.db")
-	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	dbPath := tempFile.Name()
 	if err := tempFile.Close(); err != nil {
-		return nil, err
+		_ = os.Remove(dbPath)
+		return "", nil, err
+	}
+	if err := os.Remove(dbPath); err != nil {
+		return "", nil, err
+	}
+	cleanup := func() {
+		_ = os.Remove(dbPath)
+		removeSQLiteSidecars(dbPath)
+	}
+	if err := db.Exec("VACUUM INTO ?", dbPath).Error; err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	if err := os.Chmod(dbPath, 0o600); err != nil {
+		cleanup()
+		return "", nil, err
 	}
 
 	backupDb, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
 	if err != nil {
-		return nil, err
+		cleanup()
+		return "", nil, err
 	}
-	defer os.Remove(dbPath)
-
-	err = backupDb.AutoMigrate(
-		&model.Setting{},
-		&model.Tls{},
-		&model.Inbound{},
-		&model.Outbound{},
-		&model.Endpoint{},
-		&model.ManagedPortEntry{},
-		&model.Service{},
-		&model.User{},
-		&model.Tokens{},
-		&model.Stats{},
-		&model.Client{},
-		&model.Changes{},
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	var settings []model.Setting
-	var tls []model.Tls
-	var inbound []model.Inbound
-	var outbound []model.Outbound
-	var endpoint []model.Endpoint
-	var managedPorts []model.ManagedPortEntry
-	var services []model.Service
-	var users []model.User
-	var tokens []model.Tokens
-	var clients []model.Client
-	var stats []model.Stats
-	var changes []model.Changes
-
-	// Perform scans and handle errors
-	if err := db.Model(&model.Setting{}).Scan(&settings).Error; err != nil {
-		return nil, err
-	} else if len(settings) > 0 {
-		if err := backupDb.Save(settings).Error; err != nil {
-			return nil, err
-		}
-	}
-	if err := db.Model(&model.Tls{}).Scan(&tls).Error; err != nil {
-		return nil, err
-	} else if len(tls) > 0 {
-		if err := backupDb.Save(tls).Error; err != nil {
-			return nil, err
-		}
-	}
-	if err := db.Model(&model.Inbound{}).Scan(&inbound).Error; err != nil {
-		return nil, err
-	} else if len(inbound) > 0 {
-		if err := backupDb.Save(inbound).Error; err != nil {
-			return nil, err
-		}
-	}
-	if err := db.Model(&model.Outbound{}).Scan(&outbound).Error; err != nil {
-		return nil, err
-	} else if len(outbound) > 0 {
-		if err := backupDb.Save(outbound).Error; err != nil {
-			return nil, err
-		}
-	}
-	if err := db.Model(&model.Endpoint{}).Scan(&endpoint).Error; err != nil {
-		return nil, err
-	} else if len(endpoint) > 0 {
-		if err := backupDb.Save(endpoint).Error; err != nil {
-			return nil, err
-		}
-	}
-	if err := db.Model(&model.ManagedPortEntry{}).Scan(&managedPorts).Error; err != nil {
-		return nil, err
-	} else if len(managedPorts) > 0 {
-		if err := backupDb.Save(managedPorts).Error; err != nil {
-			return nil, err
-		}
-	}
-	if err := db.Model(&model.Service{}).Scan(&services).Error; err != nil {
-		return nil, err
-	} else if len(services) > 0 {
-		if err := backupDb.Save(services).Error; err != nil {
-			return nil, err
-		}
-	}
-	if err := db.Model(&model.User{}).Scan(&users).Error; err != nil {
-		return nil, err
-	} else if len(users) > 0 {
-		if err := backupDb.Save(users).Error; err != nil {
-			return nil, err
-		}
-	}
-	if err := db.Model(&model.Tokens{}).Scan(&tokens).Error; err != nil {
-		return nil, err
-	} else if len(tokens) > 0 {
-		if err := backupDb.Save(tokens).Error; err != nil {
-			return nil, err
-		}
-	}
-	if err := db.Model(&model.Client{}).Scan(&clients).Error; err != nil {
-		return nil, err
-	} else if len(clients) > 0 {
-		if err := backupDb.Save(clients).Error; err != nil {
-			return nil, err
-		}
-	}
-
-	if !exclude_stats {
-		if err := db.Model(&model.Stats{}).Scan(&stats).Error; err != nil {
-			return nil, err
-		}
-		if len(stats) > 0 {
-			if err := backupDb.Save(stats).Error; err != nil {
-				return nil, err
-			}
-		}
-	}
-	if !exclude_changes {
-		if err := db.Model(&model.Changes{}).Scan(&changes).Error; err != nil {
-			return nil, err
-		}
-		if len(changes) > 0 {
-			if err := backupDb.Save(changes).Error; err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	// Update WAL
-	err = backupDb.Exec("PRAGMA wal_checkpoint;").Error
-	if err != nil {
-		return nil, err
-	}
-
 	bdb, err := backupDb.DB()
 	if err != nil {
-		return nil, err
+		cleanup()
+		return "", nil, err
+	}
+	closeAndCleanup := func() {
+		_ = bdb.Close()
+		cleanup()
+	}
+	if exclude_stats {
+		if err := backupDb.Exec("DELETE FROM stats").Error; err != nil {
+			closeAndCleanup()
+			return "", nil, err
+		}
+	}
+	if exclude_changes {
+		if err := backupDb.Exec("DELETE FROM changes").Error; err != nil {
+			closeAndCleanup()
+			return "", nil, err
+		}
+	}
+	if exclude_stats || exclude_changes {
+		if err := backupDb.Exec("VACUUM").Error; err != nil {
+			closeAndCleanup()
+			return "", nil, err
+		}
 	}
 	if err := bdb.Close(); err != nil {
-		return nil, err
+		cleanup()
+		return "", nil, err
 	}
-
-	// Open the file for reading
-	file, err := os.Open(dbPath)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	// Read the file contents
-	fileContents, err := io.ReadAll(file)
-	if err != nil {
-		return nil, err
-	}
-
-	return fileContents, nil
+	return dbPath, cleanup, nil
 }
 
 func ImportDB(file multipart.File) error {

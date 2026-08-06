@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -44,6 +45,44 @@ func TestMigrateDBHandlesShortVersionWithoutPanic(t *testing.T) {
 	}
 	if version != config.GetVersion() {
 		t.Fatalf("version = %q, want %q", version, config.GetVersion())
+	}
+}
+
+func TestMoveJSONToDBRejectsMalformedLegacyConfigBeforeDroppingTables(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "config.json"), []byte(`{"outbounds":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldExecutable := os.Args[0]
+	os.Args[0] = filepath.Join(dir, "sui")
+	t.Cleanup(func() { os.Args[0] = oldExecutable })
+	t.Setenv("SUI_BIN_FOLDER", "bin")
+
+	dbPath := filepath.Join(dir, "legacy.db")
+	conn, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.AutoMigrate(&model.Inbound{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Create(&model.Inbound{Type: "direct", Tag: "keep-me", Options: []byte(`{}`)}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := moveJsonToDb(conn); err == nil {
+		t.Fatal("expected malformed legacy config to fail")
+	}
+	var count int64
+	if err := conn.Model(&model.Inbound{}).Where("tag = ?", "keep-me").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("legacy inbound table was modified before validation")
 	}
 }
 

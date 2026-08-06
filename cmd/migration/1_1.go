@@ -28,29 +28,44 @@ func migrateClientSchema(db *gorm.DB) error {
 			pk        int
 		)
 
-		rows.Scan(&cid, &cname, &ctype, &notnull, &dfltValue, &pk)
+		if err := rows.Scan(&cid, &cname, &ctype, &notnull, &dfltValue, &pk); err != nil {
+			return err
+		}
 		if cname == "config" || cname == "inbounds" || cname == "links" {
-			if ctype == "text" {
+			if strings.EqualFold(ctype, "text") {
 				fmt.Printf("Column %s has type TEXT\n", cname)
 				oldData := make([]struct {
 					Id   uint
 					Data string
 				}, 0)
-				db.Model(model.Client{}).Select("id", cname+" as data").Scan(&oldData)
+				if err := db.Model(model.Client{}).Select("id", cname+" as data").Scan(&oldData).Error; err != nil {
+					return err
+				}
 				for _, data := range oldData {
 					var newData []byte
 					switch cname {
 					case "inbounds":
 						inbounds := strings.Split(data.Data, ",")
-						newData, _ = json.MarshalIndent(inbounds, "", "  ")
+						newData, err = json.MarshalIndent(inbounds, "", "  ")
 					case "config":
 						jsonData := map[string]interface{}{}
-						json.Unmarshal([]byte(data.Data), &jsonData)
-						newData, _ = json.MarshalIndent(jsonData, "", "  ")
+						if strings.TrimSpace(data.Data) != "" {
+							err = json.Unmarshal([]byte(data.Data), &jsonData)
+						}
+						if err == nil {
+							newData, err = json.MarshalIndent(jsonData, "", "  ")
+						}
 					case "links":
 						jsonData := make([]interface{}, 0)
-						json.Unmarshal([]byte(data.Data), &jsonData)
-						newData, _ = json.MarshalIndent(jsonData, "", "  ")
+						if strings.TrimSpace(data.Data) != "" {
+							err = json.Unmarshal([]byte(data.Data), &jsonData)
+						}
+						if err == nil {
+							newData, err = json.MarshalIndent(jsonData, "", "  ")
+						}
+					}
+					if err != nil {
+						return fmt.Errorf("convert client %d column %s: %w", data.Id, cname, err)
 					}
 					err = db.Model(model.Client{}).Where("id = ?", data.Id).UpdateColumn(cname, newData).Error
 					if err != nil {
@@ -60,7 +75,7 @@ func migrateClientSchema(db *gorm.DB) error {
 			}
 		}
 	}
-	return nil
+	return rows.Err()
 }
 
 func deleteOldWebSecret(db *gorm.DB) error {

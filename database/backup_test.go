@@ -100,6 +100,46 @@ func TestRestoreFallbackDatabaseReopensLiveConnection(t *testing.T) {
 	}
 }
 
+func TestCreateDBBackupStreamsSnapshotAndAppliesExclusions(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "source.db")
+	if err := InitDB(dbPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := GetDB().Create(&model.Stats{DateTime: 1, Resource: "user", Tag: "alice", Traffic: 10}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := GetDB().Create(&model.Changes{DateTime: 1, Actor: "test", Key: "clients", Action: "add", Obj: []byte(`{}`)}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	backupPath, cleanup, err := CreateDBBackup("stats,changes")
+	if err != nil {
+		t.Fatalf("create backup: %v", err)
+	}
+	defer cleanup()
+	info, err := os.Stat(backupPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("backup permissions = %o, want 600", info.Mode().Perm())
+	}
+
+	backup, err := gorm.Open(sqlite.Open(backupPath), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]interface{}{"stats": &model.Stats{}, "changes": &model.Changes{}} {
+		var count int64
+		if err := backup.Model(value).Count(&count).Error; err != nil {
+			t.Fatalf("count %s: %v", name, err)
+		}
+		if count != 0 {
+			t.Fatalf("backup contains %d %s rows, want 0", count, name)
+		}
+	}
+}
+
 func TestValidateAndSanitizeRestoreDBRejectsInvalidFleetConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "invalid-fleet.db")
 	conn, err := gorm.Open(sqlite.Open(path), &gorm.Config{})

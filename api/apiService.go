@@ -409,14 +409,14 @@ func (a *ApiService) GetKeypairs(c *gin.Context) {
 
 func (a *ApiService) GetDb(c *gin.Context) {
 	exclude := c.Query("exclude")
-	db, err := database.GetDb(exclude)
+	dbPath, cleanup, err := database.CreateDBBackup(exclude)
 	if err != nil {
 		jsonMsg(c, "", err)
 		return
 	}
+	defer cleanup()
 	c.Header("Content-Type", "application/octet-stream")
-	c.Header("Content-Disposition", "attachment; filename=s-ui_"+time.Now().Format("20060102-150405")+".db")
-	c.Writer.Write(db)
+	c.FileAttachment(dbPath, "s-ui_"+time.Now().Format("20060102-150405")+".db")
 }
 
 func (a *ApiService) Login(c *gin.Context) {

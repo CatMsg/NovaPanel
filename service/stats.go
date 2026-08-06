@@ -2,7 +2,6 @@ package service
 
 import (
 	"errors"
-	"sort"
 	"sync"
 	"time"
 
@@ -96,7 +95,6 @@ func (s *StatsService) SaveStats(enableTraffic bool) error {
 }
 
 func (s *StatsService) GetStats(resource string, tag string, limit int) ([]model.Stats, error) {
-	var err error
 	var result []model.Stats
 
 	currentTime := time.Now().Unix()
@@ -107,58 +105,55 @@ func (s *StatsService) GetStats(resource string, tag string, limit int) ([]model
 	if resource == "endpoint" {
 		resources = []string{"inbound", "outbound"}
 	}
-	err = db.Model(model.Stats{}).Where("resource in ? AND tag = ? AND date_time > ?", resources, tag, timeDiff).Scan(&result).Error
-	if err != nil {
+	query := db.Model(model.Stats{}).Where("resource IN ? AND tag = ? AND date_time > ?", resources, tag, timeDiff)
+	var count int64
+	if err := query.Count(&count).Error; err != nil {
 		return nil, err
 	}
-
-	result = s.downsampleStats(result, 60) // 60 rows for 30 buckets
-	return result, nil
-}
-
-// downsampleStats reduces stats to maxRows rows.
-// Each bucket outputs two rows (direction false and true) with average Traffic.
-func (s *StatsService) downsampleStats(stats []model.Stats, maxRows int) []model.Stats {
-	if len(stats) <= maxRows {
-		return stats
+	if count <= 60 {
+		if err := query.Order("date_time ASC, direction ASC").Find(&result).Error; err != nil {
+			return nil, err
+		}
+		return result, nil
 	}
-	numBuckets := int(maxRows / 2)
-	sort.Slice(stats, func(i, j int) bool { return stats[i].DateTime < stats[j].DateTime })
-	timeMin, timeMax := stats[0].DateTime, stats[len(stats)-1].DateTime
-	bucketSpan := (timeMax - timeMin) / int64(numBuckets)
+
+	var bounds struct {
+		Min int64
+		Max int64
+	}
+	if err := query.Select("MIN(date_time) AS min, MAX(date_time) AS max").Scan(&bounds).Error; err != nil {
+		return nil, err
+	}
+	const bucketCount int64 = 30
+	bucketSpan := (bounds.Max - bounds.Min) / bucketCount
 	if bucketSpan == 0 {
 		bucketSpan = 1
 	}
-	downsampled := make([]model.Stats, 0, maxRows)
-	for i := 0; i < numBuckets; i++ {
-		bucketStart := timeMin + int64(i)*bucketSpan
-		bucketEnd := timeMin + int64(i+1)*bucketSpan
-		if i == numBuckets-1 {
-			bucketEnd = timeMax + 1
-		}
-		for _, dir := range []bool{false, true} {
-			var sum int64
-			var count int
-			for _, r := range stats {
-				if r.DateTime >= bucketStart && r.DateTime < bucketEnd && r.Direction == dir {
-					sum += r.Traffic
-					count++
-				}
-			}
-			avg := int64(0)
-			if count > 0 {
-				avg = sum / int64(count)
-			}
-			downsampled = append(downsampled, model.Stats{
-				DateTime:  bucketStart,
-				Resource:  stats[0].Resource,
-				Tag:       stats[0].Tag,
-				Direction: dir,
-				Traffic:   avg,
-			})
-		}
+
+	const bucketSQL = `
+		SELECT 0 AS id,
+		       ? + bucket * ? AS date_time,
+		       MIN(resource) AS resource,
+		       ? AS tag,
+		       direction,
+		       CAST(AVG(traffic) AS INTEGER) AS traffic
+		FROM (
+			SELECT resource, direction, traffic,
+			       MIN(CAST((date_time - ?) / ? AS INTEGER), ?) AS bucket
+			FROM stats
+			WHERE resource IN ? AND tag = ? AND date_time > ?
+		)
+		GROUP BY bucket, direction
+		ORDER BY date_time ASC, direction ASC`
+	if err := db.Raw(
+		bucketSQL,
+		bounds.Min, bucketSpan, tag,
+		bounds.Min, bucketSpan, bucketCount-1,
+		resources, tag, timeDiff,
+	).Scan(&result).Error; err != nil {
+		return nil, err
 	}
-	return downsampled
+	return result, nil
 }
 
 func (s *StatsService) GetOnlines() (onlines, error) {
