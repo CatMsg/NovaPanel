@@ -27,7 +27,7 @@ if (!packageLock.packages || !packageLock.packages['']) {
 }
 packageLock.packages[''].version = version
 
-await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\r\n`)
-await writeFile(packageLockPath, `${JSON.stringify(packageLock, null, 2)}\r\n`)
+await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`)
+await writeFile(packageLockPath, `${JSON.stringify(packageLock, null, 2)}\n`)
 
 console.log(`synchronized frontend version to ${version}`)
