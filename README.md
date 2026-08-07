@@ -1,43 +1,31 @@
-
 # NovaPanel
 
-<p align="center">
-  NovaPanel 基于 s-ui 修改
-</p>
-
+NovaPanel 是基于 s-ui 扩展的 Sing-Box 管理面板，提供协议配置、订阅、端口规则、监控与多服务器运维能力。
 
 > **免责声明：** 本项目仅供个人学习与交流使用，请勿用于非法用途。
 
-## 项目速览
+## 快速了解
 
-| 项目 | 说明 |
+| 项目 | 默认值 |
 | --- | --- |
-| 最新发布 | [GitHub Releases](https://github.com/CatMsg/NovaPanel/releases/latest) |
-| 仓库地址 | [CatMsg/NovaPanel](https://github.com/CatMsg/NovaPanel) |
-| 面板路径 | `/app/` |
-| 面板端口 | `2095` |
-| 订阅路径 | `/sub/` |
-| 订阅端口 | `2096` |
-| 命令 | `s-ui` |
-| 命名规范 | [NAMING.md](NAMING.md) |
+| 最新版本 | [GitHub Releases](https://github.com/CatMsg/NovaPanel/releases/latest) |
+| 面板 | `http://服务器IP:2095/app/` |
+| 订阅 | `http://服务器IP:2096/sub/` |
+| 管理命令 | `s-ui` |
+| 发布平台 | Linux AMD64 |
 
-## 一眼看懂
+## 主要能力
 
-
-| 能力 | 说明 |
-| --- | --- |
-| 多协议 | Mixed、SOCKS、HTTP、HTTPS、Direct、Redirect、TProxy、VLESS、VMess、Trojan、Shadowsocks、ShadowTLS、Hysteria、Hysteria2、Naive、TUIC、MASQUE、Mieru |
-| 订阅输出 | `link`、`json`、`clash`、`info` |
-| 运维面板 | 入站、出站、端点、服务、规则、路由 |
-| 可视化 | 客户端、流量、在线状态、系统状态、访问记录 |
-| 使用体验 | 多语言、深色/浅色主题、HTTPS 访问 |
-| 部署方式 | Linux、Docker、源码构建 |
-
-## 快速开始
+- 管理入站、出站、节点、服务、路由、规则集、DNS、用户和管理员。
+- 支持 VLESS、VMess、Trojan、Shadowsocks、Hysteria2、TUIC、Naive、AnyTLS、Mieru、MASQUE 等协议。
+- 输出 Link、JSON、Clash/Mihomo 订阅，并支持多服务器订阅聚合。
+- 自动同步入站、节点、面板和订阅端口规则，适配 `ufw`、`nftables` 与 `iptables`。
+- 提供系统监控、流量统计、在线用户、访问记录、端口诊断和 Telegram 告警。
+- 支持数据库备份恢复、恢复前检查、端口规则重建和失败回滚。
+- 服务器集合可集中查看远端状态、日志，并执行后台更新或重启。
+- 支持多语言、深色/浅色主题、HTTPS、自定义路径和移动端界面。
 
 ## 安装
-
-### Linux
 
 安装最新版本：
 
@@ -45,172 +33,76 @@
 bash <(curl -Ls https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh)
 ```
 
-### Windows
+安装指定版本：
 
-GitHub Release 提供 Linux 和 Windows 产物；Windows 也可以使用仓库内脚本本地自行构建和安装：
+```sh
+bash <(curl -Ls https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh) vx.x.x
+```
 
-1. 进入 [windows](windows) 目录。
-2. 使用 `build-windows.bat` 或 `build-windows.ps1` 构建，脚本会自动修补当前 sing-box 的 Windows 接口兼容问题，并按 release 同款方式生成 `NovaPanel-windows\` 输出目录。
-3. 在 `NovaPanel-windows\` 里以管理员身份运行 `install-windows.bat`。
-4. 后续通过 `s-ui-windows.bat` 管理服务。
+安装时可设置管理员账号、面板路径和端口。安装后可使用以下命令维护：
 
+| 命令 | 用途 |
+| --- | --- |
+| `s-ui` | 打开管理菜单 |
+| `s-ui update --background` | 在后台更新，SSH 断开后仍会继续 |
+| `s-ui update-status` | 查看后台更新状态与日志 |
+| `s-ui admin -show` | 查看管理员信息 |
+| `s-ui admin -reset` | 重置管理员账号 |
+| `s-ui uninstall` | 卸载 NovaPanel |
 
-| 入口 | 命令 | 说明 |
-| --- | --- | --- |
-| 指定版本 | `bash <(curl -Ls https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh) vx.x.x` | 安装固定版本 |
-| 后台更新 | `s-ui update --background` | 脱离 SSH 会话执行更新，避免更新重启时连接中断 |
-| 更新状态 | `s-ui update-status` | 查看后台更新状态和最近日志 |
-| Docker Compose | `docker compose up -d` | 使用容器部署 |
-| 源码运行 | `./runSUI.sh` | 
-
-
-### 源码构建
+## 本地开发
 
 ```sh
 git clone https://github.com/CatMsg/NovaPanel
 cd NovaPanel
-./runSUI.sh
+sh runSUI.sh
 ```
 
-如果你想手动拼装前后端，可以先构建前端，再构建后端：
+开发脚本支持：
 
-```sh
-cd frontend
-npm install
-npm run build
-
-cd ..
-rm -rf web/html/*
-cp -R frontend/dist/ web/html/
-go build -o sui main.go
-./sui
+```text
+sh runSUI.sh run       # 构建、启动并跟随日志
+sh runSUI.sh restart   # 停止后重新构建并启动
+sh runSUI.sh stop      # 停止本地进程
+sh runSUI.sh status    # 查看进程和路径
+sh runSUI.sh logs      # 查看最近日志
+sh runSUI.sh logs -f   # 持续跟随日志
 ```
 
 ## Docker
 
-> Docker 镜像名 `ghcr.io/catmsg/novapanel-app`。
-
-### docker compose
-
-```yaml
-services:
-  novapanel:
-    image: ghcr.io/catmsg/novapanel-app
-    container_name: novapanel
-    hostname: "novapanel"
-    network_mode: host
-    volumes:
-      - "./db:/app/db"
-      - "./cert:/app/cert"
-    tty: true
-    restart: unless-stopped
-    entrypoint: "./entrypoint.sh"
-```
-
-```sh
-docker compose up -d
-```
-
-### docker run
-
-```sh
-mkdir -p novapanel && cd novapanel
-
-docker run -itd \
-  --network host \
-  -v $PWD/db:/app/db \
-  -v $PWD/cert:/app/cert \
-  --name novapanel \
-  --restart=unless-stopped \
-  ghcr.io/catmsg/novapanel-app
-```
-
-### 自行构建镜像
+当前不发布 GHCR 镜像，可从源码自行构建：
 
 ```sh
 git clone https://github.com/CatMsg/NovaPanel
+cd NovaPanel
 docker build -t novapanel .
+
+mkdir -p db cert
+docker run -d \
+  --network host \
+  -v "$PWD/db:/app/db" \
+  -v "$PWD/cert:/app/cert" \
+  --name novapanel \
+  --restart unless-stopped \
+  novapanel
 ```
-
-## 功能亮点
-
-- 提供入站、出站、节点、服务、规则、DNS、管理员等完整面板管理能力。
-- 新增端口管理页，可查看当前监听端口、NAT IPv4 / IPv6 规则和端口转发后端状态。
-- 面板端口新增、修改会自动同步到本地端口转发规则，减少手工维护。
-- Hysteria2 的 `server_ports` 支持单端口、范围和组合写法，例如 `500,900,1000-1400`，恢复备份后会自动重建对应规则。
-- MASQUE 节点支持 HTTP/3 CONNECT-IP 服务、实时会话与流量统计、逐项运行诊断，以及 ACME 证书续签后的握手热重载。
-- Mieru 入站集成官方 `mita` Linux 服务端，单个共享进程可绑定多个现有用户，支持 TCP / UDP、单端口或连续端口范围、多路复用、0-RTT、按用户流量记账与普通 Clash/Mihomo 聚合订阅。
-- 备份恢复前会检查端口管理后端，自动适配 `ufw`、`nftables` 或 `iptables`，并在冲突场景下尽量保证恢复结果可用。
-- 服务器集合支持保存远端 NovaPanel 地址和加密令牌，可集中查看版本、核心、端口、用户、节点、MASQUE 和 Mieru 状态，并查看日志或重启面板。
-- 服务器集合支持单台刷新、状态重试、断线保留上次状态，以及通过令牌远程执行脱离 SSH 的 `s-ui update`，可查看更新状态和最近日志。
-- 健康与诊断页集中检查核心、数据库、磁盘、端口、TLS、订阅和 MASQUE，并支持 Telegram 告警通知与重复冷却。
-- 后台更新采用全局互斥，重复点击只复用当前任务；配置保存采用串行协调和失败补偿，外部端口、核心或监听器应用失败时自动恢复数据库前态。
-- 更新安装器会校验发布包 SHA-256，使用临时目录解包，并在安装或启动失败时回滚上一版核心文件。
-- 服务器集合配置随数据库备份保存；恢复时会校验 SQLite 完整性、关键数据表和集合配置，失效的本机证书路径会自动清理，并保留恢复前数据库作为回退副本。
-- 数据库备份包含服务、API Token 和受管端口规则；恢复前可先预览数据统计，确认后再替换当前数据库。
-- 端口管理页支持检查受管端口数量并一键重建端口规则，用于修复防火墙/NAT 规则漂移。
-- 端口管理页会按协议、地址族和 NovaPanel 链自动检测缺失、重复、残留及未归属的 `REDIRECT` 规则，并仅在确认后重建。
-- 入站、节点、面板端口和订阅端口的配置变更采用数据库、核心和端口规则的失败回滚策略，避免只保存了一半导致状态不一致。
-- SSL 证书申请成功后可自动回填面板配置路径，并提供重置入口作为兜底。
-- 修复配置保存过程中偶发的 `database is locked` 问题，减少保存后重启核心时的并发冲突。
-- 首页与登录页已做移动端适配，信息卡和实时状态也针对小屏做了重新整理。
-- 支持订阅聚合、导出和信息头展示，支持流量统计、在线资源和系统监控。
-- 支持面板与订阅分离配置，便于不同场景部署。
-- 支持 HTTPS 访问、自定义路径，以及脚本、Docker 或源码方式部署。
-
-## 默认信息
-
-| 项目 | 默认值 |
-| --- | --- |
-| 面板端口 | `2095` |
-| 面板路径 | `/app/` |
-| 订阅端口 | `2096` |
-| 订阅路径 | `/sub/` |
-
-首次安装时，脚本会提示你确认或修改管理员账号密码；如果不修改，也可能自动生成一组随机凭据。后续可用 `s-ui admin -show` 查看当前账号信息，`s-ui admin -reset` 恢复为默认值。
-
-## 卸载
-
-```sh
-sudo -i
-
-systemctl disable s-ui --now
-rm -f /etc/systemd/system/sing-box.service
-systemctl daemon-reload
-
-rm -rf /usr/local/s-ui
-rm -f /usr/bin/s-ui
-```
-
-如果你启用了 Hysteria2 的 `server_ports` 转发，`s-ui uninstall` 会先清掉 NovaPanel 自己写入的专用转发规则，再删除程序目录。
-
-## 语言
-
-- English
-- 简体中文
 
 ## 环境变量
 
-| 变量 | 类型 | 默认值 |
+| 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `SUI_LOG_LEVEL` | `"debug"` \| `"info"` \| `"warn"` \| `"error"` | `"info"` |
-| `SUI_DEBUG` | `boolean` | `false` |
-| `SUI_BIN_FOLDER` | `string` | `"bin"` |
-| `SUI_DB_FOLDER` | `string` | `"db"` |
-| `SINGBOX_API` | `string` | - |
+| `SUI_LOG_LEVEL` | `info` | `debug`、`info`、`warn` 或 `error` |
+| `SUI_DEBUG` | `false` | 启用调试模式 |
+| `SUI_BIN_FOLDER` | `bin` | 核心文件目录 |
+| `SUI_DB_FOLDER` | `db` | 数据库目录 |
+| `SINGBOX_API` | 空 | 自定义 Sing-Box API 地址 |
 
-## SSL 证书
+## 相关文档
 
-使用 Certbot 示例：
-
-```bash
-snap install core
-snap refresh core
-snap install --classic certbot
-ln -s /snap/bin/certbot /usr/bin/certbot
-
-certbot certonly --standalone --register-unsafely-without-email --non-interactive --agree-tos -d <你的域名>
-```
+- [命名规范](NAMING.md)
+- [版本发布](https://github.com/CatMsg/NovaPanel/releases)
+- [问题反馈](https://github.com/CatMsg/NovaPanel/issues)
 
 ## 致谢
 
