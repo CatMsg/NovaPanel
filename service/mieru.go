@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -34,6 +35,10 @@ const (
 	mieruQueryTimeout    = 4 * time.Second
 	mieruLogLimit        = 80
 	mieruDebugDuration   = 10 * time.Minute
+	mieruWatchInterval   = 20 * time.Second
+	mieruWatchThreshold  = 3
+	mieruWatchQueryTime  = 3 * time.Second
+	mieruBridgeProbeTime = 2 * time.Second
 	mieruBridgeHost      = "127.0.0.1"
 	mieruBridgeProxyName = "novapanel"
 )
@@ -80,6 +85,13 @@ type MieruService struct {
 	restartScheduled bool
 	lastError        string
 	debugUntil       time.Time
+	watchCancel      context.CancelFunc
+	watchDone        chan struct{}
+	watchFailures    int
+	watchRestarts    int
+	watchLastCheck   time.Time
+	watchLastError   string
+	watchLastRestart time.Time
 }
 
 func NewMieruService() *MieruService {
@@ -135,7 +147,10 @@ func (s *MieruService) SyncFromDB() error {
 	}
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
+	return s.syncFromDBLocked()
+}
 
+func (s *MieruService) syncFromDBLocked() error {
 	inboundConfig, credentials, err := loadMieruInboundConfig()
 	if err != nil {
 		return err
@@ -341,10 +356,252 @@ func (s *MieruService) EnableTemporaryDebug() (time.Time, error) {
 	return deadline, nil
 }
 
+func (s *MieruService) StartWatchdog() {
+	if s == nil || runtime.GOOS != "linux" {
+		return
+	}
+	s.mu.Lock()
+	if s.watchCancel != nil {
+		s.mu.Unlock()
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	s.watchCancel = cancel
+	s.watchDone = done
+	s.mu.Unlock()
+
+	go s.runWatchdog(ctx, done)
+}
+
+func (s *MieruService) stopWatchdog() {
+	s.mu.Lock()
+	cancel := s.watchCancel
+	done := s.watchDone
+	s.mu.Unlock()
+	if cancel == nil {
+		return
+	}
+	cancel()
+	if done != nil {
+		<-done
+	}
+	s.mu.Lock()
+	if s.watchDone == done {
+		s.watchCancel = nil
+		s.watchDone = nil
+	}
+	s.mu.Unlock()
+}
+
+func (s *MieruService) runWatchdog(ctx context.Context, done chan struct{}) {
+	defer close(done)
+	ticker := time.NewTicker(mieruWatchInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.runWatchdogCheck(ctx)
+		}
+	}
+}
+
+func (s *MieruService) runWatchdogCheck(ctx context.Context) {
+	s.mu.Lock()
+	runtimeState := s.active
+	total := s.total
+	appliedConfig := append([]byte(nil), s.appliedConfig...)
+	s.mu.Unlock()
+	if total == 0 {
+		s.recordWatchdogResult(runtimeState, nil)
+		return
+	}
+
+	probeErr := s.probeRuntime(runtimeState, appliedConfig)
+	if ctx.Err() != nil {
+		return
+	}
+	if !s.recordWatchdogResult(runtimeState, probeErr) {
+		return
+	}
+
+	diagnostics := s.collectWatchdogDiagnostics(runtimeState, probeErr)
+	logger.Warning("mieru watchdog detected persistent failure: ", diagnostics)
+	if err := s.restartUnhealthyRuntime(runtimeState, probeErr.Error()); err != nil {
+		logger.Warning("mieru watchdog recovery failed: ", err)
+		return
+	}
+	logger.Info("mieru watchdog recovered the data plane")
+}
+
+func (s *MieruService) probeRuntime(runtimeState *mieruRuntime, appliedConfig []byte) error {
+	if runtimeState == nil {
+		return common.NewError("mita runtime is missing")
+	}
+	if !runtimeState.running.Load() {
+		return common.NewError("mita process is not running")
+	}
+	binary, err := mieruBinaryPath()
+	if err != nil {
+		return err
+	}
+	_, socketPath := mitaRuntimePaths()
+	status, err := runMitaQueryWithTimeout(mieruWatchQueryTime, binary, socketPath, "status")
+	if err != nil {
+		return fmt.Errorf("query mita status: %w", err)
+	}
+	if !strings.Contains(strings.ToUpper(string(status)), "RUNNING") {
+		return fmt.Errorf("mita status is not RUNNING: %s", strings.TrimSpace(string(status)))
+	}
+	if _, err := runMitaQueryWithTimeout(mieruWatchQueryTime, binary, socketPath, "get", "connections"); err != nil {
+		return fmt.Errorf("query mita connections: %w", err)
+	}
+	if err := probeMieruBridge(appliedConfig); err != nil {
+		return err
+	}
+	return nil
+}
+
+func probeMieruBridge(payload []byte) error {
+	var serverConfig mitaServerConfig
+	if len(payload) == 0 || json.Unmarshal(payload, &serverConfig) != nil {
+		return common.NewError("parse active mita config for bridge probe")
+	}
+	var bridge *mitaEgressProxy
+	for index := range serverConfig.Egress.Proxies {
+		candidate := &serverConfig.Egress.Proxies[index]
+		if candidate.Name == mieruBridgeProxyName && candidate.Protocol == "SOCKS5_PROXY_PROTOCOL" {
+			bridge = candidate
+			break
+		}
+	}
+	if bridge == nil || strings.TrimSpace(bridge.Host) == "" || bridge.Port < 1 {
+		return common.NewError("Mieru routing bridge is not configured")
+	}
+	address := net.JoinHostPort(bridge.Host, fmt.Sprint(bridge.Port))
+	connection, err := net.DialTimeout("tcp", address, mieruBridgeProbeTime)
+	if err != nil {
+		return fmt.Errorf("connect Mieru routing bridge %s: %w", address, err)
+	}
+	defer connection.Close()
+	if err := connection.SetDeadline(time.Now().Add(mieruBridgeProbeTime)); err != nil {
+		return err
+	}
+	if _, err := connection.Write([]byte{0x05, 0x01, 0x00}); err != nil {
+		return fmt.Errorf("write Mieru routing bridge handshake: %w", err)
+	}
+	reply := make([]byte, 2)
+	if _, err := io.ReadFull(connection, reply); err != nil {
+		return fmt.Errorf("read Mieru routing bridge handshake: %w", err)
+	}
+	if reply[0] != 0x05 || reply[1] != 0x00 {
+		return fmt.Errorf("Mieru routing bridge rejected handshake: %x", reply)
+	}
+	return nil
+}
+
+func (s *MieruService) recordWatchdogResult(runtimeState *mieruRuntime, probeErr error) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.active != runtimeState {
+		return false
+	}
+	s.watchLastCheck = time.Now()
+	if probeErr == nil {
+		s.watchFailures = 0
+		return false
+	}
+	s.watchFailures++
+	s.watchLastError = probeErr.Error()
+	if s.watchFailures == 1 {
+		logger.Warning("mieru watchdog probe failed: ", probeErr)
+	}
+	return s.watchFailures >= mieruWatchThreshold
+}
+
+func (s *MieruService) collectWatchdogDiagnostics(runtimeState *mieruRuntime, probeErr error) string {
+	parts := []string{"probe=" + probeErr.Error()}
+	if binary, err := mieruBinaryPath(); err == nil {
+		_, socketPath := mitaRuntimePaths()
+		for _, query := range []struct {
+			name string
+			args []string
+		}{
+			{name: "status", args: []string{"status"}},
+			{name: "connections", args: []string{"get", "connections"}},
+			{name: "metrics", args: []string{"get", "metrics"}},
+		} {
+			output, queryErr := runMitaQueryWithTimeout(time.Second, binary, socketPath, query.args...)
+			if queryErr != nil {
+				parts = append(parts, query.name+"_error="+queryErr.Error())
+			} else {
+				parts = append(parts, query.name+"="+limitMieruDiagnostic(string(output), 1600))
+			}
+		}
+	}
+	if runtimeState != nil {
+		runtimeState.mu.Lock()
+		logs := append([]string(nil), runtimeState.logs...)
+		runtimeError := runtimeState.lastError
+		runtimeState.mu.Unlock()
+		if len(logs) > 12 {
+			logs = logs[len(logs)-12:]
+		}
+		if runtimeError != "" {
+			parts = append(parts, "runtime_error="+runtimeError)
+		}
+		if len(logs) > 0 {
+			parts = append(parts, "recent_logs="+limitMieruDiagnostic(strings.Join(logs, " | "), 2400))
+		}
+	}
+	return strings.Join(parts, "; ")
+}
+
+func limitMieruDiagnostic(value string, limit int) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\n", " | "))
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "..."
+}
+
+func (s *MieruService) restartUnhealthyRuntime(expected *mieruRuntime, reason string) error {
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+	s.mu.Lock()
+	if s.active != expected || s.total == 0 {
+		s.mu.Unlock()
+		return nil
+	}
+	s.active = nil
+	s.appliedHash = ""
+	s.restartScheduled = false
+	s.watchFailures = 0
+	s.watchLastError = reason
+	s.mu.Unlock()
+	if expected != nil {
+		stopMieruRuntime(expected)
+	}
+	if err := s.syncFromDBLocked(); err != nil {
+		s.mu.Lock()
+		s.lastError = "mieru watchdog recovery failed: " + err.Error()
+		s.mu.Unlock()
+		return err
+	}
+	s.mu.Lock()
+	s.watchRestarts++
+	s.watchLastRestart = time.Now()
+	s.mu.Unlock()
+	return nil
+}
+
 func (s *MieruService) Stop() error {
 	if s == nil {
 		return nil
 	}
+	s.stopWatchdog()
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
 	s.mu.Lock()
@@ -393,6 +650,11 @@ func (s *MieruService) GetStatus(tag string) (map[string]interface{}, error) {
 	total := s.total
 	serviceError := s.lastError
 	appliedConfig := append([]byte(nil), s.appliedConfig...)
+	watchFailures := s.watchFailures
+	watchRestarts := s.watchRestarts
+	watchLastCheck := s.watchLastCheck
+	watchLastError := s.watchLastError
+	watchLastRestart := s.watchLastRestart
 	s.mu.Unlock()
 	running := runtimeState != nil && runtimeState.running.Load()
 	result := map[string]interface{}{
@@ -416,6 +678,17 @@ func (s *MieruService) GetStatus(tag string) (map[string]interface{}, error) {
 		"users":                  "",
 		"user_stats":             map[string]map[string]string{},
 		"metrics":                map[string]int64{},
+		"watchdog_failures":      watchFailures,
+		"watchdog_restarts":      watchRestarts,
+	}
+	if !watchLastCheck.IsZero() {
+		result["watchdog_last_check"] = watchLastCheck.Format(time.RFC3339)
+	}
+	if watchLastError != "" {
+		result["watchdog_last_error"] = watchLastError
+	}
+	if !watchLastRestart.IsZero() {
+		result["watchdog_last_restart"] = watchLastRestart.Format(time.RFC3339)
 	}
 	var runtimeConfig mitaServerConfig
 	if json.Unmarshal(appliedConfig, &runtimeConfig) == nil {
@@ -496,6 +769,8 @@ func (s *MieruService) GetSummary() map[string]int {
 
 func (s *MieruService) healthSummary() (map[string]int, []string) {
 	summary := s.GetSummary()
+	summary["watchdog_failures"] = 0
+	summary["watchdog_restarts"] = 0
 	details := make([]string, 0, 1)
 	if summary["total"] > 0 && summary["running"] != summary["total"] {
 		s.mu.Lock()
@@ -510,7 +785,15 @@ func (s *MieruService) healthSummary() (map[string]int, []string) {
 	s.mu.Lock()
 	runtimeState := s.active
 	serviceError := s.lastError
+	watchFailures := s.watchFailures
+	watchRestarts := s.watchRestarts
+	watchLastError := s.watchLastError
 	s.mu.Unlock()
+	summary["watchdog_failures"] = watchFailures
+	summary["watchdog_restarts"] = watchRestarts
+	if watchFailures > 0 && watchLastError != "" {
+		details = append(details, fmt.Sprintf("数据面探活连续失败 %d 次: %s", watchFailures, watchLastError))
+	}
 	if serviceError != "" {
 		details = append(details, serviceError)
 	}
@@ -753,6 +1036,7 @@ func stopMieruRuntime(runtimeState *mieruRuntime) {
 
 func (r *mieruRuntime) captureOutput(reader interface{ Read([]byte) (int, error) }) {
 	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {

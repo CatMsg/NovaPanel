@@ -113,6 +113,7 @@ func (a *APP) runDeferredStartupTasks() {
 		if err := a.mieruService.SyncFromDB(); err != nil {
 			logger.Warning("rebuild mieru service failed:", err)
 		}
+		a.mieruService.StartWatchdog()
 	}
 
 	if err := a.SettingService.RebuildAllManagedPortForwarding(&a.configService.InboundService, &a.configService.EndpointService); err != nil {

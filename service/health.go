@@ -226,6 +226,9 @@ func (s *HealthService) checkMieru(diagnostics map[string]interface{}) HealthChe
 	if summary["running"] != summary["total"] {
 		return HealthCheck{ID: "mieru", Title: "Mieru", Status: "error", Summary: fmt.Sprintf("%d/%d 个入站运行", summary["running"], summary["total"]), Detail: strings.Join(details, "\n"), Action: "inbounds"}
 	}
+	if summary["watchdog_failures"] > 0 {
+		return HealthCheck{ID: "mieru", Title: "Mieru", Status: "warning", Summary: fmt.Sprintf("数据面探活连续失败 %d 次", summary["watchdog_failures"]), Detail: strings.Join(details, "\n"), Action: "inbounds"}
+	}
 	return HealthCheck{ID: "mieru", Title: "Mieru", Status: "ok", Summary: fmt.Sprintf("%d 个入站运行正常", summary["running"]), Action: "inbounds"}
 }
 

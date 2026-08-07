@@ -1,9 +1,18 @@
 package service
 
 import (
+	"encoding/json"
+	"errors"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
+	"time"
+
+	"github.com/CatMsg/NovaPanel/logger"
+	"github.com/op/go-logging"
 )
 
 func TestStartMieruRuntimeWaitsForRunningStatus(t *testing.T) {
@@ -71,5 +80,90 @@ func TestRequiresMitaRestartOnlyForNonReloadableFields(t *testing.T) {
 	egressChanged := []byte(`{"portBindings":[{"port":20000,"protocol":"TCP"}],"users":[{"name":"one","hashedPassword":"abc"}],"loggingLevel":"INFO","mtu":1400,"dns":{"dualStack":"PREFER_IPv4"},"egress":{"proxies":[{"name":"novapanel","protocol":"SOCKS5_PROXY_PROTOCOL","host":"127.0.0.1","port":39000}],"rules":[{"ipRanges":["*"],"domainNames":["*"],"action":"PROXY","proxyNames":["novapanel"]}]}}`)
 	if !requiresMitaRestart(base, egressChanged) {
 		t.Fatal("Mieru egress bridge change should require restart")
+	}
+}
+
+func TestMieruWatchdogRequiresConsecutiveFailures(t *testing.T) {
+	logger.InitLogger(logging.ERROR)
+	service := NewMieruService()
+	runtimeState := &mieruRuntime{}
+	runtimeState.running.Store(true)
+	service.active = runtimeState
+	service.total = 1
+
+	for attempt := 1; attempt < mieruWatchThreshold; attempt++ {
+		if service.recordWatchdogResult(runtimeState, errors.New("probe failed")) {
+			t.Fatalf("watchdog requested restart after only %d failures", attempt)
+		}
+	}
+	if !service.recordWatchdogResult(runtimeState, errors.New("probe failed")) {
+		t.Fatal("watchdog did not request restart at the failure threshold")
+	}
+	if service.recordWatchdogResult(runtimeState, nil) {
+		t.Fatal("successful probe requested a restart")
+	}
+	if service.watchFailures != 0 {
+		t.Fatalf("successful probe left %d failures", service.watchFailures)
+	}
+}
+
+func TestProbeMieruBridgePerformsSOCKSHandshake(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+	serverErr := make(chan error, 1)
+	go func() {
+		connection, err := listener.Accept()
+		if err != nil {
+			serverErr <- err
+			return
+		}
+		defer connection.Close()
+		_ = connection.SetDeadline(time.Now().Add(time.Second))
+		hello := make([]byte, 3)
+		if _, err := io.ReadFull(connection, hello); err != nil {
+			serverErr <- err
+			return
+		}
+		if string(hello) != string([]byte{0x05, 0x01, 0x00}) {
+			serverErr <- errors.New("unexpected SOCKS5 greeting")
+			return
+		}
+		_, err = connection.Write([]byte{0x05, 0x00})
+		serverErr <- err
+	}()
+
+	address := listener.Addr().(*net.TCPAddr)
+	payload, err := json.Marshal(mitaServerConfig{Egress: mitaEgress{
+		Proxies: []mitaEgressProxy{{
+			Name:     mieruBridgeProxyName,
+			Protocol: "SOCKS5_PROXY_PROTOCOL",
+			Host:     address.IP.String(),
+			Port:     address.Port,
+		}},
+	}})
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	if err := probeMieruBridge(payload); err != nil {
+		t.Fatalf("probe bridge: %v", err)
+	}
+	if err := <-serverErr; err != nil {
+		t.Fatalf("SOCKS server: %v", err)
+	}
+}
+
+func TestProbeMieruBridgeRejectsUnavailableBridge(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	_ = listener.Close()
+	payload := []byte(`{"egress":{"proxies":[{"name":"novapanel","protocol":"SOCKS5_PROXY_PROTOCOL","host":"127.0.0.1","port":` + strconv.Itoa(port) + `}]}}`)
+	if err := probeMieruBridge(payload); err == nil {
+		t.Fatal("unavailable bridge passed the watchdog probe")
 	}
 }
