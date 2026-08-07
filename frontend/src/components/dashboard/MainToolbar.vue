@@ -12,7 +12,7 @@
         <v-card class="main-menu" rounded="xl" variant="flat">
           <v-card-title class="main-menu__title">
             <span>{{ $t('main.tiles') }}</span>
-            <v-btn icon variant="text" @click="emit('update:menu', false)">
+            <v-btn icon variant="text" :aria-label="$t('actions.close')" @click="emit('update:menu', false)">
               <v-icon icon="mdi-close"></v-icon>
             </v-btn>
           </v-card-title>

@@ -9,7 +9,7 @@
         </v-row>
       </v-card-title>
       <v-divider></v-divider>
-      <v-row v-for="l, i in wgLinks">
+      <v-row v-for="l, i in wgLinks" :key="i">
         <v-col style="text-align: center;" v-if="l.length>0">
           <v-chip>{{ $t('types.wg.peer') + ' ' + (i+1) }}</v-chip> <v-icon icon="mdi-download" @click="download(l,i)" /><br />
           <QrcodeVue :value="l" :size="size" @click="copyToClipboard(l)" :margin="1" style="border-radius: .5rem; cursor: copy;" />

@@ -3,7 +3,7 @@
     <v-card-subtitle>Shadowsocks API
       <v-chip color="primary" density="compact" variant="elevated" @click="add_server"><v-icon icon="mdi-plus" /></v-chip>
     </v-card-subtitle>
-    <v-row v-for="(server, index) in servers">
+    <v-row v-for="(server, index) in servers" :key="index">
       <v-col cols="auto" align-self="center" justify-self="center">
         <v-icon @click="del_server(index)" color="error" icon="mdi-delete" />
       </v-col>

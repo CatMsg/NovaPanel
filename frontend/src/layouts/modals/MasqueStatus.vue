@@ -10,7 +10,7 @@
           <v-chip :color="status.running ? 'success' : 'error'" variant="tonal" size="small">
             {{ status.running ? '服务运行中' : '服务未运行' }}
           </v-chip>
-          <v-btn icon="mdi-refresh" variant="text" :loading="loading" aria-label="刷新" @click="load" />
+          <v-btn icon="mdi-refresh" variant="text" :loading="loading" :aria-label="$t('ui.common.refresh')" @click="load" />
           <v-btn icon="mdi-close" variant="text" :aria-label="$t('actions.close')" @click="$emit('close')" />
         </div>
       </v-card-title>

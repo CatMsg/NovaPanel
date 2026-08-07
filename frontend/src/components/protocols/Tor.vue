@@ -16,7 +16,7 @@
     <div class="v-card-subtitle" style="margin: 10px;">Torrc
       <v-chip color="primary" density="compact" variant="elevated" @click="add_torrc_option"><v-icon icon="mdi-plus" /></v-chip>
     </div>
-    <v-row v-for="(torrc, index) in torrc_options">
+    <v-row v-for="(torrc, index) in torrc_options" :key="index">
       <v-col cols="auto" align-self="center" justify-self="center">
         <v-icon @click="del_torrc_option(index)" color="error" icon="mdi-delete" />
       </v-col>

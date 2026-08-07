@@ -46,7 +46,7 @@
             <v-card-subtitle>Predefined
               <v-chip color="primary" density="compact" variant="elevated" @click="addHostsPredefined"><v-icon icon="mdi-plus" /></v-chip>
             </v-card-subtitle>
-            <v-row v-for="(pd, index) in hostsPredefined">
+            <v-row v-for="(pd, index) in hostsPredefined" :key="index">
               <v-col cols="12" sm="6" md="4">
                 <v-text-field v-model="pd.name" :label="$t('setting.domain')" @input="update_pds_key(index,$event.target.value)" hide-details></v-text-field>
               </v-col>

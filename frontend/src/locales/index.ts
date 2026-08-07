@@ -5,18 +5,19 @@ import vi from './vi'
 import zhcn from './zhcn'
 import zhtw from './zhtw'
 import ru from './ru'
+import { uiMessages } from './ui'
 
 export const i18n = createI18n({
   legacy: false,
   locale: localStorage.getItem("locale") ?? 'zhHans',
   fallbackLocale: 'zhHans',
   messages: {
-    en: en,
-    fa: fa,
-    vi: vi,
-    zhHans: zhcn,
-    zhHant: zhtw,
-    ru: ru
+    en: { ...en, ui: uiMessages.en },
+    fa: { ...fa, ui: uiMessages.fa },
+    vi: { ...vi, ui: uiMessages.vi },
+    zhHans: { ...zhcn, ui: uiMessages.zhHans },
+    zhHant: { ...zhtw, ui: uiMessages.zhHant },
+    ru: { ...ru, ui: uiMessages.ru }
   },
 })
 

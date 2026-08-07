@@ -45,7 +45,7 @@
                 <template v-slot:append>
                   <v-menu>
                     <template v-slot:activator="{ props }">
-                      <v-btn icon v-bind="props" variant="text" class="login-actions__theme">
+                      <v-btn icon v-bind="props" variant="text" class="login-actions__theme" :aria-label="$t('menu.theme')">
                         <v-icon>mdi-theme-light-dark</v-icon>
                       </v-btn>
                     </template>

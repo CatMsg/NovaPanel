@@ -73,7 +73,7 @@
                   <v-card-subtitle>{{ $t('in.multiDomain') }}
                     <v-chip color="primary" density="compact" variant="elevated" @click="add_addr"><v-icon icon="mdi-plus" /></v-chip>
                   </v-card-subtitle>
-                  <template v-for="addr,index in inbound.addrs">
+                  <template v-for="addr,index in inbound.addrs" :key="index">
                     {{ $t('in.addr') }} #{{ (index+1) }} <v-icon icon="mdi-delete" color="error" @click="inbound.addrs?.splice(index,1)" />
                     <v-divider></v-divider>
                     <AddrVue :addr="addr" :hasTls="HasTls.includes(inbound.type)" />
@@ -97,6 +97,7 @@
           color="primary"
           variant="tonal"
           :loading="loading"
+          :disabled="!validate"
           @click="saveChanges"
         >
           {{ $t('actions.save') }}

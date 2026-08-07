@@ -21,7 +21,7 @@
           >
             {{ status.debug_active ? debugLabel : '调试 10 分钟' }}
           </v-btn>
-          <v-btn icon="mdi-refresh" variant="text" :loading="loading" aria-label="刷新" @click="load" />
+          <v-btn icon="mdi-refresh" variant="text" :loading="loading" :aria-label="$t('ui.common.refresh')" @click="load" />
           <v-btn icon="mdi-close" variant="text" :aria-label="$t('actions.close')" @click="$emit('close')" />
         </div>
       </v-card-title>

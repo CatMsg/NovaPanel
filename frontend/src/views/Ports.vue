@@ -18,27 +18,25 @@
               </div>
               <div>
                 <h1 class="ports-hero__title">{{ $t('pages.ports') }}</h1>
-                <p class="ports-hero__subtitle">
-                  当前机器上的监听端口、NAT 规则和面板受管端口；发现漂移时可一键重建受管规则。
-                </p>
+                <p class="ports-hero__subtitle">{{ $t('ui.ports.subtitle') }}</p>
               </div>
             </div>
             <div class="ports-hero__meta">
-              <span>更新时间：{{ formattedCapturedAt }}</span>
+              <span>{{ $t('ui.ports.updatedAt', { time: formattedCapturedAt }) }}</span>
               <span>•</span>
-              <span>错误：{{ errors.length }}</span>
+              <span>{{ $t('ui.ports.errors', { count: errors.length }) }}</span>
               <span>•</span>
-              <span>受管端口：{{ status.managed_count ?? 0 }}</span>
+              <span>{{ $t('ui.ports.managed', { count: status.managed_count ?? 0 }) }}</span>
             </div>
           </v-col>
           <v-col cols="12" lg="4" class="ports-hero__actions">
             <v-btn variant="outlined" :loading="repairing" @click="repairPorts">
               <v-icon icon="mdi-wrench-outline" start />
-              修复端口规则
+              {{ $t('ui.ports.repair') }}
             </v-btn>
             <v-btn class="ports-hero__refresh" variant="flat" color="primary" :loading="loading" @click="loadPorts">
               <v-icon icon="mdi-refresh" start />
-              刷新
+              {{ $t('ui.common.refresh') }}
             </v-btn>
           </v-col>
         </v-row>
@@ -47,7 +45,7 @@
       <v-row class="ports-summary" dense>
         <v-col cols="6" lg="3">
           <v-card class="ports-summary__card ports-summary__card--one" rounded="xl" variant="flat">
-            <div class="ports-summary__label">监听端口</div>
+            <div class="ports-summary__label">{{ $t('ui.ports.listeners') }}</div>
             <div class="ports-summary__value">{{ listeners.length }}</div>
           </v-card>
         </v-col>
@@ -65,7 +63,7 @@
         </v-col>
         <v-col cols="6" lg="3">
           <v-card class="ports-summary__card ports-summary__card--four" rounded="xl" variant="flat">
-            <div class="ports-summary__label">后端</div>
+            <div class="ports-summary__label">{{ $t('ui.ports.backend') }}</div>
             <div class="ports-summary__value">{{ status.backend || $t('unknown') }}</div>
           </v-card>
         </v-col>
@@ -79,7 +77,7 @@
         rounded="xl"
         density="comfortable"
       >
-        <div class="ports-alert__title">采集到的问题</div>
+        <div class="ports-alert__title">{{ $t('ui.ports.collectedIssues') }}</div>
         <ul class="ports-alert__list">
           <li v-for="(error, index) in errors" :key="`${index}-${error}`">{{ error }}</li>
         </ul>
@@ -94,25 +92,30 @@
         density="comfortable"
       >
         <div class="ports-alert__title">
-          {{ drift.status === 'drift' ? '端口规则发现漂移' : '端口规则暂时无法确认' }}
+          {{ drift.status === 'drift' ? $t('ui.ports.drift') : $t('ui.ports.driftUnknown') }}
         </div>
         <div class="ports-drift__summary">
-          期望 {{ drift.desired_rules }} 条，实际受管 {{ drift.actual_managed_rules }} 条；
-          缺失 {{ drift.missing_count }}，重复 {{ drift.duplicate_count }}，残留 {{ drift.orphan_count }}。
+          {{ $t('ui.ports.driftSummary', {
+            desired: drift.desired_rules,
+            actual: drift.actual_managed_rules,
+            missing: drift.missing_count,
+            duplicate: drift.duplicate_count,
+            orphan: drift.orphan_count,
+          }) }}
         </div>
         <ul class="ports-alert__list">
           <li v-for="(issue, index) in drift.issues.slice(0, 8)" :key="`${issue.type}-${issue.chain}-${issue.protocol}-${issue.port}-${index}`">
             {{ issue.detail }}<span v-if="issue.owner_tag">（{{ issue.owner_tag }}）</span>
           </li>
         </ul>
-        <div v-if="drift.issues.length > 8" class="ports-drift__more">还有 {{ drift.issues.length - 8 }} 项，请点击“修复端口规则”重建。</div>
+        <div v-if="drift.issues.length > 8" class="ports-drift__more">{{ $t('ui.ports.moreIssues', { count: drift.issues.length - 8 }) }}</div>
       </v-alert>
 
       <v-row class="ports-panels" dense>
         <v-col cols="12" lg="6">
           <v-card class="ports-panel" rounded="xl" variant="flat">
             <v-card-title class="ports-panel__title">
-              <span>监听列表</span>
+              <span>{{ $t('ui.ports.listenerList') }}</span>
               <v-chip size="small" variant="flat">{{ listeners.length }}</v-chip>
             </v-card-title>
             <v-divider />
@@ -131,19 +134,19 @@
                   </div>
                   <div class="ports-mobile-item__address ports-table__mono">{{ row.local }}</div>
                   <div class="ports-mobile-item__meta">
-                    <span>{{ row.process || '未知进程' }}</span>
+                    <span>{{ row.process || $t('ui.common.unknownProcess') }}</span>
                     <span>PID {{ row.pid || '-' }}</span>
                   </div>
                 </article>
-                <div v-if="listeners.length === 0" class="ports-mobile-empty">没有检测到监听端口</div>
+                <div v-if="listeners.length === 0" class="ports-mobile-empty">{{ $t('ui.ports.noListeners') }}</div>
               </div>
               <v-table v-else density="compact" class="ports-table">
                 <thead>
                   <tr>
-                    <th>协议</th>
-                    <th>本地地址</th>
-                    <th>端口</th>
-                    <th>进程</th>
+                    <th>{{ $t('ui.common.protocol') }}</th>
+                    <th>{{ $t('ui.ports.localAddress') }}</th>
+                    <th>{{ $t('ui.common.port') }}</th>
+                    <th>{{ $t('ui.common.process') }}</th>
                     <th>PID</th>
                   </tr>
                 </thead>
@@ -160,7 +163,7 @@
                     <td>{{ row.pid || '-' }}</td>
                   </tr>
                   <tr v-if="listeners.length === 0">
-                    <td colspan="5" class="ports-table__empty">没有检测到监听端口</td>
+                    <td colspan="5" class="ports-table__empty">{{ $t('ui.ports.noListeners') }}</td>
                   </tr>
                 </tbody>
               </v-table>
@@ -171,7 +174,7 @@
         <v-col cols="12" lg="6">
           <v-card class="ports-panel" rounded="xl" variant="flat">
             <v-card-title class="ports-panel__title">
-              <span>NAT 规则</span>
+              <span>{{ $t('ui.ports.natRules') }}</span>
               <v-chip size="small" variant="flat">{{ natIpv4.length + natIpv6.length }}</v-chip>
             </v-card-title>
             <v-divider />
@@ -194,20 +197,20 @@
                         <v-chip size="x-small" variant="flat" color="primary">{{ row.protocol || '-' }}</v-chip>
                       </div>
                       <div class="ports-mobile-item__route">
-                        <span><small>入口</small>{{ row.dport || '-' }}</span>
+                        <span><small>{{ $t('ui.common.entry') }}</small>{{ row.dport || '-' }}</span>
                         <v-icon icon="mdi-arrow-right" size="16" />
-                        <span><small>{{ row.target || '目标' }}</small>{{ row.to_ports || '-' }}</span>
+                        <span><small>{{ row.target || $t('ui.common.target') }}</small>{{ row.to_ports || '-' }}</span>
                       </div>
                     </article>
-                    <div v-if="natIpv4.length === 0" class="ports-mobile-empty">没有检测到 IPv4 NAT 规则</div>
+                    <div v-if="natIpv4.length === 0" class="ports-mobile-empty">{{ $t('ui.ports.noIpv4') }}</div>
                   </div>
                   <v-table v-else density="compact" class="ports-table">
                     <thead>
                       <tr>
-                        <th>链</th>
-                        <th>协议</th>
+                        <th>{{ $t('ui.ports.chain') }}</th>
+                        <th>{{ $t('ui.common.protocol') }}</th>
                         <th>dport</th>
-                        <th>目标</th>
+                        <th>{{ $t('ui.common.target') }}</th>
                         <th>to-ports</th>
                       </tr>
                     </thead>
@@ -220,7 +223,7 @@
                         <td>{{ row.to_ports || '-' }}</td>
                       </tr>
                       <tr v-if="natIpv4.length === 0">
-                        <td colspan="5" class="ports-table__empty">没有检测到 IPv4 NAT 规则</td>
+                        <td colspan="5" class="ports-table__empty">{{ $t('ui.ports.noIpv4') }}</td>
                       </tr>
                     </tbody>
                   </v-table>
@@ -237,20 +240,20 @@
                         <v-chip size="x-small" variant="flat" color="info">{{ row.protocol || '-' }}</v-chip>
                       </div>
                       <div class="ports-mobile-item__route">
-                        <span><small>入口</small>{{ row.dport || '-' }}</span>
+                        <span><small>{{ $t('ui.common.entry') }}</small>{{ row.dport || '-' }}</span>
                         <v-icon icon="mdi-arrow-right" size="16" />
-                        <span><small>{{ row.target || '目标' }}</small>{{ row.to_ports || '-' }}</span>
+                        <span><small>{{ row.target || $t('ui.common.target') }}</small>{{ row.to_ports || '-' }}</span>
                       </div>
                     </article>
-                    <div v-if="natIpv6.length === 0" class="ports-mobile-empty">没有检测到 IPv6 NAT 规则</div>
+                    <div v-if="natIpv6.length === 0" class="ports-mobile-empty">{{ $t('ui.ports.noIpv6') }}</div>
                   </div>
                   <v-table v-else density="compact" class="ports-table">
                     <thead>
                       <tr>
-                        <th>链</th>
-                        <th>协议</th>
+                        <th>{{ $t('ui.ports.chain') }}</th>
+                        <th>{{ $t('ui.common.protocol') }}</th>
                         <th>dport</th>
-                        <th>目标</th>
+                        <th>{{ $t('ui.common.target') }}</th>
                         <th>to-ports</th>
                       </tr>
                     </thead>
@@ -263,7 +266,7 @@
                         <td>{{ row.to_ports || '-' }}</td>
                       </tr>
                       <tr v-if="natIpv6.length === 0">
-                        <td colspan="5" class="ports-table__empty">没有检测到 IPv6 NAT 规则</td>
+                        <td colspan="5" class="ports-table__empty">{{ $t('ui.ports.noIpv6') }}</td>
                       </tr>
                     </tbody>
                   </v-table>

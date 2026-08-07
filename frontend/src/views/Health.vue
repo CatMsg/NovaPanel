@@ -7,24 +7,24 @@
       <v-row align="center">
         <v-col cols="12" md="8">
           <div class="health-hero__badges">
-            <span class="health-badge">系统诊断</span>
+            <span class="health-badge">{{ $t('ui.health.badge') }}</span>
             <span class="health-badge health-badge--soft">{{ statusLabel }}</span>
           </div>
           <div class="health-hero__title-row">
             <div class="health-hero__icon"><v-icon icon="mdi-heart-pulse" size="30" /></div>
             <div>
-              <h1>健康与诊断</h1>
-              <p>集中检查核心、数据库、端口规则、TLS、订阅服务和 MASQUE 运行状态。</p>
+              <h1>{{ $t('ui.health.title') }}</h1>
+              <p>{{ $t('ui.health.subtitle') }}</p>
             </div>
           </div>
           <div class="health-hero__meta">
-            <span>检查时间：{{ checkedAt }}</span>
-            <span>耗时：{{ report?.durationMs ?? 0 }} ms</span>
+            <span>{{ $t('ui.health.checkedAt', { time: checkedAt }) }}</span>
+            <span>{{ $t('ui.health.duration', { value: report?.durationMs ?? 0 }) }}</span>
           </div>
         </v-col>
         <v-col cols="12" md="4" class="health-hero__actions">
-          <v-btn variant="tonal" prepend-icon="mdi-content-copy" :disabled="!report" @click="copyReport">复制报告</v-btn>
-          <v-btn color="primary" prepend-icon="mdi-radar" :loading="loading" @click="loadHealth(true)">深度检查</v-btn>
+          <v-btn variant="tonal" prepend-icon="mdi-content-copy" :disabled="!report" @click="copyReport">{{ $t('ui.health.copyReport') }}</v-btn>
+          <v-btn color="primary" prepend-icon="mdi-radar" :loading="loading" @click="loadHealth(true)">{{ $t('ui.health.deepCheck') }}</v-btn>
         </v-col>
       </v-row>
     </v-card>
@@ -41,7 +41,7 @@
       </v-col>
     </v-row>
 
-    <v-alert v-if="report?.status === 'critical'" type="error" variant="tonal" title="存在需要处理的问题" text="建议先处理红色检查项，再修改配置或执行批量更新。" />
+    <v-alert v-if="report?.status === 'critical'" type="error" variant="tonal" :title="$t('ui.health.criticalTitle')" :text="$t('ui.health.criticalText')" />
 
     <section class="health-grid">
       <v-card v-for="check in report?.checks ?? []" :key="check.id" class="health-check glass-card" :class="`health-check--${check.status}`" elevation="0">
@@ -54,17 +54,17 @@
           <p class="health-check__summary">{{ check.summary }}</p>
           <p v-if="check.detail" class="health-check__detail">{{ check.detail }}</p>
         </div>
-        <v-btn v-if="check.action" size="small" variant="text" append-icon="mdi-arrow-right" @click="handleAction(check.action)">处理</v-btn>
+        <v-btn v-if="check.action" size="small" variant="text" append-icon="mdi-arrow-right" @click="handleAction(check.action)">{{ $t('ui.health.action') }}</v-btn>
       </v-card>
     </section>
 
     <v-card class="health-diagnostics glass-card" elevation="0">
       <div class="health-diagnostics__header">
         <div>
-          <h2>诊断说明</h2>
-          <p>深度检查会绕过状态缓存，重新读取数据库、磁盘、监听端口和 NAT 规则。</p>
+          <h2>{{ $t('ui.health.diagnostics') }}</h2>
+          <p>{{ $t('ui.health.diagnosticsHint') }}</p>
         </div>
-        <v-btn variant="tonal" prepend-icon="mdi-lan-check" :loading="reconciling" @click="reconcilePorts">全部重建</v-btn>
+        <v-btn variant="tonal" prepend-icon="mdi-lan-check" :loading="reconciling" @click="reconcilePorts">{{ $t('ui.health.rebuildAll') }}</v-btn>
       </div>
       <div v-if="portIssues.length" class="port-issues">
         <div v-for="issue in portIssues" :key="issue.id" class="port-issue">
@@ -77,7 +77,7 @@
               <v-chip v-if="issue.owner_tag" size="x-small" variant="tonal">{{ portOwnerLabel(issue.scope) }} · {{ issue.owner_tag }}</v-chip>
             </div>
             <span>{{ issue.detail }}</span>
-            <small v-if="issue.port">{{ issue.family || '全部地址族' }} · {{ issue.protocol?.toUpperCase() }} {{ issue.port }} → {{ issue.to_ports || '-' }}</small>
+            <small v-if="issue.port">{{ issue.family || $t('ui.health.allFamilies') }} · {{ issue.protocol?.toUpperCase() }} {{ issue.port }} → {{ issue.to_ports || '-' }}</small>
           </div>
           <v-btn
             v-if="issue.repairable"
@@ -88,49 +88,49 @@
             :disabled="repairingIssueId !== '' || reconciling"
             @click="repairPortIssue(issue)"
           >
-            修复此项
+            {{ $t('ui.health.repairItem') }}
           </v-btn>
-          <v-chip v-else size="small" color="secondary" variant="tonal">需手动处理</v-chip>
+          <v-chip v-else size="small" color="secondary" variant="tonal">{{ $t('ui.health.manual') }}</v-chip>
         </div>
       </div>
-      <v-alert v-else type="success" variant="tonal" class="mt-4" text="当前没有可修复的端口规则问题。" />
+      <v-alert v-else type="success" variant="tonal" class="mt-4" :text="$t('ui.health.noRepairable')" />
     </v-card>
 
     <v-card class="alert-settings glass-card" elevation="0">
       <div class="alert-settings__header">
         <div>
-          <div class="alert-settings__eyebrow">主动通知</div>
-          <h2>告警通知</h2>
-          <p>通过 Telegram 推送健康异常，仅在状态变化或冷却时间到期后发送，避免重复轰炸。</p>
+          <div class="alert-settings__eyebrow">{{ $t('ui.health.proactive') }}</div>
+          <h2>{{ $t('ui.health.alerts') }}</h2>
+          <p>{{ $t('ui.health.alertHint') }}</p>
         </div>
         <div class="alert-settings__header-actions">
-          <v-switch v-model="alerts.enabled" color="primary" label="启用告警" hide-details inset />
+          <v-switch v-model="alerts.enabled" color="primary" :label="$t('ui.health.enableAlerts')" hide-details inset />
           <v-btn
             variant="tonal"
             :prepend-icon="showAlertSettings ? 'mdi-chevron-up' : 'mdi-tune-variant'"
             @click="showAlertSettings = !showAlertSettings"
           >
-            {{ showAlertSettings ? '收起配置' : '配置' }}
+            {{ showAlertSettings ? $t('ui.health.collapse') : $t('ui.health.configure') }}
           </v-btn>
         </div>
       </div>
       <v-expand-transition>
       <v-row v-show="showAlertSettings" class="mt-2">
         <v-col cols="12" md="7">
-          <v-text-field v-model="alerts.telegramToken" :label="alerts.telegramTokenSet ? 'Telegram Bot Token（已配置，留空不修改）' : 'Telegram Bot Token'" prepend-inner-icon="mdi-send-check-outline" type="password" autocomplete="new-password" />
+          <v-text-field v-model="alerts.telegramToken" :label="alerts.telegramTokenSet ? $t('ui.health.tokenSaved') : 'Telegram Bot Token'" prepend-inner-icon="mdi-send-check-outline" type="password" autocomplete="new-password" />
         </v-col>
         <v-col cols="12" md="5">
           <v-text-field v-model="alerts.telegramChatId" label="Telegram Chat ID" prepend-inner-icon="mdi-account-tie" />
         </v-col>
         <v-col cols="6" md="3">
-          <v-number-input v-model="alerts.intervalMinutes" label="检查间隔（分钟）" :min="1" :max="1440" control-variant="stacked" />
+          <v-number-input v-model="alerts.intervalMinutes" :label="$t('ui.health.interval')" :min="1" :max="1440" control-variant="stacked" />
         </v-col>
         <v-col cols="6" md="3">
-          <v-number-input v-model="alerts.cooldownMinutes" label="重复冷却（分钟）" :min="1" :max="10080" control-variant="stacked" />
+          <v-number-input v-model="alerts.cooldownMinutes" :label="$t('ui.health.cooldown')" :min="1" :max="10080" control-variant="stacked" />
         </v-col>
         <v-col cols="12" md="6" class="alert-settings__actions">
-          <v-btn variant="tonal" prepend-icon="mdi-send-check-outline" :loading="testingAlert" @click="testAlert">测试通知</v-btn>
-          <v-btn color="primary" prepend-icon="mdi-content-save-outline" :loading="savingAlerts" @click="saveAlerts">保存告警</v-btn>
+          <v-btn variant="tonal" prepend-icon="mdi-send-check-outline" :loading="testingAlert" @click="testAlert">{{ $t('ui.health.testAlert') }}</v-btn>
+          <v-btn color="primary" prepend-icon="mdi-content-save-outline" :loading="savingAlerts" @click="saveAlerts">{{ $t('ui.health.saveAlerts') }}</v-btn>
         </v-col>
       </v-row>
       </v-expand-transition>
@@ -143,6 +143,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { push } from 'notivue'
 import HttpUtils from '@/plugins/httputil'
+import { i18n } from '@/locales'
 
 interface HealthCheck { id: string; title: string; status: string; summary: string; detail?: string; action?: string }
 interface HealthReport { status: string; checkedAt: string; durationMs: number; summary: Record<string, number>; checks: HealthCheck[]; diagnostics: Record<string, unknown> }
@@ -150,6 +151,7 @@ interface AlertSettings { enabled: boolean; telegramToken: string; telegramToken
 interface PortDriftIssue { id: string; type: string; severity: string; scope?: string; family?: string; protocol?: string; port?: string; to_ports?: string; owner_tag?: string; detail: string; repairable: boolean }
 
 const router = useRouter()
+const t = i18n.global.t
 const loading = ref(false)
 const reconciling = ref(false)
 const repairingIssueId = ref('')
@@ -159,13 +161,13 @@ const testingAlert = ref(false)
 const showAlertSettings = ref(false)
 const alerts = ref<AlertSettings>({ enabled: false, telegramToken: '', telegramTokenSet: false, telegramChatId: '', intervalMinutes: 5, cooldownMinutes: 60 })
 
-const statusLabel = computed(() => ({ healthy: '全部正常', warning: '需要关注', critical: '发现异常' } as Record<string, string>)[report.value?.status ?? ''] ?? '等待检查')
+const statusLabel = computed(() => ({ healthy: t('ui.health.allHealthy'), warning: t('ui.health.needsAttention'), critical: t('ui.health.critical') } as Record<string, string>)[report.value?.status ?? ''] ?? t('ui.health.waiting'))
 const checkedAt = computed(() => report.value?.checkedAt ? new Date(report.value.checkedAt).toLocaleString() : '-')
 const summaryCards = computed(() => [
-  { key: 'ok', label: '正常', value: report.value?.summary?.ok ?? 0, icon: 'mdi-check-circle-outline' },
-  { key: 'warning', label: '警告', value: report.value?.summary?.warning ?? 0, icon: 'mdi-alert-outline' },
-  { key: 'error', label: '异常', value: report.value?.summary?.error ?? 0, icon: 'mdi-close-circle-outline' },
-  { key: 'info', label: '信息', value: report.value?.summary?.info ?? 0, icon: 'mdi-information-outline' },
+  { key: 'ok', label: t('ui.health.ok'), value: report.value?.summary?.ok ?? 0, icon: 'mdi-check-circle-outline' },
+  { key: 'warning', label: t('ui.health.warning'), value: report.value?.summary?.warning ?? 0, icon: 'mdi-alert-outline' },
+  { key: 'error', label: t('ui.health.error'), value: report.value?.summary?.error ?? 0, icon: 'mdi-close-circle-outline' },
+  { key: 'info', label: t('ui.health.info'), value: report.value?.summary?.info ?? 0, icon: 'mdi-information-outline' },
 ])
 const portIssues = computed<PortDriftIssue[]>(() => {
   const diagnostics = report.value?.diagnostics as any
@@ -191,7 +193,7 @@ const repairPortIssue = async (issue: PortDriftIssue) => {
   const msg = await HttpUtils.post('api/repairPortIssue', { issueId: issue.id })
   repairingIssueId.value = ''
   if (msg.success) {
-    push.success({ message: '端口规则已修复' })
+    push.success({ message: t('ui.health.repaired') })
     await loadHealth(true)
   }
 }
@@ -212,16 +214,16 @@ const testAlert = async () => {
   testingAlert.value = true
   const msg = await HttpUtils.post('api/alertTest', {})
   testingAlert.value = false
-  if (msg.success) push.success({ message: '测试通知已发送' })
+  if (msg.success) push.success({ message: t('ui.health.testSent') })
 }
 
 const copyReport = async () => {
   if (!report.value) return
   try {
     await navigator.clipboard.writeText(JSON.stringify(report.value, null, 2))
-    push.success({ message: '诊断报告已复制' })
+    push.success({ message: t('ui.health.reportCopied') })
   } catch {
-    push.error({ message: '复制失败，请检查浏览器剪贴板权限' })
+    push.error({ message: t('ui.health.copyFailed') })
   }
 }
 
@@ -238,9 +240,9 @@ const handleAction = async (action: string) => {
 
 const statusColor = (status: string) => ({ ok: 'success', warning: 'warning', error: 'error', info: 'info' } as Record<string, string>)[status] ?? 'info'
 const statusIcon = (status: string) => ({ ok: 'mdi-check-circle', warning: 'mdi-alert', error: 'mdi-close-circle', info: 'mdi-information' } as Record<string, string>)[status] ?? 'mdi-information'
-const checkStatusLabel = (status: string) => ({ ok: '正常', warning: '警告', error: '异常', info: '信息' } as Record<string, string>)[status] ?? status
-const portIssueLabel = (type: string) => ({ missing: '缺失规则', duplicate: '重复规则', orphan: '孤立规则', unexpected: '目标不匹配', 'desired-duplicate': '配置重复', 'inspection-error': '检查失败', unsupported: '当前平台不支持' } as Record<string, string>)[type] ?? type
-const portOwnerLabel = (scope?: string) => ({ inbound: '入站', endpoint: '节点', panel: '面板' } as Record<string, string>)[scope ?? ''] ?? '受管规则'
+const checkStatusLabel = (status: string) => ({ ok: t('ui.health.ok'), warning: t('ui.health.warning'), error: t('ui.health.error'), info: t('ui.health.info') } as Record<string, string>)[status] ?? status
+const portIssueLabel = (type: string) => ({ missing: t('ui.health.missingRule'), duplicate: t('ui.health.duplicateRule'), orphan: t('ui.health.orphanRule'), unexpected: t('ui.health.targetMismatch'), 'desired-duplicate': t('ui.health.duplicateConfig'), 'inspection-error': t('ui.health.inspectionFailed'), unsupported: t('ui.health.unsupported') } as Record<string, string>)[type] ?? type
+const portOwnerLabel = (scope?: string) => ({ inbound: t('ui.health.inbound'), endpoint: t('ui.health.endpoint'), panel: t('ui.health.panel') } as Record<string, string>)[scope ?? ''] ?? t('ui.health.managedRule')
 const portIssueIcon = (severity: string) => ({ error: 'mdi-alert-circle-outline', warning: 'mdi-alert-outline', info: 'mdi-information-outline' } as Record<string, string>)[severity] ?? 'mdi-information-outline'
 const portIssueColor = (severity: string) => ({ error: 'error', warning: 'warning', info: 'info' } as Record<string, string>)[severity] ?? 'info'
 

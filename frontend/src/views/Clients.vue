@@ -222,7 +222,7 @@
         <template v-slot:item.inbounds="{ item }">
           <span class="clients-inbound-count">
           <v-tooltip activator="parent" dir="ltr" location="start" v-if="item.inbounds.length > 0">
-            <span v-for="i in item.inbounds">{{ inbounds.find(inb => inb.id == i)?.tag }}<br /></span>
+            <span v-for="i in item.inbounds" :key="i">{{ inbounds.find(inb => inb.id == i)?.tag }}<br /></span>
           </v-tooltip>
           <v-icon icon="mdi-tunnel-outline" size="15" />
           {{ item.inbounds?.length }}

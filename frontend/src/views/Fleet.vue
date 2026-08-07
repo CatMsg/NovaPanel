@@ -6,9 +6,9 @@
     <div class="fleet-shell__inner">
       <v-card class="fleet-hero" rounded="xl" variant="flat">
         <div class="fleet-hero__topline">
-          <span class="fleet-hero__badge">服务器集合</span>
+          <span class="fleet-hero__badge">{{ $t('ui.fleet.badge') }}</span>
           <span class="fleet-hero__badge fleet-hero__badge--soft">
-            {{ initialLoading ? '正在检查…' : `${reachableCount}/${servers.length} 在线` }}
+            {{ initialLoading ? $t('ui.fleet.checking') : `${reachableCount}/${servers.length} ${$t('ui.common.online')}` }}
           </span>
         </div>
         <v-row class="fleet-hero__content" align="center">
@@ -18,16 +18,14 @@
                 <v-icon icon="mdi-server-network" size="32" />
               </div>
               <div>
-                <h1 class="fleet-hero__title">服务器集合</h1>
-                <p class="fleet-hero__subtitle">
-                  从一个页面查看多台 NovaPanel 的运行状态、端口后端和核心健康情况。
-                </p>
+                <h1 class="fleet-hero__title">{{ $t('ui.fleet.title') }}</h1>
+                <p class="fleet-hero__subtitle">{{ $t('ui.fleet.subtitle') }}</p>
               </div>
             </div>
             <div class="fleet-hero__meta">
-              <span>上次检查：{{ formattedCheckedAt }}</span>
+              <span>{{ $t('ui.fleet.lastCheck', { time: formattedCheckedAt }) }}</span>
               <span>•</span>
-              <span>{{ remoteCount }} 台远端服务器</span>
+              <span>{{ $t('ui.fleet.remoteCount', { count: remoteCount }) }}</span>
             </div>
           </v-col>
           <v-col cols="12" lg="5" class="fleet-hero__actions">
@@ -39,7 +37,7 @@
               @click="runBatchAction('restart')"
             >
               <v-icon icon="mdi-restart" start />
-              一键重启
+              {{ $t('ui.fleet.batchRestart') }}
             </v-btn>
             <v-btn
               color="primary"
@@ -48,15 +46,15 @@
               @click="runBatchAction('update')"
             >
               <v-icon icon="mdi-download-outline" start />
-              一键更新
+              {{ $t('ui.fleet.batchUpdate') }}
             </v-btn>
             <v-btn variant="outlined" :disabled="loading" @click="showConfig = true">
               <v-icon icon="mdi-server-plus" start />
-              管理服务器
+              {{ $t('ui.fleet.manage') }}
             </v-btn>
             <v-btn color="primary" :loading="loading" @click="loadFleet">
               <v-icon icon="mdi-refresh" start />
-              刷新状态
+              {{ $t('ui.fleet.refreshStatus') }}
             </v-btn>
           </v-col>
         </v-row>
@@ -68,50 +66,50 @@
       <v-row class="fleet-summary" dense>
         <v-col cols="6" class="fleet-summary__col">
           <v-card class="fleet-summary__card fleet-summary__card--one" rounded="xl" variant="flat">
-            <div class="fleet-summary__label">服务器总数</div>
+            <div class="fleet-summary__label">{{ $t('ui.fleet.total') }}</div>
             <div class="fleet-summary__value">{{ initialLoading ? '—' : servers.length }}</div>
           </v-card>
         </v-col>
         <v-col cols="6" class="fleet-summary__col">
           <v-card class="fleet-summary__card fleet-summary__card--two" rounded="xl" variant="flat">
-            <div class="fleet-summary__label">在线</div>
+            <div class="fleet-summary__label">{{ $t('ui.common.online') }}</div>
             <div class="fleet-summary__value">{{ initialLoading ? '—' : reachableCount }}</div>
           </v-card>
         </v-col>
         <v-col cols="6" class="fleet-summary__col">
           <v-card class="fleet-summary__card fleet-summary__card--three" rounded="xl" variant="flat">
-            <div class="fleet-summary__label">核心运行</div>
+            <div class="fleet-summary__label">{{ $t('ui.fleet.coreRunning') }}</div>
             <div class="fleet-summary__value">{{ initialLoading ? '—' : runningCount }}</div>
           </v-card>
         </v-col>
         <v-col cols="6" class="fleet-summary__col">
           <v-card class="fleet-summary__card fleet-summary__card--four" rounded="xl" variant="flat">
-            <div class="fleet-summary__label">异常</div>
+            <div class="fleet-summary__label">{{ $t('ui.fleet.errors') }}</div>
             <div class="fleet-summary__value">{{ initialLoading ? '—' : errorCount }}</div>
           </v-card>
         </v-col>
         <v-col cols="6" class="fleet-summary__col">
           <v-card class="fleet-summary__card fleet-summary__card--five" rounded="xl" variant="flat">
-            <div class="fleet-summary__label">在线用户</div>
+            <div class="fleet-summary__label">{{ $t('ui.fleet.onlineUsers') }}</div>
             <div class="fleet-summary__value">{{ initialLoading ? '—' : onlineUsersTotal }}</div>
           </v-card>
         </v-col>
         <v-col cols="6" class="fleet-summary__col">
           <v-card class="fleet-summary__card fleet-summary__card--six" rounded="xl" variant="flat">
-            <div class="fleet-summary__label">节点总数</div>
+            <div class="fleet-summary__label">{{ $t('ui.fleet.endpointTotal') }}</div>
             <div class="fleet-summary__value">{{ initialLoading ? '—' : endpointTotal }}</div>
           </v-card>
         </v-col>
         <v-col cols="6" class="fleet-summary__col fleet-summary__col--last">
           <v-card class="fleet-summary__card fleet-summary__card--seven" rounded="xl" variant="flat">
-            <div class="fleet-summary__label">配置差异</div>
+            <div class="fleet-summary__label">{{ $t('ui.fleet.configDrift') }}</div>
             <div class="fleet-summary__value">{{ initialLoading ? '—' : driftServerCount }}</div>
           </v-card>
         </v-col>
       </v-row>
 
       <v-alert v-if="!initialLoading && servers.length === 1" type="info" variant="tonal" rounded="xl" class="fleet-empty">
-        当前只有本机。点击“管理服务器”添加远端 NovaPanel 的 API 地址和令牌，即可纳入集合。
+        {{ $t('ui.fleet.onlyLocal') }}
       </v-alert>
 
       <v-row class="fleet-grid" dense>
@@ -128,9 +126,9 @@
                 </div>
               </div>
               <div class="fleet-card__chips">
-                <v-chip v-if="server.driftCount" size="small" color="warning" variant="tonal">{{ server.driftCount }} 项差异</v-chip>
+                <v-chip v-if="server.driftCount" size="small" color="warning" variant="tonal">{{ $t('ui.fleet.driftItems', { count: server.driftCount }) }}</v-chip>
                 <v-chip size="small" :color="server.reachable ? 'success' : server.enabled ? 'error' : 'secondary'" variant="flat">
-                  {{ server.reachable ? '在线' : server.lastKnown ? '上次状态' : server.enabled ? '失联' : '已停用' }}
+                  {{ server.reachable ? $t('ui.common.online') : server.lastKnown ? $t('ui.fleet.lastKnown') : server.enabled ? $t('ui.fleet.unreachable') : $t('ui.fleet.disabled') }}
                 </v-chip>
               </div>
             </div>
@@ -139,39 +137,39 @@
 
             <div class="fleet-card__metrics">
               <div class="fleet-metric">
-                <span>版本</span>
+                <span>{{ $t('ui.common.version') }}</span>
                 <strong>{{ server.System?.appVersion || '-' }}</strong>
               </div>
               <div class="fleet-metric">
-                <span>延迟</span>
-                <strong>{{ server.id === 'local' ? '本机' : server.reachable ? `${server.latencyMs} ms` : '-' }}</strong>
+                <span>{{ $t('ui.common.latency') }}</span>
+                <strong>{{ server.id === 'local' ? $t('ui.common.local') : server.reachable ? `${server.latencyMs} ms` : '-' }}</strong>
               </div>
               <div class="fleet-metric">
-                <span>公网 IP</span>
+                <span>{{ $t('ui.common.publicIp') }}</span>
                 <strong>{{ server.PublicIP || '-' }}</strong>
               </div>
               <div class="fleet-metric">
-                <span>运行时间</span>
+                <span>{{ $t('ui.common.uptime') }}</span>
                 <strong>{{ formatUptime(server.Uptime) }}</strong>
               </div>
               <div class="fleet-metric">
-                <span>防火墙</span>
+                <span>{{ $t('ui.common.firewall') }}</span>
                 <strong>{{ server.portBackend || '-' }}</strong>
               </div>
               <div class="fleet-metric">
-                <span>监听 / NAT</span>
+                <span>{{ $t('ui.fleet.listenersNat') }}</span>
                 <strong>{{ server.reachable ? `${server.listeners} / ${server.natRules}` : '-' }}</strong>
               </div>
               <div class="fleet-metric">
-                <span>用户在线</span>
+                <span>{{ $t('ui.fleet.usersOnline') }}</span>
                 <strong>{{ server.OnlineUsers }} / {{ server.Clients }}</strong>
               </div>
               <div class="fleet-metric">
-                <span>入站 / 出站</span>
+                <span>{{ $t('ui.fleet.inboundsOutbounds') }}</span>
                 <strong>{{ server.Inbounds }} / {{ server.Outbounds }}</strong>
               </div>
               <div class="fleet-metric">
-                <span>节点</span>
+                <span>{{ $t('ui.common.endpoints') }}</span>
                 <strong>{{ server.Endpoints }}</strong>
               </div>
               <div class="fleet-metric">
@@ -187,25 +185,25 @@
             <div class="fleet-card__footer">
               <span class="fleet-core-state" :class="server.Core?.running ? 'is-running' : ''">
                 <v-icon :icon="server.Core?.running ? 'mdi-check-circle' : 'mdi-alert-circle-outline'" size="16" />
-                {{ server.Core?.running ? 'Sing-Box 运行中' : 'Sing-Box 未运行' }}
+                {{ server.Core?.running ? $t('ui.fleet.singboxRunning') : $t('ui.fleet.singboxStopped') }}
               </span>
               <span v-if="server.error" class="fleet-card__error" :title="server.error">{{ server.error }}</span>
             </div>
             <div class="fleet-card__actions">
               <v-btn size="small" variant="tonal" @click.stop="openDetails(server)">
-                <v-icon icon="mdi-information-outline" start />详情
+                <v-icon icon="mdi-information-outline" start />{{ $t('ui.common.details') }}
               </v-btn>
               <v-btn size="small" variant="text" @click.stop="openLogs(server)">
-                <v-icon icon="mdi-text-box-outline" start />日志
+                <v-icon icon="mdi-text-box-outline" start />{{ $t('ui.common.logs') }}
               </v-btn>
               <v-btn size="small" variant="text" color="warning" :disabled="batchAction !== '' || !server.reachable" @click.stop="restartServer(server)">
-                <v-icon icon="mdi-restart" start />重启
+                <v-icon icon="mdi-restart" start />{{ $t('ui.common.restart') }}
               </v-btn>
               <v-btn size="small" variant="text" color="primary" :loading="updateLoadingId === server.id" :disabled="batchAction !== '' || !server.reachable" @click.stop="updateServer(server)">
-                <v-icon icon="mdi-download-outline" start />更新
+                <v-icon icon="mdi-download-outline" start />{{ $t('ui.common.update') }}
               </v-btn>
               <v-btn size="small" variant="text" :loading="refreshLoadingId === server.id" @click.stop="refreshServer(server)">
-                <v-icon icon="mdi-refresh" start />刷新
+                <v-icon icon="mdi-refresh" start />{{ $t('ui.common.refresh') }}
               </v-btn>
             </div>
           </v-card>
@@ -216,36 +214,36 @@
     <v-dialog v-model="showConfig" max-width="860" scrollable>
       <v-card rounded="xl" class="fleet-dialog">
         <v-card-title class="fleet-dialog__title">
-          <span>管理服务器集合</span>
-          <v-btn icon="mdi-close" variant="text" @click="showConfig = false" />
+          <span>{{ $t('ui.fleet.manageTitle') }}</span>
+          <v-btn icon="mdi-close" variant="text" :aria-label="$t('actions.close')" @click="showConfig = false" />
         </v-card-title>
         <v-card-subtitle>
-          远端地址填写面板根地址，例如 https://example.com:9999。令牌用于状态读取和远程运维，留空保持已保存令牌不变。
+          {{ $t('ui.fleet.manageHint') }}
         </v-card-subtitle>
         <v-card-text>
           <div v-for="(item, index) in configs" :key="item.id || index" class="fleet-config-row">
-            <v-text-field v-model="item.name" label="名称" density="compact" hide-details />
-            <v-text-field v-model="item.url" label="面板地址" density="compact" hide-details />
+            <v-text-field v-model="item.name" :label="$t('ui.fleet.name')" density="compact" hide-details />
+            <v-text-field v-model="item.url" :label="$t('ui.fleet.panelUrl')" density="compact" hide-details />
             <v-text-field
               v-model="item.token"
-              label="API 令牌"
+              :label="$t('ui.fleet.apiToken')"
               density="compact"
               hide-details
               type="password"
-              :placeholder="item.tokenSet ? '已保存，留空保持不变' : ''"
+              :placeholder="item.tokenSet ? $t('ui.fleet.tokenSaved') : ''"
             />
             <v-switch v-model="item.enabled" color="primary" hide-details density="compact" />
-            <v-btn icon="mdi-delete-outline" color="error" variant="text" @click="removeConfig(index)" />
+            <v-btn icon="mdi-delete-outline" color="error" variant="text" :aria-label="$t('actions.del')" @click="removeConfig(index)" />
           </div>
           <v-btn variant="tonal" color="primary" class="fleet-dialog__add" @click="addConfig">
             <v-icon icon="mdi-plus" start />
-            添加服务器
+            {{ $t('ui.fleet.addServer') }}
           </v-btn>
         </v-card-text>
         <v-card-actions>
           <v-spacer />
-          <v-btn variant="text" @click="showConfig = false">取消</v-btn>
-          <v-btn color="primary" :loading="saving" @click="saveConfig">保存并检查</v-btn>
+          <v-btn variant="text" @click="showConfig = false">{{ $t('ui.common.cancel') }}</v-btn>
+          <v-btn color="primary" :loading="saving" @click="saveConfig">{{ $t('ui.fleet.saveCheck') }}</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -253,48 +251,48 @@
     <v-dialog v-model="showDetails" max-width="760" scrollable>
       <v-card rounded="xl" class="fleet-dialog" v-if="selectedServer">
         <v-card-title class="fleet-dialog__title">
-          <span>{{ selectedServer.name }} · 服务器详情</span>
-          <v-btn icon="mdi-close" variant="text" @click="showDetails = false" />
+          <span>{{ selectedServer.name }} · {{ $t('ui.fleet.serverDetails') }}</span>
+          <v-btn icon="mdi-close" variant="text" :aria-label="$t('actions.close')" @click="showDetails = false" />
         </v-card-title>
         <v-card-text>
           <div class="fleet-detail__status">
             <v-chip :color="selectedServer.reachable ? 'success' : 'error'" variant="tonal">
-              {{ selectedServer.reachable ? '在线' : '失联' }}
+              {{ selectedServer.reachable ? $t('ui.common.online') : $t('ui.fleet.unreachable') }}
             </v-chip>
-            <span>检查时间：{{ selectedServer.checkedAt ? new Date(selectedServer.checkedAt).toLocaleString() : '-' }}</span>
-            <span>延迟：{{ selectedServer.id === 'local' ? '本机' : `${selectedServer.latencyMs} ms` }}</span>
+            <span>{{ $t('ui.fleet.checkTime', { time: selectedServer.checkedAt ? new Date(selectedServer.checkedAt).toLocaleString() : '-' }) }}</span>
+            <span>{{ $t('ui.common.latency') }}：{{ selectedServer.id === 'local' ? $t('ui.common.local') : `${selectedServer.latencyMs} ms` }}</span>
           </div>
           <v-alert v-if="updateStates[selectedServer.id]" class="mt-4" variant="tonal" :type="updateAlertType(selectedServer)">
-            <strong>更新状态：</strong>{{ updateStateLabel(selectedServer) }}
+            <strong>{{ $t('ui.fleet.updateStatus') }}</strong>{{ updateStateLabel(selectedServer) }}
             <span v-if="updateStates[selectedServer.id]?.message"> · {{ updateStates[selectedServer.id].message }}</span>
           </v-alert>
           <div class="fleet-detail__grid">
-            <div><span>地址</span><strong>{{ selectedServer.url }}</strong></div>
-            <div><span>公网 IP</span><strong>{{ selectedServer.PublicIP || '-' }}</strong></div>
-            <div><span>版本</span><strong>{{ selectedServer.System?.appVersion || '-' }}</strong></div>
-            <div><span>运行时间</span><strong>{{ formatUptime(selectedServer.Uptime) }}</strong></div>
-            <div><span>防火墙</span><strong>{{ selectedServer.portBackend || '-' }}</strong></div>
-            <div><span>监听 / NAT</span><strong>{{ selectedServer.listeners }} / {{ selectedServer.natRules }}</strong></div>
-            <div><span>用户 / 在线</span><strong>{{ selectedServer.Clients }} / {{ selectedServer.OnlineUsers }}</strong></div>
-            <div><span>入站 / 出站</span><strong>{{ selectedServer.Inbounds }} / {{ selectedServer.Outbounds }}</strong></div>
-            <div><span>节点</span><strong>{{ selectedServer.Endpoints }}</strong></div>
+            <div><span>{{ $t('ui.fleet.address') }}</span><strong>{{ selectedServer.url }}</strong></div>
+            <div><span>{{ $t('ui.common.publicIp') }}</span><strong>{{ selectedServer.PublicIP || '-' }}</strong></div>
+            <div><span>{{ $t('ui.common.version') }}</span><strong>{{ selectedServer.System?.appVersion || '-' }}</strong></div>
+            <div><span>{{ $t('ui.common.uptime') }}</span><strong>{{ formatUptime(selectedServer.Uptime) }}</strong></div>
+            <div><span>{{ $t('ui.common.firewall') }}</span><strong>{{ selectedServer.portBackend || '-' }}</strong></div>
+            <div><span>{{ $t('ui.fleet.listenersNat') }}</span><strong>{{ selectedServer.listeners }} / {{ selectedServer.natRules }}</strong></div>
+            <div><span>{{ $t('ui.fleet.usersOnline') }}</span><strong>{{ selectedServer.Clients }} / {{ selectedServer.OnlineUsers }}</strong></div>
+            <div><span>{{ $t('ui.fleet.inboundsOutbounds') }}</span><strong>{{ selectedServer.Inbounds }} / {{ selectedServer.Outbounds }}</strong></div>
+            <div><span>{{ $t('ui.common.endpoints') }}</span><strong>{{ selectedServer.Endpoints }}</strong></div>
             <div><span>MASQUE</span><strong>{{ selectedServer.MasqueRunning }} / {{ selectedServer.MasqueTotal }}</strong></div>
             <div><span>Mieru</span><strong>{{ selectedServer.MieruRunning }} / {{ selectedServer.MieruTotal }}</strong></div>
           </div>
           <section v-if="selectedServer.configuration" class="fleet-config-compare">
             <div class="fleet-detail__log-head">
-              <span>配置快照</span>
+              <span>{{ $t('ui.fleet.configSnapshot') }}</span>
               <v-chip size="small" :color="selectedServer.driftCount ? 'warning' : 'success'" variant="tonal">
-                {{ selectedServer.id === 'local' ? '对比基线' : selectedServer.driftCount ? `${selectedServer.driftCount} 项差异` : '与本机一致' }}
+                {{ selectedServer.id === 'local' ? $t('ui.fleet.baseline') : selectedServer.driftCount ? $t('ui.fleet.driftItems', { count: selectedServer.driftCount }) : $t('ui.fleet.sameAsLocal') }}
               </v-chip>
             </div>
             <div class="fleet-config-snapshot">
-              <div><span>面板</span><strong>{{ selectedServer.configuration.webPort }} · {{ selectedServer.configuration.webPath }} · {{ tlsLabel(selectedServer.configuration.webTls) }}</strong></div>
-              <div><span>订阅</span><strong>{{ selectedServer.configuration.subPort }} · {{ selectedServer.configuration.subPath }} · {{ tlsLabel(selectedServer.configuration.subTls) }}</strong></div>
-              <div><span>面板域名</span><strong>{{ selectedServer.configuration.webDomain || '未设置' }}</strong></div>
-              <div><span>订阅域名</span><strong>{{ selectedServer.configuration.subDomain || '未设置' }}</strong></div>
-              <div><span>订阅角色</span><strong>{{ selectedServer.configuration.subMode === 'master' ? '主模式' : '从模式' }}</strong></div>
-              <div><span>订阅开关</span><strong>Base64 {{ boolLabel(selectedServer.configuration.subEncode) }} · 用户信息 {{ boolLabel(selectedServer.configuration.subShowInfo) }}</strong></div>
+              <div><span>{{ $t('ui.fleet.panel') }}</span><strong>{{ selectedServer.configuration.webPort }} · {{ selectedServer.configuration.webPath }} · {{ tlsLabel(selectedServer.configuration.webTls) }}</strong></div>
+              <div><span>{{ $t('ui.fleet.subscription') }}</span><strong>{{ selectedServer.configuration.subPort }} · {{ selectedServer.configuration.subPath }} · {{ tlsLabel(selectedServer.configuration.subTls) }}</strong></div>
+              <div><span>{{ $t('ui.fleet.panelDomain') }}</span><strong>{{ selectedServer.configuration.webDomain || $t('ui.fleet.notSet') }}</strong></div>
+              <div><span>{{ $t('ui.fleet.subscriptionDomain') }}</span><strong>{{ selectedServer.configuration.subDomain || $t('ui.fleet.notSet') }}</strong></div>
+              <div><span>{{ $t('ui.fleet.subscriptionRole') }}</span><strong>{{ selectedServer.configuration.subMode === 'master' ? $t('ui.fleet.master') : $t('ui.fleet.slave') }}</strong></div>
+              <div><span>{{ $t('ui.fleet.subscriptionOptions') }}</span><strong>Base64 {{ boolLabel(selectedServer.configuration.subEncode) }} · {{ $t('ui.fleet.userInfo') }} {{ boolLabel(selectedServer.configuration.subShowInfo) }}</strong></div>
             </div>
             <div v-if="selectedServer.drift?.length" class="fleet-drift-list">
               <div v-for="item in selectedServer.drift" :key="item.field" class="fleet-drift-item">
@@ -305,22 +303,22 @@
               </div>
             </div>
           </section>
-          <v-alert v-else-if="selectedServer.reachable" type="info" variant="tonal" class="mt-4">远端版本尚未提供配置对比数据，更新后即可参与比较。</v-alert>
+          <v-alert v-else-if="selectedServer.reachable" type="info" variant="tonal" class="mt-4">{{ $t('ui.fleet.remoteConfigUnavailable') }}</v-alert>
           <v-alert v-if="selectedServer.error" type="error" variant="tonal" class="mt-4">{{ selectedServer.error }}</v-alert>
           <div class="fleet-detail__log-head">
-            <span>最近日志</span>
-            <v-btn size="small" variant="tonal" :loading="logsLoading" @click="loadLogs(selectedServer)">刷新日志</v-btn>
+            <span>{{ $t('ui.fleet.recentLogs') }}</span>
+            <v-btn size="small" variant="tonal" :loading="logsLoading" @click="loadLogs(selectedServer)">{{ $t('ui.fleet.refreshLogs') }}</v-btn>
           </div>
-          <pre class="fleet-detail__logs">{{ logLines.length ? logLines.join('\n') : '点击“刷新日志”查看最近 100 行日志' }}</pre>
+          <pre class="fleet-detail__logs">{{ logLines.length ? logLines.join('\n') : $t('ui.fleet.logsHint') }}</pre>
         </v-card-text>
         <v-card-actions>
           <v-spacer />
-          <v-btn variant="text" @click="showDetails = false">关闭</v-btn>
+          <v-btn variant="text" @click="showDetails = false">{{ $t('ui.common.close') }}</v-btn>
           <v-btn color="warning" :loading="actionLoading" :disabled="batchAction !== '' || !selectedServer.reachable" @click="restartServer(selectedServer)">
-            <v-icon icon="mdi-restart" start />重启面板
+            <v-icon icon="mdi-restart" start />{{ $t('ui.fleet.restartPanel') }}
           </v-btn>
           <v-btn color="primary" :loading="updateLoadingId === selectedServer.id" :disabled="batchAction !== '' || !selectedServer.reachable" @click="updateServer(selectedServer)">
-            <v-icon icon="mdi-download-outline" start />后台更新
+            <v-icon icon="mdi-download-outline" start />{{ $t('ui.fleet.backgroundUpdate') }}
           </v-btn>
         </v-card-actions>
       </v-card>
@@ -331,6 +329,7 @@
 <script lang="ts" setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import HttpUtils from '@/plugins/httputil'
+import { i18n } from '@/locales'
 
 type FleetServer = {
   id: string
@@ -394,6 +393,8 @@ type FleetConfig = {
   tokenSet?: boolean
   enabled: boolean
 }
+
+const t = i18n.global.t
 
 const loading = ref(true)
 const saving = ref(false)
@@ -466,13 +467,13 @@ const formatUptime = (seconds: number) => {
   const days = Math.floor(seconds / 86400)
   const hours = Math.floor((seconds % 86400) / 3600)
   const minutes = Math.floor((seconds % 3600) / 60)
-  if (days > 0) return `${days}天 ${hours}时`
-  if (hours > 0) return `${hours}时 ${minutes}分`
-  return `${Math.max(minutes, 1)}分`
+  if (days > 0) return t('ui.fleet.daysHours', { days, hours })
+  if (hours > 0) return t('ui.fleet.hoursMinutes', { hours, minutes })
+  return t('ui.fleet.minutes', { minutes: Math.max(minutes, 1) })
 }
 
-const tlsLabel = (state: string) => ({ enabled: 'TLS 已启用', disabled: 'TLS 未启用', partial: 'TLS 配置不完整' } as Record<string, string>)[state] ?? state
-const boolLabel = (value: boolean) => value ? '开' : '关'
+const tlsLabel = (state: string) => ({ enabled: t('ui.fleet.tlsEnabled'), disabled: t('ui.fleet.tlsDisabled'), partial: t('ui.fleet.tlsPartial') } as Record<string, string>)[state] ?? state
+const boolLabel = (value: boolean) => value ? t('ui.fleet.on') : t('ui.fleet.off')
 const formatDriftValue = (value: unknown) => {
   if (typeof value === 'boolean') return boolLabel(value)
   return String(value ?? '-')
@@ -565,16 +566,16 @@ const runBatchAction = async (action: 'update' | 'restart') => {
   const targets = [...remoteTargets, ...(localTarget ? [localTarget] : [])]
   if (!targets.length) {
     batchMessageType.value = 'warning'
-    batchMessage.value = '没有可执行操作的在线服务器'
+    batchMessage.value = t('ui.fleet.noTargets')
     return
   }
-  const actionLabel = action === 'update' ? '更新' : '重启'
+  const actionLabel = action === 'update' ? t('ui.common.update') : t('ui.common.restart')
   const targetNames = targets.map((server) => server.name).join('、')
-  if (!window.confirm(`将按远端服务器优先、本机最后的顺序${actionLabel}：${targetNames}\n\n是否继续？`)) return
+  if (!window.confirm(t('ui.fleet.confirmBatch', { action: actionLabel, targets: targetNames }))) return
 
   batchAction.value = action
   batchMessageType.value = 'info'
-  batchMessage.value = `准备${actionLabel} ${targets.length} 台服务器，远端服务器优先`
+  batchMessage.value = t('ui.fleet.preparing', { action: actionLabel, count: targets.length })
   let remoteFailed = false
   let localFailed = false
   const failedRemoteNames: string[] = []
@@ -582,7 +583,7 @@ const runBatchAction = async (action: 'update' | 'restart') => {
   for (let index = 0; index < targets.length; index += 1) {
     const server = targets[index]
     if (server.id === 'local' && remoteFailed) break
-    batchMessage.value = `${actionLabel}中：${server.name}（${index + 1}/${targets.length}）`
+    batchMessage.value = t('ui.fleet.runningAction', { action: actionLabel, name: server.name, current: index + 1, total: targets.length })
     const response = await HttpUtils.post('api/fleetAction', { id: server.id, action })
     if (!response.success) {
       if (server.id !== 'local') {
@@ -591,7 +592,7 @@ const runBatchAction = async (action: 'update' | 'restart') => {
       }
       else localFailed = true
       batchMessageType.value = 'error'
-      batchMessage.value = `${server.name}${actionLabel}失败：${response.msg}`
+      batchMessage.value = t('ui.fleet.actionFailed', { name: server.name, action: actionLabel, message: response.msg })
       if (server.id !== 'local') continue
       break
     }
@@ -600,7 +601,7 @@ const runBatchAction = async (action: 'update' | 'restart') => {
   if (remoteFailed) {
     batchAction.value = ''
     batchMessageType.value = 'warning'
-    batchMessage.value = `远端${failedRemoteNames.join('、')}${actionLabel}失败，本机未执行`
+    batchMessage.value = t('ui.fleet.remoteFailed', { names: failedRemoteNames.join(', '), action: actionLabel })
     return
   }
 
@@ -611,9 +612,7 @@ const runBatchAction = async (action: 'update' | 'restart') => {
 
   batchAction.value = ''
   batchMessageType.value = 'success'
-  batchMessage.value = localTarget
-    ? `远端服务器已优先${action === 'update' ? '提交更新' : '完成重启'}，本机已最后执行`
-    : `远端服务器已${action === 'update' ? '提交更新' : '完成重启'}`
+  batchMessage.value = localTarget ? t('ui.fleet.batchDoneWithLocal') : t('ui.fleet.batchDoneRemote')
   if (localTarget) {
     schedule(loadFleet, 4500)
   }
@@ -642,7 +641,7 @@ const updateServer = async (server: FleetServer) => {
 
 const updateStateLabel = (server: FleetServer) => {
   const state = updateStates.value[server.id]?.state
-  return ({ queued: '排队中', running: '更新中', success: '已完成', failed: '失败', never: '未执行' } as Record<string, string>)[state] ?? state ?? '未知'
+  return ({ queued: t('ui.fleet.queued'), running: t('ui.fleet.updating'), success: t('ui.fleet.completed'), failed: t('ui.fleet.failed'), never: t('ui.fleet.never') } as Record<string, string>)[state] ?? state ?? t('ui.fleet.unknown')
 }
 
 const updateAlertType = (server: FleetServer) => {
