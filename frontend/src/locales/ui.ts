@@ -3,6 +3,7 @@ const en = {
     online: 'Online', offline: 'Offline', local: 'Local', refresh: 'Refresh', close: 'Close', cancel: 'Cancel',
     update: 'Update', restart: 'Restart', details: 'Details', logs: 'Logs', version: 'Version', latency: 'Latency',
     publicIp: 'Public IP', uptime: 'Uptime', firewall: 'Firewall', endpoints: 'Endpoints', protocol: 'Protocol',
+    cpu: 'CPU', memory: 'Memory', uploadSpeed: 'Upload', downloadSpeed: 'Download', sampling: 'Sampling…',
     port: 'Port', process: 'Process', target: 'Target', entry: 'Entry', unknownProcess: 'Unknown process',
   },
   fleet: {
@@ -32,6 +33,7 @@ const en = {
     actionFailed: '{name} {action} failed: {message}', remoteFailed: 'Remote servers {names} failed to {action}; local server was not changed',
     batchDoneWithLocal: 'Remote servers finished first; the local server ran last', batchDoneRemote: 'Remote servers finished',
     queued: 'Queued', updating: 'Updating', completed: 'Completed', failed: 'Failed', never: 'Never run', unknown: 'Unknown',
+    autoRefresh: 'Refreshes every 5 seconds while this page is visible',
   },
   ports: {
     subtitle: 'Inspect listening ports, NAT rules, and NovaPanel-managed ports. Rebuild managed rules when drift is detected.',
@@ -67,6 +69,7 @@ const zhHans = {
     online: '在线', offline: '失联', local: '本机', refresh: '刷新', close: '关闭', cancel: '取消', update: '更新',
     restart: '重启', details: '详情', logs: '日志', version: '版本', latency: '延迟', publicIp: '公网 IP', uptime: '运行时间',
     firewall: '防火墙', endpoints: '节点', protocol: '协议', port: '端口', process: '进程', target: '目标', entry: '入口', unknownProcess: '未知进程',
+    cpu: 'CPU', memory: '内存', uploadSpeed: '上传速度', downloadSpeed: '下载速度', sampling: '采样中…',
   },
   fleet: {
     badge: '服务器集合', checking: '正在检查…', title: '服务器集合', subtitle: '从一个页面查看多台 NovaPanel 的运行状态、端口后端和核心健康情况。',
@@ -91,6 +94,7 @@ const zhHans = {
     actionFailed: '{name}{action}失败：{message}', remoteFailed: '远端{names}{action}失败，本机未执行',
     batchDoneWithLocal: '远端服务器已优先完成操作，本机已最后执行', batchDoneRemote: '远端服务器已完成操作',
     queued: '排队中', updating: '更新中', completed: '已完成', failed: '失败', never: '未执行', unknown: '未知',
+    autoRefresh: '页面可见时每 5 秒自动刷新',
   },
   ports: {
     subtitle: '当前机器上的监听端口、NAT 规则和面板受管端口；发现漂移时可一键重建受管规则。', updatedAt: '更新时间：{time}',

@@ -26,6 +26,8 @@
               <span>{{ $t('ui.fleet.lastCheck', { time: formattedCheckedAt }) }}</span>
               <span>•</span>
               <span>{{ $t('ui.fleet.remoteCount', { count: remoteCount }) }}</span>
+              <span>•</span>
+              <span>{{ $t('ui.fleet.autoRefresh') }}</span>
             </div>
           </v-col>
           <v-col cols="12" lg="5" class="fleet-hero__actions">
@@ -134,6 +136,31 @@
             </div>
 
             <v-divider />
+
+            <div class="fleet-monitor">
+              <div class="fleet-monitor__item fleet-monitor__item--cpu">
+                <div class="fleet-monitor__head">
+                  <span>{{ $t('ui.common.cpu') }}</span>
+                  <strong>{{ server.reachable && server.ResourcesReady ? formatPercent(server.CPUPercent) : '-' }}</strong>
+                </div>
+                <v-progress-linear :model-value="server.reachable && server.ResourcesReady ? clampPercent(server.CPUPercent) : 0" height="5" rounded color="info" />
+              </div>
+              <div class="fleet-monitor__item fleet-monitor__item--memory">
+                <div class="fleet-monitor__head">
+                  <span>{{ $t('ui.common.memory') }}</span>
+                  <strong>{{ server.reachable && server.ResourcesReady ? formatMemory(server.MemoryUsed, server.MemoryTotal) : '-' }}</strong>
+                </div>
+                <v-progress-linear :model-value="server.reachable && server.ResourcesReady ? memoryPercent(server) : 0" height="5" rounded color="warning" />
+              </div>
+              <div class="fleet-monitor__item fleet-monitor__item--upload">
+                <span>{{ $t('ui.common.uploadSpeed') }}</span>
+                <strong>{{ networkRateLabel(server, 'upload') }}</strong>
+              </div>
+              <div class="fleet-monitor__item fleet-monitor__item--download">
+                <span>{{ $t('ui.common.downloadSpeed') }}</span>
+                <strong>{{ networkRateLabel(server, 'download') }}</strong>
+              </div>
+            </div>
 
             <div class="fleet-card__metrics">
               <div class="fleet-metric">
@@ -267,6 +294,10 @@
             <span v-if="updateStates[selectedServer.id]?.message"> · {{ updateStates[selectedServer.id].message }}</span>
           </v-alert>
           <div class="fleet-detail__grid">
+            <div><span>{{ $t('ui.common.cpu') }}</span><strong>{{ selectedServer.ResourcesReady ? formatPercent(selectedServer.CPUPercent) : '-' }}</strong></div>
+            <div><span>{{ $t('ui.common.memory') }}</span><strong>{{ selectedServer.ResourcesReady ? formatMemory(selectedServer.MemoryUsed, selectedServer.MemoryTotal, true) : '-' }}</strong></div>
+            <div><span>{{ $t('ui.common.uploadSpeed') }}</span><strong>{{ networkRateLabel(selectedServer, 'upload') }}</strong></div>
+            <div><span>{{ $t('ui.common.downloadSpeed') }}</span><strong>{{ networkRateLabel(selectedServer, 'download') }}</strong></div>
             <div><span>{{ $t('ui.fleet.address') }}</span><strong>{{ selectedServer.url }}</strong></div>
             <div><span>{{ $t('ui.common.publicIp') }}</span><strong>{{ selectedServer.PublicIP || '-' }}</strong></div>
             <div><span>{{ $t('ui.common.version') }}</span><strong>{{ selectedServer.System?.appVersion || '-' }}</strong></div>
@@ -349,6 +380,15 @@ type FleetServer = {
   core?: Record<string, any>
   PublicIP: string
   Uptime: number
+  CPUPercent: number
+  MemoryUsed: number
+  MemoryTotal: number
+  NetworkSent: number
+  NetworkReceived: number
+  UploadRate: number
+  DownloadRate: number
+  NetworkRateReady: boolean
+  ResourcesReady: boolean
   OnlineUsers: number
   OnlineInbounds: number
   OnlineOutbounds: number
@@ -414,6 +454,8 @@ const updateLoadingId = ref('')
 const refreshLoadingId = ref('')
 const updateStates = ref<Record<string, any>>({})
 const pendingTimers = new Set<number>()
+const networkSamples = new Map<string, { sent: number; received: number; checkedAt: number }>()
+let fleetRequestActive = false
 
 const schedule = (callback: () => void, delay: number) => {
   const timer = window.setTimeout(() => {
@@ -423,29 +465,56 @@ const schedule = (callback: () => void, delay: number) => {
   pendingTimers.add(timer)
 }
 
-const normalizeServer = (server: any): FleetServer => ({
-  ...server,
-  System: server.system ?? server.System ?? {},
-  Core: server.core ?? server.Core ?? {},
-  PublicIP: server.publicIp ?? server.PublicIP ?? '',
-  Uptime: server.uptime ?? server.Uptime ?? 0,
-  OnlineUsers: server.onlineUsers ?? server.OnlineUsers ?? 0,
-  OnlineInbounds: server.onlineInbounds ?? server.OnlineInbounds ?? 0,
-  OnlineOutbounds: server.onlineOutbounds ?? server.OnlineOutbounds ?? 0,
-  Clients: server.clients ?? server.Clients ?? 0,
-  Inbounds: server.inbounds ?? server.Inbounds ?? 0,
-  Outbounds: server.outbounds ?? server.Outbounds ?? 0,
-  Endpoints: server.endpoints ?? server.Endpoints ?? 0,
-  MasqueTotal: server.masqueTotal ?? server.MasqueTotal ?? 0,
-  MasqueRunning: server.masqueRunning ?? server.MasqueRunning ?? 0,
-  MieruTotal: server.mieruTotal ?? server.MieruTotal ?? 0,
-  MieruRunning: server.mieruRunning ?? server.MieruRunning ?? 0,
-  listeners: server.listeners ?? 0,
-  natRules: server.natRules ?? 0,
-  configuration: server.configuration,
-  drift: Array.isArray(server.drift) ? server.drift : [],
-  driftCount: server.driftCount ?? 0,
-})
+const normalizeServer = (server: any): FleetServer => {
+  const checkedAt = new Date(server.checkedAt ?? Date.now()).getTime()
+  const sent = Number(server.networkSent ?? server.NetworkSent ?? 0)
+  const received = Number(server.networkReceived ?? server.NetworkReceived ?? 0)
+  const previous = networkSamples.get(server.id)
+  let uploadRate = 0
+  let downloadRate = 0
+  let rateReady = false
+  const resourcesReady = Boolean(server.resourcesReady ?? server.ResourcesReady)
+  if (server.reachable && resourcesReady && previous && checkedAt > previous.checkedAt && sent >= previous.sent && received >= previous.received) {
+    const elapsedSeconds = (checkedAt - previous.checkedAt) / 1000
+    uploadRate = (sent - previous.sent) / elapsedSeconds
+    downloadRate = (received - previous.received) / elapsedSeconds
+    rateReady = true
+  }
+  if (server.reachable && resourcesReady && Number.isFinite(checkedAt)) networkSamples.set(server.id, { sent, received, checkedAt })
+
+  return {
+    ...server,
+    System: server.system ?? server.System ?? {},
+    Core: server.core ?? server.Core ?? {},
+    PublicIP: server.publicIp ?? server.PublicIP ?? '',
+    Uptime: server.uptime ?? server.Uptime ?? 0,
+    CPUPercent: Number(server.cpuPercent ?? server.CPUPercent ?? 0),
+    MemoryUsed: Number(server.memoryUsed ?? server.MemoryUsed ?? 0),
+    MemoryTotal: Number(server.memoryTotal ?? server.MemoryTotal ?? 0),
+    NetworkSent: sent,
+    NetworkReceived: received,
+    UploadRate: uploadRate,
+    DownloadRate: downloadRate,
+    NetworkRateReady: rateReady,
+    ResourcesReady: resourcesReady,
+    OnlineUsers: server.onlineUsers ?? server.OnlineUsers ?? 0,
+    OnlineInbounds: server.onlineInbounds ?? server.OnlineInbounds ?? 0,
+    OnlineOutbounds: server.onlineOutbounds ?? server.OnlineOutbounds ?? 0,
+    Clients: server.clients ?? server.Clients ?? 0,
+    Inbounds: server.inbounds ?? server.Inbounds ?? 0,
+    Outbounds: server.outbounds ?? server.Outbounds ?? 0,
+    Endpoints: server.endpoints ?? server.Endpoints ?? 0,
+    MasqueTotal: server.masqueTotal ?? server.MasqueTotal ?? 0,
+    MasqueRunning: server.masqueRunning ?? server.MasqueRunning ?? 0,
+    MieruTotal: server.mieruTotal ?? server.MieruTotal ?? 0,
+    MieruRunning: server.mieruRunning ?? server.MieruRunning ?? 0,
+    listeners: server.listeners ?? 0,
+    natRules: server.natRules ?? 0,
+    configuration: server.configuration,
+    drift: Array.isArray(server.drift) ? server.drift : [],
+    driftCount: server.driftCount ?? 0,
+  }
+}
 
 const remoteServers = computed(() => servers.value.filter((server) => server.id !== 'local'))
 const reachableCount = computed(() => servers.value.filter((server) => server.reachable).length)
@@ -472,6 +541,32 @@ const formatUptime = (seconds: number) => {
   return t('ui.fleet.minutes', { minutes: Math.max(minutes, 1) })
 }
 
+const clampPercent = (value: number) => Math.min(100, Math.max(0, Number.isFinite(value) ? value : 0))
+const formatPercent = (value: number) => `${clampPercent(value).toFixed(value >= 10 ? 0 : 1)}%`
+const memoryPercent = (server: FleetServer) => server.MemoryTotal > 0 ? clampPercent((server.MemoryUsed / server.MemoryTotal) * 100) : 0
+const formatBytes = (value: number, suffix = '') => {
+  if (!Number.isFinite(value) || value < 0) return '-'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let size = value
+  let unitIndex = 0
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024
+    unitIndex += 1
+  }
+  const digits = size >= 100 || unitIndex === 0 ? 0 : size >= 10 ? 1 : 2
+  return `${size.toFixed(digits)} ${units[unitIndex]}${suffix}`
+}
+const formatMemory = (used: number, total: number, detailed = false) => {
+  if (!total) return '-'
+  const percent = formatPercent((used / total) * 100)
+  return detailed ? `${formatBytes(used)} / ${formatBytes(total)} · ${percent}` : percent
+}
+const networkRateLabel = (server: FleetServer, direction: 'upload' | 'download') => {
+  if (!server.reachable || !server.ResourcesReady) return '-'
+  if (!server.NetworkRateReady) return t('ui.common.sampling')
+  return formatBytes(direction === 'upload' ? server.UploadRate : server.DownloadRate, '/s')
+}
+
 const tlsLabel = (state: string) => ({ enabled: t('ui.fleet.tlsEnabled'), disabled: t('ui.fleet.tlsDisabled'), partial: t('ui.fleet.tlsPartial') } as Record<string, string>)[state] ?? state
 const boolLabel = (value: boolean) => value ? t('ui.fleet.on') : t('ui.fleet.off')
 const formatDriftValue = (value: unknown) => {
@@ -479,14 +574,17 @@ const formatDriftValue = (value: unknown) => {
   return String(value ?? '-')
 }
 
-const loadFleet = async () => {
-  loading.value = true
+const loadFleet = async (silent = false) => {
+  if (fleetRequestActive) return
+  fleetRequestActive = true
+  if (!silent) loading.value = true
   try {
     const response = await HttpUtils.get('api/fleet')
     if (response.success && response.obj) {
-      servers.value = (response.obj.servers ?? []).map(normalizeServer)
+      const nextServers = (response.obj.servers ?? []).map(normalizeServer)
+      servers.value = nextServers
       checkedAt.value = response.obj.checkedAt ?? ''
-      configs.value = remoteServers.value.map((server) => ({
+      if (!showConfig.value) configs.value = nextServers.filter((server: FleetServer) => server.id !== 'local').map((server: FleetServer) => ({
         id: server.id,
         name: server.name,
         url: server.url,
@@ -494,10 +592,17 @@ const loadFleet = async () => {
         tokenSet: server.tokenSet,
         enabled: server.enabled,
       }))
+      if (selectedServer.value) selectedServer.value = nextServers.find((server: FleetServer) => server.id === selectedServer.value?.id) ?? selectedServer.value
     }
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
+    fleetRequestActive = false
   }
+}
+
+const pollFleet = async () => {
+  if (document.visibilityState === 'visible' && !showConfig.value && !batchAction.value) await loadFleet(true)
+  schedule(pollFleet, 5000)
 }
 
 const addConfig = () => {
@@ -657,7 +762,10 @@ const statusClass = (server: FleetServer) => {
   return 'is-online'
 }
 
-onMounted(loadFleet)
+onMounted(async () => {
+  await loadFleet()
+  schedule(pollFleet, 5000)
+})
 onBeforeUnmount(() => {
   pendingTimers.forEach(timer => window.clearTimeout(timer))
   pendingTimers.clear()
@@ -743,6 +851,14 @@ onBeforeUnmount(() => {
 .fleet-card__name-wrap { min-width: 0; }
 .fleet-card__name { font-size: 1.05rem; font-weight: 750; }
 .fleet-card__url { overflow: hidden; color: var(--np-text-muted); font-size: 0.76rem; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-monitor { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 14px 0 2px; }
+.fleet-monitor__item { min-width: 0; padding: 10px 11px; border: 1px solid var(--np-border); border-radius: 14px; background: var(--np-surface-muted); }
+.fleet-monitor__item > span, .fleet-monitor__head span { color: var(--np-text-muted); font-size: 0.7rem; }
+.fleet-monitor__item > strong { display: block; margin-top: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.88rem; }
+.fleet-monitor__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 7px; }
+.fleet-monitor__head strong { font-size: 0.82rem; }
+.fleet-monitor__item--upload { box-shadow: inset 0 2px 0 rgba(245, 158, 11, .6); }
+.fleet-monitor__item--download { box-shadow: inset 0 2px 0 rgba(34, 197, 94, .6); }
 .fleet-card__metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 18px 0; }
 .fleet-metric { display: grid; gap: 3px; }
 .fleet-metric span { color: var(--np-text-muted); font-size: 0.75rem; }
@@ -768,6 +884,7 @@ onBeforeUnmount(() => {
 .fleet-drift-item { display: grid; grid-template-columns: minmax(110px, .8fr) minmax(90px, 1fr) auto minmax(120px, 1fr); align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid rgba(249, 115, 22, .22); border-radius: 13px; background: rgba(249, 115, 22, .07); }
 
 @media (max-width: 600px) {
+  .fleet-monitor { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .fleet-detail__grid, .fleet-config-snapshot { grid-template-columns: 1fr; }
   .fleet-drift-item { grid-template-columns: 1fr auto; }
   .fleet-drift-item span, .fleet-drift-item strong { grid-column: 1 / -1; }

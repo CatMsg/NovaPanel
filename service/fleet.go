@@ -58,6 +58,12 @@ type FleetServerView struct {
 	Core            map[string]interface{} `json:"core,omitempty"`
 	PublicIP        string                 `json:"publicIp,omitempty"`
 	Uptime          int64                  `json:"uptime,omitempty"`
+	CPUPercent      float64                `json:"cpuPercent"`
+	MemoryUsed      int64                  `json:"memoryUsed"`
+	MemoryTotal     int64                  `json:"memoryTotal"`
+	NetworkSent     int64                  `json:"networkSent"`
+	NetworkReceived int64                  `json:"networkReceived"`
+	ResourcesReady  bool                   `json:"resourcesReady"`
 	OnlineUsers     int                    `json:"onlineUsers,omitempty"`
 	OnlineInbounds  int                    `json:"onlineInbounds,omitempty"`
 	OnlineOutbounds int                    `json:"onlineOutbounds,omitempty"`
@@ -122,11 +128,16 @@ var fleetLastKnown = struct {
 
 func (s *FleetService) GetFleetStatus() map[string]interface{} {
 	serverService := &ServerService{}
-	status := serverService.GetStatus("sys,sbd,db")
+	status := serverService.GetStatus("sys,sbd,db,cpu,mem,net")
 	result := map[string]interface{}{
-		"system":        (*status)["sys"],
-		"core":          (*status)["sbd"],
-		"database":      (*status)["db"],
+		"system":   (*status)["sys"],
+		"core":     (*status)["sbd"],
+		"database": (*status)["db"],
+		"resources": map[string]interface{}{
+			"cpu":     (*status)["cpu"],
+			"memory":  (*status)["mem"],
+			"network": (*status)["net"],
+		},
 		"publicIp":      serverService.GetPublicIP(),
 		"ports":         serverService.GetPortStatus(),
 		"configuration": s.getFleetConfigProfile(),
@@ -456,6 +467,7 @@ func (s *FleetService) applyFleetStatus(view *FleetServerView, payload map[strin
 	if publicIP, ok := payload["publicIp"].(string); ok {
 		view.PublicIP = publicIP
 	}
+	applyFleetResourceInfo(view, payload["resources"])
 	applyFleetDatabaseInfo(view, payload["database"])
 	if online, ok := payload["online"].(map[string]interface{}); ok {
 		view.OnlineUsers = fleetInt(online["users"])
@@ -476,6 +488,23 @@ func (s *FleetService) applyFleetStatus(view *FleetServerView, payload map[strin
 		view.NatRules = fleetSliceLength(ports["nat_ipv4"]) + fleetSliceLength(ports["nat_ipv6"])
 	}
 	view.Configuration = fleetConfigProfileFromValue(payload["configuration"])
+}
+
+func applyFleetResourceInfo(view *FleetServerView, value interface{}) {
+	resources, ok := value.(map[string]interface{})
+	if !ok {
+		return
+	}
+	view.ResourcesReady = true
+	view.CPUPercent = fleetFloat64(resources["cpu"])
+	if memory, ok := resources["memory"].(map[string]interface{}); ok {
+		view.MemoryUsed = fleetInt64(memory["current"])
+		view.MemoryTotal = fleetInt64(memory["total"])
+	}
+	if network, ok := resources["network"].(map[string]interface{}); ok {
+		view.NetworkSent = fleetInt64(network["sent"])
+		view.NetworkReceived = fleetInt64(network["recv"])
+	}
 }
 
 func (s *FleetService) getFleetConfigProfile() *FleetConfigProfile {
@@ -727,6 +756,26 @@ func fleetInt64(value interface{}) int64 {
 		return int64(typed)
 	case json.Number:
 		parsed, _ := typed.Int64()
+		return parsed
+	default:
+		return 0
+	}
+}
+
+func fleetFloat64(value interface{}) float64 {
+	switch typed := value.(type) {
+	case float32:
+		return float64(typed)
+	case float64:
+		return typed
+	case int:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	case uint64:
+		return float64(typed)
+	case json.Number:
+		parsed, _ := typed.Float64()
 		return parsed
 	default:
 		return 0
