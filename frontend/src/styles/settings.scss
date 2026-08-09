@@ -30,6 +30,7 @@
   --np-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --np-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --np-ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --np-ease-standard: cubic-bezier(0.25, 0.1, 0.25, 1);
   --np-duration-press: 120ms;
   --np-duration-fast: 160ms;
   --np-duration-dialog: 220ms;
@@ -173,6 +174,21 @@ body {
   .dialog-top-transition-leave-active {
     transition-duration: var(--np-duration-fast);
     transition-timing-function: var(--np-ease-out);
+  }
+
+  .scale-transition-enter-active {
+    transition-duration: var(--np-duration-fast);
+    transition-timing-function: var(--np-ease-out);
+  }
+
+  .scale-transition-leave-active {
+    transition-duration: var(--np-duration-press);
+    transition-timing-function: var(--np-ease-out);
+  }
+
+  .scale-transition-enter-from {
+    opacity: 0;
+    transform: scale(0.96);
   }
 }
 
@@ -383,7 +399,7 @@ body::after {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.42),
     0 8px 18px rgba(15, 23, 42, 0.04);
-  transition: border-color var(--np-duration-fast) ease, background-color var(--np-duration-fast) ease, transform var(--np-duration-fast) var(--np-ease-out), box-shadow var(--np-duration-fast) ease;
+  transition: border-color var(--np-duration-fast) var(--np-ease-standard), background-color var(--np-duration-fast) var(--np-ease-standard), transform var(--np-duration-fast) var(--np-ease-out), box-shadow var(--np-duration-fast) var(--np-ease-standard);
 }
 
 .app-bar__spacer {
@@ -495,6 +511,12 @@ body::after {
   .app-bar__spacer {
     width: 8px;
   }
+
+  .app-drawer.v-navigation-drawer--temporary {
+    height: calc(100% - 16px) !important;
+    margin: 8px;
+    border-radius: 24px;
+  }
 }
 
 .app-drawer {
@@ -509,6 +531,16 @@ body::after {
     inset 0 1px 0 rgba(255, 255, 255, 0.46),
     0 18px 50px rgba(15, 23, 42, 0.08);
   overflow: hidden;
+}
+
+.app-drawer.v-navigation-drawer--temporary {
+  transition-duration: 240ms;
+  transition-property: transform, visibility, box-shadow;
+  transition-timing-function: var(--np-ease-drawer);
+}
+
+.v-navigation-drawer__scrim {
+  transition: opacity var(--np-duration-fast) var(--np-ease-out);
 }
 
 .v-theme--dark .app-drawer {
@@ -536,7 +568,7 @@ body::after {
 .app-drawer .v-list-item {
   border-radius: 16px;
   margin: 4px 10px;
-  transition: background-color var(--np-duration-fast) ease, transform var(--np-duration-fast) var(--np-ease-out), box-shadow var(--np-duration-fast) ease;
+  transition: background-color var(--np-duration-fast) var(--np-ease-standard), transform var(--np-duration-fast) var(--np-ease-out), box-shadow var(--np-duration-fast) var(--np-ease-standard);
 }
 
 .app-drawer .v-list-item--active {
@@ -584,7 +616,7 @@ body::after {
   letter-spacing: 0;
   text-transform: none;
   box-shadow: none;
-  transition: transform var(--np-duration-fast) var(--np-ease-out), box-shadow var(--np-duration-fast) ease, border-color var(--np-duration-fast) ease;
+  transition: transform var(--np-duration-fast) var(--np-ease-out), box-shadow var(--np-duration-fast) var(--np-ease-standard), border-color var(--np-duration-fast) var(--np-ease-standard);
 }
 
 .v-btn--variant-flat,
@@ -605,7 +637,7 @@ body::after {
 .v-textarea .v-field {
   border-radius: 22px;
   border: 1px solid transparent;
-  transition: border-color var(--np-duration-fast) ease, box-shadow var(--np-duration-fast) ease, background-color var(--np-duration-fast) ease;
+  transition: border-color var(--np-duration-fast) var(--np-ease-standard), box-shadow var(--np-duration-fast) var(--np-ease-standard), background-color var(--np-duration-fast) var(--np-ease-standard);
 }
 
 .v-field__outline {
@@ -810,7 +842,7 @@ body::after {
   border-radius: 12px !important;
   background: var(--np-surface-muted);
   color: var(--np-text-main);
-  transition: transform var(--np-duration-fast) var(--np-ease-out), border-color var(--np-duration-fast) ease, background var(--np-duration-fast) ease;
+  transition: transform var(--np-duration-fast) var(--np-ease-out), border-color var(--np-duration-fast) var(--np-ease-standard), background var(--np-duration-fast) var(--np-ease-standard);
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -859,6 +891,30 @@ body::after {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .dialog-transition-enter-active,
+  .dialog-transition-leave-active,
+  .dialog-bottom-transition-enter-active,
+  .dialog-bottom-transition-leave-active,
+  .dialog-top-transition-enter-active,
+  .dialog-top-transition-leave-active,
+  .scale-transition-enter-active,
+  .scale-transition-leave-active,
+  .app-drawer.v-navigation-drawer--temporary,
+  .v-navigation-drawer__scrim {
+    transition-duration: 0.01ms !important;
+  }
+
+  .dialog-transition-enter-from,
+  .dialog-transition-leave-to,
+  .dialog-bottom-transition-enter-from,
+  .dialog-bottom-transition-leave-to,
+  .dialog-top-transition-enter-from,
+  .dialog-top-transition-leave-to,
+  .scale-transition-enter-from,
+  .scale-transition-leave-to {
+    transform: none !important;
+  }
+
   .app-bar__menu,
   .app-bar__icon-btn,
   .app-drawer .v-list-item,
@@ -874,6 +930,85 @@ body::after {
   .v-btn,
   .np-card-action {
     transform: none !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --np-surface: rgb(248, 250, 253);
+    --np-surface-strong: rgb(255, 255, 255);
+  }
+
+  .v-theme--dark,
+  body:has(.v-theme--dark) {
+    --np-surface: rgb(11, 18, 31);
+    --np-surface-strong: rgb(16, 24, 41);
+  }
+
+  body,
+  body:has(.v-theme--dark) {
+    background: var(--np-bg-2);
+  }
+
+  body::before,
+  body::after,
+  .ports-shell__glow,
+  .fleet-shell__glow {
+    display: none;
+  }
+
+  :where(
+    .app-bar,
+    .app-drawer,
+    .v-card,
+    .v-menu > .v-overlay__content,
+    .v-overlay__content > .v-list,
+    .clients-hero,
+    .clients-table-card,
+    .ports-hero,
+    .ports-summary__card,
+    .ports-panel,
+    .ports-alert,
+    .resource-hero,
+    .resource-card,
+    .fleet-hero,
+    .fleet-card,
+    .fleet-summary__card,
+    .fleet-dialog,
+    .glass-card,
+    .modal-shell,
+    .main-shell,
+    .main-toolbar,
+    .main-hero
+  ) {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --np-border: rgba(51, 65, 85, 0.42);
+    --np-text-muted: rgba(30, 41, 59, 0.9);
+  }
+
+  .v-theme--dark,
+  body:has(.v-theme--dark) {
+    --np-border: rgba(186, 230, 253, 0.42);
+    --np-text-muted: rgba(226, 232, 240, 0.9);
+  }
+}
+
+@media (forced-colors: active) {
+  :where(.app-bar, .app-drawer, .v-card, .v-list, .v-field, .v-table, .v-data-table) {
+    color: CanvasText !important;
+    background: Canvas !important;
+    border-color: CanvasText !important;
+    box-shadow: none !important;
+  }
+
+  :where(a, button, [role='button'], input, textarea, select):focus-visible {
+    outline: 2px solid Highlight;
   }
 }
 

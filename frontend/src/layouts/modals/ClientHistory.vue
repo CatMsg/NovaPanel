@@ -537,7 +537,7 @@ watch(
 
 .history-dialog__table :deep(tbody tr) {
   height: 58px;
-  transition: background-color var(--np-duration-fast) ease;
+  transition: background-color var(--np-duration-fast) var(--np-ease-standard);
 }
 
 @media (hover: hover) and (pointer: fine) {

@@ -26,12 +26,17 @@ import Vue3PersianDatetimePicker from 'vue3-persian-datetime-picker'
 // Notivue
 import { createNotivue } from 'notivue'
 import 'notivue/notification.css'
-import 'notivue/animations.css'
 const notivue = createNotivue({
   position: 'bottom-center',
   limit: 4,
   enqueue: false,
   avoidDuplicates: true,
+  transition: 'transform 160ms cubic-bezier(0.23, 1, 0.32, 1)',
+  animations: {
+    enter: '',
+    leave: '',
+    clearAll: '',
+  },
   notifications: {
     global: {
       duration: 3000

@@ -112,8 +112,7 @@ export default {
 .vpd-content {
   background-color: rgb(var(--v-theme-background)) !important;
 }
-.vpd-addon-list-item.vpd-selected,
-.vpd-addon-list-item:hover {
+.vpd-addon-list-item.vpd-selected {
   background-color: rgb(var(--v-theme-primary)) !important;
 }
 .vpd-close-addon {
@@ -126,8 +125,14 @@ export default {
 .vpd-month-label {
   width: auto;
 }
-.vpd-actions button:hover {
-  background-color: transparent;
+@media (hover: hover) and (pointer: fine) {
+  .vpd-addon-list-item:hover {
+    background-color: rgb(var(--v-theme-primary)) !important;
+  }
+
+  .vpd-actions button:hover {
+    background-color: transparent;
+  }
 }
 .vpd-wrapper[data-type=datetime].vpd-compact-time .vpd-time {
   border-top: 0;

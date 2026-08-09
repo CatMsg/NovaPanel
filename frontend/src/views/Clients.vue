@@ -516,7 +516,7 @@
   border-bottom: 1px solid var(--np-border) !important;
   background: color-mix(in srgb, var(--np-surface-muted) 82%, transparent);
   color: var(--np-text-main);
-  transition: background var(--np-duration-fast) ease, border-color var(--np-duration-fast) ease;
+  transition: background var(--np-duration-fast) var(--np-ease-standard), border-color var(--np-duration-fast) var(--np-ease-standard);
 }
 
 .clients-table tbody td:first-child {
