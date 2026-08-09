@@ -27,6 +27,12 @@
   --np-text-main: rgba(15, 23, 42, 0.94);
   --np-text-muted: rgba(71, 85, 105, 0.78);
   --np-accent: #0a84ff;
+  --np-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --np-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --np-ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --np-duration-press: 120ms;
+  --np-duration-fast: 160ms;
+  --np-duration-dialog: 220ms;
 }
 
 .v-theme--dark {
@@ -152,6 +158,47 @@ body {
 .v-dialog > .v-overlay__content > .v-card > :where(.v-card-title, .v-card-text, .v-card-actions) {
   color: var(--np-text-main);
   background: transparent;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .dialog-transition-enter-active,
+  .dialog-bottom-transition-enter-active,
+  .dialog-top-transition-enter-active {
+    transition-duration: var(--np-duration-dialog);
+    transition-timing-function: var(--np-ease-out);
+  }
+
+  .dialog-transition-leave-active,
+  .dialog-bottom-transition-leave-active,
+  .dialog-top-transition-leave-active {
+    transition-duration: var(--np-duration-fast);
+    transition-timing-function: var(--np-ease-out);
+  }
+}
+
+@media (max-width: 600px) and (prefers-reduced-motion: no-preference) {
+  .dialog-bottom-transition-enter-active,
+  .dialog-bottom-transition-leave-active {
+    transition-timing-function: var(--np-ease-drawer);
+  }
+}
+
+@media (min-width: 601px) and (prefers-reduced-motion: no-preference) {
+  .dialog-bottom-transition-enter-from,
+  .dialog-bottom-transition-leave-to,
+  .dialog-top-transition-enter-from,
+  .dialog-top-transition-leave-to {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+
+  .dialog-bottom-transition-enter-to,
+  .dialog-bottom-transition-leave-from,
+  .dialog-top-transition-enter-to,
+  .dialog-top-transition-leave-from {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .v-theme--dark.v-overlay__content > .v-card,
@@ -336,14 +383,7 @@ body::after {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.42),
     0 8px 18px rgba(15, 23, 42, 0.04);
-  transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
-}
-
-.app-bar__menu:hover,
-.app-bar__icon-btn:hover {
-  border-color: rgba(10, 132, 255, 0.22);
-  background: rgba(255, 255, 255, 0.72);
-  transform: translateY(-1px);
+  transition: border-color var(--np-duration-fast) ease, background-color var(--np-duration-fast) ease, transform var(--np-duration-fast) var(--np-ease-out), box-shadow var(--np-duration-fast) ease;
 }
 
 .app-bar__spacer {
@@ -496,21 +536,12 @@ body::after {
 .app-drawer .v-list-item {
   border-radius: 16px;
   margin: 4px 10px;
-  transition: background-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+  transition: background-color var(--np-duration-fast) ease, transform var(--np-duration-fast) var(--np-ease-out), box-shadow var(--np-duration-fast) ease;
 }
 
 .app-drawer .v-list-item--active {
   background: linear-gradient(90deg, rgba(10, 132, 255, 0.14), rgba(90, 200, 250, 0.08));
   box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.14);
-}
-
-.app-drawer .v-list-item:hover {
-  background: rgba(255, 255, 255, 0.42);
-  transform: translateX(2px);
-}
-
-.v-theme--dark .app-drawer .v-list-item:hover {
-  background: rgba(255, 255, 255, 0.06);
 }
 
 .v-card {
@@ -553,17 +584,13 @@ body::after {
   letter-spacing: 0;
   text-transform: none;
   box-shadow: none;
-  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+  transition: transform var(--np-duration-fast) var(--np-ease-out), box-shadow var(--np-duration-fast) ease, border-color var(--np-duration-fast) ease;
 }
 
 .v-btn--variant-flat,
 .v-btn--variant-tonal,
 .v-btn--variant-elevated {
   box-shadow: var(--np-shadow-soft);
-}
-
-.v-btn:hover {
-  transform: translateY(-1px);
 }
 
 .v-chip {
@@ -578,7 +605,7 @@ body::after {
 .v-textarea .v-field {
   border-radius: 22px;
   border: 1px solid transparent;
-  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+  transition: border-color var(--np-duration-fast) ease, box-shadow var(--np-duration-fast) ease, background-color var(--np-duration-fast) ease;
 }
 
 .v-field__outline {
@@ -589,10 +616,6 @@ body::after {
 .v-field--variant-solo-filled,
 .v-field--variant-filled {
   background: var(--np-surface-strong);
-}
-
-.v-field:hover {
-  border-color: rgba(10, 132, 255, 0.16);
 }
 
 .v-field.v-field--focused {
@@ -631,11 +654,6 @@ body::after {
 .v-data-table tbody td,
 .v-table tbody td {
   color: var(--np-text-main);
-}
-
-.v-table tbody tr:hover,
-.v-data-table tbody tr:hover {
-  background: rgba(10, 132, 255, 0.04);
 }
 
 .v-tabs {
@@ -792,13 +810,71 @@ body::after {
   border-radius: 12px !important;
   background: var(--np-surface-muted);
   color: var(--np-text-main);
-  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+  transition: transform var(--np-duration-fast) var(--np-ease-out), border-color var(--np-duration-fast) ease, background var(--np-duration-fast) ease;
 }
 
-.np-card-action:hover {
-  transform: translateY(-1px);
-  border-color: rgba(10, 132, 255, 0.22);
-  background: rgba(10, 132, 255, 0.08);
+@media (hover: hover) and (pointer: fine) {
+  .app-bar__menu:hover,
+  .app-bar__icon-btn:hover {
+    border-color: rgba(10, 132, 255, 0.22);
+    background: rgba(255, 255, 255, 0.72);
+    transform: translateY(-1px);
+  }
+
+  .app-drawer .v-list-item:hover {
+    background: rgba(255, 255, 255, 0.42);
+    transform: translateX(2px);
+  }
+
+  .v-theme--dark .app-drawer .v-list-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .v-btn:hover,
+  .np-card-action:hover {
+    transform: translateY(-1px);
+  }
+
+  .np-card-action:hover {
+    border-color: rgba(10, 132, 255, 0.22);
+    background: rgba(10, 132, 255, 0.08);
+  }
+
+  .v-field:hover {
+    border-color: rgba(10, 132, 255, 0.16);
+  }
+
+  .v-table tbody tr:hover,
+  .v-data-table tbody tr:hover {
+    background: rgba(10, 132, 255, 0.04);
+  }
+}
+
+.v-btn:not(.v-btn--disabled):active,
+.app-bar__menu:active,
+.app-bar__icon-btn:active,
+.np-card-action:active {
+  transform: scale(0.97);
+  transition-duration: var(--np-duration-press);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-bar__menu,
+  .app-bar__icon-btn,
+  .app-drawer .v-list-item,
+  .v-btn,
+  .v-field,
+  .np-card-action {
+    transition-duration: 0.01ms !important;
+  }
+
+  .app-bar__menu,
+  .app-bar__icon-btn,
+  .app-drawer .v-list-item,
+  .v-btn,
+  .np-card-action {
+    transform: none !important;
+  }
 }
 
 @media (max-width: 599px) {

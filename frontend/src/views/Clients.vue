@@ -516,7 +516,7 @@
   border-bottom: 1px solid var(--np-border) !important;
   background: color-mix(in srgb, var(--np-surface-muted) 82%, transparent);
   color: var(--np-text-main);
-  transition: background 160ms ease, border-color 160ms ease;
+  transition: background var(--np-duration-fast) ease, border-color var(--np-duration-fast) ease;
 }
 
 .clients-table tbody td:first-child {
@@ -529,9 +529,11 @@
   border-radius: 0 16px 16px 0;
 }
 
-.clients-table tbody tr:hover td {
-  border-color: rgba(10, 132, 255, 0.2) !important;
-  background: rgba(10, 132, 255, 0.07);
+@media (hover: hover) and (pointer: fine) {
+  .clients-table tbody tr:hover td {
+    border-color: rgba(10, 132, 255, 0.2) !important;
+    background: rgba(10, 132, 255, 0.07);
+  }
 }
 
 .clients-table__actions {
@@ -762,9 +764,11 @@
   color: rgba(237, 244, 255, 0.94);
 }
 
-.v-theme--dark .clients-table tbody tr:hover td {
-  border-color: rgba(125, 211, 252, 0.22) !important;
-  background: rgba(30, 58, 92, 0.5);
+@media (hover: hover) and (pointer: fine) {
+  .v-theme--dark .clients-table tbody tr:hover td {
+    border-color: rgba(125, 211, 252, 0.22) !important;
+    background: rgba(30, 58, 92, 0.5);
+  }
 }
 
 @media (max-width: 960px) {

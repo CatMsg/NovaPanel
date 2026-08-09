@@ -152,8 +152,10 @@ const updateReloadItems = (value: string[] | null) => {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
 }
 
-.main-toolbar__button:hover {
-  transform: translateY(-1px);
+@media (hover: hover) and (pointer: fine) {
+  .main-toolbar__button:hover {
+    transform: translateY(-1px);
+  }
 }
 
 .main-menu {

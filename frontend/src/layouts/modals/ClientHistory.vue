@@ -537,11 +537,13 @@ watch(
 
 .history-dialog__table :deep(tbody tr) {
   height: 58px;
-  transition: background-color 0.18s ease;
+  transition: background-color var(--np-duration-fast) ease;
 }
 
-.history-dialog__table :deep(tbody tr:hover) {
-  background: rgba(var(--v-theme-primary), 0.045);
+@media (hover: hover) and (pointer: fine) {
+  .history-dialog__table :deep(tbody tr:hover) {
+    background: rgba(var(--v-theme-primary), 0.045);
+  }
 }
 
 .history-dialog__date-chip {

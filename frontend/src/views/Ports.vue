@@ -550,7 +550,6 @@ onMounted(() => {
   justify-content: space-between;
   position: relative;
   overflow: hidden;
-  transition: transform 180ms ease, box-shadow 180ms ease;
 }
 
 .ports-summary__card::before {

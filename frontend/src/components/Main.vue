@@ -336,15 +336,24 @@ const restartSingbox = async () => {
   min-height: 220px;
   border-radius: 28px;
   transition:
-    transform 180ms ease,
+    transform 180ms var(--np-ease-out),
     box-shadow 180ms ease,
     border-color 180ms ease;
 }
 
-.main-tile:hover {
-  transform: translateY(-3px);
-  border-color: rgba(10, 132, 255, 0.2);
-  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.12);
+@media (hover: hover) and (pointer: fine) {
+  .main-tile:hover {
+    transform: translateY(-3px);
+    border-color: rgba(10, 132, 255, 0.2);
+    box-shadow: 0 24px 70px rgba(15, 23, 42, 0.12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .main-tile {
+    transform: none !important;
+    transition-duration: 0.01ms;
+  }
 }
 
 .main-tile__accent {

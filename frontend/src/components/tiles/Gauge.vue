@@ -89,7 +89,7 @@ const gaugeColor = computed(() => {
   background: rgb(var(--v-theme-primary));
   transform-origin: center top;
   transform: rotate(0turn);
-  transition: transform 0.2s ease-out;
+  transition: transform 200ms var(--np-ease-out);
 }
 
 .gauge__cover {
@@ -115,5 +115,11 @@ const gaugeColor = computed(() => {
 
 sup {
   font-size: 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gauge__fill {
+    transition: none;
+  }
 }
 </style>
