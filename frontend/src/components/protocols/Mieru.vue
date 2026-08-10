@@ -21,6 +21,9 @@
           <v-select v-model="data.multiplexing" :items="multiplexingItems" label="多路复用" hide-details />
         </v-col>
         <v-col cols="12" sm="6" md="4">
+          <v-select v-model="data.handshake_mode" :items="handshakeItems" label="握手模式" hide-details />
+        </v-col>
+        <v-col cols="12" sm="6" md="4">
           <v-text-field
             v-model.number="data.mtu"
             label="MTU"
@@ -57,6 +60,10 @@ export default {
         { title: '关闭', value: 'MULTIPLEXING_OFF' },
         { title: '中', value: 'MULTIPLEXING_MIDDLE' },
         { title: '高', value: 'MULTIPLEXING_HIGH' },
+      ],
+      handshakeItems: [
+        { title: '标准握手（推荐）', value: 'HANDSHAKE_STANDARD' },
+        { title: '0-RTT', value: 'HANDSHAKE_NO_WAIT' },
       ],
       trafficPatternItems: [
         { title: '默认（性能优先）', value: 'DEFAULT' },

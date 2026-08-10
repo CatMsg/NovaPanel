@@ -50,7 +50,7 @@ func TestMieruLinkGeneratorUsesClientCredentialAndInboundSettings(t *testing.T) 
 		t.Fatalf("Mieru profile space must use percent encoding: %q", parsed.RawQuery)
 	}
 	if query.Get("multiplexing") != "MULTIPLEXING_MIDDLE" ||
-		query.Get("handshake-mode") != "HANDSHAKE_STANDARD" ||
+		query.Get("handshake-mode") != "HANDSHAKE_NO_WAIT" ||
 		query.Get("mtu") != "1380" ||
 		query.Get("traffic-pattern") == "" {
 		t.Fatalf("missing generated Mieru settings: %#v", query)

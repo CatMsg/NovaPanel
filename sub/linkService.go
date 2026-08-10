@@ -77,7 +77,6 @@ func (s *LinkService) addClientInfo(uri string, clientInfo string) string {
 			return uri
 		}
 		query := parsed.Query()
-		query.Set("handshake-mode", "HANDSHAKE_STANDARD")
 		profile := query.Get("profile")
 		if profile != "" {
 			query.Set("profile", profile+clientInfo)

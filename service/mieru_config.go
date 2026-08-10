@@ -23,6 +23,7 @@ var validMieruMultiplexing = map[string]struct{}{
 
 var validMieruHandshakeModes = map[string]struct{}{
 	"HANDSHAKE_STANDARD": {},
+	"HANDSHAKE_NO_WAIT":  {},
 }
 
 var validMieruTrafficPatterns = map[string]int{
@@ -144,7 +145,7 @@ func parseMieruInbound(inbound *model.Inbound) (*mieruInboundConfig, error) {
 	if config.Multiplexing == "" {
 		config.Multiplexing = "MULTIPLEXING_LOW"
 	}
-	if config.HandshakeMode == "" || config.HandshakeMode == "HANDSHAKE_NO_WAIT" {
+	if config.HandshakeMode == "" {
 		config.HandshakeMode = "HANDSHAKE_STANDARD"
 	}
 	if config.TrafficPattern == "" {
@@ -162,25 +163,6 @@ func parseMieruInbound(inbound *model.Inbound) (*mieruInboundConfig, error) {
 		return nil, err
 	}
 	return config, nil
-}
-
-func normalizeMieruInboundOptions(inbound *model.Inbound) error {
-	if inbound == nil {
-		return common.NewError("missing mieru inbound")
-	}
-	options := make(map[string]interface{})
-	if len(inbound.Options) > 0 {
-		if err := json.Unmarshal(inbound.Options, &options); err != nil {
-			return fmt.Errorf("parse Mieru options: %w", err)
-		}
-	}
-	options["handshake_mode"] = "HANDSHAKE_STANDARD"
-	payload, err := json.MarshalIndent(options, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode Mieru options: %w", err)
-	}
-	inbound.Options = payload
-	return nil
 }
 
 func parseMieruClientCredential(client *model.Client) (mieruClientCredential, error) {

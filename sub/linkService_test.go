@@ -65,18 +65,3 @@ func TestAddClientInfoNormalizesStoredMieruProfileWithoutClientInfo(t *testing.T
 		t.Fatalf("stored Mieru profile was not normalized: %q", got)
 	}
 }
-
-func TestAddClientInfoNormalizesLegacyMieruHandshake(t *testing.T) {
-	service := LinkService{}
-	result := service.addClientInfo(
-		"mierus://alice:secret@proxy.example.com?handshake-mode=HANDSHAKE_NO_WAIT&port=8443&profile=cn2-mieru&protocol=TCP",
-		"",
-	)
-	parsed, err := url.Parse(result)
-	if err != nil {
-		t.Fatalf("parse Mieru link: %v", err)
-	}
-	if got := parsed.Query().Get("handshake-mode"); got != "HANDSHAKE_STANDARD" {
-		t.Fatalf("unexpected normalized handshake mode: %q", got)
-	}
-}

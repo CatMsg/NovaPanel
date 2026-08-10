@@ -63,7 +63,7 @@ func TestParseMieruInboundPortRange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse Mieru range inbound: %v", err)
 	}
-	if config.Transport != "UDP" || config.HandshakeMode != "HANDSHAKE_STANDARD" {
+	if config.Transport != "UDP" || config.HandshakeMode != "HANDSHAKE_NO_WAIT" {
 		t.Fatalf("unexpected normalized config: %#v", config)
 	}
 	if config.TrafficPattern != "BALANCED" {
@@ -71,23 +71,6 @@ func TestParseMieruInboundPortRange(t *testing.T) {
 	}
 	if !reflect.DeepEqual(config.Ports, []int{23000, 23001, 23002}) {
 		t.Fatalf("unexpected ports: %#v", config.Ports)
-	}
-}
-
-func TestNormalizeMieruInboundOptionsForcesStandardHandshake(t *testing.T) {
-	inbound := &model.Inbound{
-		Type:    "mieru",
-		Options: json.RawMessage(`{"listen_port":23000,"handshake_mode":"HANDSHAKE_NO_WAIT"}`),
-	}
-	if err := normalizeMieruInboundOptions(inbound); err != nil {
-		t.Fatalf("normalize Mieru options: %v", err)
-	}
-	var options map[string]interface{}
-	if err := json.Unmarshal(inbound.Options, &options); err != nil {
-		t.Fatalf("decode normalized Mieru options: %v", err)
-	}
-	if options["handshake_mode"] != "HANDSHAKE_STANDARD" {
-		t.Fatalf("unexpected handshake mode: %#v", options["handshake_mode"])
 	}
 }
 

@@ -197,9 +197,6 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			}
 		}
 		if inbound.Type == "mieru" {
-			if err := normalizeMieruInboundOptions(&inbound); err != nil {
-				return nil, err
-			}
 			if _, err := parseMieruInbound(&inbound); err != nil {
 				return nil, err
 			}

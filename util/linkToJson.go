@@ -81,7 +81,7 @@ func mieru(u *url.URL, i int) (*map[string]interface{}, string, error) {
 		"username":       username,
 		"password":       password,
 		"multiplexing":   defaultString(strings.ToUpper(query.Get("multiplexing")), "MULTIPLEXING_LOW"),
-		"handshake-mode": "HANDSHAKE_STANDARD",
+		"handshake-mode": defaultString(strings.ToUpper(query.Get("handshake-mode")), "HANDSHAKE_STANDARD"),
 	}
 	if strings.Contains(portValue, "-") {
 		outbound["port-range"] = portValue

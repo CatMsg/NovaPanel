@@ -24,7 +24,7 @@ func TestMieruLinkParsesForOrdinaryAggregate(t *testing.T) {
 	if got := (*node)["transport"]; got != "TCP" {
 		t.Fatalf("unexpected transport: %#v", got)
 	}
-	if got := (*node)["handshake-mode"]; got != "HANDSHAKE_STANDARD" {
+	if got := (*node)["handshake-mode"]; got != "HANDSHAKE_NO_WAIT" {
 		t.Fatalf("unexpected handshake mode: %#v", got)
 	}
 	if got := (*node)["udp"]; got != true {
