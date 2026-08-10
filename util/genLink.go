@@ -126,7 +126,6 @@ func mieruLink(
 	}
 	portRange, _ := inbound["port_range"].(string)
 	multiplexing, _ := inbound["multiplexing"].(string)
-	handshakeMode, _ := inbound["handshake_mode"].(string)
 	trafficPattern, _ := inbound["traffic_pattern"].(string)
 
 	links := make([]string, 0, len(addrs))
@@ -153,9 +152,7 @@ func mieruLink(
 		if multiplexing != "" {
 			query.Set("multiplexing", strings.ToUpper(multiplexing))
 		}
-		if handshakeMode != "" {
-			query.Set("handshake-mode", strings.ToUpper(handshakeMode))
-		}
+		query.Set("handshake-mode", "HANDSHAKE_STANDARD")
 		switch strings.ToUpper(strings.TrimSpace(trafficPattern)) {
 		case "BALANCED":
 			query.Set("traffic-pattern", "CIcIEAAaBAgAEAAiCAgCEAAYBCAGKgQIIBBA")

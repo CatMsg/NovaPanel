@@ -153,7 +153,7 @@ export interface Mieru extends InboundBasics {
   port_range?: string
   transport: 'TCP' | 'UDP'
   multiplexing: 'MULTIPLEXING_OFF' | 'MULTIPLEXING_LOW' | 'MULTIPLEXING_MIDDLE' | 'MULTIPLEXING_HIGH'
-  handshake_mode: 'HANDSHAKE_STANDARD' | 'HANDSHAKE_NO_WAIT'
+  handshake_mode: 'HANDSHAKE_STANDARD'
   traffic_pattern: 'DEFAULT' | 'BALANCED' | 'ENHANCED'
   mtu: number
 }
