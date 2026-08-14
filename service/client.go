@@ -297,6 +297,9 @@ func (s *ClientService) updateLinksWithFixedInbounds(tx *gorm.DB, clients []*mod
 			inboundIndex[inbound.Id] = &inbound
 		}
 	}
+	if err := normalizeMasqueClientConfigs(tx, clients); err != nil {
+		return err
+	}
 
 	for index, client := range clients {
 		clientLinks, err := decodeClientLinks(client.Links)
@@ -404,6 +407,9 @@ func (s *ClientService) UpdateClientsOnInboundDelete(tx *gorm.DB, id uint, tag s
 		if err != nil {
 			return err
 		}
+	}
+	if err := normalizeMasqueClientConfigs(tx, sliceClientPointers(clients)); err != nil {
+		return err
 	}
 	for index := range clients {
 		err = tx.Save(&clients[index]).Error

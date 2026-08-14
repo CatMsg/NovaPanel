@@ -130,7 +130,7 @@
                   <v-btn variant="tonal" @click="shuffle()">{{ $t('reset') + ' - ' + $t('all') }}<v-icon icon="mdi-refresh" /></v-btn>
                 </v-col>
               </v-row>
-              <v-row v-for="key in Object.keys(clientConfig)" :key="key">
+              <v-row v-for="key in Object.keys(clientConfig).filter(key => key != 'masque')" :key="key">
                 <v-col cols="12" md="3" align="end" align-self="center">
                     {{ key }}
                     <v-icon @click="shuffle(key)" icon="mdi-refresh" v-tooltip:top="$t('reset')" />

@@ -36,7 +36,7 @@
             </v-col>
           </v-row>
           <v-tabs
-            v-if="HasInData.includes(inbound.type)"
+            v-if="HasInData.includes(inbound.type) && inbound.type != inTypes.Masque"
             v-model="side"
             density="compact"
             fixed-tabs
@@ -58,16 +58,17 @@
               <Tun v-if="inbound.type == inTypes.Tun" :data="inbound" />
               <AnyTls v-if="inbound.type == inTypes.AnyTls" :data="inbound" direction="in" />
               <Mieru v-if="inbound.type == inTypes.Mieru" :data="inbound" />
+              <Masque v-if="inbound.type == inTypes.Masque" :data="inbound" />
               <TProxy v-if="inbound.type == inTypes.TProxy" :inbound="inbound" />
-              <Transport v-if="inbound.type != inTypes.Mieru && Object.hasOwn(inbound,'transport')" :data="inbound" />
+              <Transport v-if="!externalInbound && Object.hasOwn(inbound,'transport')" :data="inbound" />
               <Users v-if="hasUser" :clients="clients" :data="initUsers" />
               <InTls v-if="HasTls.includes(inbound.type)"  :inbound="inbound" :tlsConfigs="tlsConfigs" :tls_id="inbound.tls_id" />
               <Multiplex v-if="MuxAvailable.includes(inbound.type)" direction="in" :data="inbound" />
             </v-window-item>
-            <v-window-item value="c">
-              <OutJsonVue v-if="inbound.type != inTypes.Mieru" :inData="inbound" :type="inbound.type" />
-              <Multiplex v-if="inbound.type != inTypes.Mieru && Object.hasOwn(inbound,'multiplex')" direction="out" :data="inbound.out_json" />
-              <Dial v-if="inbound.type != inTypes.Mieru && inbound.out_json" :dial="inbound.out_json" mode="client" />
+            <v-window-item v-if="!externalInbound" value="c">
+              <OutJsonVue :inData="inbound" :type="inbound.type" />
+              <Multiplex v-if="Object.hasOwn(inbound,'multiplex')" direction="out" :data="inbound.out_json" />
+              <Dial v-if="inbound.out_json" :dial="inbound.out_json" mode="client" />
               <v-card>
                 <v-card-text>
                   <v-card-subtitle>{{ $t('in.multiDomain') }}
@@ -123,6 +124,7 @@ import Tuic from '@/components/protocols/Tuic.vue'
 import Tun from '@/components/protocols/Tun.vue'
 import AnyTls from '@/components/protocols/AnyTls.vue'
 import Mieru from '@/components/protocols/Mieru.vue'
+import Masque from '@/components/protocols/Masque.vue'
 import InTls from '@/components/tls/InTLS.vue'
 import TProxy from '@/components/protocols/TProxy.vue'
 import Multiplex from '@/components/Multiplex.vue'
@@ -141,7 +143,7 @@ export default {
       loading: false,
       side: "s",
       inTypes: InTypes,
-      inboundWithUsers: ['mixed', 'socks', 'http', 'shadowsocks', 'vmess', 'trojan', 'naive', 'hysteria', 'shadowtls', 'tuic', 'hysteria2', 'vless', 'anytls', 'mieru'],
+      inboundWithUsers: ['mixed', 'socks', 'http', 'shadowsocks', 'vmess', 'trojan', 'naive', 'hysteria', 'shadowtls', 'tuic', 'hysteria2', 'vless', 'anytls', 'mieru', 'masque'],
       initUsers: {
         model: 'none',
         values: <any>[],
@@ -161,6 +163,7 @@ export default {
         InTypes.Hysteria2,
         InTypes.Naive,
         InTypes.Mieru,
+        InTypes.Masque,
       ],
       HasTls: [
         InTypes.HTTP,
@@ -261,6 +264,10 @@ export default {
           }
         }
       }
+      if (this.inbound.type == InTypes.Masque) {
+        ;(this.inbound as any).network = 'quic'
+        ;(this.inbound as any).udp = true
+      }
 
       // save data
       this.loading = true
@@ -300,6 +307,9 @@ export default {
       if ((<any>this.inbound).managed) return false
       return true
     },
+    externalInbound() {
+      return this.inbound.type == InTypes.Mieru || this.inbound.type == InTypes.Masque
+    },
   },
   watch: {
     visible(newValue) {
@@ -311,7 +321,7 @@ export default {
   components: {
     Listen, InTls, Hysteria2, Naive, Direct, Shadowsocks,
     Users, Hysteria, ShadowTls, TProxy, Multiplex, Tuic, Tun,
-    AnyTls, Mieru, Transport, AddrVue, OutJsonVue, Dial
+    AnyTls, Mieru, Masque, Transport, AddrVue, OutJsonVue, Dial
   }
 }
 </script>

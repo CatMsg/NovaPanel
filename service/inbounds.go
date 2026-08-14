@@ -29,11 +29,17 @@ func (s *InboundService) rollbackInboundCoreState(act string, oldInbound, newInb
 		if newInbound == nil {
 			return nil
 		}
+		if newInbound.Type == "masque" {
+			return nil
+		}
 		if err := corePtr.RemoveInbound(newInbound.Tag); err != nil && !errors.Is(err, os.ErrInvalid) {
 			return err
 		}
 	case "edit", "del":
 		if oldInbound == nil {
+			return nil
+		}
+		if oldInbound.Type == "masque" {
 			return nil
 		}
 		var configData []byte
@@ -196,6 +202,11 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 				return nil, err
 			}
 		}
+		if inbound.Type == "masque" {
+			if err := prepareMasqueInbound(tx, &inbound, oldInbound, hostname); err != nil {
+				return nil, err
+			}
+		}
 		if inbound.Type == "mieru" {
 			if _, err := parseMieruInbound(&inbound); err != nil {
 				return nil, err
@@ -254,7 +265,7 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		}
 
 		var inboundConfig []byte
-		if corePtr.IsRunning() {
+		if corePtr.IsRunning() && inbound.Type != "masque" {
 			if inbound.Type == "mieru" {
 				inboundConfig, err = buildMieruBridgeInbound(inbound.Tag)
 			} else {
@@ -278,7 +289,7 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		postCommit = func() error {
 			coreChanged := false
 			if corePtr.IsRunning() {
-				if act == "edit" && oldSnapshot != nil {
+				if act == "edit" && oldSnapshot != nil && oldSnapshot.Type != "masque" {
 					if err := corePtr.RemoveInbound(oldSnapshot.Tag); err != nil && err != os.ErrInvalid {
 						return err
 					}
@@ -301,6 +312,11 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			}
 			if mieruPtr != nil && (inboundSnapshot.Type == "mieru" || (oldSnapshot != nil && oldSnapshot.Type == "mieru")) {
 				if err := mieruPtr.SyncFromDB(); err != nil {
+					return err
+				}
+			}
+			if masquePtr != nil && (inboundSnapshot.Type == "masque" || (oldSnapshot != nil && oldSnapshot.Type == "masque")) {
+				if err := masquePtr.SyncFromDB(); err != nil {
 					return err
 				}
 			}
@@ -336,7 +352,7 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		oldSnapshot := oldInbound
 		postCommit = func() error {
 			coreChanged := false
-			if corePtr.IsRunning() {
+			if corePtr.IsRunning() && oldSnapshot.Type != "masque" {
 				if err := corePtr.RemoveInbound(tag); err != nil && err != os.ErrInvalid {
 					return err
 				}
@@ -350,6 +366,11 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			}
 			if mieruPtr != nil && oldSnapshot.Type == "mieru" {
 				if err := mieruPtr.SyncFromDB(); err != nil {
+					return err
+				}
+			}
+			if masquePtr != nil && oldSnapshot.Type == "masque" {
+				if err := masquePtr.SyncFromDB(); err != nil {
 					return err
 				}
 			}
@@ -369,7 +390,7 @@ func (s *InboundService) removeInboundByTag(tag string) error {
 			return err
 		}
 
-		if corePtr.IsRunning() {
+		if corePtr.IsRunning() && oldInbound.Type != "masque" {
 			err = corePtr.RemoveInbound(tag)
 			if err != nil && err != os.ErrInvalid {
 				return err
@@ -418,6 +439,9 @@ func (s *InboundService) GetAllConfig(db *gorm.DB) ([]json.RawMessage, error) {
 		return nil, err
 	}
 	for _, inbound := range inbounds {
+		if inbound.Type == "masque" {
+			continue
+		}
 		if inbound.Type == "mieru" {
 			inboundJson, err := buildMieruBridgeInbound(inbound.Tag)
 			if err != nil {
@@ -441,7 +465,7 @@ func (s *InboundService) GetAllConfig(db *gorm.DB) ([]json.RawMessage, error) {
 
 func (s *InboundService) hasUser(inboundType string) bool {
 	switch inboundType {
-	case "mixed", "socks", "http", "shadowsocks", "vmess", "trojan", "naive", "hysteria", "shadowtls", "tuic", "hysteria2", "vless", "anytls", "mieru":
+	case "mixed", "socks", "http", "shadowsocks", "vmess", "trojan", "naive", "hysteria", "shadowtls", "tuic", "hysteria2", "vless", "anytls", "mieru", "masque":
 		return true
 	}
 	return false
@@ -556,9 +580,14 @@ func (s *InboundService) BuildRestartInboundsAction(tx *gorm.DB, ids []uint) (fu
 
 	restartConfigs := make([]taggedConfig, 0, len(inbounds))
 	mieruChanged := false
+	masqueChanged := false
 	for _, inbound := range inbounds {
 		if inbound.Type == "mieru" {
 			mieruChanged = true
+			continue
+		}
+		if inbound.Type == "masque" {
+			masqueChanged = true
 			continue
 		}
 		if corePtr == nil || !corePtr.IsRunning() {
@@ -585,7 +614,7 @@ func (s *InboundService) BuildRestartInboundsAction(tx *gorm.DB, ids []uint) (fu
 		})
 		coreAction = buildCoreReplaceAction(snapshots, corePtr.RemoveInbound, corePtr.AddInbound)
 	}
-	if coreAction == nil && !mieruChanged {
+	if coreAction == nil && !mieruChanged && !masqueChanged {
 		return nil, nil
 	}
 	return func() error {
@@ -595,7 +624,14 @@ func (s *InboundService) BuildRestartInboundsAction(tx *gorm.DB, ids []uint) (fu
 			}
 		}
 		if mieruChanged && mieruPtr != nil {
-			return mieruPtr.SyncFromDB()
+			if err := mieruPtr.SyncFromDB(); err != nil {
+				return err
+			}
+		}
+		if masqueChanged && masquePtr != nil {
+			if err := masquePtr.SyncFromDB(); err != nil {
+				return err
+			}
 		}
 		return nil
 	}, nil

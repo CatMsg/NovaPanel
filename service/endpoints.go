@@ -22,7 +22,7 @@ type EndpointService struct {
 func (o *EndpointService) GetAll() (*[]map[string]interface{}, error) {
 	db := database.GetDB()
 	endpoints := []*model.Endpoint{}
-	err := db.Model(model.Endpoint{}).Where("type <> ?", "mieru").Scan(&endpoints).Error
+	err := db.Model(model.Endpoint{}).Where("type NOT IN ?", []string{"mieru", "masque"}).Scan(&endpoints).Error
 	if err != nil {
 		return nil, err
 	}
@@ -205,6 +205,9 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 		if endpoint.Type == "mieru" {
 			return nil, common.NewError("Mieru 已迁移到入站管理，节点管理不再支持该类型")
 		}
+		if endpoint.Type == "masque" {
+			return nil, common.NewError("MASQUE 已迁移到入站管理，节点管理不再支持该类型")
+		}
 
 		var oldEndpoint *model.Endpoint
 		if act == "edit" {
@@ -218,15 +221,6 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 				equalJSONBytes(oldEndpoint.Options, endpoint.Options) &&
 				equalJSONBytes(oldEndpoint.Ext, endpoint.Ext) {
 				return nil, ErrNoChanges
-			}
-		}
-		if endpoint.Type == "masque" {
-			config, parseErr := parseMasqueEndpoint(&endpoint)
-			if parseErr != nil {
-				return nil, parseErr
-			}
-			if err := validateMasqueNetwork(config.Network); err != nil {
-				return nil, err
 			}
 		}
 		if _, ports, _, active, err := collectEndpointForwardPorts(&endpoint); err == nil {

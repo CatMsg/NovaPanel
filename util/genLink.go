@@ -12,7 +12,7 @@ import (
 	"github.com/CatMsg/NovaPanel/util/common"
 )
 
-var InboundTypeWithLink = []string{"socks", "http", "mixed", "shadowsocks", "naive", "hysteria", "hysteria2", "anytls", "tuic", "vless", "trojan", "vmess", "mieru"}
+var InboundTypeWithLink = []string{"socks", "http", "mixed", "shadowsocks", "naive", "hysteria", "hysteria2", "anytls", "tuic", "vless", "trojan", "vmess", "mieru", "masque"}
 
 type LinkParam struct {
 	Key   string

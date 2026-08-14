@@ -14,12 +14,6 @@
     :tag="stats.tag"
     @close="closeStats"
   />
-  <MasqueStatus
-    v-model="masqueStatus.visible"
-    :visible="masqueStatus.visible"
-    :data="masqueStatus.data"
-    @close="closeMasqueStatus"
-  />
   <QrCode
     v-model="qrcode.visible"
     :visible="qrcode.visible"
@@ -39,7 +33,7 @@
           <div>
             <h1 class="resource-hero__title">{{ $t('pages.endpoints') }}</h1>
             <p class="resource-hero__subtitle">
-              管理 MASQUE、WireGuard 等端点，状态与复制入口聚合到一处。
+              管理 WireGuard、Warp 与 Tailscale 等端点，状态与配置入口聚合到一处。
             </p>
           </div>
         </div>
@@ -47,8 +41,6 @@
           <span>在线 {{ onlines.length }}</span>
           <span>•</span>
           <span>总数 {{ endpoints.length }}</span>
-          <span>•</span>
-          <span>MASQUE {{ endpoints.filter(e => e.type == 'masque').length }}</span>
         </div>
       </v-col>
       <v-col v-if="endpoints.length > 0" cols="12" lg="4" class="resource-hero__actions">
@@ -134,7 +126,7 @@
       <EmptyState
         icon="mdi-cloud-tags-outline"
         title="暂无节点"
-        description="添加 MASQUE、WireGuard 等节点后，可在这里查看状态并复制客户端配置。"
+        description="添加 WireGuard、Warp 或 Tailscale 节点后，可在这里查看状态和客户端配置。"
         :action="$t('actions.add')"
         @action="showModal(0)"
       />
@@ -147,44 +139,24 @@
           </v-row>
         </v-card-subtitle>
         <v-card-text>
-          <template v-if="item.type == 'masque'">
-            <v-row>
-              <v-col>Server</v-col>
-              <v-col>{{ item.server ?? '-' }}</v-col>
-            </v-row>
-            <v-row>
-              <v-col>Port</v-col>
-              <v-col>{{ item.port ?? '-' }}</v-col>
-            </v-row>
-            <v-row>
-              <v-col>Network</v-col>
-              <v-col>{{ item.network ?? '-' }}</v-col>
-            </v-row>
-            <v-row>
-              <v-col>IP</v-col>
-              <v-col>{{ item.ip ?? '-' }}</v-col>
-            </v-row>
-          </template>
-          <template v-else>
-            <v-row>
-              <v-col>{{ $t('in.addr') }}</v-col>
-              <v-col>
-                {{ item.address?.length>0 ? item.address[0] : '-' }}
-              </v-col>
-            </v-row>
-            <v-row>
-              <v-col>{{ $t('in.port') }}</v-col>
-              <v-col>
-                {{ item.listen_port>0 ? item.listen_port : '-' }}
-              </v-col>
-            </v-row>
-            <v-row>
-              <v-col>{{ $t('types.wg.peers') }}</v-col>
-              <v-col>
-                {{ item.peers?.length?? '-'  }}
-              </v-col>
-            </v-row>
-          </template>
+          <v-row>
+            <v-col>{{ $t('in.addr') }}</v-col>
+            <v-col>
+              {{ item.address?.length>0 ? item.address[0] : '-' }}
+            </v-col>
+          </v-row>
+          <v-row>
+            <v-col>{{ $t('in.port') }}</v-col>
+            <v-col>
+              {{ item.listen_port>0 ? item.listen_port : '-' }}
+            </v-col>
+          </v-row>
+          <v-row>
+            <v-col>{{ $t('types.wg.peers') }}</v-col>
+            <v-col>
+              {{ item.peers?.length?? '-'  }}
+            </v-col>
+          </v-row>
           <v-row>
             <v-col>{{ $t('online') }}</v-col>
             <v-col>
@@ -204,14 +176,6 @@
           <v-btn class="np-card-action" variant="text" style="margin-inline-start:0;" color="warning" @click="delOverlay[index] = true">
             <v-icon icon="mdi-file-remove" /><span>{{ $t('actions.del') }}</span>
             <v-tooltip activator="parent" location="top" :text="$t('actions.del')"></v-tooltip>
-          </v-btn>
-          <v-btn v-if="item.type == 'masque'" class="np-card-action" variant="text" @click="copyMasque(item)">
-            <v-icon icon="mdi-content-copy" /><span>{{ $t('actions.copy') }}</span>
-            <v-tooltip activator="parent" location="top" text="Copy config"></v-tooltip>
-          </v-btn>
-          <v-btn v-if="item.type == 'masque'" class="np-card-action" variant="text" @click="showMasqueStatus(item.id)">
-            <v-icon icon="mdi-information-outline" /><span>{{ $t('status') }}</span>
-            <v-tooltip activator="parent" location="top" text="MASQUE status"></v-tooltip>
           </v-btn>
           <v-overlay
             v-model="delOverlay[index]"
@@ -236,7 +200,7 @@
             <v-icon icon="mdi-qrcode" /><span>QR</span>
             <v-tooltip activator="parent" location="top" text="WireGuard QR Code"></v-tooltip>
           </v-btn>
-          <v-btn class="np-card-action" variant="text" @click="showStats(item.tag)" v-if="Data().enableTraffic && item.type != 'masque'">
+          <v-btn class="np-card-action" variant="text" @click="showStats(item.tag)" v-if="Data().enableTraffic">
             <v-icon icon="mdi-chart-line" /><span>{{ $t('stats.graphTitle') }}</span>
             <v-tooltip activator="parent" location="top" :text="$t('stats.graphTitle')"></v-tooltip>
           </v-btn>
@@ -249,7 +213,6 @@
 <script lang="ts" setup>
 import Data from '@/store/modules/data'
 import { Endpoint } from '@/types/endpoints'
-import { buildMasqueConfig } from '@/plugins/masqueUtil'
 import HttpUtils from '@/plugins/httputil'
 import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
 import { push } from 'notivue'
@@ -258,7 +221,6 @@ import EmptyState from '@/components/EmptyState.vue'
 
 const EndpointVue = defineAsyncComponent(() => import('@/layouts/modals/Endpoint.vue'))
 const Stats = defineAsyncComponent(() => import('@/layouts/modals/Stats.vue'))
-const MasqueStatus = defineAsyncComponent(() => import('@/layouts/modals/MasqueStatus.vue'))
 const QrCode = defineAsyncComponent(() => import('@/layouts/modals/WgQrCode.vue'))
 const { smAndDown } = useDisplay()
 const showEndpointAggregate = ref(!smAndDown.value)
@@ -353,10 +315,6 @@ const qrcode = ref({
   data: <any>{},
 })
 
-const masqueStatus = ref({
-  visible: false,
-  data: <any>{},
-})
 
 const showQrCode = (id: number) => {
   qrcode.value.data = endpoints.value.findLast(o => o.id == id)
@@ -364,15 +322,6 @@ const showQrCode = (id: number) => {
 }
 const closeQrCode = () => {
   qrcode.value.visible = false
-}
-
-const showMasqueStatus = (id: number) => {
-  masqueStatus.value.data = endpoints.value.findLast(o => o.id == id)
-  masqueStatus.value.visible = true
-}
-
-const closeMasqueStatus = () => {
-  masqueStatus.value.visible = false
 }
 
 const loadEndpointAggregateConfig = async () => {
@@ -453,11 +402,6 @@ const copyEndpointLink = async (text: string, label: string) => {
     }
     push.error({ message: `复制${label}失败` })
   }
-}
-
-const copyMasque = async (item: any) => {
-  const text = buildMasqueConfig(item)
-  await navigator.clipboard.writeText(text)
 }
 
 </script>

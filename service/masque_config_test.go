@@ -32,21 +32,21 @@ func TestParseMasqueEndpointNormalizesFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse endpoint: %v", err)
 	}
-	if config.Host != "tk.mile.news" || config.Port != 8443 || config.Network != "quic" || config.PrivateKey != "key" || config.IP != "172.16.0.9/32" || config.MTU != 1380 || config.KeepAlive != 25 {
+	if config.Host != "tk.mile.news" || config.Port != 8443 || config.Network != "quic" || config.PrivateKey != "key" || config.ClientSubnet != "172.16.0.0/24" || config.MTU != 1380 || config.KeepAlive != 25 {
 		t.Fatalf("unexpected config: %#v", config)
 	}
 }
 
-func TestParseMasquePeerPrefixRequiresIPv4(t *testing.T) {
-	prefix, err := parseMasquePeerPrefix("172.16.0.9")
+func TestParseMasqueClientSubnetRequiresIPv4Pool(t *testing.T) {
+	prefix, err := parseMasqueClientSubnet("172.16.0.0")
 	if err != nil {
 		t.Fatalf("parse ipv4 prefix: %v", err)
 	}
-	if got := prefix.String(); got != "172.16.0.9/32" {
+	if got := prefix.String(); got != "172.16.0.0/24" {
 		t.Fatalf("unexpected ipv4 prefix: %s", got)
 	}
 
-	if _, err := parseMasquePeerPrefix("fd00::9/128"); err == nil {
+	if _, err := parseMasqueClientSubnet("fd00::/64"); err == nil {
 		t.Fatal("expected ipv6 peer prefix to fail")
 	}
 }

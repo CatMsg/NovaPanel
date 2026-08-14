@@ -19,6 +19,7 @@ export const InTypes = {
   VLESS: 'vless',
   AnyTls: 'anytls',
   Mieru: 'mieru',
+  Masque: 'masque',
   Tun: 'tun',
   Redirect: 'redirect',
   TProxy: 'tproxy',
@@ -157,6 +158,18 @@ export interface Mieru extends InboundBasics {
   traffic_pattern: 'DEFAULT' | 'BALANCED' | 'ENHANCED'
   mtu: number
 }
+export interface Masque extends InboundBasics {
+  server?: string
+  network: 'quic'
+  private_key?: string
+  public_key?: string
+  client_subnet?: string
+  mtu: number
+  keepalive: number
+  sni?: string
+  remote_dns_resolve?: boolean
+  udp: boolean
+}
 export interface Tun extends InboundBasics {
   interface_name?: string
   address?: string[]
@@ -205,6 +218,7 @@ type InterfaceMap = {
   vless: VLESS
   anytls: AnyTls
   mieru: Mieru
+  masque: Masque
   tun: Tun
   redirect: Redirect
   tproxy: TProxy
@@ -247,6 +261,15 @@ const defaultValues: Record<InType, Inbound> = {
     handshake_mode: 'HANDSHAKE_STANDARD',
     traffic_pattern: 'DEFAULT',
     mtu: 1400,
+  },
+  masque: <Masque>{
+    type: InTypes.Masque,
+    network: 'quic',
+    client_subnet: '',
+    mtu: 1380,
+    keepalive: 25,
+    remote_dns_resolve: false,
+    udp: true,
   },
   tun: <Tun>{ type: InTypes.Tun, mtu: 9000, stack: 'system', udp_timeout: '5m', auto_route: false },
   redirect: <Redirect>{ type: InTypes.Redirect },

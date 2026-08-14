@@ -46,6 +46,15 @@ func (s *StatsService) SaveStats(enableTraffic bool) error {
 			sampled = mergeOnlines(sampled, mieruOnline)
 		}
 	}
+	if masque := GetMasqueService(); masque != nil {
+		masqueStats, masqueOnline, err := masque.CollectStats()
+		if err != nil {
+			collectionErr = errors.Join(collectionErr, err)
+		} else {
+			stats = append(stats, masqueStats...)
+			sampled = mergeOnlines(sampled, masqueOnline)
+		}
+	}
 
 	if len(stats) == 0 {
 		onlineResourcesMu.Lock()

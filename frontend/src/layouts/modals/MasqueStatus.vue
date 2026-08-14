@@ -20,15 +20,15 @@
         <template v-else>
           <section class="masque-hero">
             <div>
-              <div class="masque-hero__label">节点</div>
+              <div class="masque-hero__label">入站</div>
               <h3>{{ status.tag || '-' }}</h3>
               <p>{{ status.host || '-' }}:{{ status.port || '-' }} · {{ status.network || 'quic' }}</p>
             </div>
             <div class="masque-hero__session" :class="{ 'masque-hero__session--online': status.session_active }">
               <span class="masque-hero__pulse"></span>
               <div>
-                <strong>{{ status.session_active ? '客户端已连接' : '等待客户端' }}</strong>
-                <small>{{ status.client_addr || '暂无活动 CONNECT-IP 会话' }}</small>
+                <strong>{{ status.session_active ? `${status.active_users ?? 0} 位用户在线` : '等待客户端' }}</strong>
+                <small>{{ status.session_active ? `${status.active_sessions ?? 0} 个 CONNECT-IP 会话` : '暂无活动 CONNECT-IP 会话' }}</small>
               </div>
             </div>
           </section>
@@ -36,8 +36,8 @@
           <section class="masque-metrics">
             <article class="masque-metric">
               <span>当前会话</span>
-              <strong>{{ status.session_active ? `#${status.session_id}` : '-' }}</strong>
-              <small>{{ formatDuration(status.session_uptime_seconds) }}</small>
+              <strong>{{ status.active_sessions ?? 0 }}</strong>
+              <small>独立并发会话</small>
             </article>
             <article class="masque-metric">
               <span>客户端上传</span>
@@ -50,19 +50,24 @@
               <small>{{ formatPackets(status.tx_packets) }}</small>
             </article>
             <article class="masque-metric">
+              <span>授权用户</span>
+              <strong>{{ status.configured_users ?? 0 }}</strong>
+              <small>当前在线 {{ status.active_users ?? 0 }}</small>
+            </article>
+            <article class="masque-metric">
               <span>累计连接</span>
               <strong>{{ status.total_sessions ?? 0 }}</strong>
-              <small>接管 {{ status.takeover_count ?? 0 }} 次</small>
+              <small>不再互相抢占</small>
             </article>
           </section>
 
           <v-alert
-            v-if="status.start_error || status.last_error"
+            v-if="status.start_error || status.client_error || status.last_error"
             type="error"
             variant="tonal"
             class="mb-4"
-            :title="status.start_error ? '节点启动失败' : '最近一次会话异常'"
-            :text="status.start_error || status.last_error"
+            :title="status.start_error ? '入站启动失败' : status.client_error ? '用户身份配置异常' : '最近一次会话异常'"
+            :text="status.start_error || status.client_error || status.last_error"
           ></v-alert>
 
           <section class="masque-section">
@@ -102,8 +107,8 @@
               <div><span>证书来源</span><strong>{{ certSource(status.cert_source) }}</strong></div>
               <div><span>证书有效期</span><strong>{{ formatDate(status.cert_not_after) }}</strong></div>
               <div><span>最近重载</span><strong>{{ formatDate(status.cert_last_reload_at) }}</strong></div>
-              <div class="masque-details__wide"><span>证书文件</span><strong>{{ status.cert_file || '节点内置证书' }}</strong></div>
-              <div class="masque-details__wide"><span>密钥文件</span><strong>{{ status.key_file || '节点私钥动态生成' }}</strong></div>
+              <div class="masque-details__wide"><span>证书文件</span><strong>{{ status.cert_file || '入站内置证书' }}</strong></div>
+              <div class="masque-details__wide"><span>密钥文件</span><strong>{{ status.key_file || '入站私钥动态生成' }}</strong></div>
             </div>
             <v-alert
               v-if="status.cert_reload_error || status.cert_error"
@@ -138,9 +143,9 @@ type MasqueStatus = {
   running?: boolean
   bind_addr?: string
   session_active?: boolean
-  session_id?: number
-  session_uptime_seconds?: number
-  client_addr?: string
+  active_sessions?: number
+  active_users?: number
+  configured_users?: number
   total_sessions?: number
   takeover_count?: number
   rx_bytes?: number
@@ -148,6 +153,7 @@ type MasqueStatus = {
   rx_packets?: number
   tx_packets?: number
   start_error?: string
+  client_error?: string
   last_error?: string
   cert_file?: string
   key_file?: string
@@ -178,7 +184,7 @@ export default {
       if (this.loading) return
       const tag = String(this.$props.data?.tag ?? '').trim()
       if (!tag) {
-        this.alert = '缺少 MASQUE 节点标识'
+        this.alert = '缺少 MASQUE 入站标识'
         this.status = {}
         return
       }
@@ -239,7 +245,7 @@ export default {
       return ({ ok: '正常', warning: '注意', error: '异常', info: '信息' } as Record<string, string>)[status] || status
     },
     certSource(source?: string) {
-      return source === 'file' ? '证书文件' : source === 'endpoint-key' ? '节点内置证书' : source || '-'
+      return source === 'file' ? '证书文件' : source === 'inbound-key' ? '入站内置证书' : source || '-'
     },
   },
   watch: {

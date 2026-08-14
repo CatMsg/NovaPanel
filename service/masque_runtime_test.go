@@ -1,12 +1,14 @@
 package service
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
 	"math/big"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,27 +17,85 @@ import (
 	mtls "github.com/metacubex/tls"
 )
 
+func TestMasqueRuntimeRoutesFlowToOriginatingSession(t *testing.T) {
+	runtime := &masqueRuntime{
+		sessions: map[uint64]*masqueSession{}, userSessions: map[string]map[uint64]*masqueSession{},
+		latestByUser: map[string]uint64{}, flows: map[masqueFlowKey]masqueFlowEntry{},
+		usersByIP: map[netip.Addr]string{}, traffic: map[string]*masqueUserTraffic{"alice": {}},
+	}
+	prefix := netip.MustParsePrefix("172.16.1.2/32")
+	runtime.usersByIP[prefix.Addr()] = "alice"
+	newSession := func() (*masqueSession, context.CancelFunc) {
+		ctx, cancel := context.WithCancel(context.Background())
+		return &masqueSession{identity: masqueClientIdentity{Name: "alice", Prefix: prefix}, ctx: ctx, cancel: cancel, outgoing: make(chan []byte, 1)}, cancel
+	}
+	first, cancelFirst := newSession()
+	defer cancelFirst()
+	second, cancelSecond := newSession()
+	defer cancelSecond()
+	runtime.addSession(first)
+	runtime.addSession(second)
+
+	request := testIPv4UDPPacket([4]byte{172, 16, 1, 2}, [4]byte{1, 1, 1, 1}, 41000, 53)
+	runtime.recordClientFlow(first, request)
+	response := testIPv4UDPPacket([4]byte{1, 1, 1, 1}, [4]byte{172, 16, 1, 2}, 53, 41000)
+	if !runtime.routeTunPacket(response) {
+		t.Fatal("expected response to be routed")
+	}
+	select {
+	case <-first.outgoing:
+	default:
+		t.Fatal("originating session did not receive response")
+	}
+	select {
+	case <-second.outgoing:
+		t.Fatal("latest session incorrectly stole an existing flow")
+	default:
+	}
+}
+
+func testIPv4UDPPacket(src, dst [4]byte, srcPort, dstPort uint16) []byte {
+	packet := make([]byte, 28)
+	packet[0] = 0x45
+	packet[9] = 17
+	copy(packet[12:16], src[:])
+	copy(packet[16:20], dst[:])
+	packet[20], packet[21] = byte(srcPort>>8), byte(srcPort)
+	packet[22], packet[23] = byte(dstPort>>8), byte(dstPort)
+	return packet
+}
+
 func TestMasqueRuntimeStatusSnapshot(t *testing.T) {
-	runtime := &masqueRuntime{}
+	runtime := &masqueRuntime{
+		sessions: map[uint64]*masqueSession{}, userSessions: map[string]map[uint64]*masqueSession{},
+		latestByUser: map[string]uint64{}, flows: map[masqueFlowKey]masqueFlowEntry{},
+		clients: map[string]masqueClientIdentity{"key": {Name: "alice"}},
+	}
 	runtime.running.Store(true)
 	runtime.rxBytes.Store(4096)
 	runtime.txBytes.Store(8192)
 	runtime.rxPackets.Store(4)
 	runtime.txPackets.Store(8)
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	session := &masqueSession{
+		identity:  masqueClientIdentity{Name: "alice"},
 		startedAt: time.Now().Add(-5 * time.Second),
 		remote:    "203.0.113.10:44321",
+		ctx:       ctx,
+		cancel:    cancel,
+		outgoing:  make(chan []byte, 1),
 	}
 	session.rxBytes.Store(1024)
 	session.txBytes.Store(2048)
-	runtime.activateSession(session)
+	runtime.addSession(session)
 
 	status := runtime.statusSnapshot()
-	if status["session_active"] != true || status["client_addr"] != "203.0.113.10:44321" {
+	if status["session_active"] != true || status["active_sessions"] != 1 || status["active_users"] != 1 {
 		t.Fatalf("unexpected session status: %#v", status)
 	}
-	if status["rx_bytes"] != uint64(4096) || status["session_tx_bytes"] != uint64(2048) {
+	if status["rx_bytes"] != uint64(4096) {
 		t.Fatalf("unexpected traffic counters: %#v", status)
 	}
 }
@@ -76,7 +136,7 @@ func TestMasqueCertificateReloaderReloadsChangedFiles(t *testing.T) {
 }
 
 func TestMasqueDiagnosticsRejectInvalidCertificateWindow(t *testing.T) {
-	config := &masqueEndpointConfig{Network: "quic"}
+	config := &masqueInboundConfig{Network: "quic"}
 	tests := []struct {
 		name string
 		cert masqueCertificateSnapshot

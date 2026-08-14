@@ -54,6 +54,8 @@ func FillOutJson(i *model.Inbound, hostname string) error {
 		hysteria2Out(&outJson, *inbound)
 	case "tuic":
 		tuicOut(&outJson, *inbound)
+	case "masque":
+		masqueOut(&outJson, *inbound)
 	case "vless":
 		vlessOut(&outJson, *inbound)
 	case "trojan":
@@ -72,6 +74,37 @@ func FillOutJson(i *model.Inbound, hostname string) error {
 	}
 
 	return nil
+}
+
+func masqueOut(out *map[string]interface{}, inbound map[string]interface{}) {
+	if server, ok := inbound["server"].(string); ok && server != "" {
+		(*out)["server"] = server
+	}
+	(*out)["network"] = "quic"
+	(*out)["udp"] = true
+	(*out)["congestion-controller"] = "bbr"
+	(*out)["proto"] = "bbr"
+	if publicKey, ok := inbound["public_key"].(string); ok {
+		(*out)["public-key"] = publicKey
+	}
+	if mtu, ok := inbound["mtu"]; ok {
+		(*out)["mtu"] = mtu
+	}
+	if keepAlive, ok := inbound["keepalive"]; ok {
+		(*out)["keepalive"] = keepAlive
+	}
+	if sni, ok := inbound["sni"].(string); ok && sni != "" {
+		(*out)["sni"] = sni
+	} else {
+		delete(*out, "sni")
+	}
+	if remoteDNS, ok := inbound["remote_dns_resolve"].(bool); ok && remoteDNS {
+		(*out)["remote-dns-resolve"] = true
+		(*out)["dns"] = []string{"1.1.1.1", "8.8.8.8"}
+	} else {
+		delete(*out, "remote-dns-resolve")
+		delete(*out, "dns")
+	}
 }
 
 // addTls function

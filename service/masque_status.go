@@ -18,22 +18,36 @@ func (r *masqueRuntime) statusSnapshot() map[string]interface{} {
 	}
 
 	r.sessionMu.Lock()
-	active := r.active
 	lastConnect := r.lastConnect
 	lastClose := r.lastClose
 	lastError := r.lastError
 	totalSessions := r.nextSession
-	takeovers := r.takeovers
+	sessions := make([]map[string]interface{}, 0, len(r.sessions))
+	activeUsers := make(map[string]struct{})
+	for _, session := range r.sessions {
+		activeUsers[session.identity.Name] = struct{}{}
+		sessions = append(sessions, map[string]interface{}{
+			"id": session.id, "user": session.identity.Name, "client_addr": session.remote,
+			"started_at":     session.startedAt.Format(time.RFC3339),
+			"uptime_seconds": int64(time.Since(session.startedAt).Seconds()),
+			"rx_bytes":       session.rxBytes.Load(), "tx_bytes": session.txBytes.Load(),
+			"rx_packets": session.rxPackets.Load(), "tx_packets": session.txPackets.Load(),
+		})
+	}
 	r.sessionMu.Unlock()
 
 	result := map[string]interface{}{
-		"session_active": false,
-		"total_sessions": totalSessions,
-		"takeover_count": takeovers,
-		"rx_bytes":       r.rxBytes.Load(),
-		"tx_bytes":       r.txBytes.Load(),
-		"rx_packets":     r.rxPackets.Load(),
-		"tx_packets":     r.txPackets.Load(),
+		"session_active":   len(sessions) > 0,
+		"active_sessions":  len(sessions),
+		"active_users":     len(activeUsers),
+		"configured_users": len(r.clients),
+		"sessions":         sessions,
+		"total_sessions":   totalSessions,
+		"takeover_count":   uint64(0),
+		"rx_bytes":         r.rxBytes.Load(),
+		"tx_bytes":         r.txBytes.Load(),
+		"rx_packets":       r.rxPackets.Load(),
+		"tx_packets":       r.txPackets.Load(),
 	}
 	if !lastConnect.IsZero() {
 		result["last_connected_at"] = lastConnect.Format(time.RFC3339)
@@ -44,21 +58,10 @@ func (r *masqueRuntime) statusSnapshot() map[string]interface{} {
 	if lastError != "" {
 		result["last_error"] = lastError
 	}
-	if active != nil {
-		result["session_active"] = true
-		result["session_id"] = active.id
-		result["session_started_at"] = active.startedAt.Format(time.RFC3339)
-		result["session_uptime_seconds"] = int64(time.Since(active.startedAt).Seconds())
-		result["client_addr"] = active.remote
-		result["session_rx_bytes"] = active.rxBytes.Load()
-		result["session_tx_bytes"] = active.txBytes.Load()
-		result["session_rx_packets"] = active.rxPackets.Load()
-		result["session_tx_packets"] = active.txPackets.Load()
-	}
 	return result
 }
 
-func buildMasqueDiagnostics(config *masqueEndpointConfig, runtime *masqueRuntime, cert masqueCertificateSnapshot, certErr error, startError string) []MasqueDiagnostic {
+func buildMasqueDiagnostics(config *masqueInboundConfig, runtime *masqueRuntime, cert masqueCertificateSnapshot, certErr error, startError string) []MasqueDiagnostic {
 	checks := make([]MasqueDiagnostic, 0, 7)
 
 	if config != nil && config.Network == "quic" {
@@ -92,7 +95,7 @@ func buildMasqueDiagnostics(config *masqueEndpointConfig, runtime *masqueRuntime
 	} else if !cert.NotAfter.IsZero() && time.Until(cert.NotAfter) <= 14*24*time.Hour {
 		checks = append(checks, MasqueDiagnostic{ID: "certificate", Status: "warning", Title: "TLS 证书", Detail: "证书将在 14 天内过期"})
 	} else {
-		detail := "节点内置证书"
+		detail := "入站内置证书"
 		if cert.Source == "file" {
 			detail = fmt.Sprintf("文件证书，已热重载 %d 次", cert.ReloadCount)
 		}
@@ -103,12 +106,18 @@ func buildMasqueDiagnostics(config *masqueEndpointConfig, runtime *masqueRuntime
 
 	if runtime != nil {
 		runtime.sessionMu.Lock()
-		active := runtime.active
+		activeSessions := len(runtime.sessions)
+		activeUsers := len(runtime.userSessions)
 		runtime.sessionMu.Unlock()
-		if active != nil {
-			checks = append(checks, MasqueDiagnostic{ID: "session", Status: "ok", Title: "CONNECT-IP 会话", Detail: fmt.Sprintf("会话 #%d，客户端 %s", active.id, active.remote)})
+		if activeSessions > 0 {
+			checks = append(checks, MasqueDiagnostic{ID: "session", Status: "ok", Title: "CONNECT-IP 会话", Detail: fmt.Sprintf("%d 个活动会话，%d 位用户", activeSessions, activeUsers)})
 		} else {
 			checks = append(checks, MasqueDiagnostic{ID: "session", Status: "info", Title: "CONNECT-IP 会话", Detail: "当前没有活动客户端"})
+		}
+		if len(runtime.clients) == 0 {
+			checks = append(checks, MasqueDiagnostic{ID: "clients", Status: "warning", Title: "授权用户", Detail: "尚未给此入站分配用户"})
+		} else {
+			checks = append(checks, MasqueDiagnostic{ID: "clients", Status: "ok", Title: "授权用户", Detail: fmt.Sprintf("已配置 %d 位用户", len(runtime.clients))})
 		}
 	}
 	return checks
@@ -120,19 +129,19 @@ func (s *MasqueService) healthSummary() (map[string]int, []string) {
 	summary["errors"] = 0
 	details := make([]string, 0)
 
-	endpoints, err := s.loadMasqueEndpoints()
+	inbounds, err := s.loadMasqueInbounds()
 	if err != nil {
 		summary["errors"]++
 		return summary, []string{err.Error()}
 	}
-	for _, endpoint := range endpoints {
-		if endpoint == nil {
+	for _, inbound := range inbounds {
+		if inbound == nil {
 			continue
 		}
-		status, err := s.GetStatus(endpoint.Tag)
+		status, err := s.GetStatus(inbound.Tag)
 		if err != nil {
 			summary["errors"]++
-			details = append(details, endpoint.Tag+": "+err.Error())
+			details = append(details, inbound.Tag+": "+err.Error())
 			continue
 		}
 		checks, _ := status["diagnostics"].([]MasqueDiagnostic)
@@ -145,7 +154,7 @@ func (s *MasqueService) healthSummary() (map[string]int, []string) {
 			} else {
 				summary["warnings"]++
 			}
-			details = append(details, fmt.Sprintf("%s: %s - %s", endpoint.Tag, check.Title, check.Detail))
+			details = append(details, fmt.Sprintf("%s: %s - %s", inbound.Tag, check.Title, check.Detail))
 		}
 	}
 	return summary, details

@@ -199,18 +199,18 @@ func (s *HealthService) checkMasque(diagnostics map[string]interface{}) HealthCh
 	summary, details := masque.healthSummary()
 	diagnostics["masque"] = summary
 	if summary["total"] == 0 {
-		return HealthCheck{ID: "masque", Title: "MASQUE", Status: "info", Summary: "未配置 MASQUE 节点"}
+		return HealthCheck{ID: "masque", Title: "MASQUE", Status: "info", Summary: "未配置 MASQUE 入站"}
 	}
 	if summary["running"] != summary["total"] {
-		return HealthCheck{ID: "masque", Title: "MASQUE", Status: "error", Summary: fmt.Sprintf("%d/%d 个节点运行", summary["running"], summary["total"]), Action: "endpoints"}
+		return HealthCheck{ID: "masque", Title: "MASQUE", Status: "error", Summary: fmt.Sprintf("%d/%d 个入站运行", summary["running"], summary["total"]), Action: "inbounds"}
 	}
 	if summary["errors"] > 0 {
-		return HealthCheck{ID: "masque", Title: "MASQUE", Status: "error", Summary: fmt.Sprintf("发现 %d 个运行问题", summary["errors"]), Detail: strings.Join(details, "\n"), Action: "endpoints"}
+		return HealthCheck{ID: "masque", Title: "MASQUE", Status: "error", Summary: fmt.Sprintf("发现 %d 个运行问题", summary["errors"]), Detail: strings.Join(details, "\n"), Action: "inbounds"}
 	}
 	if summary["warnings"] > 0 {
-		return HealthCheck{ID: "masque", Title: "MASQUE", Status: "warning", Summary: fmt.Sprintf("发现 %d 个注意项", summary["warnings"]), Detail: strings.Join(details, "\n"), Action: "endpoints"}
+		return HealthCheck{ID: "masque", Title: "MASQUE", Status: "warning", Summary: fmt.Sprintf("发现 %d 个注意项", summary["warnings"]), Detail: strings.Join(details, "\n"), Action: "inbounds"}
 	}
-	return HealthCheck{ID: "masque", Title: "MASQUE", Status: "ok", Summary: fmt.Sprintf("%d 个节点运行正常", summary["running"]), Action: "endpoints"}
+	return HealthCheck{ID: "masque", Title: "MASQUE", Status: "ok", Summary: fmt.Sprintf("%d 个入站运行正常", summary["running"]), Action: "inbounds"}
 }
 
 func (s *HealthService) checkMieru(diagnostics map[string]interface{}) HealthCheck {

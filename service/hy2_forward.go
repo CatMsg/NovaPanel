@@ -148,6 +148,9 @@ func collectInboundForwardSpec(inbound *model.Inbound) (managedForwardSpec, erro
 		}
 		protocols = []string{strings.ToLower(config.Transport)}
 	}
+	if inbound.Type == "masque" {
+		protocols = []string{"udp"}
+	}
 	return managedForwardSpec{
 		tag:             inbound.Tag,
 		listenPort:      listenPort,

@@ -60,6 +60,25 @@ func TestCollectMieruInboundForwardPortsUsesConfiguredTransport(t *testing.T) {
 	}
 }
 
+func TestCollectMasqueInboundForwardPortIsUDPOnly(t *testing.T) {
+	inbound := &model.Inbound{
+		Type:    "masque",
+		Tag:     "masque-inbound",
+		Options: json.RawMessage(`{"listen_port":8443}`),
+	}
+
+	spec, err := collectInboundForwardSpec(inbound)
+	if err != nil {
+		t.Fatalf("collect MASQUE port: %v", err)
+	}
+	if !spec.active || spec.listenPort != 8443 || len(spec.ports) != 1 || spec.ports[0] != 8443 {
+		t.Fatalf("unexpected MASQUE forwarding state: %#v", spec)
+	}
+	if len(spec.protocols) != 1 || spec.protocols[0] != "udp" {
+		t.Fatalf("unexpected MASQUE protocols: %#v", spec.protocols)
+	}
+}
+
 func TestSyncManagedPanelPortForwardingInvokesScript(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("panel port forwarding is only exercised on linux")

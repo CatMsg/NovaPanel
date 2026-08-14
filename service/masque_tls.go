@@ -13,13 +13,13 @@ import (
 	mtls "github.com/metacubex/tls"
 )
 
-func (s *MasqueService) loadMasqueTLSCertificate(config *masqueEndpointConfig) (mtls.Certificate, string, string, string, error) {
+func (s *MasqueService) loadMasqueTLSCertificate(config *masqueInboundConfig) (mtls.Certificate, string, string, string, error) {
 	if config != nil && strings.TrimSpace(config.PrivateKey) != "" {
 		cert, err := generateMasqueTLSCertificate(config.PrivateKey)
 		if err != nil {
 			return mtls.Certificate{}, "", "", "", err
 		}
-		return cert, "", "", "endpoint-key", nil
+		return cert, "", "", "inbound-key", nil
 	}
 
 	certFile, keyFile, err := s.resolveMasqueCertFiles(config.Host)

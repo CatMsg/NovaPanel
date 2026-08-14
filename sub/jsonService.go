@@ -3,6 +3,7 @@ package sub
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/CatMsg/NovaPanel/database"
@@ -65,6 +66,7 @@ func (j *JsonService) GetJson(subId string, format string) (*string, []string, e
 	if err != nil {
 		return nil, nil, err
 	}
+	*outbounds, *outTags = withoutUnsupportedJSONOutbounds(*outbounds, *outTags, "masque")
 
 	links := j.LinkService.GetLinks(&client.Links, "external", "")
 	tagNumEnable := 0
@@ -170,6 +172,16 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 			}
 			userPass = append(userPass, pass)
 			outbound["password"] = strings.Join(userPass, ":")
+		} else if protocol == "masque" {
+			masqueConfigs, _ := configs["masque"].(map[string]interface{})
+			credential, _ := masqueConfigs[strconv.FormatUint(uint64(inData.Id), 10)].(map[string]interface{})
+			privateKey, _ := credential["private_key"].(string)
+			ip, _ := credential["ip"].(string)
+			if strings.TrimSpace(privateKey) == "" || strings.TrimSpace(ip) == "" {
+				continue
+			}
+			outbound["private-key"] = privateKey
+			outbound["ip"] = ip
 		} else { // Other protocols
 			config, _ := configs[protocol].(map[string]interface{})
 			for key, value := range config {
@@ -233,6 +245,32 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 		}
 	}
 	return &outbounds, &outTags, nil
+}
+
+func withoutUnsupportedJSONOutbounds(outbounds []map[string]interface{}, tags []string, unsupported ...string) ([]map[string]interface{}, []string) {
+	blocked := make(map[string]struct{}, len(unsupported))
+	for _, protocol := range unsupported {
+		blocked[protocol] = struct{}{}
+	}
+	filtered := make([]map[string]interface{}, 0, len(outbounds))
+	allowedTags := make(map[string]struct{})
+	for _, outbound := range outbounds {
+		protocol, _ := outbound["type"].(string)
+		if _, skip := blocked[protocol]; skip {
+			continue
+		}
+		filtered = append(filtered, outbound)
+		if tag, _ := outbound["tag"].(string); tag != "" {
+			allowedTags[tag] = struct{}{}
+		}
+	}
+	filteredTags := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		if _, ok := allowedTags[tag]; ok {
+			filteredTags = append(filteredTags, tag)
+		}
+	}
+	return filtered, filteredTags
 }
 
 func (j *JsonService) addDefaultOutbounds(outbounds *[]map[string]interface{}, outTags *[]string) {

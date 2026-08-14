@@ -20,7 +20,7 @@
             hide-details
             :disabled="endpoint.id > 0"
             :label="$t('type')"
-            :items="Object.keys(epTypes).map((key,index) => ({title: key, value: Object.values(epTypes)[index]}))"
+            :items="Object.entries(epTypes).map(([title, value]) => ({ title, value }))"
             v-model="endpoint.type"
             @update:modelValue="changeType">
             </v-select>
@@ -38,8 +38,7 @@
           @refreshPeerKey="refreshWgPeerKey" />
         <Warp v-if="endpoint.type == epTypes.Warp" :data="endpoint" />
         <TailscaleVue v-if="endpoint.type == epTypes.Tailscale" :data="endpoint" />
-        <Masque v-if="endpoint.type == epTypes.Masque" :data="endpoint" />
-        <Dial v-if="endpoint.type != epTypes.Masque" :dial="endpoint" />
+        <Dial :dial="endpoint" />
       </v-card-text>
       <v-card-actions class="modal-shell__actions">
         <v-spacer></v-spacer>
@@ -70,7 +69,6 @@ import Dial from '@/components/Dial.vue'
 import Wireguard from '@/components/protocols/Wireguard.vue'
 import Warp from '@/components/protocols/Warp.vue'
 import TailscaleVue from '@/components/protocols/Tailscale.vue'
-import Masque from '@/components/protocols/Masque.vue'
 import HttpUtils from '@/plugins/httputil'
 import { push } from 'notivue'
 import { i18n } from '@/locales'
@@ -132,25 +130,6 @@ export default {
         case EpTypes.Tailscale:
           prevConfig = { tag: tag }
           break
-        case EpTypes.Masque: {
-          const masqueKeys = await this.genMasqueKey()
-          const server = await this.getMasqueServer()
-          prevConfig = {
-            tag: tag,
-            server,
-            port: RandomUtil.randomIntRange(10000, 60000),
-            network: 'quic',
-            private_key: masqueKeys.private_key,
-            public_key: masqueKeys.public_key,
-            sni: server,
-            keepalive: 25,
-            remote_dns_resolve: false,
-            ip: '172.16.0.' + RandomUtil.randomIntRange(2, 254).toString() + '/32',
-            mtu: 1380,
-            udp: true,
-          }
-          break
-        }
       }
       this.endpoint = createEndpoint(this.endpoint.type, prevConfig)
     },
@@ -165,36 +144,6 @@ export default {
       const isDuplicatedTag = Data().checkTag("endpoint",this.endpoint.id, this.endpoint.tag)
       if (isDuplicatedTag) return
 
-      if (this.endpoint.type == EpTypes.Masque) {
-        this.endpoint.network = 'quic'
-        const preferredHost = await this.getMasqueServer()
-        const currentHost = String(this.endpoint.server ?? '').trim()
-        if (!currentHost || this.isIpLiteral(currentHost)) {
-          if (!preferredHost) {
-            push.error({
-              message: 'MASQUE 需要先在 设置-界面 里配置 subDomain 或 webDomain',
-              duration: 5000,
-            })
-            this.loading = false
-            return
-          }
-          this.endpoint.server = preferredHost
-        }
-        const resolvedHost = String(this.endpoint.server ?? '').trim()
-        if (!String(this.endpoint.ip ?? '').trim()) {
-          push.error({
-            message: 'MASQUE 需要填写客户端 IPv4，例如 172.16.0.2/32',
-            duration: 5000,
-          })
-          this.loading = false
-          return
-        }
-        const sni = String((this.endpoint as any).sni ?? '').trim()
-        if (!sni && !this.isIpLiteral(resolvedHost)) {
-          (this.endpoint as any).sni = resolvedHost
-        }
-        delete (this.endpoint as any).ipv6
-      }
       // save data
       this.loading = true
       const success = await Data().save("endpoints", this.$props.id == 0 ? "new" : "edit", this.endpoint)
@@ -221,50 +170,6 @@ export default {
         })
       }
       return result
-    },
-    async genMasqueKey() {
-      this.loading = true
-      const msg = await HttpUtils.get('api/keypairs', { k: "masque" })
-      this.loading = false
-      let result = { private_key: "", public_key: "" }
-      if (msg.success) {
-        msg.obj.forEach((line:string) => {
-          if (line.startsWith("PrivateKey")){
-            result.private_key = line.substring(12)
-          }
-          if (line.startsWith("PublicKey")){
-            result.public_key = line.substring(11)
-          }
-        })
-      } else {
-        push.error({
-          message: i18n.global.t('error') + ": " + msg.obj
-        })
-      }
-      return result
-    },
-    async getMasqueServer() {
-      try {
-        const msg = await HttpUtils.get('api/settings')
-        if (!msg.success || !msg.obj) {
-          return ''
-        }
-        const subDomain = String(msg.obj.subDomain ?? '').trim()
-        if (subDomain && !this.isIpLiteral(subDomain)) {
-          return subDomain
-        }
-        const webDomain = String(msg.obj.webDomain ?? '').trim()
-        if (webDomain && !this.isIpLiteral(webDomain)) {
-          return webDomain
-        }
-      } catch {
-        // ignore and use fallback
-      }
-      return ''
-    },
-    isIpLiteral(host: string) {
-      const normalized = String(host ?? '').trim().replace(/^\[|\]$/g, '')
-      return /^(\d{1,3}\.){3}\d{1,3}$/.test(normalized) || /^[0-9a-fA-F:]+$/.test(normalized)
     },
     async newWgKey(){
       this.loading = true
@@ -330,7 +235,7 @@ export default {
       }
     },
   },
-  components: { Dial, Wireguard, Warp, TailscaleVue, Masque }
+  components: { Dial, Wireguard, Warp, TailscaleVue }
 }
 </script>
 
