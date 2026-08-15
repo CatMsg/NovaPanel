@@ -1,11 +1,52 @@
 package sub
 
 import (
+	"encoding/json"
 	"testing"
 
+	"github.com/CatMsg/NovaPanel/database/model"
 	"github.com/CatMsg/NovaPanel/util"
 	"gopkg.in/yaml.v3"
 )
+
+func TestAppendMieruSubscriptionOutboundSupportsLegacyEmptyOutJSON(t *testing.T) {
+	service := ClashService{}
+	inbound := &model.Inbound{
+		Id:      9,
+		Type:    "mieru",
+		Tag:     "cn2-mieru",
+		Addrs:   json.RawMessage(`[]`),
+		OutJson: json.RawMessage(`{}`),
+		Options: json.RawMessage(`{
+			"listen":"::",
+			"listen_port":8899,
+			"transport":"TCP",
+			"multiplexing":"MULTIPLEXING_LOW",
+			"handshake_mode":"HANDSHAKE_NO_WAIT",
+			"traffic_pattern":"DEFAULT",
+			"mtu":1400
+		}`),
+	}
+	clientConfig := json.RawMessage(`{"mieru":{"name":"cn2mememe","password":"secret"}}`)
+	outbounds := []map[string]interface{}{{"type": "mieru", "tag": "cn2-mieru"}}
+	tags := []string{"cn2-mieru"}
+
+	service.appendMieruSubscriptionOutbounds(clientConfig, []*model.Inbound{inbound}, "cn2.example.com", &outbounds, &tags)
+
+	if len(outbounds) != 1 || len(tags) != 1 {
+		t.Fatalf("expected one Mieru outbound, got %#v %#v", outbounds, tags)
+	}
+	got := outbounds[0]
+	if got["type"] != "mieru" || got["server"] != "cn2.example.com" || got["server_port"] != 8899 {
+		t.Fatalf("unexpected Mieru server fields: %#v", got)
+	}
+	if got["username"] != "cn2mememe" || got["password"] != "secret" {
+		t.Fatalf("unexpected Mieru credentials: %#v", got)
+	}
+	if got["transport"] != "TCP" || got["multiplexing"] != "MULTIPLEXING_LOW" || got["mtu"] != 1400 {
+		t.Fatalf("unexpected Mieru options: %#v", got)
+	}
+}
 
 func TestMieruLinkParsesForOrdinaryAggregate(t *testing.T) {
 	node, tag, err := util.GetOutbound(

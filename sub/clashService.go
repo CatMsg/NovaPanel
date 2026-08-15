@@ -1,8 +1,10 @@
 package sub
 
 import (
+	"encoding/json"
 	"strings"
 
+	"github.com/CatMsg/NovaPanel/database/model"
 	"github.com/CatMsg/NovaPanel/logger"
 	"github.com/CatMsg/NovaPanel/service"
 	"github.com/CatMsg/NovaPanel/util"
@@ -61,8 +63,12 @@ const ProxyGroups = `- name: Proxy
   tolerance: 50
 `
 
-func (s *ClashService) GetClash(subId string) (*string, []string, error) {
-	cacheKey := "clash:" + strings.TrimSpace(subId)
+func (s *ClashService) GetClash(subId string, requestHosts ...string) (*string, []string, error) {
+	hostname := ""
+	if len(requestHosts) > 0 {
+		hostname = strings.TrimSpace(requestHosts[0])
+	}
+	cacheKey := "clash:" + strings.TrimSpace(subId) + ":" + hostname
 	if body, headers, ok := getCachedSubResult(cacheKey); ok {
 		return body, headers, nil
 	}
@@ -76,6 +82,7 @@ func (s *ClashService) GetClash(subId string) (*string, []string, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	s.appendMieruSubscriptionOutbounds(client.Config, inDatas, hostname, outbounds, outTags)
 
 	links := s.LinkService.GetLinks(&client.Links, "external", "")
 	tagNumEnable := 0
@@ -105,6 +112,55 @@ func (s *ClashService) GetClash(subId string) (*string, []string, error) {
 
 	storeCachedSubResult(cacheKey, resultStr, headers)
 	return &resultStr, headers, nil
+}
+
+func (s *ClashService) appendMieruSubscriptionOutbounds(
+	clientConfig json.RawMessage,
+	inbounds []*model.Inbound,
+	hostname string,
+	outbounds *[]map[string]interface{},
+	outTags *[]string,
+) {
+	if strings.TrimSpace(hostname) == "" {
+		return
+	}
+	filteredOutbounds := make([]map[string]interface{}, 0, len(*outbounds))
+	filteredTags := make([]string, 0, len(*outTags))
+	seen := make(map[string]struct{}, len(*outTags))
+	for _, outbound := range *outbounds {
+		if strings.EqualFold(strings.TrimSpace(asString(outbound["type"])), "mieru") {
+			continue
+		}
+		tag := strings.TrimSpace(asString(outbound["tag"]))
+		if tag == "" {
+			continue
+		}
+		filteredOutbounds = append(filteredOutbounds, outbound)
+		filteredTags = append(filteredTags, tag)
+		seen[tag] = struct{}{}
+	}
+	*outbounds = filteredOutbounds
+	*outTags = filteredTags
+	for _, inbound := range inbounds {
+		if inbound == nil || inbound.Type != "mieru" {
+			continue
+		}
+		for _, link := range util.LinkGenerator(clientConfig, inbound, hostname) {
+			outbound, tag, err := util.GetOutbound(link, 0)
+			if err != nil || outbound == nil || strings.TrimSpace(tag) == "" {
+				if err != nil {
+					logger.Warning("clash: failed to build Mieru subscription outbound: ", err)
+				}
+				continue
+			}
+			if _, exists := seen[tag]; exists {
+				continue
+			}
+			seen[tag] = struct{}{}
+			*outbounds = append(*outbounds, *outbound)
+			*outTags = append(*outTags, tag)
+		}
+	}
 }
 
 func (s *ClashService) getClashConfig() (string, error) {

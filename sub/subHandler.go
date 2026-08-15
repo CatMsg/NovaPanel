@@ -140,7 +140,7 @@ func (s *SubHandler) subs(c *gin.Context) {
 		case "json":
 			result, headers, err = s.JsonService.GetJson(subId, format)
 		case "clash":
-			result, headers, err = s.ClashService.GetClash(subId)
+			result, headers, err = s.ClashService.GetClash(subId, requestHost(c))
 		}
 		if err != nil || result == nil {
 			logger.Error(err)
