@@ -32,9 +32,13 @@ var masquePtr *MasqueService
 var masqueStatusCache = newTimedCache()
 
 const (
-	masqueStatusCacheTTL = 2 * time.Second
-	masqueFlowTTL        = 5 * time.Minute
-	masqueSessionQueue   = 256
+	masqueStatusCacheTTL     = 2 * time.Second
+	masqueFlowTTL            = 5 * time.Minute
+	masqueSessionIdleTimeout = 90 * time.Second
+	masqueSessionMaxLifetime = 10 * time.Minute
+	masqueAgedSessionQuiet   = 30 * time.Second
+	masqueSessionSweep       = 30 * time.Second
+	masqueSessionQueue       = 256
 )
 
 type masqueFlowKey struct {
@@ -80,7 +84,6 @@ type masqueRuntime struct {
 	sessionMu    sync.Mutex
 	sessions     map[uint64]*masqueSession
 	userSessions map[string]map[uint64]*masqueSession
-	latestByUser map[string]uint64
 	flows        map[masqueFlowKey]masqueFlowEntry
 	nextSession  uint64
 	lastConnect  time.Time
@@ -95,19 +98,21 @@ type masqueRuntime struct {
 }
 
 type masqueSession struct {
-	id        uint64
-	identity  masqueClientIdentity
-	startedAt time.Time
-	remote    string
-	ctx       context.Context
-	cancel    context.CancelFunc
-	conn      *connectip.Conn
-	outgoing  chan []byte
-	closeOnce sync.Once
-	rxBytes   atomic.Uint64
-	txBytes   atomic.Uint64
-	rxPackets atomic.Uint64
-	txPackets atomic.Uint64
+	id         uint64
+	identity   masqueClientIdentity
+	startedAt  time.Time
+	remote     string
+	ctx        context.Context
+	cancel     context.CancelFunc
+	conn       *connectip.Conn
+	outgoing   chan []byte
+	closeOnce  sync.Once
+	rxBytes    atomic.Uint64
+	txBytes    atomic.Uint64
+	rxPackets  atomic.Uint64
+	txPackets  atomic.Uint64
+	lastActive atomic.Int64
+	closing    atomic.Bool
 }
 
 type masqueTrafficSnapshot struct {
@@ -353,7 +358,7 @@ func (s *MasqueService) startInbound(inbound *model.Inbound) (*masqueRuntime, er
 		clientSubnet: clientSubnet, clients: identities, usersByIP: map[netip.Addr]string{},
 		traffic: map[string]*masqueUserTraffic{}, ctx: ctx, cancel: cancel,
 		sessions: map[uint64]*masqueSession{}, userSessions: map[string]map[uint64]*masqueSession{},
-		latestByUser: map[string]uint64{}, flows: map[masqueFlowKey]masqueFlowEntry{},
+		flows: map[masqueFlowKey]masqueFlowEntry{},
 	}
 	for _, identity := range identities {
 		handle.usersByIP[identity.Prefix.Addr()] = identity.Name
@@ -398,6 +403,7 @@ func (s *MasqueService) startInbound(inbound *model.Inbound) (*masqueRuntime, er
 	handle.server = srv
 	handle.running.Store(true)
 	go handle.dispatchTunPackets()
+	go handle.reapSessions()
 	go func() {
 		err := srv.Serve(packetConn)
 		handle.running.Store(false)
@@ -438,7 +444,6 @@ func (r *masqueRuntime) stop() {
 	}
 	r.sessions = map[uint64]*masqueSession{}
 	r.userSessions = map[string]map[uint64]*masqueSession{}
-	r.latestByUser = map[string]uint64{}
 	r.flows = map[masqueFlowKey]masqueFlowEntry{}
 	r.sessionMu.Unlock()
 	for _, session := range sessions {
@@ -464,6 +469,7 @@ func (s *masqueSession) close() {
 	if s == nil {
 		return
 	}
+	s.closing.Store(true)
 	s.closeOnce.Do(func() {
 		s.cancel()
 		if s.conn != nil {
@@ -472,9 +478,27 @@ func (s *masqueSession) close() {
 	})
 }
 
+func (s *masqueSession) touch(now time.Time) {
+	if s != nil {
+		s.lastActive.Store(now.UnixNano())
+	}
+}
+
+func (s *masqueSession) lastActivity() time.Time {
+	if s == nil {
+		return time.Time{}
+	}
+	value := s.lastActive.Load()
+	if value == 0 {
+		return s.startedAt
+	}
+	return time.Unix(0, value)
+}
+
 func (r *masqueRuntime) addSession(session *masqueSession) {
 	r.sessionMu.Lock()
 	defer r.sessionMu.Unlock()
+	session.touch(session.startedAt)
 	r.nextSession++
 	session.id = r.nextSession
 	r.sessions[session.id] = session
@@ -482,8 +506,43 @@ func (r *masqueRuntime) addSession(session *masqueSession) {
 		r.userSessions[session.identity.Name] = map[uint64]*masqueSession{}
 	}
 	r.userSessions[session.identity.Name][session.id] = session
-	r.latestByUser[session.identity.Name] = session.id
 	r.lastConnect = session.startedAt
+}
+
+func (r *masqueRuntime) reapSessions() {
+	ticker := time.NewTicker(masqueSessionSweep)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-r.ctx.Done():
+			return
+		case now := <-ticker.C:
+			if count := r.closeExpiredSessions(now); count > 0 {
+				logger.Info("masque sessions recycled: ", r.tag, " count=", count)
+			}
+		}
+	}
+}
+
+func (r *masqueRuntime) closeExpiredSessions(now time.Time) int {
+	if r == nil {
+		return 0
+	}
+	r.sessionMu.Lock()
+	expired := make([]*masqueSession, 0)
+	for _, session := range r.sessions {
+		quietFor := now.Sub(session.lastActivity())
+		idle := quietFor >= masqueSessionIdleTimeout
+		tooOld := now.Sub(session.startedAt) >= masqueSessionMaxLifetime && quietFor >= masqueAgedSessionQuiet
+		if (idle || tooOld) && session.closing.CompareAndSwap(false, true) {
+			expired = append(expired, session)
+		}
+	}
+	r.sessionMu.Unlock()
+	for _, session := range expired {
+		session.close()
+	}
+	return len(expired)
 }
 
 func (r *masqueRuntime) removeSession(session *masqueSession, err error) {
@@ -498,15 +557,6 @@ func (r *masqueRuntime) removeSession(session *masqueSession, err error) {
 		delete(sessions, session.id)
 		if len(sessions) == 0 {
 			delete(r.userSessions, session.identity.Name)
-			delete(r.latestByUser, session.identity.Name)
-		} else if r.latestByUser[session.identity.Name] == session.id {
-			var latest uint64
-			for id := range sessions {
-				if id > latest {
-					latest = id
-				}
-			}
-			r.latestByUser[session.identity.Name] = latest
 		}
 	}
 	for key, entry := range r.flows {
@@ -577,6 +627,7 @@ func (r *masqueRuntime) serveConnectIP(ctx context.Context, w mhttp.ResponseWrit
 			if len(packet) == 0 {
 				continue
 			}
+			session.touch(time.Now())
 			if !masquePacketSourceMatches(packet, identity.Prefix.Addr()) {
 				errCh <- common.NewError("masque client packet source does not match assigned address")
 				return
@@ -611,6 +662,7 @@ func (r *masqueRuntime) serveConnectIP(ctx context.Context, w mhttp.ResponseWrit
 					errCh <- err
 					return
 				}
+				session.touch(time.Now())
 			}
 		}
 		errCh <- sessionCtx.Err()
@@ -680,7 +732,13 @@ func (r *masqueRuntime) routeTunPacket(packet []byte) bool {
 	if session == nil {
 		destination := netip.AddrFrom4(key.Dst)
 		if user := r.usersByIP[destination]; user != "" {
-			session = r.sessions[r.latestByUser[user]]
+			// An unsolicited packet can only be routed safely when this user has
+			// one active session. Existing flows remain pinned to their origin.
+			if sessions := r.userSessions[user]; len(sessions) == 1 {
+				for _, candidate := range sessions {
+					session = candidate
+				}
+			}
 		}
 	}
 	r.sessionMu.Unlock()

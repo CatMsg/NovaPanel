@@ -20,7 +20,7 @@ import (
 func TestMasqueRuntimeRoutesFlowToOriginatingSession(t *testing.T) {
 	runtime := &masqueRuntime{
 		sessions: map[uint64]*masqueSession{}, userSessions: map[string]map[uint64]*masqueSession{},
-		latestByUser: map[string]uint64{}, flows: map[masqueFlowKey]masqueFlowEntry{},
+		flows:     map[masqueFlowKey]masqueFlowEntry{},
 		usersByIP: map[netip.Addr]string{}, traffic: map[string]*masqueUserTraffic{"alice": {}},
 	}
 	prefix := netip.MustParsePrefix("172.16.1.2/32")
@@ -54,6 +54,80 @@ func TestMasqueRuntimeRoutesFlowToOriginatingSession(t *testing.T) {
 	}
 }
 
+func TestMasqueRuntimeDoesNotGuessAmongConcurrentSessions(t *testing.T) {
+	runtime := &masqueRuntime{
+		sessions: map[uint64]*masqueSession{}, userSessions: map[string]map[uint64]*masqueSession{},
+		flows:     map[masqueFlowKey]masqueFlowEntry{},
+		usersByIP: map[netip.Addr]string{}, traffic: map[string]*masqueUserTraffic{"alice": {}},
+	}
+	prefix := netip.MustParsePrefix("172.16.1.2/32")
+	runtime.usersByIP[prefix.Addr()] = "alice"
+	newSession := func() *masqueSession {
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		return &masqueSession{identity: masqueClientIdentity{Name: "alice", Prefix: prefix}, startedAt: time.Now(), ctx: ctx, cancel: cancel, outgoing: make(chan []byte, 1)}
+	}
+	first := newSession()
+	second := newSession()
+	runtime.addSession(first)
+	runtime.addSession(second)
+
+	unknown := testIPv4UDPPacket([4]byte{1, 1, 1, 1}, [4]byte{172, 16, 1, 2}, 53, 42000)
+	if runtime.routeTunPacket(unknown) {
+		t.Fatal("ambiguous packet was routed to an arbitrary session")
+	}
+}
+
+func TestMasqueRuntimeReapsIdleAndOldSessions(t *testing.T) {
+	runtime := &masqueRuntime{
+		tag: "masque-main", sessions: map[uint64]*masqueSession{},
+		userSessions: map[string]map[uint64]*masqueSession{},
+		flows:        map[masqueFlowKey]masqueFlowEntry{},
+	}
+	now := time.Now()
+	newSession := func(startedAt, activeAt time.Time) *masqueSession {
+		ctx, cancel := context.WithCancel(context.Background())
+		session := &masqueSession{identity: masqueClientIdentity{Name: "alice"}, startedAt: startedAt, ctx: ctx, cancel: cancel, outgoing: make(chan []byte, 1)}
+		session.touch(activeAt)
+		return session
+	}
+	idle := newSession(now.Add(-2*time.Minute), now.Add(-masqueSessionIdleTimeout-time.Second))
+	old := newSession(now.Add(-masqueSessionMaxLifetime-time.Second), now.Add(-masqueAgedSessionQuiet-time.Second))
+	active := newSession(now.Add(-time.Minute), now)
+	longActive := newSession(now.Add(-masqueSessionMaxLifetime-time.Minute), now)
+	runtime.addSession(idle)
+	idle.touch(now.Add(-masqueSessionIdleTimeout - time.Second))
+	runtime.addSession(old)
+	old.touch(now.Add(-masqueAgedSessionQuiet - time.Second))
+	runtime.addSession(active)
+	runtime.addSession(longActive)
+	longActive.touch(now)
+
+	if got := runtime.closeExpiredSessions(now); got != 2 {
+		t.Fatalf("unexpected expired session count: %d", got)
+	}
+	select {
+	case <-idle.ctx.Done():
+	default:
+		t.Fatal("idle session was not closed")
+	}
+	select {
+	case <-old.ctx.Done():
+	default:
+		t.Fatal("old session was not closed")
+	}
+	select {
+	case <-active.ctx.Done():
+		t.Fatal("active session was closed")
+	default:
+	}
+	select {
+	case <-longActive.ctx.Done():
+		t.Fatal("long-running active session was closed")
+	default:
+	}
+}
+
 func testIPv4UDPPacket(src, dst [4]byte, srcPort, dstPort uint16) []byte {
 	packet := make([]byte, 28)
 	packet[0] = 0x45
@@ -68,7 +142,7 @@ func testIPv4UDPPacket(src, dst [4]byte, srcPort, dstPort uint16) []byte {
 func TestMasqueRuntimeStatusSnapshot(t *testing.T) {
 	runtime := &masqueRuntime{
 		sessions: map[uint64]*masqueSession{}, userSessions: map[string]map[uint64]*masqueSession{},
-		latestByUser: map[string]uint64{}, flows: map[masqueFlowKey]masqueFlowEntry{},
+		flows:   map[masqueFlowKey]masqueFlowEntry{},
 		clients: map[string]masqueClientIdentity{"key": {Name: "alice"}},
 	}
 	runtime.running.Store(true)

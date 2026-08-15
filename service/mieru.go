@@ -147,6 +147,9 @@ func (s *MieruService) SyncFromDB() error {
 	}
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
+	if err := migrateMieruHandshakeModeOnce(); err != nil {
+		return fmt.Errorf("migrate Mieru handshake mode: %w", err)
+	}
 	return s.syncFromDBLocked()
 }
 
