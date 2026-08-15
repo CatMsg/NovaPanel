@@ -78,7 +78,7 @@ func TestMasqueRuntimeDoesNotGuessAmongConcurrentSessions(t *testing.T) {
 	}
 }
 
-func TestMasqueRuntimeReapsIdleAndOldSessions(t *testing.T) {
+func TestMasqueRuntimeReapsOnlyTrulyIdleSessions(t *testing.T) {
 	runtime := &masqueRuntime{
 		tag: "masque-main", sessions: map[uint64]*masqueSession{},
 		userSessions: map[string]map[uint64]*masqueSession{},
@@ -91,19 +91,19 @@ func TestMasqueRuntimeReapsIdleAndOldSessions(t *testing.T) {
 		session.touch(activeAt)
 		return session
 	}
-	idle := newSession(now.Add(-2*time.Minute), now.Add(-masqueSessionIdleTimeout-time.Second))
-	old := newSession(now.Add(-masqueSessionMaxLifetime-time.Second), now.Add(-masqueAgedSessionQuiet-time.Second))
+	idle := newSession(now.Add(-6*time.Minute), now.Add(-masqueSessionIdleTimeout-time.Second))
+	healthCheckIdle := newSession(now.Add(-4*time.Minute), now.Add(-181*time.Second))
 	active := newSession(now.Add(-time.Minute), now)
-	longActive := newSession(now.Add(-masqueSessionMaxLifetime-time.Minute), now)
+	longActive := newSession(now.Add(-time.Hour), now)
 	runtime.addSession(idle)
 	idle.touch(now.Add(-masqueSessionIdleTimeout - time.Second))
-	runtime.addSession(old)
-	old.touch(now.Add(-masqueAgedSessionQuiet - time.Second))
+	runtime.addSession(healthCheckIdle)
+	healthCheckIdle.touch(now.Add(-181 * time.Second))
 	runtime.addSession(active)
 	runtime.addSession(longActive)
 	longActive.touch(now)
 
-	if got := runtime.closeExpiredSessions(now); got != 2 {
+	if got := runtime.closeExpiredSessions(now); got != 1 {
 		t.Fatalf("unexpected expired session count: %d", got)
 	}
 	select {
@@ -112,9 +112,9 @@ func TestMasqueRuntimeReapsIdleAndOldSessions(t *testing.T) {
 		t.Fatal("idle session was not closed")
 	}
 	select {
-	case <-old.ctx.Done():
+	case <-healthCheckIdle.ctx.Done():
+		t.Fatal("session was closed before the next provider health check")
 	default:
-		t.Fatal("old session was not closed")
 	}
 	select {
 	case <-active.ctx.Done():

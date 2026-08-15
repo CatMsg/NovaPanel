@@ -34,9 +34,7 @@ var masqueStatusCache = newTimedCache()
 const (
 	masqueStatusCacheTTL     = 2 * time.Second
 	masqueFlowTTL            = 5 * time.Minute
-	masqueSessionIdleTimeout = 90 * time.Second
-	masqueSessionMaxLifetime = 10 * time.Minute
-	masqueAgedSessionQuiet   = 30 * time.Second
+	masqueSessionIdleTimeout = 5 * time.Minute
 	masqueSessionSweep       = 30 * time.Second
 	masqueSessionQueue       = 256
 )
@@ -532,9 +530,7 @@ func (r *masqueRuntime) closeExpiredSessions(now time.Time) int {
 	expired := make([]*masqueSession, 0)
 	for _, session := range r.sessions {
 		quietFor := now.Sub(session.lastActivity())
-		idle := quietFor >= masqueSessionIdleTimeout
-		tooOld := now.Sub(session.startedAt) >= masqueSessionMaxLifetime && quietFor >= masqueAgedSessionQuiet
-		if (idle || tooOld) && session.closing.CompareAndSwap(false, true) {
+		if quietFor >= masqueSessionIdleTimeout && session.closing.CompareAndSwap(false, true) {
 			expired = append(expired, session)
 		}
 	}
