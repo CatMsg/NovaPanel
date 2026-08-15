@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -39,16 +40,23 @@ func (a *AggregateService) GetAggregate(format string, host string) (*string, []
 		return nil, nil, common.NewError("aggregate subscription is disabled in slave mode")
 	}
 
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "clash":
+		proxies, usage, err := a.collectAggregateClashProxies(host)
+		if err != nil {
+			return nil, nil, err
+		}
+		return a.buildAggregateClashProxies(proxies, usage)
+	}
+
 	links, usage, err := a.collectAggregateLinks(host)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	switch format {
+	switch strings.ToLower(strings.TrimSpace(format)) {
 	case "json":
 		return a.buildAggregateJson(links, usage)
-	case "clash":
-		return a.buildAggregateClash(links, usage)
 	default:
 		return a.buildAggregatePlain(links, usage)
 	}
@@ -93,23 +101,125 @@ func (a *AggregateService) buildAggregateJson(links []string, usage aggregateUsa
 	return a.aggregateFormatResult(string(result), usage)
 }
 
-func (a *AggregateService) buildAggregateClash(links []string, usage aggregateUsage) (*string, []string, error) {
-	outbounds, _, err := a.outboundsFromLinks(links)
-	if err != nil {
-		return nil, nil, err
-	}
-
+func (a *AggregateService) buildAggregateClashProxies(proxies []map[string]interface{}, usage aggregateUsage) (*string, []string, error) {
 	basicConfig, err := a.ClashService.getClashConfig()
 	if err != nil || len(basicConfig) == 0 {
 		basicConfig = basicClashConfig
 	}
 
-	result, err := a.ClashService.ConvertToClashMeta(outbounds, basicConfig)
+	result, err := a.ClashService.ConvertRawClashProxies(proxies, basicConfig)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	return a.aggregateFormatResult(result, usage)
+}
+
+func (a *AggregateService) collectAggregateClashProxies(host string) ([]map[string]interface{}, aggregateUsage, error) {
+	sources, err := a.SettingService.GetSubMasterSources()
+	if err != nil {
+		return nil, aggregateUsage{}, err
+	}
+	selfAggregateURI, err := a.selfAggregateURI(host)
+	if err != nil {
+		return nil, aggregateUsage{}, err
+	}
+
+	seen := make(map[string]struct{})
+	proxies := make([]map[string]interface{}, 0)
+	usage := aggregateUsage{}
+	for _, source := range sources {
+		if sameSubscriptionSource(source, selfAggregateURI) {
+			logger.Warning("aggregate: skip self source:", source)
+			continue
+		}
+
+		clashSource, err := subscriptionSourceWithFormat(source, "clash")
+		if err != nil {
+			logger.Warning("aggregate: skip invalid source:", source, err)
+			continue
+		}
+		data, headers := util.GetExternalLinkWithHeaders(clashSource)
+		if strings.TrimSpace(data) == "" {
+			logger.Warning("aggregate: failed to load remote clash subscription:", source)
+			continue
+		}
+		usage.addHeader(headers.Get("Subscription-Userinfo"))
+
+		sourceProxies, err := clashProxiesFromSource(data)
+		if err != nil {
+			sourceProxies, err = a.clashProxiesFromPlainSource(data)
+		}
+		if err != nil {
+			logger.Warning("aggregate: skip invalid clash source:", source, err)
+			continue
+		}
+		for _, proxy := range sourceProxies {
+			name := strings.TrimSpace(asString(proxy["name"]))
+			if name == "" {
+				continue
+			}
+			if _, exists := seen[name]; exists {
+				continue
+			}
+			seen[name] = struct{}{}
+			proxies = append(proxies, proxy)
+		}
+	}
+
+	if len(proxies) == 0 {
+		return nil, aggregateUsage{}, common.NewError("no clash proxies found")
+	}
+	return proxies, usage, nil
+}
+
+func subscriptionSourceWithFormat(source string, format string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(source))
+	if err != nil {
+		return "", err
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return "", common.NewError("invalid subscription source")
+	}
+	query := parsed.Query()
+	query.Set("format", format)
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
+}
+
+func clashProxiesFromSource(data string) ([]map[string]interface{}, error) {
+	var config struct {
+		Proxies []map[string]interface{} `yaml:"proxies"`
+	}
+	if err := yaml.Unmarshal([]byte(strings.TrimSpace(data)), &config); err != nil {
+		return nil, err
+	}
+	if len(config.Proxies) == 0 {
+		return nil, common.NewError("no proxies in clash subscription")
+	}
+	return config.Proxies, nil
+}
+
+func (a *AggregateService) clashProxiesFromPlainSource(data string) ([]map[string]interface{}, error) {
+	links := make([]string, 0)
+	for _, line := range strings.Split(data, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "#") {
+			links = append(links, line)
+		}
+	}
+	if len(links) == 0 {
+		return nil, common.NewError("no subscription links found")
+	}
+	outbounds, _, err := a.outboundsFromLinks(links)
+	if err != nil {
+		return nil, err
+	}
+	result, err := a.ClashService.ConvertToClashMeta(outbounds, basicClashConfig)
+	if err != nil {
+		return nil, err
+	}
+	return clashProxiesFromSource(result)
 }
 
 func (a *AggregateService) aggregateHeaders(usage aggregateUsage) []string {

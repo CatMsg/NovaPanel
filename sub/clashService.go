@@ -407,14 +407,40 @@ func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, b
 			}
 		}
 
+		tag := asString(obMap["tag"])
+		if tag == "" {
+			continue
+		}
 		proxies = append(proxies, proxy)
-		proxyTags = append(proxyTags, obMap["tag"].(string))
+		proxyTags = append(proxyTags, tag)
 	}
+	return s.renderClashConfig(proxies, proxyTags, basicConfig)
+}
 
+func (s *ClashService) ConvertRawClashProxies(rawProxies []map[string]interface{}, basicConfig string) (string, error) {
+	proxies := make([]interface{}, 0, len(rawProxies))
+	proxyTags := make([]string, 0, len(rawProxies))
+	seen := make(map[string]struct{}, len(rawProxies))
+	for _, proxy := range rawProxies {
+		name := strings.TrimSpace(asString(proxy["name"]))
+		proxyType := strings.ToLower(strings.TrimSpace(asString(proxy["type"])))
+		if name == "" || proxyType == "" || proxyType == "direct" || proxyType == "selector" || proxyType == "url-test" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		proxies = append(proxies, proxy)
+		proxyTags = append(proxyTags, name)
+	}
+	return s.renderClashConfig(proxies, proxyTags, basicConfig)
+}
+
+func (s *ClashService) renderClashConfig(proxies []interface{}, proxyTags []string, basicConfig string) (string, error) {
 	var proxyGroups []map[string]interface{}
-	err := yaml.Unmarshal([]byte(ProxyGroups), &proxyGroups)
-	if err != nil {
-		logger.Error(err.Error())
+	if err := yaml.Unmarshal([]byte(ProxyGroups), &proxyGroups); err != nil {
+		return "", err
 	}
 
 	proxyGroups[1]["proxies"] = proxyTags
@@ -422,9 +448,8 @@ func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, b
 
 	// Merge proxies and proxy groups if exist
 	var output map[string]interface{}
-	err = yaml.Unmarshal([]byte(basicConfig), &output)
-	if err != nil {
-		logger.Error(err.Error())
+	if err := yaml.Unmarshal([]byte(basicConfig), &output); err != nil {
+		return "", err
 	}
 
 	if p, ok := output["proxies"].([]interface{}); ok {

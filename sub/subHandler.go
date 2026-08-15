@@ -35,7 +35,10 @@ func (s *SubHandler) initRouter(g *gin.RouterGroup) {
 }
 
 func (s *SubHandler) aggregate(c *gin.Context) {
-	format := c.Query("format")
+	format, _, negotiated := requestedSubscriptionFormat(c)
+	if negotiated {
+		c.Header("Vary", "User-Agent")
+	}
 	result, headers, err := s.AggregateService.GetAggregate(format, requestHost(c))
 	if err != nil || result == nil {
 		logger.Error(err)
@@ -58,7 +61,16 @@ func (s *SubHandler) aggregateHeaders(c *gin.Context) {
 		c.String(404, "")
 		return
 	}
-	_, usage, err := s.AggregateService.collectAggregateLinks(requestHost(c))
+	format, _, negotiated := requestedSubscriptionFormat(c)
+	if negotiated {
+		c.Header("Vary", "User-Agent")
+	}
+	var usage aggregateUsage
+	if format == "clash" {
+		_, usage, err = s.AggregateService.collectAggregateClashProxies(requestHost(c))
+	} else {
+		_, usage, err = s.AggregateService.collectAggregateLinks(requestHost(c))
+	}
 	if err != nil {
 		logger.Error(err)
 		c.String(400, "Error!")
@@ -119,7 +131,10 @@ func (s *SubHandler) subs(c *gin.Context) {
 	var result *string
 	var err error
 	subId := c.Param("subid")
-	format, isFormat := c.GetQuery("format")
+	format, isFormat, negotiated := requestedSubscriptionFormat(c)
+	if negotiated {
+		c.Header("Vary", "User-Agent")
+	}
 	if isFormat {
 		switch format {
 		case "json":
@@ -144,6 +159,29 @@ func (s *SubHandler) subs(c *gin.Context) {
 	s.addHeaders(c, headers)
 
 	c.String(200, *result)
+}
+
+func requestedSubscriptionFormat(c *gin.Context) (format string, selected bool, negotiated bool) {
+	if value, exists := c.GetQuery("format"); exists {
+		return strings.ToLower(strings.TrimSpace(value)), true, false
+	}
+	if isClashSubscriptionClient(c.GetHeader("User-Agent")) {
+		return "clash", true, true
+	}
+	return "", false, false
+}
+
+func isClashSubscriptionClient(userAgent string) bool {
+	userAgent = strings.ToLower(strings.TrimSpace(userAgent))
+	if userAgent == "" {
+		return false
+	}
+	for _, marker := range []string{"clash", "mihomo", "openclash", "shadowrocket", "stash"} {
+		if strings.Contains(userAgent, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *SubHandler) subHeaders(c *gin.Context) {
