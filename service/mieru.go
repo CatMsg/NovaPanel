@@ -499,6 +499,22 @@ func probeMieruBridge(payload []byte) error {
 	if len(payload) == 0 || json.Unmarshal(payload, &serverConfig) != nil {
 		return common.NewError("parse active mita config for bridge probe")
 	}
+	var probeUser *mitaUser
+	for index := range serverConfig.Users {
+		candidate := &serverConfig.Users[index]
+		if strings.TrimSpace(candidate.Name) != "" && strings.TrimSpace(candidate.HashedPassword) != "" {
+			probeUser = candidate
+			break
+		}
+	}
+	if probeUser == nil {
+		return common.NewError("Mieru routing bridge probe user is not configured")
+	}
+	username := strings.TrimSpace(probeUser.Name)
+	password := strings.TrimSpace(probeUser.HashedPassword)
+	if len(username) > 255 || len(password) > 255 {
+		return common.NewError("Mieru routing bridge probe credentials are too long")
+	}
 	var bridge *mitaEgressProxy
 	for index := range serverConfig.Egress.Proxies {
 		candidate := &serverConfig.Egress.Proxies[index]
@@ -519,15 +535,29 @@ func probeMieruBridge(payload []byte) error {
 	if err := connection.SetDeadline(time.Now().Add(mieruBridgeProbeTime)); err != nil {
 		return err
 	}
-	if _, err := connection.Write([]byte{0x05, 0x01, 0x00}); err != nil {
+	if _, err := connection.Write([]byte{0x05, 0x01, 0x02}); err != nil {
 		return fmt.Errorf("write Mieru routing bridge handshake: %w", err)
 	}
 	reply := make([]byte, 2)
 	if _, err := io.ReadFull(connection, reply); err != nil {
 		return fmt.Errorf("read Mieru routing bridge handshake: %w", err)
 	}
-	if reply[0] != 0x05 || reply[1] != 0x00 {
+	if reply[0] != 0x05 || reply[1] != 0x02 {
 		return fmt.Errorf("Mieru routing bridge rejected handshake: %x", reply)
+	}
+	authRequest := make([]byte, 0, len(username)+len(password)+3)
+	authRequest = append(authRequest, 0x01, byte(len(username)))
+	authRequest = append(authRequest, username...)
+	authRequest = append(authRequest, byte(len(password)))
+	authRequest = append(authRequest, password...)
+	if _, err := connection.Write(authRequest); err != nil {
+		return fmt.Errorf("write Mieru routing bridge authentication: %w", err)
+	}
+	if _, err := io.ReadFull(connection, reply); err != nil {
+		return fmt.Errorf("read Mieru routing bridge authentication: %w", err)
+	}
+	if reply[0] != 0x01 || reply[1] != 0x00 {
+		return fmt.Errorf("Mieru routing bridge rejected authentication: %x", reply)
 	}
 	return nil
 }

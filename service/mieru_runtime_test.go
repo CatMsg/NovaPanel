@@ -108,6 +108,10 @@ func TestMieruWatchdogRequiresConsecutiveFailures(t *testing.T) {
 }
 
 func TestProbeMieruBridgePerformsSOCKSHandshake(t *testing.T) {
+	const (
+		username = "alice"
+		password = "0123456789abcdef"
+	)
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -127,16 +131,49 @@ func TestProbeMieruBridgePerformsSOCKSHandshake(t *testing.T) {
 			serverErr <- err
 			return
 		}
-		if string(hello) != string([]byte{0x05, 0x01, 0x00}) {
+		if string(hello) != string([]byte{0x05, 0x01, 0x02}) {
 			serverErr <- errors.New("unexpected SOCKS5 greeting")
 			return
 		}
-		_, err = connection.Write([]byte{0x05, 0x00})
+		if _, err = connection.Write([]byte{0x05, 0x02}); err != nil {
+			serverErr <- err
+			return
+		}
+		authHeader := make([]byte, 2)
+		if _, err = io.ReadFull(connection, authHeader); err != nil {
+			serverErr <- err
+			return
+		}
+		if authHeader[0] != 0x01 || int(authHeader[1]) != len(username) {
+			serverErr <- errors.New("unexpected SOCKS5 authentication header")
+			return
+		}
+		authPayload := make([]byte, len(username)+1)
+		if _, err = io.ReadFull(connection, authPayload); err != nil {
+			serverErr <- err
+			return
+		}
+		if string(authPayload[:len(username)]) != username || int(authPayload[len(username)]) != len(password) {
+			serverErr <- errors.New("unexpected SOCKS5 username")
+			return
+		}
+		passwordPayload := make([]byte, len(password))
+		if _, err = io.ReadFull(connection, passwordPayload); err != nil {
+			serverErr <- err
+			return
+		}
+		if string(passwordPayload) != password {
+			serverErr <- errors.New("unexpected SOCKS5 password")
+			return
+		}
+		_, err = connection.Write([]byte{0x01, 0x00})
 		serverErr <- err
 	}()
 
 	address := listener.Addr().(*net.TCPAddr)
-	payload, err := json.Marshal(mitaServerConfig{Egress: mitaEgress{
+	payload, err := json.Marshal(mitaServerConfig{Users: []mitaUser{{
+		Name: username, HashedPassword: password,
+	}}, Egress: mitaEgress{
 		Proxies: []mitaEgressProxy{{
 			Name:     mieruBridgeProxyName,
 			Protocol: "SOCKS5_PROXY_PROTOCOL",
@@ -162,8 +199,15 @@ func TestProbeMieruBridgeRejectsUnavailableBridge(t *testing.T) {
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
 	_ = listener.Close()
-	payload := []byte(`{"egress":{"proxies":[{"name":"novapanel","protocol":"SOCKS5_PROXY_PROTOCOL","host":"127.0.0.1","port":` + strconv.Itoa(port) + `}]}}`)
+	payload := []byte(`{"users":[{"name":"alice","hashedPassword":"hash"}],"egress":{"proxies":[{"name":"novapanel","protocol":"SOCKS5_PROXY_PROTOCOL","host":"127.0.0.1","port":` + strconv.Itoa(port) + `}]}}`)
 	if err := probeMieruBridge(payload); err == nil {
 		t.Fatal("unavailable bridge passed the watchdog probe")
+	}
+}
+
+func TestProbeMieruBridgeRequiresProbeUser(t *testing.T) {
+	payload := []byte(`{"egress":{"proxies":[{"name":"novapanel","protocol":"SOCKS5_PROXY_PROTOCOL","host":"127.0.0.1","port":1080}]}}`)
+	if err := probeMieruBridge(payload); err == nil {
+		t.Fatal("bridge probe passed without an authenticated user")
 	}
 }
