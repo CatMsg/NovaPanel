@@ -149,6 +149,10 @@ func (c *rateLimitedConn) Write(p []byte) (int, error) {
 	return c.Conn.Write(p)
 }
 
+func (c *rateLimitedConn) Upstream() any {
+	return c.Conn
+}
+
 type rateLimitedPacketConn struct {
 	network.PacketConn
 	ctx     context.Context
@@ -173,6 +177,10 @@ func (c *rateLimitedPacketConn) WritePacket(buffer *buf.Buffer, destination M.So
 		}
 	}
 	return c.PacketConn.WritePacket(buffer, destination)
+}
+
+func (c *rateLimitedPacketConn) Upstream() any {
+	return c.PacketConn
 }
 
 var _ net.Conn = (*rateLimitedConn)(nil)

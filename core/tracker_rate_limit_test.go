@@ -6,7 +6,20 @@ import (
 	"time"
 
 	"github.com/CatMsg/NovaPanel/database/model"
+	"github.com/sagernet/sing/common/network"
 )
+
+type headroomPacketConn struct {
+	network.PacketConn
+}
+
+func (c *headroomPacketConn) FrontHeadroom() int {
+	return 10
+}
+
+func (c *headroomPacketConn) RearHeadroom() int {
+	return 6
+}
 
 func TestUserRateLimitTrackerSharesLimitAndSeparatesDirections(t *testing.T) {
 	tracker := NewUserRateLimitTracker()
@@ -46,5 +59,25 @@ func TestUserRateLimitTrackerHotReloadRemovesLimit(t *testing.T) {
 	tracker.SetLimits([]model.Client{{Name: "alice"}})
 	if tracker.limiter("alice", true) != nil {
 		t.Fatal("zero limit should remove the limiter")
+	}
+}
+
+func TestRateLimitedPacketConnPreservesHeadroom(t *testing.T) {
+	underlying := &headroomPacketConn{}
+	limited := &rateLimitedPacketConn{PacketConn: underlying}
+
+	if got := network.CalculateFrontHeadroom(limited); got != 10 {
+		t.Fatalf("front headroom was hidden by rate limiter: got %d want 10", got)
+	}
+	if got := network.CalculateRearHeadroom(limited); got != 6 {
+		t.Fatalf("rear headroom was hidden by rate limiter: got %d want 6", got)
+	}
+	buffer := network.NewReadWaitOptions(nil, limited).NewPacketBuffer()
+	defer buffer.Release()
+	if buffer.Start() < 10 {
+		t.Fatalf("packet copy buffer did not reserve front headroom: got %d want at least 10", buffer.Start())
+	}
+	if buffer.FreeLen() < 6 {
+		t.Fatalf("packet copy buffer did not reserve rear headroom: got %d want at least 6", buffer.FreeLen())
 	}
 }
