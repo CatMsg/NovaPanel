@@ -38,21 +38,16 @@ RUN if [ "$TARGETARCH" = "arm" ]; then export GOARM=7; [ "$TARGETVARIANT" = "v6"
     -tags "with_quic,with_grpc,with_utls,with_acme,with_gvisor,with_naive_outbound,with_purego,with_tailscale" \
     -o sui main.go
 
+RUN test "$TARGETARCH" = "amd64" && \
+    CGO_ENABLED=0 GOOS=linux GOARCH="$TARGETARCH" bash ./scripts/build-mita.sh /app/mita
+
 FROM alpine
 ENV TZ=Asia/Shanghai
 WORKDIR /app
 ARG TARGETARCH
 RUN set -ex && apk add --no-cache --upgrade bash tzdata ca-certificates nftables
 COPY --from=backend-builder /app/sui /app/libcronet.so /app/
-RUN set -ex; \
-    test "$TARGETARCH" = "amd64"; \
-    mkdir -p /app/bin; \
-    wget -O /tmp/mita.tar.gz \
-      https://github.com/enfein/mieru/releases/download/v3.34.1/mita_3.34.1_linux_amd64.tar.gz; \
-    echo "499c7390406175a32c140bf31b8b3e1fc2abfe7f4d523e067f09a6fc461e6325  /tmp/mita.tar.gz" | sha256sum -c -; \
-    tar -xzf /tmp/mita.tar.gz -C /app/bin mita; \
-    chmod 755 /app/bin/mita; \
-    rm -f /tmp/mita.tar.gz
+COPY --from=backend-builder /app/mita /app/bin/mita
 COPY LICENSE THIRD_PARTY_NOTICES.md /app/
 COPY entrypoint.sh /app/
 ENTRYPOINT [ "./entrypoint.sh" ]

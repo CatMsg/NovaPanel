@@ -10,6 +10,18 @@ import (
 	"github.com/CatMsg/NovaPanel/database/model"
 )
 
+func TestValidateClientRateLimits(t *testing.T) {
+	if err := validateClientRateLimits(&model.Client{UploadLimit: 125_000, DownloadLimit: 250_000}); err != nil {
+		t.Fatalf("valid rate limits were rejected: %v", err)
+	}
+	if err := validateClientRateLimits(&model.Client{UploadLimit: -1}); err == nil {
+		t.Fatal("negative upload limit was accepted")
+	}
+	if err := validateClientRateLimits(&model.Client{DownloadLimit: -1}); err == nil {
+		t.Fatal("negative download limit was accepted")
+	}
+}
+
 func TestUpdateLinksWithFixedInboundsUsesEachClientsOwnInbounds(t *testing.T) {
 	workDir := t.TempDir()
 	if err := database.InitDB(filepath.Join(workDir, "client-links.db")); err != nil {

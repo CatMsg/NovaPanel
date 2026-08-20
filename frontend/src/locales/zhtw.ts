@@ -248,6 +248,11 @@ export default {
     autoReset: "自動重置",
     resetDays: "重置天數",
     nextReset: "下次重置",
+    uploadLimit: "上傳限速",
+    downloadLimit: "下載限速",
+    rateLimitHint: "0 表示不限速；同一使用者的所有入站與裝置共享此頻寬",
+    bulkRateLimitHint: "留空不修改，0 表示不限速",
+    rateLimit: "速率限制",
   },
   bulk: {
     order: "排序",

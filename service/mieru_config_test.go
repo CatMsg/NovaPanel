@@ -194,7 +194,7 @@ func TestBuildMitaServerConfigUsesOneInboundAndManyUsers(t *testing.T) {
 }
 
 func TestBuildMieruBridgeInboundUsesOriginalTagAndLoopback(t *testing.T) {
-	payload, err := buildMieruBridgeInbound("mieru-main")
+	payload, err := buildMieruBridgeInbound("mieru-main", []mieruClientCredential{{Name: "alice", Password: "secret"}})
 	if err != nil {
 		t.Fatalf("build Mieru bridge inbound: %v", err)
 	}
@@ -207,6 +207,14 @@ func TestBuildMieruBridgeInboundUsesOriginalTagAndLoopback(t *testing.T) {
 	}
 	if port, ok := inbound["listen_port"].(float64); !ok || port <= 0 {
 		t.Fatalf("invalid Mieru bridge port: %#v", inbound["listen_port"])
+	}
+	users, ok := inbound["users"].([]interface{})
+	if !ok || len(users) != 1 {
+		t.Fatalf("Mieru bridge users were not configured: %#v", inbound["users"])
+	}
+	user := users[0].(map[string]interface{})
+	if user["username"] != "alice" || user["password"] != hashMieruPassword("alice", "secret") {
+		t.Fatalf("unexpected Mieru bridge credentials: %#v", user)
 	}
 	var parsed option.Inbound
 	if err := parsed.UnmarshalJSONContext(core.NewCore().GetCtx(), payload); err != nil {

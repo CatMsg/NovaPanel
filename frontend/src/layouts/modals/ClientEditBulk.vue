@@ -47,6 +47,32 @@
                     hide-details
                   ></v-switch>
                 </v-col>
+                <v-col cols="12" sm="6" md="4">
+                  <v-text-field
+                    v-model.number="editData.uploadLimit"
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    clearable
+                    :label="$t('client.uploadLimit')"
+                    suffix="Mbps"
+                    :hint="$t('client.bulkRateLimitHint')"
+                    persistent-hint
+                  ></v-text-field>
+                </v-col>
+                <v-col cols="12" sm="6" md="4">
+                  <v-text-field
+                    v-model.number="editData.downloadLimit"
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    clearable
+                    :label="$t('client.downloadLimit')"
+                    suffix="Mbps"
+                    :hint="$t('client.bulkRateLimitHint')"
+                    persistent-hint
+                  ></v-text-field>
+                </v-col>
               </v-row>
               <v-row v-if="actionMode === 'add_inbounds' || actionMode === 'remove_inbounds'">
                 <v-col cols="12" sm="8">
@@ -114,6 +140,8 @@ export default {
         enable: true,
         addDays: 0,
         addVolume: 0,
+        uploadLimit: null as number | null,
+        downloadLimit: null as number | null,
         inboundTags: [] as number[],
       },
       selectedClients: {
@@ -153,6 +181,10 @@ export default {
               c.volume += this.editData.addVolume*(1024 ** 3)
             if (this.editData.addDays != 0 && c.expiry > 0)
               c.expiry += this.editData.addDays*(24 * 60 * 60)
+            if (this.editData.uploadLimit !== null && Number.isFinite(this.editData.uploadLimit))
+              c.uploadLimit = this.editData.uploadLimit > 0 ? Math.round(this.editData.uploadLimit * 1_000_000 / 8) : 0
+            if (this.editData.downloadLimit !== null && Number.isFinite(this.editData.downloadLimit))
+              c.downloadLimit = this.editData.downloadLimit > 0 ? Math.round(this.editData.downloadLimit * 1_000_000 / 8) : 0
             if (this.editData.enable)
               c.enable = (c.volume == 0 || c.up + c.down < c.volume) && (c.expiry == 0 || c.expiry > Date.now()/1000)
           })
@@ -187,7 +219,7 @@ export default {
     visible(newVal) {
       if (newVal) {
         this.actionMode = 'change_limits'
-        this.editData = { enable: true, addDays: 0, addVolume: 0, inboundTags: [] }
+        this.editData = { enable: true, addDays: 0, addVolume: 0, uploadLimit: null, downloadLimit: null, inboundTags: [] }
         this.selectedClients = { model: 'none', values: [] }
       }
     },

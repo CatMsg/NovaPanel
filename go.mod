@@ -18,6 +18,7 @@ require (
 	github.com/shirou/gopsutil/v4 v4.26.2
 	github.com/yosida95/uritemplate/v3 v3.0.2
 	golang.org/x/sys v0.46.0
+	golang.org/x/time v0.12.0
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/sqlite v1.6.0
@@ -198,7 +199,6 @@ require (
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/term v0.44.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
-	golang.org/x/time v0.12.0 // indirect
 	golang.org/x/tools v0.47.0 // indirect
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
 	golang.zx2c4.com/wireguard/windows v0.5.3 // indirect

@@ -235,6 +235,7 @@
               <span>/ {{ item.volume == 0 ? $t('unlimited') : HumanReadable.sizeFormat(item.volume) }}</span>
             </div>
             <span>{{ $t('date.expiry') }}: {{ HumanReadable.remainedDays(item.expiry) }}</span>
+            <span>{{ $t('client.rateLimit') }}: ↑ {{ formatRate(item.uploadLimit) }} · ↓ {{ formatRate(item.downloadLimit) }}</span>
           </div>
           <v-progress-linear
             class="clients-usage__progress"
@@ -299,6 +300,7 @@
           <div><span>{{ $t('stats.usage') }}</span><strong>{{ HumanReadable.sizeFormat(item.up + item.down) }}</strong></div>
           <div><span>{{ $t('stats.volume') }}</span><strong>{{ item.volume === 0 ? $t('unlimited') : HumanReadable.sizeFormat(item.volume) }}</strong></div>
           <div><span>{{ $t('date.expiry') }}</span><strong>{{ HumanReadable.remainedDays(item.expiry) }}</strong></div>
+          <div><span>{{ $t('client.rateLimit') }}</span><strong>↑ {{ formatRate(item.uploadLimit) }} · ↓ {{ formatRate(item.downloadLimit) }}</strong></div>
         </div>
         <v-progress-linear v-if="item.volume > 0" :model-value="percent(item)" :color="percentColor(item)" rounded />
         <div class="clients-mobile-card__actions">
@@ -858,6 +860,11 @@ const visibleClients = computed((): Client[] => {
 const onlineCount = computed((): number => {
   return Data().onlines?.user?.length ?? 0
 })
+
+const formatRate = (bytesPerSecond: number): string => {
+  if (!bytesPerSecond || bytesPerSecond <= 0) return i18n.global.t('unlimited')
+  return `${Number((bytesPerSecond * 8 / 1_000_000).toFixed(2))} Mbps`
+}
 
 const isOnline = (cname: string) => computed(() => {
   return Data().onlines?.user ? Data().onlines.user.includes(cname) : false

@@ -55,6 +55,14 @@
                 </v-col>
               </v-row>
               <v-row>
+                <v-col cols="12" sm="6">
+                  <v-text-field v-model.number="UploadLimit" type="number" min="0" step="0.1" :label="$t('client.uploadLimit')" suffix="Mbps" :hint="$t('client.rateLimitHint')" persistent-hint></v-text-field>
+                </v-col>
+                <v-col cols="12" sm="6">
+                  <v-text-field v-model.number="DownloadLimit" type="number" min="0" step="0.1" :label="$t('client.downloadLimit')" suffix="Mbps" :hint="$t('client.rateLimitHint')" persistent-hint></v-text-field>
+                </v-col>
+              </v-row>
+              <v-row>
                 <v-col cols="12" sm="6" md="4">
                   <v-switch color="primary"
                     :disabled="client.up+client.down>0"
@@ -320,6 +328,14 @@ export default {
     Volume: {
       get() { return this.client.volume == 0 ? 0 : (this.client.volume / (1024 ** 3)) },
       set(v:number) { this.client.volume = v > 0 ? v*(1024 ** 3) : 0 }
+    },
+    UploadLimit: {
+      get() { return this.client.uploadLimit > 0 ? Number((this.client.uploadLimit * 8 / 1_000_000).toFixed(2)) : 0 },
+      set(v:number) { this.client.uploadLimit = v > 0 ? Math.round(v * 1_000_000 / 8) : 0 }
+    },
+    DownloadLimit: {
+      get() { return this.client.downloadLimit > 0 ? Number((this.client.downloadLimit * 8 / 1_000_000).toFixed(2)) : 0 },
+      set(v:number) { this.client.downloadLimit = v > 0 ? Math.round(v * 1_000_000 / 8) : 0 }
     },
     delayStart: {
       get() { return this.client.delayStart?? false },

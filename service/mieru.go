@@ -128,17 +128,44 @@ func getMieruBridgePort() (int, error) {
 	return port, nil
 }
 
-func buildMieruBridgeInbound(tag string) ([]byte, error) {
+func buildMieruBridgeInbound(tag string, credentials []mieruClientCredential) ([]byte, error) {
 	port, err := getMieruBridgePort()
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(map[string]interface{}{
+	users := make([]map[string]string, 0, len(credentials))
+	for _, credential := range credentials {
+		name := strings.TrimSpace(credential.Name)
+		password := strings.TrimSpace(credential.Password)
+		if name == "" || password == "" {
+			continue
+		}
+		users = append(users, map[string]string{
+			"username": name,
+			"password": hashMieruPassword(name, password),
+		})
+	}
+	config := map[string]interface{}{
 		"type":        "socks",
 		"tag":         strings.TrimSpace(tag),
 		"listen":      mieruBridgeHost,
 		"listen_port": port,
-	})
+	}
+	if len(users) > 0 {
+		config["users"] = users
+	}
+	return json.Marshal(config)
+}
+
+func buildMieruBridgeInboundFromDB(db *gorm.DB, inbound *model.Inbound) ([]byte, error) {
+	if inbound == nil {
+		return nil, common.NewError("Mieru inbound is required")
+	}
+	credentials, err := loadMieruClientCredentials(db, inbound.Id)
+	if err != nil {
+		return nil, err
+	}
+	return buildMieruBridgeInbound(inbound.Tag, credentials)
 }
 
 func (s *MieruService) SyncFromDB() error {
@@ -958,6 +985,7 @@ func startMieruRuntime(binary, configPath, socketPath string, onExit func(*mieru
 		"MITA_UDS_PATH="+socketPath,
 		"MITA_INSECURE_UDS=1",
 		"MITA_LOG_NO_TIMESTAMP=1",
+		"MITA_NOVAPANEL_BRIDGE_AUTH=1",
 	)
 	runtimeState := &mieruRuntime{
 		cmd:       command,
@@ -1171,8 +1199,6 @@ func (s *MieruService) CollectStats() ([]model.Stats, onlines, error) {
 	}
 	current := parseMitaTrafficCounters(output)
 	now := time.Now()
-	stats := make([]model.Stats, 0, len(users)*2)
-
 	s.mu.Lock()
 	if s.trafficBaseline == nil {
 		s.trafficBaseline = make(map[string]mieruTrafficCounters)
@@ -1195,16 +1221,6 @@ func (s *MieruService) CollectStats() ([]model.Stats, onlines, error) {
 		if uploadDelta > 0 || downloadDelta > 0 {
 			s.recentUsers[username] = now
 		}
-		if uploadDelta > 0 {
-			stats = append(stats, model.Stats{
-				DateTime: now.Unix(), Resource: "user", Tag: username, Direction: true, Traffic: uploadDelta,
-			})
-		}
-		if downloadDelta > 0 {
-			stats = append(stats, model.Stats{
-				DateTime: now.Unix(), Resource: "user", Tag: username, Direction: false, Traffic: downloadDelta,
-			})
-		}
 	}
 	sampled := onlines{}
 	for username, lastSeen := range s.recentUsers {
@@ -1222,7 +1238,9 @@ func (s *MieruService) CollectStats() ([]model.Stats, onlines, error) {
 	}
 	s.mu.Unlock()
 
-	return stats, sampled, nil
+	// Traffic is counted by the authenticated Sing-box bridge. Mita metrics are
+	// retained only for online detection to avoid charging every byte twice.
+	return nil, sampled, nil
 }
 
 func parseMitaUserStats(output, username string) map[string]string {

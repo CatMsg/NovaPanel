@@ -36,22 +36,23 @@ import (
 var _ adapter.SimpleLifecycle = (*Box)(nil)
 
 type Box struct {
-	createdAt       time.Time
-	logFactory      log.Factory
-	logger          log.ContextLogger
-	network         *route.NetworkManager
-	endpoint        *endpoint.Manager
-	inbound         *inbound.Manager
-	outbound        *outbound.Manager
-	service         *boxService.Manager
-	dnsTransport    *dns.TransportManager
-	dnsRouter       *dns.Router
-	connection      *route.ConnectionManager
-	router          *route.Router
-	internalService []adapter.LifecycleService
-	statsTracker    *StatsTracker
-	connTracker     *ConnTracker
-	done            chan struct{}
+	createdAt        time.Time
+	logFactory       log.Factory
+	logger           log.ContextLogger
+	network          *route.NetworkManager
+	endpoint         *endpoint.Manager
+	inbound          *inbound.Manager
+	outbound         *outbound.Manager
+	service          *boxService.Manager
+	dnsTransport     *dns.TransportManager
+	dnsRouter        *dns.Router
+	connection       *route.ConnectionManager
+	router           *route.Router
+	internalService  []adapter.LifecycleService
+	statsTracker     *StatsTracker
+	connTracker      *ConnTracker
+	rateLimitTracker *UserRateLimitTracker
+	done             chan struct{}
 }
 
 type Options struct {
@@ -329,9 +330,14 @@ func NewBox(options Options) (*Box, error) {
 	statsTracker := NewStatsTracker()
 	connTracker := NewConnTracker()
 	historyTracker := NewHistoryTracker()
+	rateLimitTracker := NewUserRateLimitTracker()
+	if err := rateLimitTracker.Reload(); err != nil {
+		return nil, common.NewError(err, "load user rate limits")
+	}
 	router.AppendTracker(statsTracker)
 	router.AppendTracker(connTracker)
 	router.AppendTracker(historyTracker)
+	router.AppendTracker(rateLimitTracker)
 
 	if needCacheFile {
 		cacheFile := cachefile.New(ctx, sbCommon.PtrValueOrDefault(experimentalOptions.CacheFile))
@@ -378,22 +384,23 @@ func NewBox(options Options) (*Box, error) {
 		internalServices = append(internalServices, adapter.NewLifecycleService(timeService, "ntp service"))
 	}
 	return &Box{
-		network:         networkManager,
-		endpoint:        endpointManager,
-		inbound:         inboundManager,
-		outbound:        outboundManager,
-		dnsTransport:    dnsTransportManager,
-		service:         serviceManager,
-		dnsRouter:       dnsRouter,
-		connection:      connectionManager,
-		router:          router,
-		createdAt:       createdAt,
-		logFactory:      logFactory,
-		logger:          logFactory.Logger(),
-		internalService: internalServices,
-		statsTracker:    statsTracker,
-		connTracker:     connTracker,
-		done:            make(chan struct{}),
+		network:          networkManager,
+		endpoint:         endpointManager,
+		inbound:          inboundManager,
+		outbound:         outboundManager,
+		dnsTransport:     dnsTransportManager,
+		service:          serviceManager,
+		dnsRouter:        dnsRouter,
+		connection:       connectionManager,
+		router:           router,
+		createdAt:        createdAt,
+		logFactory:       logFactory,
+		logger:           logFactory.Logger(),
+		internalService:  internalServices,
+		statsTracker:     statsTracker,
+		connTracker:      connTracker,
+		rateLimitTracker: rateLimitTracker,
+		done:             make(chan struct{}),
 	}, nil
 }
 
@@ -591,4 +598,8 @@ func (s *Box) StatsTracker() *StatsTracker {
 
 func (s *Box) ConnTracker() *ConnTracker {
 	return s.connTracker
+}
+
+func (s *Box) RateLimitTracker() *UserRateLimitTracker {
+	return s.rateLimitTracker
 }

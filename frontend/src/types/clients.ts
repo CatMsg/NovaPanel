@@ -26,6 +26,8 @@ export interface Client {
   history?: HistoryEntry[]
 	volume: number
 	expiry: number
+	uploadLimit: number
+	downloadLimit: number
   up: number
   down: number
   desc: string
@@ -47,6 +49,8 @@ const defaultClient: Client = {
   history: [],
   volume: 0,
   expiry: 0,
+  uploadLimit: 0,
+  downloadLimit: 0,
   up: 0,
   down: 0,
   desc: "",

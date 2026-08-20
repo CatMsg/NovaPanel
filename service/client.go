@@ -105,7 +105,7 @@ func (s *ClientService) GetAll() (*[]model.Client, error) {
 	db := database.GetDB()
 	var clients []model.Client
 	err := db.Model(model.Client{}).
-		Select("`id`, `enable`, `name`, `desc`, `group`, `inbounds`, `up`, `down`, `volume`, `expiry`").
+		Select("`id`, `enable`, `name`, `desc`, `group`, `inbounds`, `up`, `down`, `volume`, `expiry`, `upload_limit`, `download_limit`").
 		Scan(&clients).Error
 	if err != nil {
 		return nil, err
@@ -134,6 +134,9 @@ func (s *ClientService) Save(tx *gorm.DB, act string, data json.RawMessage, host
 		var client model.Client
 		err = json.Unmarshal(data, &client)
 		if err != nil {
+			return nil, err
+		}
+		if err = validateClientRateLimits(&client); err != nil {
 			return nil, err
 		}
 		if act == "edit" {
@@ -168,6 +171,14 @@ func (s *ClientService) Save(tx *gorm.DB, act string, data json.RawMessage, host
 		if err != nil {
 			return nil, err
 		}
+		if len(clients) == 0 {
+			return nil, common.NewError("at least one client is required")
+		}
+		for _, client := range clients {
+			if err = validateClientRateLimits(client); err != nil {
+				return nil, err
+			}
+		}
 		err = json.Unmarshal(clients[0].Inbounds, &inboundIds)
 		if err != nil {
 			return nil, err
@@ -187,6 +198,9 @@ func (s *ClientService) Save(tx *gorm.DB, act string, data json.RawMessage, host
 			return nil, err
 		}
 		for _, client := range clients {
+			if err = validateClientRateLimits(client); err != nil {
+				return nil, err
+			}
 			err = s.preserveClientHistory(tx, client)
 			if err != nil {
 				return nil, err
@@ -256,6 +270,16 @@ func (s *ClientService) Save(tx *gorm.DB, act string, data json.RawMessage, host
 	}
 
 	return inboundIds, nil
+}
+
+func validateClientRateLimits(client *model.Client) error {
+	if client == nil {
+		return common.NewError("client is required")
+	}
+	if client.UploadLimit < 0 || client.DownloadLimit < 0 {
+		return common.NewError("upload and download limits cannot be negative")
+	}
+	return nil
 }
 
 func (s *ClientService) updateLinksWithFixedInbounds(tx *gorm.DB, clients []*model.Client, hostname string) error {

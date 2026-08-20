@@ -248,6 +248,11 @@ export default {
     autoReset: "بازنشانی خودکار",
     resetDays: "روزهای بازنشانی",
     nextReset: "بازنشانی بعدی",
+    uploadLimit: "Upload limit",
+    downloadLimit: "Download limit",
+    rateLimitHint: "0 means unlimited; all inbounds and devices for this user share the bandwidth",
+    bulkRateLimitHint: "Leave blank to keep unchanged; 0 means unlimited",
+    rateLimit: "Rate limit",
   },
   bulk: {
     order: "ترتیب",

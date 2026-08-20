@@ -19,6 +19,7 @@ NovaPanel 是基于 s-ui 扩展的 Sing-Box 管理面板，提供协议配置、
 - 管理入站、出站、节点、服务、路由、规则集、DNS、用户和管理员。
 - 支持 VLESS、VMess、Trojan、Shadowsocks、Hysteria2、TUIC、Naive、AnyTLS、Mieru、MASQUE 等协议。
 - MASQUE 作为多用户入站运行：单 UDP 端口、用户独立密钥与隧道地址、并发会话、流量配额和 Clash/Mihomo 订阅。
+- 用户管理统一配置上传、下载限速，同一用户跨入站协议和多台设备共享带宽额度，并覆盖 Mieru 与 MASQUE。
 - 输出 Link、JSON、Clash/Mihomo 订阅，并支持多服务器订阅聚合。
 - 自动同步入站、节点、面板和订阅端口规则，适配 `ufw`、`nftables` 与 `iptables`。
 - 提供系统监控、流量统计、在线用户、访问记录、端口诊断和 Telegram 告警。

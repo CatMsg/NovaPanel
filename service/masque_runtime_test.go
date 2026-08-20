@@ -17,6 +17,38 @@ import (
 	mtls "github.com/metacubex/tls"
 )
 
+type recordingMasqueRateLimiter struct {
+	uploadUser, downloadUser   string
+	uploadBytes, downloadBytes int
+}
+
+func (l *recordingMasqueRateLimiter) WaitUpload(_ context.Context, user string, size int) error {
+	l.uploadUser, l.uploadBytes = user, size
+	return nil
+}
+
+func (l *recordingMasqueRateLimiter) WaitDownload(_ context.Context, user string, size int) error {
+	l.downloadUser, l.downloadBytes = user, size
+	return nil
+}
+
+func TestMasqueRuntimeAppliesUserRateLimitsByDirection(t *testing.T) {
+	limiter := &recordingMasqueRateLimiter{}
+	runtime := &masqueRuntime{rateLimiter: func() masqueRateLimiter { return limiter }}
+	if err := runtime.waitUpload(context.Background(), "alice", 1200); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.waitDownload(context.Background(), "alice", 2400); err != nil {
+		t.Fatal(err)
+	}
+	if limiter.uploadUser != "alice" || limiter.uploadBytes != 1200 {
+		t.Fatalf("unexpected upload limit call: %#v", limiter)
+	}
+	if limiter.downloadUser != "alice" || limiter.downloadBytes != 2400 {
+		t.Fatalf("unexpected download limit call: %#v", limiter)
+	}
+}
+
 func TestMasqueRuntimeRoutesFlowToOriginatingSession(t *testing.T) {
 	runtime := &masqueRuntime{
 		sessions: map[uint64]*masqueSession{}, userSessions: map[string]map[uint64]*masqueSession{},

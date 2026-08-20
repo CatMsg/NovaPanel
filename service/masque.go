@@ -57,6 +57,44 @@ type masqueUserTraffic struct {
 	Download atomic.Uint64
 }
 
+type masqueRateLimiter interface {
+	WaitUpload(context.Context, string, int) error
+	WaitDownload(context.Context, string, int) error
+}
+
+func currentMasqueRateLimiter() masqueRateLimiter {
+	if corePtr == nil || !corePtr.IsRunning() {
+		return nil
+	}
+	instance := corePtr.GetInstance()
+	if instance == nil {
+		return nil
+	}
+	return instance.RateLimitTracker()
+}
+
+func (r *masqueRuntime) waitUpload(ctx context.Context, user string, size int) error {
+	if r == nil || r.rateLimiter == nil {
+		return nil
+	}
+	limiter := r.rateLimiter()
+	if limiter == nil {
+		return nil
+	}
+	return limiter.WaitUpload(ctx, user, size)
+}
+
+func (r *masqueRuntime) waitDownload(ctx context.Context, user string, size int) error {
+	if r == nil || r.rateLimiter == nil {
+		return nil
+	}
+	limiter := r.rateLimiter()
+	if limiter == nil {
+		return nil
+	}
+	return limiter.WaitDownload(ctx, user, size)
+}
+
 type masqueRuntime struct {
 	tag          string
 	port         int
@@ -76,6 +114,7 @@ type masqueRuntime struct {
 	clients      map[string]masqueClientIdentity
 	usersByIP    map[netip.Addr]string
 	traffic      map[string]*masqueUserTraffic
+	rateLimiter  func() masqueRateLimiter
 	ctx          context.Context
 	cancel       context.CancelFunc
 	tunWriteMu   sync.Mutex
@@ -355,7 +394,8 @@ func (s *MasqueService) startInbound(inbound *model.Inbound) (*masqueRuntime, er
 		certificate:  newMasqueCertificateReloader(cert, certFile, keyFile, certSource),
 		clientSubnet: clientSubnet, clients: identities, usersByIP: map[netip.Addr]string{},
 		traffic: map[string]*masqueUserTraffic{}, ctx: ctx, cancel: cancel,
-		sessions: map[uint64]*masqueSession{}, userSessions: map[string]map[uint64]*masqueSession{},
+		rateLimiter: currentMasqueRateLimiter,
+		sessions:    map[uint64]*masqueSession{}, userSessions: map[string]map[uint64]*masqueSession{},
 		flows: map[masqueFlowKey]masqueFlowEntry{},
 	}
 	for _, identity := range identities {
@@ -623,6 +663,10 @@ func (r *masqueRuntime) serveConnectIP(ctx context.Context, w mhttp.ResponseWrit
 			if len(packet) == 0 {
 				continue
 			}
+			if err := r.waitUpload(sessionCtx, identity.Name, len(packet)); err != nil {
+				errCh <- err
+				return
+			}
 			session.touch(time.Now())
 			if !masquePacketSourceMatches(packet, identity.Prefix.Addr()) {
 				errCh <- common.NewError("masque client packet source does not match assigned address")
@@ -654,6 +698,10 @@ func (r *masqueRuntime) serveConnectIP(ctx context.Context, w mhttp.ResponseWrit
 				errCh <- sessionCtx.Err()
 				return
 			case packet := <-session.outgoing:
+				if err := r.waitDownload(sessionCtx, identity.Name, len(packet)); err != nil {
+					errCh <- err
+					return
+				}
 				if _, err := conn.WritePacket(packet); err != nil {
 					errCh <- err
 					return

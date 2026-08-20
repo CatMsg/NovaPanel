@@ -314,6 +314,18 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 			run:  postCommit,
 		})
 	}
+	if obj == "clients" && corePtr != nil && corePtr.IsRunning() {
+		actions = append(actions, postCommitAction{
+			name: "reload user rate limits",
+			run: func() error {
+				instance := corePtr.GetInstance()
+				if instance == nil || instance.RateLimitTracker() == nil {
+					return nil
+				}
+				return instance.RateLimitTracker().Reload()
+			},
+		})
+	}
 	if masquePtr != nil && (obj == "endpoints" || obj == "settings") {
 		actions = append(actions, postCommitAction{
 			name: "sync masque service",

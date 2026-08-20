@@ -62,6 +62,14 @@
             </v-col>
           </v-row>
           <v-row>
+            <v-col cols="12" sm="6">
+              <v-text-field v-model.number="bulkData.uploadLimit" type="number" min="0" step="0.1" :label="$t('client.uploadLimit')" suffix="Mbps" hide-details></v-text-field>
+            </v-col>
+            <v-col cols="12" sm="6">
+              <v-text-field v-model.number="bulkData.downloadLimit" type="number" min="0" step="0.1" :label="$t('client.downloadLimit')" suffix="Mbps" hide-details></v-text-field>
+            </v-col>
+          </v-row>
+          <v-row>
             <v-col>
               <v-select
                 v-model="bulkData.clientInbounds"
@@ -123,6 +131,8 @@ export default {
         clientInbounds: [],
         expiry: 0,
         Volume: 0,
+        uploadLimit: 0,
+        downloadLimit: 0,
         delayStart: false,
         autoReset: false,
         resetDays: 0,
@@ -145,6 +155,8 @@ export default {
         clientInbounds: [],
         expiry: 0,
         Volume: 0,
+        uploadLimit: 0,
+        downloadLimit: 0,
         delayStart: false,
         autoReset: false,
         resetDays: 0,
@@ -170,6 +182,8 @@ export default {
           inbounds: this.bulkData.clientInbounds.length > 0 ? this.bulkData.clientInbounds.sort() : [],
           links: [],
           volume: this.bulkData.Volume*(1024 ** 3),
+          uploadLimit: this.bulkData.uploadLimit > 0 ? Math.round(this.bulkData.uploadLimit * 1_000_000 / 8) : 0,
+          downloadLimit: this.bulkData.downloadLimit > 0 ? Math.round(this.bulkData.downloadLimit * 1_000_000 / 8) : 0,
           expiry: (this.bulkData.delayStart && !this.bulkData.autoReset) ? 0 : this.bulkData.expiry,
           up: 0,
           down: 0,

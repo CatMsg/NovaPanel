@@ -45,7 +45,7 @@ func (s *InboundService) rollbackInboundCoreState(act string, oldInbound, newInb
 		var configData []byte
 		var err error
 		if oldInbound.Type == "mieru" {
-			configData, err = buildMieruBridgeInbound(oldInbound.Tag)
+			configData, err = buildMieruBridgeInboundFromDB(database.GetDB(), oldInbound)
 		} else {
 			configData, err = oldInbound.MarshalJSON()
 			if err == nil {
@@ -267,7 +267,7 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		var inboundConfig []byte
 		if corePtr.IsRunning() && inbound.Type != "masque" {
 			if inbound.Type == "mieru" {
-				inboundConfig, err = buildMieruBridgeInbound(inbound.Tag)
+				inboundConfig, err = buildMieruBridgeInboundFromDB(tx, &inbound)
 			} else {
 				inboundConfig, err = inbound.MarshalJSON()
 				if err == nil {
@@ -443,7 +443,7 @@ func (s *InboundService) GetAllConfig(db *gorm.DB) ([]json.RawMessage, error) {
 			continue
 		}
 		if inbound.Type == "mieru" {
-			inboundJson, err := buildMieruBridgeInbound(inbound.Tag)
+			inboundJson, err := buildMieruBridgeInboundFromDB(db, inbound)
 			if err != nil {
 				return nil, err
 			}
