@@ -161,6 +161,9 @@ func collectInboundForwardSpec(inbound *model.Inbound) (managedForwardSpec, erro
 		return managedForwardSpec{}, err
 	}
 	protocols := []string{"tcp", "udp"}
+	if inbound.Type == "hysteria2" {
+		protocols = []string{"udp"}
+	}
 	if inbound.Type == "mieru" {
 		config, err := parseMieruInbound(inbound)
 		if err != nil {

@@ -43,6 +43,7 @@ func runCommandOutput(timeout time.Duration, name string, args ...string) ([]byt
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, name, args...)
+	configureCommandCancellation(cmd)
 	output, err := cmd.CombinedOutput()
 	if err == nil {
 		return output, nil

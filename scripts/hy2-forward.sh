@@ -143,6 +143,42 @@ normalize_ports() {
   done
 }
 
+compact_ports() {
+  local normalized_ports="${1:-}"
+  local start=""
+  local previous=""
+  local port
+
+  emit_range() {
+    if [[ -z "${start}" ]]; then
+      return 0
+    fi
+    if [[ "${start}" == "${previous}" ]]; then
+      printf '%s\n' "${start}"
+    else
+      printf '%s:%s\n' "${start}" "${previous}"
+    fi
+  }
+
+  while IFS= read -r port; do
+    [[ -n "${port}" ]] || continue
+    if [[ -z "${start}" ]]; then
+      start="${port}"
+      previous="${port}"
+      continue
+    fi
+    if ((port == previous + 1)); then
+      previous="${port}"
+      continue
+    fi
+    emit_range
+    start="${port}"
+    previous="${port}"
+  done < <(printf '%s\n' "${normalized_ports}" | sed '/^$/d' | sort -n -u)
+
+  emit_range
+}
+
 render_ufw_block() {
   local ports="${1:-}"
   local family_label="${2:-}"
@@ -371,7 +407,7 @@ reload_ufw() {
 
 apply_ufw_allow_rules() {
   local normalized_ports="${1:-}"
-  local port
+  local port_spec
   local protocol
 
   if ! has_cmd ufw; then
@@ -379,21 +415,53 @@ apply_ufw_allow_rules() {
   fi
 
   remove_ufw_allow_rules
-  while IFS= read -r port; do
-    if [[ -n "${port}" ]]; then
+  while IFS= read -r port_spec; do
+    if [[ -n "${port_spec}" ]]; then
       for protocol in "${protocols[@]}"; do
-        ufw allow "${port}/${protocol}" comment "NovaPanel ${chain}" >/dev/null
+        ufw allow "${port_spec}/${protocol}" comment "NovaPanel ${chain}" >/dev/null
       done
     fi
-  done <<< "${normalized_ports}"
+  done < <(compact_ports "${normalized_ports}")
 }
 
 remove_ufw_allow_rules() {
   local marker="NovaPanel ${chain}"
+  local marker_hex
+  local file
+  local tmp
+  local removed_from_files=0
   local rule_number
   local status
 
   if ! has_cmd ufw; then
+    return 0
+  fi
+
+  marker_hex="$(printf '%s' "${marker}" | od -An -tx1 | tr -d '[:space:]')"
+  for file in /etc/ufw/user.rules /etc/ufw/user6.rules; do
+    [[ -f "${file}" ]] || continue
+    if ! grep -q "comment=${marker_hex}" "${file}"; then
+      continue
+    fi
+    tmp="$(mktemp)"
+    awk -v marker="comment=${marker_hex}" '
+      BEGIN { skipping = 0 }
+      skipping {
+        if ($0 == "") skipping = 0
+        next
+      }
+      index($0, "### tuple ###") == 1 && index($0, marker) > 0 {
+        skipping = 1
+        next
+      }
+      { print }
+    ' "${file}" > "${tmp}"
+    chmod --reference="${file}" "${tmp}"
+    chown --reference="${file}" "${tmp}"
+    mv "${tmp}" "${file}"
+    removed_from_files=1
+  done
+  if [[ "${removed_from_files}" -eq 1 ]]; then
     return 0
   fi
 

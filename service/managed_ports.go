@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/CatMsg/NovaPanel/logger"
 	"gorm.io/gorm"
@@ -21,6 +22,9 @@ const (
 )
 
 var portForwardingMu sync.Mutex
+
+const portForwardCommandTimeout = 2 * time.Minute
+
 var managedPanelApplyProtocols = []string{"tcp"}
 var managedPanelCleanupProtocols = []string{"tcp", "udp"}
 var managedForwardProtocols = []string{"tcp", "udp"}
@@ -224,7 +228,7 @@ func runPortForwardScript(action string, tag string, listenPort int, ports []int
 		args = append(args, tag, strconv.Itoa(listenPort), joinPorts(ports))
 		args = append(args, strings.Join(protocols, ","))
 	}
-	_, err := runCommandOutput(externalCommandTimeout, "bash", append([]string{hy2ForwardScriptPath()}, args...)...)
+	_, err := runCommandOutput(portForwardCommandTimeout, "bash", append([]string{hy2ForwardScriptPath()}, args...)...)
 	if err != nil {
 		wrapped := formatExternalCommandError("port forwarding sync failed", err)
 		logger.Warning(wrapped)

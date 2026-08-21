@@ -238,6 +238,8 @@ func TestRunHy2ForwardScriptUFW(t *testing.T) {
 	replaced := strings.NewReplacer(
 		"/etc/ufw/before.rules", filepath.Join(etcDir, "before.rules"),
 		"/etc/ufw/before6.rules", filepath.Join(etcDir, "before6.rules"),
+		"/etc/ufw/user.rules", filepath.Join(etcDir, "user.rules"),
+		"/etc/ufw/user6.rules", filepath.Join(etcDir, "user6.rules"),
 	).Replace(string(scriptCopy))
 	scriptPath := filepath.Join(workDir, "hy2-forward.sh")
 	if err := os.WriteFile(scriptPath, []byte(replaced), 0o755); err != nil {
@@ -249,7 +251,7 @@ func TestRunHy2ForwardScriptUFW(t *testing.T) {
 		"HY2_MOCK_LOG="+filepath.Join(workDir, "ufw.log"),
 	)
 
-	cmd := exec.Command("bash", scriptPath, "apply", "hy2-demo-ufw", "12345", "443,8443")
+	cmd := exec.Command("bash", scriptPath, "apply", "hy2-demo-ufw", "12345", "443,444,445,8443")
 	cmd.Env = env
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("apply failed: %v\n%s", err, string(out))
@@ -266,14 +268,32 @@ func TestRunHy2ForwardScriptUFW(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read ufw log: %v", err)
 	}
-	if !bytes.Contains(ufwLog, []byte("ufw allow 443/tcp comment NovaPanel ")) ||
-		!bytes.Contains(ufwLog, []byte("ufw allow 443/udp comment NovaPanel ")) ||
+	if !bytes.Contains(ufwLog, []byte("ufw allow 443:445/tcp comment NovaPanel ")) ||
+		!bytes.Contains(ufwLog, []byte("ufw allow 443:445/udp comment NovaPanel ")) ||
 		!bytes.Contains(ufwLog, []byte("ufw allow 8443/tcp comment NovaPanel ")) ||
 		!bytes.Contains(ufwLog, []byte("ufw allow 8443/udp comment NovaPanel ")) {
 		t.Fatalf("ufw apply did not add allow rules:\n%s", string(ufwLog))
 	}
 
-	cmd = exec.Command("bash", scriptPath, "remove", "hy2-demo-ufw", "12345", "443,8443")
+	markerHex := fmt.Sprintf("%x", []byte("NovaPanel "+hy2ChainName("hy2-demo-ufw")))
+	userRulesPath := filepath.Join(etcDir, "user.rules")
+	userRules := fmt.Sprintf(`*filter
+### RULES ###
+
+### tuple ### allow udp 443 0.0.0.0/0 any 0.0.0.0/0 in comment=%s
+-A ufw-user-input -p udp --dport 443 -j ACCEPT
+
+### tuple ### allow tcp 9527 0.0.0.0/0 any 0.0.0.0/0 in
+-A ufw-user-input -p tcp --dport 9527 -j ACCEPT
+
+### END RULES ###
+COMMIT
+`, markerHex)
+	if err := os.WriteFile(userRulesPath, []byte(userRules), 0o644); err != nil {
+		t.Fatalf("seed UFW user rules: %v", err)
+	}
+
+	cmd = exec.Command("bash", scriptPath, "remove", "hy2-demo-ufw", "12345", "443,444,445,8443")
 	cmd.Env = env
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("remove failed: %v\n%s", err, string(out))
@@ -286,12 +306,12 @@ func TestRunHy2ForwardScriptUFW(t *testing.T) {
 	if bytes.Contains(beforeRules, []byte("NOVAPANEL HY2 BEGIN")) || bytes.Contains(beforeRules, []byte("REDIRECT --to-ports 12345")) {
 		t.Fatalf("ufw remove did not clear NAT block:\n%s", string(beforeRules))
 	}
-	ufwLog, err = os.ReadFile(filepath.Join(workDir, "ufw.log"))
+	cleanedUserRules, err := os.ReadFile(userRulesPath)
 	if err != nil {
-		t.Fatalf("read ufw log after remove: %v", err)
+		t.Fatalf("read UFW user rules after remove: %v", err)
 	}
-	if !bytes.Contains(ufwLog, []byte("ufw --force delete ")) {
-		t.Fatalf("ufw remove did not delete allow rules:\n%s", string(ufwLog))
+	if bytes.Contains(cleanedUserRules, []byte(markerHex)) || !bytes.Contains(cleanedUserRules, []byte("--dport 9527")) {
+		t.Fatalf("ufw remove did not selectively clean managed allow rules:\n%s", string(cleanedUserRules))
 	}
 }
 

@@ -95,6 +95,26 @@ func TestCollectMasqueInboundForwardPortIsUDPOnly(t *testing.T) {
 	}
 }
 
+func TestCollectHysteria2InboundForwardPortsAreUDPOnly(t *testing.T) {
+	inbound := &model.Inbound{
+		Type:    "hysteria2",
+		Tag:     "hy2-range",
+		Options: json.RawMessage(`{"listen_port":443}`),
+		OutJson: json.RawMessage(`{"server_ports":["443-445"]}`),
+	}
+
+	spec, err := collectInboundForwardSpec(inbound)
+	if err != nil {
+		t.Fatalf("collect Hysteria2 ports: %v", err)
+	}
+	if !spec.active || spec.listenPort != 443 || len(spec.ports) != 3 {
+		t.Fatalf("unexpected Hysteria2 forwarding state: %#v", spec)
+	}
+	if len(spec.protocols) != 1 || spec.protocols[0] != "udp" {
+		t.Fatalf("unexpected Hysteria2 protocols: %#v", spec.protocols)
+	}
+}
+
 func TestSyncManagedPanelPortForwardingInvokesScript(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("panel port forwarding is only exercised on linux")
