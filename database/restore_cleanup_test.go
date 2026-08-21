@@ -169,6 +169,29 @@ func TestPruneHy2InboundServerPortsConflictBySSHPorts(t *testing.T) {
 	}
 }
 
+func TestCollectRestoreHy2LargeRangeStaysCompressed(t *testing.T) {
+	inbound := model.Inbound{
+		Type:    "hysteria2",
+		Tag:     "hy2-large-range",
+		Options: json.RawMessage(`{"listen_port":20000}`),
+		OutJson: json.RawMessage(`{"server_ports":"20000-49999"}`),
+	}
+
+	ranges, active, err := collectInboundPortRangesForRestore(&inbound)
+	if err != nil {
+		t.Fatalf("collect restore ranges: %v", err)
+	}
+	if !active || len(ranges) != 1 || ranges[0] != (restorePortRange{start: 20000, end: 49999}) {
+		t.Fatalf("large restore range was expanded or changed: %#v", ranges)
+	}
+	if hasPortRangeConflict(ranges, map[int]struct{}{2222: {}}) {
+		t.Fatal("safe SSH port unexpectedly conflicts with large range")
+	}
+	if !hasPortRangeConflict(ranges, map[int]struct{}{30000: {}}) {
+		t.Fatal("SSH port inside large range was not detected")
+	}
+}
+
 func TestPruneHy2InboundServerPortsConflictDeduplicatesMixedTokens(t *testing.T) {
 	logger.InitLogger(logging.ERROR)
 

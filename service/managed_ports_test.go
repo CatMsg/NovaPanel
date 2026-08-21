@@ -68,8 +68,8 @@ func TestCollectMieruInboundForwardPortsUsesConfiguredTransport(t *testing.T) {
 	if !spec.active || spec.listenPort != 24000 {
 		t.Fatalf("unexpected Mieru forwarding state: active=%v listen=%d", spec.active, spec.listenPort)
 	}
-	if got := len(spec.ports); got != 3 || spec.ports[0] != 24000 || spec.ports[2] != 24002 {
-		t.Fatalf("unexpected Mieru ports: %#v", spec.ports)
+	if got := len(spec.portRanges); got != 1 || spec.portRanges[0] != (managedPortRange{start: 24000, end: 24002}) {
+		t.Fatalf("unexpected Mieru port ranges: %#v", spec.portRanges)
 	}
 	if len(spec.protocols) != 1 || spec.protocols[0] != "udp" {
 		t.Fatalf("unexpected Mieru protocols: %#v", spec.protocols)
@@ -87,7 +87,7 @@ func TestCollectMasqueInboundForwardPortIsUDPOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collect MASQUE port: %v", err)
 	}
-	if !spec.active || spec.listenPort != 8443 || len(spec.ports) != 1 || spec.ports[0] != 8443 {
+	if !spec.active || spec.listenPort != 8443 || len(spec.portRanges) != 1 || spec.portRanges[0].start != 8443 {
 		t.Fatalf("unexpected MASQUE forwarding state: %#v", spec)
 	}
 	if len(spec.protocols) != 1 || spec.protocols[0] != "udp" {
@@ -107,11 +107,30 @@ func TestCollectHysteria2InboundForwardPortsAreUDPOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collect Hysteria2 ports: %v", err)
 	}
-	if !spec.active || spec.listenPort != 443 || len(spec.ports) != 3 {
+	if !spec.active || spec.listenPort != 443 || len(spec.portRanges) != 1 || spec.portRanges[0] != (managedPortRange{start: 443, end: 445}) {
 		t.Fatalf("unexpected Hysteria2 forwarding state: %#v", spec)
 	}
 	if len(spec.protocols) != 1 || spec.protocols[0] != "udp" {
 		t.Fatalf("unexpected Hysteria2 protocols: %#v", spec.protocols)
+	}
+}
+
+func TestManagedPortRangesMergeWithoutExpansion(t *testing.T) {
+	ranges := normalizeManagedPortRanges([]managedPortRange{
+		{start: 500, end: 500},
+		{start: 900, end: 900},
+		{start: 1000, end: 1400},
+		{start: 1200, end: 1600},
+		{start: 901, end: 999},
+	})
+	if len(ranges) != 2 || ranges[0] != (managedPortRange{start: 500, end: 500}) || ranges[1] != (managedPortRange{start: 900, end: 1600}) {
+		t.Fatalf("unexpected merged ranges: %#v", ranges)
+	}
+	if got := joinManagedPortRanges(ranges); got != "500,900-1600" {
+		t.Fatalf("unexpected compact script argument %q", got)
+	}
+	if got := managedPortRangeCount(ranges); got != 702 {
+		t.Fatalf("unexpected covered port count %d", got)
 	}
 }
 

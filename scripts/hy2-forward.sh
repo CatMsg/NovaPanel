@@ -101,20 +101,8 @@ has_cmd() {
 
 normalize_ports() {
   local raw="${1:-}"
-  local part trimmed start end port
-  local seen="|"
-
-  emit_port() {
-    local value="${1:-}"
-    if [[ -z "${value}" || "${value}" -lt 1 || "${value}" -gt 65535 ]]; then
-      return 0
-    fi
-    if [[ "${seen}" == *"|${value}|"* ]]; then
-      return 0
-    fi
-    seen="${seen}${value}|"
-    printf '%s\n' "${value}"
-  }
+  local part trimmed start end
+  local pairs=""
 
   IFS=',' read -r -a parts <<< "${raw}"
   for part in "${parts[@]}"; do
@@ -122,61 +110,51 @@ normalize_ports() {
     if [[ -z "${trimmed}" ]]; then
       continue
     fi
-    if [[ "${trimmed}" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+    if [[ "${trimmed}" =~ ^([0-9]+)[-:]([0-9]+)$ ]]; then
       start="${BASH_REMATCH[1]}"
       end="${BASH_REMATCH[2]}"
       if [[ "${start}" -lt 1 || "${end}" -gt 65535 || "${start}" -gt "${end}" ]]; then
         echo "invalid server_ports range: ${trimmed}" >&2
         return 1
       fi
-      for ((port=start; port<=end; port++)); do
-        emit_port "${port}"
-      done
+      pairs="${pairs}${start} ${end}"$'\n'
       continue
     fi
     if [[ "${trimmed}" =~ ^[0-9]+$ ]]; then
-      emit_port "${trimmed}"
+      if [[ "${trimmed}" -lt 1 || "${trimmed}" -gt 65535 ]]; then
+        echo "invalid server_ports token: ${trimmed}" >&2
+        return 1
+      fi
+      pairs="${pairs}${trimmed} ${trimmed}"$'\n'
       continue
     fi
     echo "invalid server_ports token: ${trimmed}" >&2
     return 1
   done
-}
-
-compact_ports() {
-  local normalized_ports="${1:-}"
-  local start=""
-  local previous=""
-  local port
-
-  emit_range() {
-    if [[ -z "${start}" ]]; then
-      return 0
-    fi
-    if [[ "${start}" == "${previous}" ]]; then
-      printf '%s\n' "${start}"
-    else
-      printf '%s:%s\n' "${start}" "${previous}"
-    fi
-  }
-
-  while IFS= read -r port; do
-    [[ -n "${port}" ]] || continue
-    if [[ -z "${start}" ]]; then
-      start="${port}"
-      previous="${port}"
-      continue
-    fi
-    if ((port == previous + 1)); then
-      previous="${port}"
-      continue
-    fi
-    emit_range
-    start="${port}"
-    previous="${port}"
-  done < <(printf '%s\n' "${normalized_ports}" | sed '/^$/d' | sort -n -u)
-
-  emit_range
+  printf '%s' "${pairs}" | sort -n -k1,1 -k2,2 | awk '
+    function emit() {
+      if (start == end) print start
+      else print start ":" end
+    }
+    NF == 2 && !active {
+      start = $1
+      end = $2
+      active = 1
+      next
+    }
+    NF == 2 && $1 <= end + 1 {
+      if ($2 > end) end = $2
+      next
+    }
+    NF == 2 {
+      emit()
+      start = $1
+      end = $2
+    }
+    END {
+      if (active) emit()
+    }
+  '
 }
 
 render_ufw_block() {
@@ -421,7 +399,7 @@ apply_ufw_allow_rules() {
         ufw allow "${port_spec}/${protocol}" comment "NovaPanel ${chain}" >/dev/null
       done
     fi
-  done < <(compact_ports "${normalized_ports}")
+  done <<< "${normalized_ports}"
 }
 
 remove_ufw_allow_rules() {
@@ -445,13 +423,15 @@ remove_ufw_allow_rules() {
     fi
     tmp="$(mktemp)"
     awk -v marker="comment=${marker_hex}" '
-      BEGIN { skipping = 0 }
-      skipping {
-        if ($0 == "") skipping = 0
+      BEGIN { remove_next = 0 }
+      remove_next && $0 == "" { next }
+      remove_next && $0 ~ /^-A / {
+        remove_next = 0
         next
       }
+      remove_next { remove_next = 0 }
       index($0, "### tuple ###") == 1 && index($0, marker) > 0 {
-        skipping = 1
+        remove_next = 1
         next
       }
       { print }
@@ -477,6 +457,69 @@ remove_ufw_allow_rules() {
           if (line ~ /^[0-9]+$/) {
             found = line
           }
+        }
+        END { print found }
+      '
+    )"
+    [[ -n "${rule_number}" ]] || break
+    ufw --force delete "${rule_number}" >/dev/null 2>&1 || break
+  done
+}
+
+purge_ufw_allow_rules() {
+  local marker_prefix
+  local marker_hex_prefix
+  local file
+  local tmp
+  local removed_from_files=0
+  local rule_number
+  local status
+
+  if ! has_cmd ufw; then
+    return 0
+  fi
+
+  marker_prefix="NovaPanel NPHY2_"
+  marker_hex_prefix="$(printf '%s' "${marker_prefix}" | od -An -tx1 | tr -d '[:space:]')"
+  for file in /etc/ufw/user.rules /etc/ufw/user6.rules; do
+    [[ -f "${file}" ]] || continue
+    if ! grep -q "comment=${marker_hex_prefix}" "${file}"; then
+      continue
+    fi
+    tmp="$(mktemp)"
+    awk -v marker="comment=${marker_hex_prefix}" '
+      BEGIN { remove_next = 0 }
+      remove_next && $0 == "" { next }
+      remove_next && $0 ~ /^-A / {
+        remove_next = 0
+        next
+      }
+      remove_next { remove_next = 0 }
+      index($0, "### tuple ###") == 1 && index($0, marker) > 0 {
+        remove_next = 1
+        next
+      }
+      { print }
+    ' "${file}" > "${tmp}"
+    chmod --reference="${file}" "${tmp}"
+    chown --reference="${file}" "${tmp}"
+    mv "${tmp}" "${file}"
+    removed_from_files=1
+  done
+  if [[ "${removed_from_files}" -eq 1 ]]; then
+    return 0
+  fi
+
+  while :; do
+    status="$(ufw status numbered 2>/dev/null || true)"
+    rule_number="$(
+      printf '%s\n' "${status}" | awk -v marker="${marker_prefix}" '
+        index($0, marker) {
+          line = $0
+          sub(/^[^[]*\[/, "", line)
+          sub(/\].*$/, "", line)
+          gsub(/[[:space:]]/, "", line)
+          if (line ~ /^[0-9]+$/) found = line
         }
         END { print found }
       '
@@ -613,6 +656,7 @@ apply_nftables_family() {
   local family="$1"
   local normalized_ports="${2:-}"
   local port
+  local nft_port
   local protocol
 
   if ! has_cmd nft; then
@@ -630,8 +674,9 @@ apply_nftables_family() {
 
   while IFS= read -r port; do
     if [[ -n "${port}" ]]; then
+      nft_port="${port/:/-}"
       for protocol in "${protocols[@]}"; do
-        nft add rule "${family}" nat "${chain}" "${protocol}" dport "${port}" redirect to :"${listen_port}"
+        nft add rule "${family}" nat "${chain}" "${protocol}" dport "${nft_port}" redirect to :"${listen_port}"
       done
     fi
   done <<< "${normalized_ports}"
@@ -681,6 +726,7 @@ remove_ufw() {
 purge_ufw() {
   remove_ufw_live_redirects "/etc/ufw/before.rules" iptables
   remove_ufw_live_redirects "/etc/ufw/before6.rules" ip6tables
+  purge_ufw_allow_rules
   strip_ufw_blocks "/etc/ufw/before.rules"
   strip_ufw_blocks "/etc/ufw/before6.rules"
   reload_ufw
@@ -736,6 +782,11 @@ if [[ "${action}" == "remove-chain" ]]; then
 fi
 
 normalized_ports="$(normalize_ports "${ports_csv}")"
+range_count="$(printf '%s\n' "${normalized_ports}" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
+if [[ "${range_count:-0}" -gt 128 ]]; then
+  echo "too many port ranges: maximum 128" >&2
+  exit 1
+fi
 backend="$(select_backend)"
 
 case "${action}" in

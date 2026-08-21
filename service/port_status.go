@@ -46,9 +46,17 @@ func (s *ServerService) GetPortStatus() map[string]interface{} {
 	listeners, listenErrors := collectListenEntries()
 	natIPv4, natIPv6, natErrors := collectNatEntries()
 	managed := make([]model.ManagedPortEntry, 0)
+	managedCount := 0
 	if database.GetDB() != nil {
 		if err := database.GetDB().Order("scope, owner_id, port").Find(&managed).Error; err != nil {
 			listenErrors = append(listenErrors, fmt.Sprintf("managed port query failed: %v", err))
+		}
+		for _, entry := range managed {
+			end := entry.EndPort
+			if end < entry.Port {
+				end = entry.Port
+			}
+			managedCount += end - entry.Port + 1
 		}
 	}
 
@@ -61,7 +69,7 @@ func (s *ServerService) GetPortStatus() map[string]interface{} {
 		"nat_ipv4":      natIPv4,
 		"nat_ipv6":      natIPv6,
 		"managed":       managed,
-		"managed_count": len(managed),
+		"managed_count": managedCount,
 		"drift":         drift,
 		"errors":        errors,
 	}

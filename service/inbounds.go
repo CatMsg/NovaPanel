@@ -222,11 +222,11 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			}
 		}
 
-		if _, ports, err := collectInboundForwardPorts(&inbound); err == nil {
-			if err := validateInboundPortsAgainstSSH(&inbound, ports); err != nil {
+		if _, ranges, err := collectInboundForwardRanges(&inbound); err == nil {
+			if err := validateInboundPortRangesAgainstSSH(&inbound, ranges); err != nil {
 				return nil, err
 			}
-			if err := validateManagedPortConflicts(tx, "入站", inbound.Tag, inbound.Id, 0, ports); err != nil {
+			if err := validateManagedPortRangeConflicts(tx, "入站", inbound.Tag, inbound.Id, 0, ranges); err != nil {
 				return nil, err
 			}
 		} else if err != nil {

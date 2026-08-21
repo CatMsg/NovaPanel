@@ -33,6 +33,7 @@ type managedForwardSpec struct {
 	tag             string
 	listenPort      int
 	ports           []int
+	portRanges      []managedPortRange
 	protocols       []string
 	removeProtocols []string
 	active          bool
@@ -40,12 +41,13 @@ type managedForwardSpec struct {
 
 func (s managedForwardSpec) normalized() managedForwardSpec {
 	s.ports = normalizeManagedPorts(s.ports)
+	s.portRanges = normalizeManagedPortRanges(append(s.portRanges, managedPortRangesFromPorts(s.ports)...))
 	s.protocols = normalizeManagedProtocols(s.protocols)
 	s.removeProtocols = normalizeManagedProtocols(s.removeProtocols)
 	if len(s.removeProtocols) == 0 {
 		s.removeProtocols = append([]string(nil), s.protocols...)
 	}
-	if s.listenPort < 1 || s.listenPort > 65535 || len(s.ports) == 0 || len(s.protocols) == 0 {
+	if s.listenPort < 1 || s.listenPort > 65535 || len(s.portRanges) == 0 || len(s.protocols) == 0 {
 		s.active = false
 	}
 	return s
@@ -57,11 +59,11 @@ func managedForwardSpecsEqual(a, b managedForwardSpec) bool {
 	if a.active != b.active || a.tag != b.tag || a.listenPort != b.listenPort {
 		return false
 	}
-	if len(a.ports) != len(b.ports) || len(a.protocols) != len(b.protocols) {
+	if len(a.portRanges) != len(b.portRanges) || len(a.protocols) != len(b.protocols) {
 		return false
 	}
-	for i := range a.ports {
-		if a.ports[i] != b.ports[i] {
+	for i := range a.portRanges {
+		if a.portRanges[i] != b.portRanges[i] {
 			return false
 		}
 	}
@@ -104,7 +106,7 @@ func validateManagedForwardSpecPorts(spec managedForwardSpec) error {
 	if !spec.active {
 		return nil
 	}
-	return validateInboundPortsAgainstSSH(nil, spec.ports)
+	return validateInboundPortRangesAgainstSSH(nil, spec.portRanges)
 }
 
 func applyManagedForwardSpec(spec managedForwardSpec) error {
@@ -112,7 +114,7 @@ func applyManagedForwardSpec(spec managedForwardSpec) error {
 	if !spec.active {
 		return nil
 	}
-	return runPortForwardScript("apply", spec.tag, spec.listenPort, spec.ports, spec.protocols)
+	return runPortForwardRangeScript("apply", spec.tag, spec.listenPort, spec.portRanges, spec.protocols)
 }
 
 func removeManagedForwardSpec(spec managedForwardSpec) error {
@@ -120,7 +122,7 @@ func removeManagedForwardSpec(spec managedForwardSpec) error {
 	if !spec.active {
 		return nil
 	}
-	return runPortForwardScript("remove", spec.tag, spec.listenPort, spec.ports, spec.removeProtocols)
+	return runPortForwardRangeScript("remove", spec.tag, spec.listenPort, spec.portRanges, spec.removeProtocols)
 }
 
 func syncManagedForwardSpecs(oldSpec, newSpec managedForwardSpec) error {
@@ -212,6 +214,10 @@ func syncManagedPortForwarding(tag string, oldPort, newPort int) error {
 }
 
 func runPortForwardScript(action string, tag string, listenPort int, ports []int, protocols []string) error {
+	return runPortForwardRangeScript(action, tag, listenPort, managedPortRangesFromPorts(ports), protocols)
+}
+
+func runPortForwardRangeScript(action string, tag string, listenPort int, ranges []managedPortRange, protocols []string) error {
 	if runtime.GOOS != "linux" {
 		return nil
 	}
@@ -225,7 +231,7 @@ func runPortForwardScript(action string, tag string, listenPort int, ports []int
 
 	args := []string{action}
 	if action != "purge" {
-		args = append(args, tag, strconv.Itoa(listenPort), joinPorts(ports))
+		args = append(args, tag, strconv.Itoa(listenPort), joinManagedPortRanges(ranges))
 		args = append(args, strings.Join(protocols, ","))
 	}
 	_, err := runCommandOutput(portForwardCommandTimeout, "bash", append([]string{hy2ForwardScriptPath()}, args...)...)

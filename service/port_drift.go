@@ -332,7 +332,7 @@ func managedForwardSpecForDriftIssue(desired []portDriftRule, issue PortDriftIss
 		if rule.ownerTag != ownerTag || (issue.Scope != "" && rule.scope != issue.Scope) {
 			continue
 		}
-		port, err := strconv.Atoi(rule.dport)
+		portRange, err := parseManagedPortRange(rule.dport)
 		if err != nil {
 			return managedForwardSpec{}, fmt.Errorf("无效期望端口 %q: %w", rule.dport, err)
 		}
@@ -344,7 +344,7 @@ func managedForwardSpecForDriftIssue(desired []portDriftRule, issue PortDriftIss
 			return managedForwardSpec{}, fmt.Errorf("规则归属 %s 存在多个目标端口", ownerTag)
 		}
 		spec.listenPort = toPort
-		spec.ports = append(spec.ports, port)
+		spec.portRanges = append(spec.portRanges, portRange)
 		spec.protocols = append(spec.protocols, rule.protocol)
 	}
 	spec.removeProtocols = append([]string(nil), spec.protocols...)
@@ -402,6 +402,9 @@ func portDriftActualRuleKey(entry PortNatEntry, backend string, desiredKeys map[
 }
 
 func portDriftRuleKey(chain, protocol, dport, toPorts string) string {
+	if item, err := parseManagedPortRange(dport); err == nil {
+		dport = formatManagedPortRange(item, ":")
+	}
 	return strings.Join([]string{chain, strings.ToLower(strings.TrimSpace(protocol)), strings.TrimSpace(dport), strings.TrimSpace(toPorts)}, "|")
 }
 
@@ -418,15 +421,16 @@ func loadDesiredPortDriftRules() ([]portDriftRule, []string) {
 	desired := make([]portDriftRule, 0)
 	errors := make([]string, 0)
 	appendSpec := func(spec managedForwardSpec, scope, ownerTag string) {
+		spec = spec.normalized()
 		if !spec.active {
 			return
 		}
-		for _, port := range spec.ports {
+		for _, item := range spec.portRanges {
 			for _, protocol := range spec.protocols {
 				desired = append(desired, portDriftRule{
 					chain:    managedPortChain(spec.tag),
 					protocol: protocol,
-					dport:    strconv.Itoa(port),
+					dport:    formatManagedPortRange(item, ":"),
 					toPorts:  strconv.Itoa(spec.listenPort),
 					scope:    scope,
 					ownerTag: ownerTag,
@@ -465,12 +469,12 @@ func loadDesiredPortDriftRules() ([]portDriftRule, []string) {
 
 	settingService := &SettingService{}
 	if port, err := settingService.GetPort(); err == nil {
-		appendSpec(managedForwardSpec{tag: managedWebPortForwardTag, listenPort: port, ports: []int{port}, protocols: []string{"tcp"}, active: true}, "panel", managedWebPortForwardTag)
+		appendSpec(managedForwardSpec{tag: managedWebPortForwardTag, listenPort: port, portRanges: []managedPortRange{{start: port, end: port}}, protocols: []string{"tcp"}, active: true}.normalized(), "panel", managedWebPortForwardTag)
 	} else {
 		errors = append(errors, fmt.Sprintf("panel web port query failed: %v", err))
 	}
 	if port, err := settingService.GetSubPort(); err == nil {
-		appendSpec(managedForwardSpec{tag: managedSubPortForwardTag, listenPort: port, ports: []int{port}, protocols: []string{"tcp"}, active: true}, "panel", managedSubPortForwardTag)
+		appendSpec(managedForwardSpec{tag: managedSubPortForwardTag, listenPort: port, portRanges: []managedPortRange{{start: port, end: port}}, protocols: []string{"tcp"}, active: true}.normalized(), "panel", managedSubPortForwardTag)
 	} else {
 		errors = append(errors, fmt.Sprintf("panel subscription port query failed: %v", err))
 	}

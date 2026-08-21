@@ -24,6 +24,19 @@ func TestBuildPortDriftReportHealthy(t *testing.T) {
 	}
 }
 
+func TestBuildPortDriftReportNormalizesPortRangeSyntax(t *testing.T) {
+	desired := []portDriftRule{{
+		chain: managedPortChain("hy2-range"), protocol: "udp", dport: "20000:49999", toPorts: "20000", ownerTag: "hy2-range",
+	}}
+	actual := []PortNatEntry{{
+		Family: "ipv4", Chain: desired[0].chain, Protocol: "udp", DPort: "20000-49999", Target: "REDIRECT", ToPorts: "20000",
+	}}
+	report := buildPortDriftReport(desired, actual, nil, "nftables")
+	if report.Status != "healthy" || report.DesiredRules != 1 || report.ActualManagedRules != 1 {
+		t.Fatalf("unexpected range drift report: %+v", report)
+	}
+}
+
 func TestBuildPortDriftReportDetectsMissingDuplicateAndOrphan(t *testing.T) {
 	desired := []portDriftRule{
 		{chain: managedPortChain("inbound-a"), protocol: "tcp", dport: "443", toPorts: "443", scope: managedPortScopeInbound, ownerTag: "inbound-a"},
@@ -119,7 +132,7 @@ func TestManagedForwardSpecForDriftIssueGroupsOwnerRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build owner spec: %v", err)
 	}
-	if spec.tag != "inbound-a" || spec.listenPort != 8443 || len(spec.ports) != 2 || len(spec.protocols) != 2 {
+	if spec.tag != "inbound-a" || spec.listenPort != 8443 || len(spec.portRanges) != 1 || spec.portRanges[0] != (managedPortRange{start: 443, end: 444}) || len(spec.protocols) != 2 {
 		t.Fatalf("unexpected owner spec: %+v", spec)
 	}
 }

@@ -133,6 +133,7 @@ func ensureIndexes() error {
 		`CREATE INDEX IF NOT EXISTS idx_outbounds_tag ON outbounds(tag)`,
 		`CREATE INDEX IF NOT EXISTS idx_endpoints_tag ON endpoints(tag)`,
 		`CREATE INDEX IF NOT EXISTS idx_managed_port_lookup ON managed_port_entries(port, scope, owner_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_managed_port_range_lookup ON managed_port_entries(port, end_port, scope, owner_id)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_managed_port_owner_port ON managed_port_entries(scope, owner_id, port)`,
 		`CREATE INDEX IF NOT EXISTS idx_services_tag ON services(tag)`,
 		`CREATE INDEX IF NOT EXISTS idx_tokens_expiry ON tokens(expiry)`,

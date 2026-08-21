@@ -6,4 +6,5 @@ type ManagedPortEntry struct {
 	OwnerId  uint   `json:"ownerId" gorm:"not null"`
 	OwnerTag string `json:"ownerTag" gorm:"size:255;not null"`
 	Port     int    `json:"port" gorm:"not null"`
+	EndPort  int    `json:"endPort,omitempty" gorm:"not null;default:0"`
 }

@@ -118,7 +118,7 @@ func (s *InboundService) syncInboundPortForwarding(oldInbound *model.Inbound, in
 		if err != nil {
 			return err
 		}
-		if err := validateInboundPortsAgainstSSH(inbound, newSpec.ports); err != nil {
+		if err := validateInboundPortRangesAgainstSSH(inbound, newSpec.portRanges); err != nil {
 			return err
 		}
 	}
@@ -126,29 +126,36 @@ func (s *InboundService) syncInboundPortForwarding(oldInbound *model.Inbound, in
 	return syncManagedForwardSpecs(oldSpec, newSpec)
 }
 
-func collectInboundForwardPorts(inbound *model.Inbound) (int, []int, error) {
+func collectInboundForwardRanges(inbound *model.Inbound) (int, []managedPortRange, error) {
 	listenPort, err := getInboundListenPort(inbound)
 	if err != nil {
 		return 0, nil, err
 	}
 
-	ports := []int{listenPort}
+	ranges := []managedPortRange{{start: listenPort, end: listenPort}}
 	if inbound.Type == "hysteria2" {
-		extraPorts, err := getHy2ServerPorts(inbound.OutJson)
+		extraRanges, err := getHy2ServerPortRanges(inbound.OutJson)
 		if err != nil {
 			return 0, nil, err
 		}
-		ports = mergeInboundForwardPorts(listenPort, extraPorts)
+		ranges = normalizeManagedPortRanges(append(ranges, extraRanges...))
 	}
 	if inbound.Type == "mieru" {
 		config, err := parseMieruInbound(inbound)
 		if err != nil {
 			return 0, nil, err
 		}
-		return config.ListenPort, config.Ports, nil
+		if strings.TrimSpace(config.PortRange) != "" {
+			item, rangeErr := parseManagedPortRange(config.PortRange)
+			if rangeErr != nil {
+				return 0, nil, rangeErr
+			}
+			return config.ListenPort, []managedPortRange{item}, nil
+		}
+		return config.ListenPort, []managedPortRange{{start: config.ListenPort, end: config.ListenPort}}, nil
 	}
 
-	return listenPort, ports, nil
+	return listenPort, ranges, nil
 }
 
 func collectInboundForwardSpec(inbound *model.Inbound) (managedForwardSpec, error) {
@@ -156,7 +163,7 @@ func collectInboundForwardSpec(inbound *model.Inbound) (managedForwardSpec, erro
 		return managedForwardSpec{}, nil
 	}
 
-	listenPort, ports, err := collectInboundForwardPorts(inbound)
+	listenPort, ranges, err := collectInboundForwardRanges(inbound)
 	if err != nil {
 		return managedForwardSpec{}, err
 	}
@@ -177,7 +184,7 @@ func collectInboundForwardSpec(inbound *model.Inbound) (managedForwardSpec, erro
 	return managedForwardSpec{
 		tag:             inbound.Tag,
 		listenPort:      listenPort,
-		ports:           ports,
+		portRanges:      ranges,
 		protocols:       protocols,
 		removeProtocols: []string{"tcp", "udp"},
 		active:          true,
@@ -220,7 +227,7 @@ func getInboundListenPort(inbound *model.Inbound) (int, error) {
 	}
 }
 
-func getHy2ServerPorts(outJson json.RawMessage) ([]int, error) {
+func getHy2ServerPortRanges(outJson json.RawMessage) ([]managedPortRange, error) {
 	if len(outJson) == 0 {
 		return nil, nil
 	}
@@ -235,18 +242,7 @@ func getHy2ServerPorts(outJson json.RawMessage) ([]int, error) {
 		return nil, nil
 	}
 
-	ports := make([]int, 0)
-	seen := map[int]struct{}{}
-	appendPort := func(port int) {
-		if port < 1 || port > 65535 {
-			return
-		}
-		if _, exists := seen[port]; exists {
-			return
-		}
-		seen[port] = struct{}{}
-		ports = append(ports, port)
-	}
+	ranges := make([]managedPortRange, 0)
 	appendToken := func(raw string) error {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
@@ -257,16 +253,17 @@ func getHy2ServerPorts(outJson json.RawMessage) ([]int, error) {
 			if err != nil {
 				return err
 			}
-			for port := start; port <= end; port++ {
-				appendPort(port)
-			}
+			ranges = append(ranges, managedPortRange{start: start, end: end})
 			return nil
 		}
 		port, err := strconv.Atoi(raw)
 		if err != nil {
 			return fmt.Errorf("invalid server_ports token: %s", raw)
 		}
-		appendPort(port)
+		if port < 1 || port > 65535 {
+			return fmt.Errorf("invalid server_ports token: %s", raw)
+		}
+		ranges = append(ranges, managedPortRange{start: port, end: port})
 		return nil
 	}
 
@@ -296,7 +293,11 @@ func getHy2ServerPorts(outJson json.RawMessage) ([]int, error) {
 		return nil, fmt.Errorf("unsupported server_ports format")
 	}
 
-	return ports, nil
+	ranges = normalizeManagedPortRanges(ranges)
+	if len(ranges) > maxManagedPortRangeSegments {
+		return nil, fmt.Errorf("too many server_ports ranges: maximum %d", maxManagedPortRangeSegments)
+	}
+	return ranges, nil
 }
 
 func parseHy2PortRange(raw string) (int, int, error) {
@@ -324,32 +325,6 @@ func parseHy2PortRange(raw string) (int, int, error) {
 	}
 
 	return start, end, nil
-}
-
-func mergeInboundForwardPorts(listenPort int, ports []int) []int {
-	merged := make([]int, 0, len(ports)+1)
-	seen := map[int]struct{}{}
-	appendPort := func(port int) {
-		if port < 1 || port > 65535 {
-			return
-		}
-		if _, exists := seen[port]; exists {
-			return
-		}
-		seen[port] = struct{}{}
-		merged = append(merged, port)
-	}
-
-	appendPort(listenPort)
-	for _, port := range ports {
-		appendPort(port)
-	}
-
-	return merged
-}
-
-func mergeHy2ForwardPorts(listenPort int, ports []int) []int {
-	return mergeInboundForwardPorts(listenPort, ports)
 }
 
 func joinPorts(ports []int) string {

@@ -14,33 +14,43 @@ import (
 )
 
 func TestGetHy2ServerPorts(t *testing.T) {
-	ports, err := getHy2ServerPorts(json.RawMessage(`{"server_ports":[443," 8443 ",443,"500-502",70000,12345]}`))
+	ranges, err := getHy2ServerPortRanges(json.RawMessage(`{"server_ports":[443," 8443 ",443,"500-502",12345]}`))
 	if err != nil {
-		t.Fatalf("getHy2ServerPorts returned error: %v", err)
+		t.Fatalf("getHy2ServerPortRanges returned error: %v", err)
 	}
 
-	got := fmt.Sprint(ports)
-	want := "[443 8443 500 501 502 12345]"
+	got := fmt.Sprint(ranges)
+	want := "[{443 443} {500 502} {8443 8443} {12345 12345}]"
 	if got != want {
-		t.Fatalf("unexpected ports: got %s want %s", got, want)
+		t.Fatalf("unexpected ranges: got %s want %s", got, want)
 	}
 
-	if joinPorts(ports) != "443,8443,500,501,502,12345" {
-		t.Fatalf("unexpected joinPorts result: %s", joinPorts(ports))
+	if joinManagedPortRanges(ranges) != "443,500-502,8443,12345" {
+		t.Fatalf("unexpected compact ranges: %s", joinManagedPortRanges(ranges))
 	}
 }
 
 func TestGetHy2ServerPortsRejectsDirtyValues(t *testing.T) {
-	_, err := getHy2ServerPorts(json.RawMessage(`{"server_ports":["500","bad","1000-1400"]}`))
+	_, err := getHy2ServerPortRanges(json.RawMessage(`{"server_ports":["500","bad","1000-1400"]}`))
 	if err == nil {
-		t.Fatal("expected getHy2ServerPorts to reject invalid token")
+		t.Fatal("expected getHy2ServerPortRanges to reject invalid token")
+	}
+	if _, err := getHy2ServerPortRanges(json.RawMessage(`{"server_ports":[70000]}`)); err == nil {
+		t.Fatal("expected out-of-range port to be rejected")
 	}
 }
 
-func TestMergeHy2ForwardPorts(t *testing.T) {
-	ports := mergeHy2ForwardPorts(500, []int{900, 500, 1000})
-	if got := fmt.Sprint(ports); got != "[500 900 1000]" {
-		t.Fatalf("unexpected merged ports: %s", got)
+func TestGetHy2ServerPortsRejectsExcessiveFragments(t *testing.T) {
+	values := make([]string, 0, maxManagedPortRangeSegments+1)
+	for port := 1000; len(values) <= maxManagedPortRangeSegments; port += 2 {
+		values = append(values, fmt.Sprintf("%d", port))
+	}
+	payload, err := json.Marshal(map[string]interface{}{"server_ports": values})
+	if err != nil {
+		t.Fatalf("marshal fragmented ports: %v", err)
+	}
+	if _, err := getHy2ServerPortRanges(payload); err == nil {
+		t.Fatal("expected excessive fragmented ranges to be rejected")
 	}
 }
 
@@ -62,6 +72,8 @@ func TestHy2ForwardScriptAllowsPurgeWithoutTag(t *testing.T) {
 	script = []byte(strings.NewReplacer(
 		"/etc/ufw/before.rules", filepath.Join(etcDir, "before.rules"),
 		"/etc/ufw/before6.rules", filepath.Join(etcDir, "before6.rules"),
+		"/etc/ufw/user.rules", filepath.Join(etcDir, "user.rules"),
+		"/etc/ufw/user6.rules", filepath.Join(etcDir, "user6.rules"),
 	).Replace(string(script)))
 	scriptPath := filepath.Join(workDir, "hy2-forward.sh")
 	if err := os.WriteFile(scriptPath, script, 0o755); err != nil {
@@ -212,10 +224,6 @@ func TestRunHy2ForwardScriptNftables(t *testing.T) {
 }
 
 func TestRunHy2ForwardScriptUFW(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("hy2 forwarding script is only exercised on linux")
-	}
-
 	workDir := t.TempDir()
 	binDir := filepath.Join(workDir, "bin")
 	etcDir := filepath.Join(workDir, "etc", "ufw")
@@ -229,6 +237,11 @@ func TestRunHy2ForwardScriptUFW(t *testing.T) {
 	mockUfw := mockUfwScript(t)
 	if err := os.WriteFile(filepath.Join(binDir, "ufw"), []byte(mockUfw), 0o755); err != nil {
 		t.Fatalf("write mock ufw: %v", err)
+	}
+	for _, name := range []string{"chmod", "chown"} {
+		if err := os.WriteFile(filepath.Join(binDir, name), []byte("#!/usr/bin/env bash\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write mock %s: %v", name, err)
+		}
 	}
 
 	scriptCopy, err := os.ReadFile(filepath.Join(mustRepoRoot(t), "scripts", "hy2-forward.sh"))
@@ -251,7 +264,7 @@ func TestRunHy2ForwardScriptUFW(t *testing.T) {
 		"HY2_MOCK_LOG="+filepath.Join(workDir, "ufw.log"),
 	)
 
-	cmd := exec.Command("bash", scriptPath, "apply", "hy2-demo-ufw", "12345", "443,444,445,8443")
+	cmd := exec.Command("bash", scriptPath, "apply", "hy2-demo-ufw", "12345", "443,444,445,8443,20000-49999")
 	cmd.Env = env
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("apply failed: %v\n%s", err, string(out))
@@ -261,7 +274,7 @@ func TestRunHy2ForwardScriptUFW(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read before.rules: %v", err)
 	}
-	if !bytes.Contains(beforeRules, []byte("NOVAPANEL HY2 BEGIN")) || !bytes.Contains(beforeRules, []byte("-p tcp --dport 443")) || !bytes.Contains(beforeRules, []byte("-p udp --dport 8443")) || !bytes.Contains(beforeRules, []byte("REDIRECT --to-ports 12345")) {
+	if !bytes.Contains(beforeRules, []byte("NOVAPANEL HY2 BEGIN")) || !bytes.Contains(beforeRules, []byte("-p tcp --dport 443:445")) || !bytes.Contains(beforeRules, []byte("-p udp --dport 8443")) || !bytes.Contains(beforeRules, []byte("-p udp --dport 20000:49999")) || !bytes.Contains(beforeRules, []byte("REDIRECT --to-ports 12345")) {
 		t.Fatalf("ufw apply did not write expected NAT block:\n%s", string(beforeRules))
 	}
 	ufwLog, err := os.ReadFile(filepath.Join(workDir, "ufw.log"))
@@ -271,7 +284,8 @@ func TestRunHy2ForwardScriptUFW(t *testing.T) {
 	if !bytes.Contains(ufwLog, []byte("ufw allow 443:445/tcp comment NovaPanel ")) ||
 		!bytes.Contains(ufwLog, []byte("ufw allow 443:445/udp comment NovaPanel ")) ||
 		!bytes.Contains(ufwLog, []byte("ufw allow 8443/tcp comment NovaPanel ")) ||
-		!bytes.Contains(ufwLog, []byte("ufw allow 8443/udp comment NovaPanel ")) {
+		!bytes.Contains(ufwLog, []byte("ufw allow 8443/udp comment NovaPanel ")) ||
+		bytes.Count(ufwLog, []byte("ufw allow 20000:49999/udp comment NovaPanel ")) != 1 {
 		t.Fatalf("ufw apply did not add allow rules:\n%s", string(ufwLog))
 	}
 
@@ -282,7 +296,6 @@ func TestRunHy2ForwardScriptUFW(t *testing.T) {
 
 ### tuple ### allow udp 443 0.0.0.0/0 any 0.0.0.0/0 in comment=%s
 -A ufw-user-input -p udp --dport 443 -j ACCEPT
-
 ### tuple ### allow tcp 9527 0.0.0.0/0 any 0.0.0.0/0 in
 -A ufw-user-input -p tcp --dport 9527 -j ACCEPT
 
@@ -293,7 +306,7 @@ COMMIT
 		t.Fatalf("seed UFW user rules: %v", err)
 	}
 
-	cmd = exec.Command("bash", scriptPath, "remove", "hy2-demo-ufw", "12345", "443,444,445,8443")
+	cmd = exec.Command("bash", scriptPath, "remove", "hy2-demo-ufw", "12345", "443,444,445,8443,20000-49999")
 	cmd.Env = env
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("remove failed: %v\n%s", err, string(out))
@@ -316,10 +329,6 @@ COMMIT
 }
 
 func TestRunHy2ForwardScriptPurgeRemovesUfwLiveRedirects(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("hy2 forwarding script is only exercised on linux")
-	}
-
 	workDir := t.TempDir()
 	binDir := filepath.Join(workDir, "bin")
 	etcDir := filepath.Join(workDir, "etc", "ufw")
@@ -336,6 +345,11 @@ func TestRunHy2ForwardScriptPurgeRemovesUfwLiveRedirects(t *testing.T) {
 
 	if err := os.WriteFile(filepath.Join(binDir, "ufw"), []byte(mockUfwScript(t)), 0o755); err != nil {
 		t.Fatalf("write mock ufw: %v", err)
+	}
+	for _, name := range []string{"chmod", "chown"} {
+		if err := os.WriteFile(filepath.Join(binDir, name), []byte("#!/usr/bin/env bash\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write mock %s: %v", name, err)
+		}
 	}
 	mockIptables := mockDirectRedirectIptablesScript(t)
 	if err := os.WriteFile(filepath.Join(binDir, "iptables"), []byte(mockIptables), 0o755); err != nil {
@@ -360,6 +374,21 @@ COMMIT
 	if err := os.WriteFile(filepath.Join(etcDir, "before6.rules"), []byte(before6Rules), 0o644); err != nil {
 		t.Fatalf("write before6.rules: %v", err)
 	}
+	managedMarkerHex := fmt.Sprintf("%x", []byte("NovaPanel NPHY2_orphan"))
+	userRules := fmt.Sprintf(`*filter
+### RULES ###
+
+### tuple ### allow udp 443 0.0.0.0/0 any 0.0.0.0/0 in comment=%s
+-A ufw-user-input -p udp --dport 443 -j ACCEPT
+### tuple ### allow tcp 2222 0.0.0.0/0 any 0.0.0.0/0 in
+-A ufw-user-input -p tcp --dport 2222 -j ACCEPT
+
+### END RULES ###
+COMMIT
+`, managedMarkerHex)
+	if err := os.WriteFile(filepath.Join(etcDir, "user.rules"), []byte(userRules), 0o644); err != nil {
+		t.Fatalf("write user.rules: %v", err)
+	}
 
 	for _, bin := range []string{"iptables", "ip6tables"} {
 		for _, protocol := range []string{"tcp", "udp"} {
@@ -377,6 +406,8 @@ COMMIT
 	replaced := strings.NewReplacer(
 		"/etc/ufw/before.rules", filepath.Join(etcDir, "before.rules"),
 		"/etc/ufw/before6.rules", filepath.Join(etcDir, "before6.rules"),
+		"/etc/ufw/user.rules", filepath.Join(etcDir, "user.rules"),
+		"/etc/ufw/user6.rules", filepath.Join(etcDir, "user6.rules"),
 	).Replace(string(scriptCopy))
 	scriptPath := filepath.Join(workDir, "hy2-forward.sh")
 	if err := os.WriteFile(scriptPath, []byte(replaced), 0o755); err != nil {
@@ -418,6 +449,13 @@ COMMIT
 	if bytes.Contains(afterRules, []byte("NOVAPANEL HY2 BEGIN")) || bytes.Contains(after6Rules, []byte("NOVAPANEL HY2 BEGIN")) {
 		t.Fatalf("purge did not strip UFW marker blocks:\n%s\n%s", string(afterRules), string(after6Rules))
 	}
+	cleanedUserRules, err := os.ReadFile(filepath.Join(etcDir, "user.rules"))
+	if err != nil {
+		t.Fatalf("read user.rules after purge: %v", err)
+	}
+	if bytes.Contains(cleanedUserRules, []byte(managedMarkerHex)) || !bytes.Contains(cleanedUserRules, []byte("--dport 2222")) {
+		t.Fatalf("purge did not selectively remove NovaPanel UFW allow rules:\n%s", string(cleanedUserRules))
+	}
 }
 
 func mustRepoRoot(t *testing.T) string {
@@ -448,6 +486,8 @@ func runHy2ForwardScriptWithEnv(repoRoot string, env []string, action string, ta
 	replaced := strings.NewReplacer(
 		"/etc/ufw/before.rules", filepath.Join(etcDir, "before.rules"),
 		"/etc/ufw/before6.rules", filepath.Join(etcDir, "before6.rules"),
+		"/etc/ufw/user.rules", filepath.Join(etcDir, "user.rules"),
+		"/etc/ufw/user6.rules", filepath.Join(etcDir, "user6.rules"),
 	).Replace(string(scriptCopy))
 	scriptPath := filepath.Join(workDir, "hy2-forward.sh")
 	if err := os.WriteFile(scriptPath, []byte(replaced), 0o755); err != nil {

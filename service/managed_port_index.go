@@ -51,11 +51,11 @@ func syncManagedPortEntriesForInboundTx(tx *gorm.DB, inbound *model.Inbound) err
 	if err := deleteManagedPortEntriesTx(tx, managedPortScopeInbound, inbound.Id); err != nil {
 		return err
 	}
-	_, ports, err := collectInboundForwardPorts(inbound)
+	_, ranges, err := collectInboundForwardRanges(inbound)
 	if err != nil {
 		return err
 	}
-	return createManagedPortEntriesTx(tx, managedPortScopeInbound, inbound.Id, inbound.Tag, ports)
+	return createManagedPortRangeEntriesTx(tx, managedPortScopeInbound, inbound.Id, inbound.Tag, ranges)
 }
 
 func syncManagedPortEntriesForEndpointTx(tx *gorm.DB, endpoint *model.Endpoint) error {
@@ -88,18 +88,23 @@ func deleteManagedPortEntriesTx(tx *gorm.DB, scope string, ownerID uint) error {
 }
 
 func createManagedPortEntriesTx(tx *gorm.DB, scope string, ownerID uint, ownerTag string, ports []int) error {
-	normalized := normalizeManagedPorts(ports)
-	if ownerID == 0 || len(normalized) == 0 {
+	return createManagedPortRangeEntriesTx(tx, scope, ownerID, ownerTag, managedPortRangesFromPorts(ports))
+}
+
+func createManagedPortRangeEntriesTx(tx *gorm.DB, scope string, ownerID uint, ownerTag string, ranges []managedPortRange) error {
+	ranges = normalizeManagedPortRanges(ranges)
+	if ownerID == 0 || len(ranges) == 0 {
 		return nil
 	}
 
-	entries := make([]model.ManagedPortEntry, 0, len(normalized))
-	for _, port := range normalized {
+	entries := make([]model.ManagedPortEntry, 0, len(ranges))
+	for _, item := range ranges {
 		entries = append(entries, model.ManagedPortEntry{
 			Scope:    scope,
 			OwnerId:  ownerID,
 			OwnerTag: ownerTag,
-			Port:     port,
+			Port:     item.start,
+			EndPort:  item.end,
 		})
 	}
 	return tx.Create(&entries).Error

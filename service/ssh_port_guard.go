@@ -189,20 +189,27 @@ func normalizePortList(matches [][]string, group int) []int {
 }
 
 func validateInboundPortsAgainstSSH(inbound *model.Inbound, ports []int) error {
+	return validateInboundPortRangesAgainstSSH(inbound, managedPortRangesFromPorts(ports))
+}
+
+func validateInboundPortRangesAgainstSSH(inbound *model.Inbound, ranges []managedPortRange) error {
 	sshPorts := getSSHListenPorts()
 	if len(sshPorts) == 0 {
 		return nil
 	}
-
-	sshSet := map[int]struct{}{}
-	for _, port := range sshPorts {
-		sshSet[port] = struct{}{}
-	}
+	ranges = normalizeManagedPortRanges(ranges)
 
 	conflicts := make([]int, 0)
 	seen := map[int]struct{}{}
-	for _, port := range ports {
-		if _, exists := sshSet[port]; !exists {
+	for _, port := range sshPorts {
+		matched := false
+		for _, item := range ranges {
+			if managedPortRangeContains(item, port) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
 			continue
 		}
 		if _, exists := seen[port]; exists {

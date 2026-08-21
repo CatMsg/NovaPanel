@@ -62,12 +62,12 @@ func pruneInboundConflictsBySSHPorts(sshPorts []int) error {
 			return err
 		}
 		for _, inbound := range inbounds {
-			ports, ok, err := collectInboundPortsForRestore(&inbound)
+			ranges, ok, err := collectInboundPortRangesForRestore(&inbound)
 			if err != nil {
 				logger.Warning("skip inbound restore conflict check failed: ", err)
 				continue
 			}
-			if !ok || !hasPortConflict(ports, sshSet) {
+			if !ok || !hasPortRangeConflict(ranges, sshSet) {
 				continue
 			}
 			if err := removeInboundFromRestoreTx(tx, &inbound); err != nil {
@@ -110,12 +110,12 @@ func pruneEndpointConflictsBySSHPorts(sshPorts []int) error {
 			return err
 		}
 		for _, endpoint := range endpoints {
-			ports, ok, err := collectEndpointPortsForRestore(&endpoint)
+			ranges, ok, err := collectEndpointPortRangesForRestore(&endpoint)
 			if err != nil {
 				logger.Warning("skip endpoint restore conflict check failed: ", err)
 				continue
 			}
-			if !ok || !hasPortConflict(ports, sshSet) {
+			if !ok || !hasPortRangeConflict(ranges, sshSet) {
 				continue
 			}
 			if err := removeEndpointFromRestoreTx(tx, &endpoint); err != nil {
@@ -135,7 +135,12 @@ func pruneEndpointConflictsBySSHPorts(sshPorts []int) error {
 	return nil
 }
 
-func collectInboundPortsForRestore(inbound *model.Inbound) ([]int, bool, error) {
+type restorePortRange struct {
+	start int
+	end   int
+}
+
+func collectInboundPortRangesForRestore(inbound *model.Inbound) ([]restorePortRange, bool, error) {
 	full, err := inbound.MarshalFull()
 	if err != nil {
 		return nil, false, err
@@ -151,13 +156,13 @@ func collectInboundPortsForRestore(inbound *model.Inbound) ([]int, bool, error) 
 		return nil, false, err
 	}
 
-	ports := []int{listenPort}
+	ranges := []restorePortRange{{start: listenPort, end: listenPort}}
 	if inbound.Type == "hysteria2" {
-		extraPorts, err := parseRestoreHy2ServerPorts(inbound.OutJson)
+		extraRanges, err := parseRestoreHy2ServerPortRanges(inbound.OutJson)
 		if err != nil {
 			return nil, false, err
 		}
-		ports = mergeRestorePorts(listenPort, extraPorts)
+		ranges = normalizeRestorePortRanges(append(ranges, extraRanges...))
 	}
 	if inbound.Type == "mieru" {
 		if listenPort < 1025 {
@@ -175,17 +180,14 @@ func collectInboundPortsForRestore(inbound *model.Inbound) ([]int, bool, error) 
 			if end-start+1 > 512 {
 				return nil, false, fmt.Errorf("Mieru port range is too large: maximum 512 ports")
 			}
-			ports = make([]int, 0, end-start+1)
-			for port := start; port <= end; port++ {
-				ports = append(ports, port)
-			}
+			ranges = []restorePortRange{{start: start, end: end}}
 		}
 	}
 
-	return ports, true, nil
+	return normalizeRestorePortRanges(ranges), true, nil
 }
 
-func collectEndpointPortsForRestore(endpoint *model.Endpoint) ([]int, bool, error) {
+func collectEndpointPortRangesForRestore(endpoint *model.Endpoint) ([]restorePortRange, bool, error) {
 	full, err := endpoint.MarshalJSON()
 	if err != nil {
 		return nil, false, err
@@ -205,7 +207,7 @@ func collectEndpointPortsForRestore(endpoint *model.Endpoint) ([]int, bool, erro
 	if err != nil {
 		return nil, false, err
 	}
-	return []int{listenPort}, true, nil
+	return []restorePortRange{{start: listenPort, end: listenPort}}, true, nil
 }
 
 func normalizeInboundPort(raw interface{}) (int, error) {
@@ -264,7 +266,7 @@ func normalizeRestorePort(raw interface{}) (int, error) {
 	}
 }
 
-func parseRestoreHy2ServerPorts(outJson json.RawMessage) ([]int, error) {
+func parseRestoreHy2ServerPortRanges(outJson json.RawMessage) ([]restorePortRange, error) {
 	if len(outJson) == 0 {
 		return nil, nil
 	}
@@ -279,18 +281,7 @@ func parseRestoreHy2ServerPorts(outJson json.RawMessage) ([]int, error) {
 		return nil, nil
 	}
 
-	ports := make([]int, 0)
-	seen := map[int]struct{}{}
-	appendPort := func(port int) {
-		if port < 1 || port > 65535 {
-			return
-		}
-		if _, exists := seen[port]; exists {
-			return
-		}
-		seen[port] = struct{}{}
-		ports = append(ports, port)
-	}
+	ranges := make([]restorePortRange, 0)
 	appendToken := func(raw string) {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
@@ -301,16 +292,16 @@ func parseRestoreHy2ServerPorts(outJson json.RawMessage) ([]int, error) {
 			if err != nil {
 				return
 			}
-			for port := start; port <= end; port++ {
-				appendPort(port)
-			}
+			ranges = append(ranges, restorePortRange{start: start, end: end})
 			return
 		}
 		port, err := strconv.Atoi(raw)
 		if err != nil {
 			return
 		}
-		appendPort(port)
+		if port >= 1 && port <= 65535 {
+			ranges = append(ranges, restorePortRange{start: port, end: port})
+		}
 	}
 
 	switch typed := rawPorts.(type) {
@@ -333,7 +324,7 @@ func parseRestoreHy2ServerPorts(outJson json.RawMessage) ([]int, error) {
 		return nil, fmt.Errorf("unsupported server_ports format")
 	}
 
-	return ports, nil
+	return normalizeRestorePortRanges(ranges), nil
 }
 
 func parseRestorePortRange(raw string) (int, int, error) {
@@ -358,30 +349,43 @@ func parseRestorePortRange(raw string) (int, int, error) {
 	return start, end, nil
 }
 
-func mergeRestorePorts(listenPort int, ports []int) []int {
-	merged := make([]int, 0, len(ports)+1)
-	seen := map[int]struct{}{}
-	appendPort := func(port int) {
-		if port < 1 || port > 65535 {
-			return
+func normalizeRestorePortRanges(ranges []restorePortRange) []restorePortRange {
+	normalized := make([]restorePortRange, 0, len(ranges))
+	for _, item := range ranges {
+		if item.start < 1 || item.end > 65535 || item.start > item.end {
+			continue
 		}
-		if _, exists := seen[port]; exists {
-			return
-		}
-		seen[port] = struct{}{}
-		merged = append(merged, port)
+		normalized = append(normalized, item)
 	}
-	appendPort(listenPort)
-	for _, port := range ports {
-		appendPort(port)
+	sort.Slice(normalized, func(i, j int) bool {
+		if normalized[i].start != normalized[j].start {
+			return normalized[i].start < normalized[j].start
+		}
+		return normalized[i].end < normalized[j].end
+	})
+	if len(normalized) == 0 {
+		return nil
+	}
+	merged := normalized[:1]
+	for _, item := range normalized[1:] {
+		last := &merged[len(merged)-1]
+		if item.start <= last.end+1 {
+			if item.end > last.end {
+				last.end = item.end
+			}
+			continue
+		}
+		merged = append(merged, item)
 	}
 	return merged
 }
 
-func hasPortConflict(ports []int, sshSet map[int]struct{}) bool {
-	for _, port := range ports {
-		if _, ok := sshSet[port]; ok {
-			return true
+func hasPortRangeConflict(ranges []restorePortRange, sshSet map[int]struct{}) bool {
+	for port := range sshSet {
+		for _, item := range ranges {
+			if port >= item.start && port <= item.end {
+				return true
+			}
 		}
 	}
 	return false

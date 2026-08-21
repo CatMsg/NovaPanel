@@ -32,42 +32,54 @@ func (e *managedPortConflictError) Error() string {
 }
 
 func validateManagedPortConflicts(tx *gorm.DB, ownerKind string, ownerTag string, skipInboundID uint, skipEndpointID uint, candidatePorts []int) error {
-	ports := normalizeManagedPorts(candidatePorts)
-	if len(ports) == 0 {
+	return validateManagedPortRangeConflicts(tx, ownerKind, ownerTag, skipInboundID, skipEndpointID, managedPortRangesFromPorts(candidatePorts))
+}
+
+func validateManagedPortRangeConflicts(tx *gorm.DB, ownerKind string, ownerTag string, skipInboundID uint, skipEndpointID uint, candidateRanges []managedPortRange) error {
+	candidateRanges = normalizeManagedPortRanges(candidateRanges)
+	if len(candidateRanges) == 0 {
 		return nil
 	}
 
-	candidateSet := make(map[int]struct{}, len(ports))
-	for _, port := range ports {
-		candidateSet[port] = struct{}{}
-	}
-
-	entries, err := findManagedPortConflictEntries(tx, ports, skipInboundID, skipEndpointID)
+	entries, err := findManagedPortRangeConflictEntries(tx, candidateRanges, skipInboundID, skipEndpointID)
 	if err != nil {
 		return err
 	}
 
-	conflictMap := make(map[int][]string)
+	conflictMap := make(map[string][]string)
 	for _, entry := range entries {
-		if _, ok := candidateSet[entry.Port]; !ok {
-			continue
+		entryEnd := entry.EndPort
+		if entryEnd < entry.Port {
+			entryEnd = entry.Port
 		}
-		conflictMap[entry.Port] = appendUniqueUsage(conflictMap[entry.Port], fmt.Sprintf("%s %s", managedPortEntryKind(entry.Scope), entry.OwnerTag))
+		entryRange := managedPortRange{start: entry.Port, end: entryEnd}
+		for _, candidate := range candidateRanges {
+			overlap, ok := managedPortRangesOverlap(candidate, entryRange)
+			if !ok {
+				continue
+			}
+			key := formatManagedPortRange(overlap, "-")
+			conflictMap[key] = appendUniqueUsage(conflictMap[key], fmt.Sprintf("%s %s", managedPortEntryKind(entry.Scope), entry.OwnerTag))
+		}
 	}
 
 	if len(conflictMap) == 0 {
 		return nil
 	}
 
-	conflictPorts := make([]int, 0, len(conflictMap))
-	for port := range conflictMap {
-		conflictPorts = append(conflictPorts, port)
+	conflictRanges := make([]string, 0, len(conflictMap))
+	for item := range conflictMap {
+		conflictRanges = append(conflictRanges, item)
 	}
-	sort.Ints(conflictPorts)
+	sort.Slice(conflictRanges, func(i, j int) bool {
+		left, _ := parseManagedPortRange(conflictRanges[i])
+		right, _ := parseManagedPortRange(conflictRanges[j])
+		return left.start < right.start
+	})
 
-	conflicts := make([]string, 0, len(conflictPorts))
-	for _, port := range conflictPorts {
-		conflicts = append(conflicts, fmt.Sprintf("%d(%s)", port, strings.Join(conflictMap[port], "、")))
+	conflicts := make([]string, 0, len(conflictRanges))
+	for _, item := range conflictRanges {
+		conflicts = append(conflicts, fmt.Sprintf("%s(%s)", item, strings.Join(conflictMap[item], "、")))
 	}
 
 	return &managedPortConflictError{
@@ -86,13 +98,22 @@ func validateManagedPanelPortConflicts(tx *gorm.DB, webPort int, subPort int) er
 }
 
 func findManagedPortConflictEntries(tx *gorm.DB, candidatePorts []int, skipInboundID uint, skipEndpointID uint) ([]model.ManagedPortEntry, error) {
-	ports := normalizeManagedPorts(candidatePorts)
-	if len(ports) == 0 {
+	return findManagedPortRangeConflictEntries(tx, managedPortRangesFromPorts(candidatePorts), skipInboundID, skipEndpointID)
+}
+
+func findManagedPortRangeConflictEntries(tx *gorm.DB, ranges []managedPortRange, skipInboundID uint, skipEndpointID uint) ([]model.ManagedPortEntry, error) {
+	ranges = normalizeManagedPortRanges(ranges)
+	if len(ranges) == 0 {
 		return nil, nil
 	}
 
 	var entries []model.ManagedPortEntry
-	query := tx.Model(&model.ManagedPortEntry{}).Where("port IN ?", ports)
+	query := tx.Model(&model.ManagedPortEntry{})
+	overlap := tx.Where("1 = 0")
+	for _, item := range ranges {
+		overlap = overlap.Or("(CASE WHEN end_port >= port THEN end_port ELSE port END) >= ? AND port <= ?", item.start, item.end)
+	}
+	query = query.Where(overlap)
 	query = query.Where(
 		"(scope <> ? OR owner_id <> ?) AND (scope <> ? OR owner_id <> ?)",
 		managedPortScopeInbound, skipInboundID,
