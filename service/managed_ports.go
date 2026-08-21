@@ -224,7 +224,7 @@ func runPortForwardScript(action string, tag string, listenPort int, ports []int
 		args = append(args, tag, strconv.Itoa(listenPort), joinPorts(ports))
 		args = append(args, strings.Join(protocols, ","))
 	}
-	_, err := runCommandOutput(externalCommandTimeout, "bash", append([]string{hy2ForwardScript}, args...)...)
+	_, err := runCommandOutput(externalCommandTimeout, "bash", append([]string{hy2ForwardScriptPath()}, args...)...)
 	if err != nil {
 		wrapped := formatExternalCommandError("port forwarding sync failed", err)
 		logger.Warning(wrapped)

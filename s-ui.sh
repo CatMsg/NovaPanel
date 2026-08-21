@@ -321,6 +321,8 @@ set_setting() {
     [ -z "$config_subPath" ] || params="$params -subPath $config_subPath"
     if /usr/local/s-ui/sui setting ${params}; then
         restart s-ui 0
+    else
+        LOGE "面板设置保存失败，请检查上方错误信息"
     fi
     before_show_menu
 }

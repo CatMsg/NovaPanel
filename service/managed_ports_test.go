@@ -34,6 +34,22 @@ func TestValidateManagedPanelPorts(t *testing.T) {
 	}
 }
 
+func TestResolveHY2ForwardScriptUsesExecutableDirectory(t *testing.T) {
+	installDir := t.TempDir()
+	scriptPath := filepath.Join(installDir, "scripts", "hy2-forward.sh")
+	if err := os.MkdirAll(filepath.Dir(scriptPath), 0o755); err != nil {
+		t.Fatalf("create scripts directory: %v", err)
+	}
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write forwarding script: %v", err)
+	}
+
+	got := resolveHY2ForwardScript(filepath.Join(installDir, "sui"))
+	if got != scriptPath {
+		t.Fatalf("resolved forwarding script %q, want %q", got, scriptPath)
+	}
+}
+
 func TestCollectMieruInboundForwardPortsUsesConfiguredTransport(t *testing.T) {
 	inbound := &model.Inbound{
 		Type: "mieru",

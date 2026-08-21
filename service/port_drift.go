@@ -364,7 +364,7 @@ func removeManagedOrphanChain(chain, family string) error {
 	}
 	portForwardingMu.Lock()
 	defer portForwardingMu.Unlock()
-	_, err := runCommandOutput(externalCommandTimeout, "bash", hy2ForwardScript, "remove-chain", chain, family)
+	_, err := runCommandOutput(externalCommandTimeout, "bash", hy2ForwardScriptPath(), "remove-chain", chain, family)
 	if err != nil {
 		return formatExternalCommandError("remove orphan port chain failed", err)
 	}

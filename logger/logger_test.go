@@ -8,6 +8,12 @@ import (
 	"github.com/op/go-logging"
 )
 
+func TestLoggerExistsBeforeExplicitInitialization(t *testing.T) {
+	if GetLogger() == nil {
+		t.Fatal("bootstrap logger is nil")
+	}
+}
+
 func TestLogBufferConcurrentAccessAndLimit(t *testing.T) {
 	InitLogger(logging.ERROR)
 	logBufferMu.Lock()

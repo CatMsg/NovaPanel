@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -14,6 +16,24 @@ import (
 )
 
 const hy2ForwardScript = "scripts/hy2-forward.sh"
+
+func hy2ForwardScriptPath() string {
+	executable, err := os.Executable()
+	if err != nil {
+		return hy2ForwardScript
+	}
+	return resolveHY2ForwardScript(executable)
+}
+
+func resolveHY2ForwardScript(executable string) string {
+	if strings.TrimSpace(executable) != "" {
+		candidate := filepath.Join(filepath.Dir(executable), hy2ForwardScript)
+		if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return hy2ForwardScript
+}
 
 func (s *InboundService) RebuildInboundPortForwarding() error {
 	if runtime.GOOS != "linux" {

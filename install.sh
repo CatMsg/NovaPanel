@@ -188,7 +188,10 @@ config_after_install() {
         [ -z "$config_path" ] || params="$params -path $config_path"
         [ -z "$config_subPort" ] || params="$params -subPort $config_subPort"
         [ -z "$config_subPath" ] || params="$params -subPath $config_subPath"
-        /usr/local/s-ui/sui setting ${params}
+        if ! /usr/local/s-ui/sui setting ${params}; then
+            echo -e "${red}面板设置初始化失败，正在回滚安装。${plain}"
+            return 1
+        fi
 
         read -p "是否修改管理员账号密码 [y/n]？": admin_confirm
         if [[ "${admin_confirm}" == "y" || "${admin_confirm}" == "Y" ]]; then

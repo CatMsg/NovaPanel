@@ -10,7 +10,9 @@ import (
 )
 
 var (
-	logger    *logging.Logger
+	// CLI commands can use service code before the application configures its
+	// final backend. Keep the package logger valid during that bootstrap phase.
+	logger    = logging.MustGetLogger("s-ui")
 	logBuffer []struct {
 		time  string
 		level logging.Level
