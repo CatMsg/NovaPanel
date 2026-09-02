@@ -415,7 +415,9 @@ func (s *Box) PreStart() error {
 				s.logger.Error("panic on early close: " + fmt.Sprint(v))
 			}
 		}()
-		s.Close()
+		if closeErr := s.Close(); closeErr != nil {
+			s.logger.Error("close after pre-start failure: ", closeErr)
+		}
 		return err
 	}
 	s.logger.Info("sing-box pre-started (", F.Seconds(time.Since(s.createdAt).Seconds()), "s)")

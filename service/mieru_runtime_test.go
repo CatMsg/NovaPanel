@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -209,5 +210,28 @@ func TestProbeMieruBridgeRequiresProbeUser(t *testing.T) {
 	payload := []byte(`{"egress":{"proxies":[{"name":"novapanel","protocol":"SOCKS5_PROXY_PROTOCOL","host":"127.0.0.1","port":1080}]}}`)
 	if err := probeMieruBridge(payload); err == nil {
 		t.Fatal("bridge probe passed without an authenticated user")
+	}
+}
+
+func TestBuildMieruAuthRequestRejectsOversizedCredentials(t *testing.T) {
+	if _, err := buildMieruAuthRequest(strings.Repeat("u", 256), "password"); err == nil {
+		t.Fatal("oversized username was accepted")
+	}
+	if _, err := buildMieruAuthRequest("username", strings.Repeat("p", 256)); err == nil {
+		t.Fatal("oversized password was accepted")
+	}
+	request, err := buildMieruAuthRequest("user", "pass")
+	if err != nil {
+		t.Fatalf("valid credentials were rejected: %v", err)
+	}
+	if string(request) != string([]byte{0x01, 0x04, 'u', 's', 'e', 'r', 0x04, 'p', 'a', 's', 's'}) {
+		t.Fatalf("unexpected authentication request: %x", request)
+	}
+}
+
+func TestMieruBinaryPathRejectsRelativeOverride(t *testing.T) {
+	t.Setenv("SUI_MITA_BIN", "bin/mita")
+	if _, err := mieruBinaryPath(); err == nil {
+		t.Fatal("relative mita binary override was accepted")
 	}
 }

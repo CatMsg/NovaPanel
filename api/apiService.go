@@ -537,8 +537,7 @@ func (a *ApiService) Logout(c *gin.Context) {
 	if loginUser != "" {
 		logger.Infof("user %s logout", loginUser)
 	}
-	ClearSession(c)
-	jsonMsg(c, "", nil)
+	jsonMsg(c, "", ClearSession(c))
 }
 
 func (a *ApiService) LoadTokens() ([]byte, error) {
@@ -574,12 +573,14 @@ func (a *ApiService) GetSingboxConfig(c *gin.Context) {
 	rawConfig, err := a.ConfigService.GetConfig("")
 	if err != nil {
 		c.Status(400)
-		c.Writer.WriteString(err.Error())
+		_, _ = c.Writer.WriteString(err.Error())
 		return
 	}
 	c.Header("Content-Type", "application/json")
 	c.Header("Content-Disposition", "attachment; filename=config_"+time.Now().Format("20060102-150405")+".json")
-	c.Writer.Write(*rawConfig)
+	if _, err := c.Writer.Write(*rawConfig); err != nil {
+		logger.Warning("write config download failed: ", err)
+	}
 }
 
 func (a *ApiService) GetCheckOutbound(c *gin.Context) {

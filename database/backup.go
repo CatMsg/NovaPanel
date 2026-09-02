@@ -160,8 +160,13 @@ func ImportDB(file multipart.File) error {
 	if err != nil {
 		return common.NewErrorf("Error checking db: %v", err)
 	}
-	newDb_db, _ := newDb.DB()
-	newDb_db.Close()
+	newSQLDB, err := newDb.DB()
+	if err != nil {
+		return common.NewErrorf("Error opening validated db: %v", err)
+	}
+	if err := newSQLDB.Close(); err != nil {
+		return common.NewErrorf("Error closing validated db: %v", err)
+	}
 
 	// Flush and close the live DB only after the replacement has passed all validation.
 	if err := db.Exec("PRAGMA wal_checkpoint(TRUNCATE)").Error; err != nil {

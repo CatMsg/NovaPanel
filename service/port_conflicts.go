@@ -97,10 +97,6 @@ func validateManagedPanelPortConflicts(tx *gorm.DB, webPort int, subPort int) er
 	return validateManagedPortConflicts(tx, "面板", fmt.Sprintf("web=%d sub=%d", webPort, subPort), 0, 0, candidatePorts)
 }
 
-func findManagedPortConflictEntries(tx *gorm.DB, candidatePorts []int, skipInboundID uint, skipEndpointID uint) ([]model.ManagedPortEntry, error) {
-	return findManagedPortRangeConflictEntries(tx, managedPortRangesFromPorts(candidatePorts), skipInboundID, skipEndpointID)
-}
-
 func findManagedPortRangeConflictEntries(tx *gorm.DB, ranges []managedPortRange, skipInboundID uint, skipEndpointID uint) ([]model.ManagedPortEntry, error) {
 	ranges = normalizeManagedPortRanges(ranges)
 	if len(ranges) == 0 {

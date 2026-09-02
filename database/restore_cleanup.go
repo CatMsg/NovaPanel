@@ -178,7 +178,7 @@ func collectInboundPortRangesForRestore(inbound *model.Inbound) ([]restorePortRa
 				return nil, false, fmt.Errorf("invalid Mieru port range %q", rawPortRange)
 			}
 			if end-start+1 > 512 {
-				return nil, false, fmt.Errorf("Mieru port range is too large: maximum 512 ports")
+				return nil, false, fmt.Errorf("mieru port range is too large: maximum 512 ports")
 			}
 			ranges = []restorePortRange{{start: start, end: end}}
 		}

@@ -50,6 +50,7 @@ jobs:
       - name: 运行前端检查
         run: |
           cd frontend
+          npm audit
           npm run lint:check
           npm run typecheck
 
@@ -98,6 +99,17 @@ jobs:
         with:
           cache: false
           go-version-file: go.mod
+
+      - name: 检查脚本语法
+        run: |
+          sh -n entrypoint.sh
+          bash -n install.sh s-ui.sh runSUI.sh build.sh scripts/*.sh
+
+      - name: 运行静态检查
+        run: |
+          go vet ./...
+          go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
+          go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
 
       - name: 运行 Go 测试
         run: bash ./scripts/go-test-packages.sh

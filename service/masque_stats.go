@@ -1,10 +1,18 @@
 package service
 
 import (
+	"math"
 	"time"
 
 	"github.com/CatMsg/NovaPanel/database/model"
 )
+
+func masqueTrafficValue(value uint64) int64 {
+	if value > math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return int64(value)
+}
 
 func (s *MasqueService) CollectStats() ([]model.Stats, onlines, error) {
 	if s == nil {
@@ -71,10 +79,10 @@ func (s *MasqueService) CollectStats() ([]model.Stats, onlines, error) {
 		}
 		inboundTag, username := key[:separator], key[separator+1:]
 		if upload > 0 {
-			stats = append(stats, model.Stats{DateTime: now.Unix(), Resource: "user", Tag: username, Direction: true, Traffic: int64(upload)})
+			stats = append(stats, model.Stats{DateTime: now.Unix(), Resource: "user", Tag: username, Direction: true, Traffic: masqueTrafficValue(upload)})
 		}
 		if download > 0 {
-			stats = append(stats, model.Stats{DateTime: now.Unix(), Resource: "user", Tag: username, Direction: false, Traffic: int64(download)})
+			stats = append(stats, model.Stats{DateTime: now.Unix(), Resource: "user", Tag: username, Direction: false, Traffic: masqueTrafficValue(download)})
 		}
 		total := inboundDeltas[inboundTag]
 		total.Upload += upload
@@ -89,10 +97,10 @@ func (s *MasqueService) CollectStats() ([]model.Stats, onlines, error) {
 	s.mu.Unlock()
 	for tag, delta := range inboundDeltas {
 		if delta.Upload > 0 {
-			stats = append(stats, model.Stats{DateTime: now.Unix(), Resource: "inbound", Tag: tag, Direction: true, Traffic: int64(delta.Upload)})
+			stats = append(stats, model.Stats{DateTime: now.Unix(), Resource: "inbound", Tag: tag, Direction: true, Traffic: masqueTrafficValue(delta.Upload)})
 		}
 		if delta.Download > 0 {
-			stats = append(stats, model.Stats{DateTime: now.Unix(), Resource: "inbound", Tag: tag, Direction: false, Traffic: int64(delta.Download)})
+			stats = append(stats, model.Stats{DateTime: now.Unix(), Resource: "inbound", Tag: tag, Direction: false, Traffic: masqueTrafficValue(delta.Download)})
 		}
 	}
 	return stats, online, nil

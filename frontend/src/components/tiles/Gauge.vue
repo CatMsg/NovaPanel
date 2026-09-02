@@ -9,10 +9,10 @@ const props = defineProps({
 
 const data = computed(() => {
   const d = props.tilesData
-  if (!d.mem && !d.cpu) return { percent: 0, text: '-' }
+  if (!d.mem && !d.cpu) return emptyGaugeData()
   switch (props.type) {
     case 'g-cpu':
-      return { percent: d.cpu, text: Math.ceil(d.cpu) + "%" }
+      return { percent: d.cpu, primary: Math.ceil(d.cpu) + '%', ratio: false }
     case 'g-mem':
       return gaugeData(d.mem)
     case 'g-dsk':
@@ -20,17 +20,25 @@ const data = computed(() => {
     case 'g-swp':
       return gaugeData(d.swp)
   }
-  return { percent: 0, text: '-'}
+  return emptyGaugeData()
 })
 
+const emptyGaugeData = () => ({ percent: 0, primary: '-', ratio: false })
+
 const gaugeData = (d:any) :any => {
-  if (!d) return { percent: 0, text: '-' }
+  if (!d || !Number.isFinite(d.current) || !Number.isFinite(d.total) || d.total <= 0) {
+    return emptyGaugeData()
+  }
   const curr = HumanReadable.sizeFormat(d.current,0).split(' ')
   const total = HumanReadable.sizeFormat(d.total,0).split(' ')
   if (curr[1] == total[1]) curr[1] = ''
   return {
     percent: Math.ceil(d.current*100/d.total),
-    text: curr[0] + "<sup>" + (curr[1]?? ' ') + "</sup>/" +  total[0] + "<sup>" + (total[1]?? '') + "</sup>"
+    primary: curr[0],
+    primaryUnit: curr[1] ?? '',
+    secondary: total[0],
+    secondaryUnit: total[1] ?? '',
+    ratio: true
   }
 }
 
@@ -58,7 +66,14 @@ const gaugeColor = computed(() => {
           background: `rgb(var(--v-theme-${gaugeColor}))`
           }">
       </div>
-      <div class="gauge__cover"><span dir="ltr" v-html="data.text"></span></div>
+      <div class="gauge__cover">
+        <span dir="ltr">
+          <template v-if="data.ratio">
+            {{ data.primary }}<sup>{{ data.primaryUnit }}</sup>/{{ data.secondary }}<sup>{{ data.secondaryUnit }}</sup>
+          </template>
+          <template v-else>{{ data.primary }}</template>
+        </span>
+      </div>
     </div>
   </div>
 </template>

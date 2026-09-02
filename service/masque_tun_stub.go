@@ -10,7 +10,7 @@ import (
 
 type masqueTun struct{}
 
-func newMasqueTun(tag string, peerPrefix netip.Prefix, mtu int) (*masqueTun, error) {
+var newMasqueTun = func(tag string, peerPrefix netip.Prefix, mtu int) (*masqueTun, error) {
 	return nil, fmt.Errorf("masque server requires Linux TUN support")
 }
 
@@ -19,10 +19,6 @@ func (t *masqueTun) ReadPacket(ctx context.Context, buf []byte) (int, error) {
 }
 
 func (t *masqueTun) WritePacket(packet []byte) error {
-	return context.Canceled
-}
-
-func (t *masqueTun) configureKernelForwarding() error {
 	return context.Canceled
 }
 

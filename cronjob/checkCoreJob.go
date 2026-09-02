@@ -1,6 +1,7 @@
 package cronjob
 
 import (
+	"github.com/CatMsg/NovaPanel/logger"
 	"github.com/CatMsg/NovaPanel/service"
 )
 
@@ -13,5 +14,7 @@ func NewCheckCoreJob() *CheckCoreJob {
 }
 
 func (s *CheckCoreJob) Run() {
-	s.ConfigService.StartCore()
+	if err := s.ConfigService.StartCore(); err != nil {
+		logger.Warning("start core from scheduled check failed: ", err)
+	}
 }

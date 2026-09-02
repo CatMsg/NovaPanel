@@ -18,6 +18,8 @@ var externalSubscriptionTransport = func() *http.Transport {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	// Upstream subscription aggregation intentionally tolerates private and
 	// mismatched certificates configured by the panel owner.
+	// #nosec G402 -- only administrator-configured upstream URLs use this
+	// compatibility transport; public client requests cannot select a target.
 	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	return transport
 }()

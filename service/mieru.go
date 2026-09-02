@@ -543,13 +543,12 @@ func probeMieruBridge(payload []byte) error {
 		return fmt.Errorf("read Mieru routing bridge handshake: %w", err)
 	}
 	if reply[0] != 0x05 || reply[1] != 0x02 {
-		return fmt.Errorf("Mieru routing bridge rejected handshake: %x", reply)
+		return fmt.Errorf("mieru routing bridge rejected handshake: %x", reply)
 	}
-	authRequest := make([]byte, 0, len(username)+len(password)+3)
-	authRequest = append(authRequest, 0x01, byte(len(username)))
-	authRequest = append(authRequest, username...)
-	authRequest = append(authRequest, byte(len(password)))
-	authRequest = append(authRequest, password...)
+	authRequest, err := buildMieruAuthRequest(username, password)
+	if err != nil {
+		return err
+	}
 	if _, err := connection.Write(authRequest); err != nil {
 		return fmt.Errorf("write Mieru routing bridge authentication: %w", err)
 	}
@@ -557,9 +556,26 @@ func probeMieruBridge(payload []byte) error {
 		return fmt.Errorf("read Mieru routing bridge authentication: %w", err)
 	}
 	if reply[0] != 0x01 || reply[1] != 0x00 {
-		return fmt.Errorf("Mieru routing bridge rejected authentication: %x", reply)
+		return fmt.Errorf("mieru routing bridge rejected authentication: %x", reply)
 	}
 	return nil
+}
+
+func buildMieruAuthRequest(username, password string) ([]byte, error) {
+	if len(username) > 255 {
+		return nil, fmt.Errorf("mieru routing bridge username exceeds 255 bytes")
+	}
+	if len(password) > 255 {
+		return nil, fmt.Errorf("mieru routing bridge password exceeds 255 bytes")
+	}
+	authRequest := make([]byte, 0, len(username)+len(password)+3)
+	// #nosec G115 -- both lengths are explicitly bounded to one byte above.
+	authRequest = append(authRequest, 0x01, byte(len(username)))
+	authRequest = append(authRequest, username...)
+	// #nosec G115 -- both lengths are explicitly bounded to one byte above.
+	authRequest = append(authRequest, byte(len(password)))
+	authRequest = append(authRequest, password...)
+	return authRequest, nil
 }
 
 func (s *MieruService) recordWatchdogResult(runtimeState *mieruRuntime, probeErr error) bool {
@@ -989,17 +1005,21 @@ func writeMitaServerConfigPayload(configPath string, payload []byte) error {
 
 func mieruBinaryPath() (string, error) {
 	if override := strings.TrimSpace(os.Getenv("SUI_MITA_BIN")); override != "" {
-		if info, err := os.Stat(override); err == nil && !info.IsDir() {
-			return override, nil
+		path := filepath.Clean(override)
+		if !filepath.IsAbs(path) {
+			return "", common.NewError("configured mita binary path must be absolute")
 		}
-		return "", fmt.Errorf("configured mita binary is unavailable: %s", override)
+		if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0111 != 0 {
+			return path, nil
+		}
+		return "", fmt.Errorf("configured mita binary is unavailable or not executable: %s", path)
 	}
 	executable, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
 	path := filepath.Join(filepath.Dir(executable), "bin", "mita")
-	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+	if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0111 != 0 {
 		return path, nil
 	}
 	if path, err := exec.LookPath("mita"); err == nil {
@@ -1271,10 +1291,6 @@ func (s *MieruService) CollectStats() ([]model.Stats, onlines, error) {
 	// Traffic is counted by the authenticated Sing-box bridge. Mita metrics are
 	// retained only for online detection to avoid charging every byte twice.
 	return nil, sampled, nil
-}
-
-func parseMitaUserStats(output, username string) map[string]string {
-	return parseMitaAllUserStats(output)[strings.TrimSpace(username)]
 }
 
 func parseMitaAllUserStats(output string) map[string]map[string]string {

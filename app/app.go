@@ -44,8 +44,10 @@ func (a *APP) Init() error {
 		logger.Warning("init ssh listen ports failed:", err)
 	}
 
-	// Init Setting
-	a.SettingService.GetAllSetting()
+	// Persist missing defaults before services read settings during startup.
+	if _, err := a.SettingService.GetAllSetting(); err != nil {
+		return err
+	}
 
 	if err := service.RebuildManagedPortEntries(); err != nil {
 		return err

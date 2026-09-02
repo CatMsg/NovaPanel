@@ -70,11 +70,11 @@ func IsLogin(c *gin.Context) bool {
 	return GetLoginUser(c) != ""
 }
 
-func ClearSession(c *gin.Context) {
+func ClearSession(c *gin.Context) error {
 	s := sessions.Default(c)
 	s.Clear()
 	options := sessionOptions(c)
 	options.MaxAge = -1
 	s.Options(options)
-	s.Save()
+	return s.Save()
 }
