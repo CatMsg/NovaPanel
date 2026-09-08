@@ -1,0 +1,305 @@
+package cmd
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/CatMsg/NovaPanel/config"
+	"github.com/CatMsg/NovaPanel/database"
+	"github.com/CatMsg/NovaPanel/service"
+
+	"github.com/shirou/gopsutil/v4/net"
+)
+
+func resetSetting() {
+	err := database.InitDB(config.GetDBPath())
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	settingService := service.SettingService{}
+	err = settingService.ResetSettings()
+	if err != nil {
+		fmt.Println("reset setting failed:", err)
+	} else {
+		fmt.Println("reset setting success")
+	}
+}
+
+func updateSetting(port int, path string, subPort int, subPath string, webCertFile string, webKeyFile string, subCertFile string, subKeyFile string, clearWebTLS bool, clearSubTLS bool) {
+	err := database.InitDB(config.GetDBPath())
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	settingService := service.SettingService{}
+	oldWebPort, err := settingService.GetPort()
+	if err != nil {
+		fmt.Println("get current port failed:", err)
+		return
+	}
+	oldSubPort, err := settingService.GetSubPort()
+	if err != nil {
+		fmt.Println("get current sub port failed:", err)
+		return
+	}
+	newWebPort := oldWebPort
+	newSubPort := oldSubPort
+	if port > 0 {
+		newWebPort = port
+	}
+	if subPort > 0 {
+		newSubPort = subPort
+	}
+	if newWebPort != oldWebPort || newSubPort != oldSubPort {
+		if err := service.ValidateManagedPanelPorts(newWebPort, newSubPort); err != nil {
+			fmt.Println("validate panel ports failed:", err)
+			return
+		}
+	}
+
+	if port > 0 {
+		err := settingService.SetPort(port)
+		if err != nil {
+			fmt.Println("set port failed:", err)
+		} else {
+			fmt.Println("set port success")
+		}
+	}
+	if path != "" {
+		err := settingService.SetWebPath(path)
+		if err != nil {
+			fmt.Println("set path failed:", err)
+		} else {
+			fmt.Println("set path success")
+		}
+	}
+	if subPort > 0 {
+		err := settingService.SetSubPort(subPort)
+		if err != nil {
+			fmt.Println("set sub port failed:", err)
+		} else {
+			fmt.Println("set sub port success")
+		}
+	}
+	if subPath != "" {
+		err := settingService.SetSubPath(subPath)
+		if err != nil {
+			fmt.Println("set sub path failed:", err)
+		} else {
+			fmt.Println("set sub path success")
+		}
+	}
+	if webCertFile != "" {
+		err := settingService.SetCertFile(webCertFile)
+		if err != nil {
+			fmt.Println("set web cert file failed:", err)
+		} else {
+			fmt.Println("set web cert file success")
+		}
+	}
+	if webKeyFile != "" {
+		err := settingService.SetKeyFile(webKeyFile)
+		if err != nil {
+			fmt.Println("set web key file failed:", err)
+		} else {
+			fmt.Println("set web key file success")
+		}
+	}
+	if subCertFile != "" {
+		err := settingService.SetSubCertFile(subCertFile)
+		if err != nil {
+			fmt.Println("set sub cert file failed:", err)
+		} else {
+			fmt.Println("set sub cert file success")
+		}
+	}
+	if subKeyFile != "" {
+		err := settingService.SetSubKeyFile(subKeyFile)
+		if err != nil {
+			fmt.Println("set sub key file failed:", err)
+		} else {
+			fmt.Println("set sub key file success")
+		}
+	}
+	if clearWebTLS {
+		err := settingService.SetCertFile("")
+		if err != nil {
+			fmt.Println("clear web cert file failed:", err)
+		} else {
+			fmt.Println("clear web cert file success")
+		}
+		err = settingService.SetKeyFile("")
+		if err != nil {
+			fmt.Println("clear web key file failed:", err)
+		} else {
+			fmt.Println("clear web key file success")
+		}
+	}
+	if clearSubTLS {
+		err := settingService.SetSubCertFile("")
+		if err != nil {
+			fmt.Println("clear sub cert file failed:", err)
+		} else {
+			fmt.Println("clear sub cert file success")
+		}
+		err = settingService.SetSubKeyFile("")
+		if err != nil {
+			fmt.Println("clear sub key file failed:", err)
+		} else {
+			fmt.Println("clear sub key file success")
+		}
+	}
+
+	currentWebPort, err := settingService.GetPort()
+	if err != nil {
+		fmt.Println("get panel port after update failed:", err)
+		return
+	}
+	currentSubPort, err := settingService.GetSubPort()
+	if err != nil {
+		fmt.Println("get sub port after update failed:", err)
+		return
+	}
+	if currentWebPort != oldWebPort || currentSubPort != oldSubPort {
+		if err := settingService.SyncManagedPanelPortForwarding(oldWebPort, currentWebPort, oldSubPort, currentSubPort); err != nil {
+			fmt.Println("sync panel port forwarding failed:", err)
+			if currentWebPort != oldWebPort {
+				if rollbackErr := settingService.SetPort(oldWebPort); rollbackErr != nil {
+					fmt.Println("rollback panel port failed:", rollbackErr)
+				}
+			}
+			if currentSubPort != oldSubPort {
+				if rollbackErr := settingService.SetSubPort(oldSubPort); rollbackErr != nil {
+					fmt.Println("rollback sub port failed:", rollbackErr)
+				}
+			}
+		} else {
+			fmt.Println("sync panel port forwarding success")
+		}
+	}
+}
+
+func showSetting() {
+	err := database.InitDB(config.GetDBPath())
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	settingService := service.SettingService{}
+	allSetting, err := settingService.GetAllSetting()
+	if err != nil {
+		fmt.Println("get current port failed,error info:", err)
+	}
+	fmt.Println("Current panel settings:")
+	fmt.Println("\tPanel port:\t", (*allSetting)["webPort"])
+	fmt.Println("\tPanel path:\t", (*allSetting)["webPath"])
+	if (*allSetting)["webListen"] != "" {
+		fmt.Println("\tPanel IP:\t", (*allSetting)["webListen"])
+	}
+	if (*allSetting)["webDomain"] != "" {
+		fmt.Println("\tPanel Domain:\t", (*allSetting)["webDomain"])
+	}
+	if (*allSetting)["webURI"] != "" {
+		fmt.Println("\tPanel URI:\t", (*allSetting)["webURI"])
+	}
+	if (*allSetting)["webCertFile"] != "" {
+		fmt.Println("\tPanel Cert:\t", (*allSetting)["webCertFile"])
+	}
+	if (*allSetting)["webKeyFile"] != "" {
+		fmt.Println("\tPanel Key:\t", (*allSetting)["webKeyFile"])
+	}
+	fmt.Println()
+	fmt.Println("Current subscription settings:")
+	fmt.Println("\tSub port:\t", (*allSetting)["subPort"])
+	fmt.Println("\tSub path:\t", (*allSetting)["subPath"])
+	if (*allSetting)["subListen"] != "" {
+		fmt.Println("\tSub IP:\t", (*allSetting)["subListen"])
+	}
+	if (*allSetting)["subDomain"] != "" {
+		fmt.Println("\tSub Domain:\t", (*allSetting)["subDomain"])
+	}
+	if (*allSetting)["subURI"] != "" {
+		fmt.Println("\tSub URI:\t", (*allSetting)["subURI"])
+	}
+	if (*allSetting)["subCertFile"] != "" {
+		fmt.Println("\tSub Cert:\t", (*allSetting)["subCertFile"])
+	}
+	if (*allSetting)["subKeyFile"] != "" {
+		fmt.Println("\tSub Key:\t", (*allSetting)["subKeyFile"])
+	}
+}
+
+func getPublicIP() string {
+	return (&service.ServerService{}).GetPublicIP()
+}
+
+func getPanelURI() {
+	err := database.InitDB(config.GetDBPath())
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	settingService := service.SettingService{}
+	Port, _ := settingService.GetPort()
+	BasePath, _ := settingService.GetWebPath()
+	Listen, _ := settingService.GetListen()
+	Domain, _ := settingService.GetWebDomain()
+	KeyFile, _ := settingService.GetKeyFile()
+	CertFile, _ := settingService.GetCertFile()
+	TLS := false
+	if KeyFile != "" && CertFile != "" {
+		TLS = true
+	}
+	Proto := ""
+	if TLS {
+		Proto = "https://"
+	} else {
+		Proto = "http://"
+	}
+	PortText := fmt.Sprintf(":%d", Port)
+	if (Port == 443 && TLS) || (Port == 80 && !TLS) {
+		PortText = ""
+	}
+	if len(Domain) > 0 {
+		fmt.Println(Proto + Domain + PortText + BasePath)
+		return
+	}
+	if len(Listen) > 0 {
+		fmt.Println(Proto + Listen + PortText + BasePath)
+		return
+	}
+	fmt.Println("Local address:")
+	netInterfaces, _ := net.Interfaces()
+	for i := 0; i < len(netInterfaces); i++ {
+		if interfaceIsUp(netInterfaces[i].Flags) {
+			addrs := netInterfaces[i].Addrs
+			for _, address := range addrs {
+				IP := strings.Split(address.Addr, "/")[0]
+				if strings.Contains(address.Addr, ".") {
+					fmt.Println(Proto + IP + PortText + BasePath)
+				} else if !strings.HasPrefix(address.Addr, "fe80::") {
+					fmt.Println(Proto + "[" + IP + "]" + PortText + BasePath)
+				}
+			}
+		}
+	}
+	pubIP := getPublicIP()
+	if pubIP != "" {
+		fmt.Printf("\nGlobal address:\n%s%s%s\n", Proto, pubIP, PortText+BasePath)
+	}
+}
+
+func interfaceIsUp(flags []string) bool {
+	up, loopback := false, false
+	for _, flag := range flags {
+		if flag == "up" {
+			up = true
+		} else if flag == "loopback" {
+			loopback = true
+		}
+	}
+	return up && !loopback
+}

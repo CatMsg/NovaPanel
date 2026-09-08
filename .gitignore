@@ -1,0 +1,46 @@
+.DS_Store
+dist/
+release/
+backup/
+bin/
+db/
+novas
+web/html
+main
+tmp
+.sync*
+*.tar.gz
+
+# local env files
+.env.local
+.env.*.local
+
+# Log files
+*.log*
+.runNovas.pid
+.runNovas.log
+.cache
+
+# Windows build artifacts
+*.exe
+*.zip
+
+# Editor directories and files
+.idea
+.vscode
+.playwright-cli/
+
+# Local data, credentials and tooling output
+*.db
+*.db-*
+*.db.*
+*.sqlite*
+*.pem
+*.key
+*.crt
+*.cer
+cert/
+.env
+*.pid
+output/
+node_modules/

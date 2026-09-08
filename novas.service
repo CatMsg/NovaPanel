@@ -1,0 +1,14 @@
+[Unit]
+Description=NovaPanel Service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/usr/local/novas/
+ExecStart=/usr/local/novas/novas
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,94 @@
+package service
+
+import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/base64"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/CatMsg/NovaPanel/database"
+)
+
+func TestParseMasqueClientSubnetRequiresIPv4Pool(t *testing.T) {
+	prefix, err := parseMasqueClientSubnet("172.16.0.0")
+	if err != nil {
+		t.Fatalf("parse ipv4 prefix: %v", err)
+	}
+	if got := prefix.String(); got != "172.16.0.0/24" {
+		t.Fatalf("unexpected ipv4 prefix: %s", got)
+	}
+
+	if _, err := parseMasqueClientSubnet("fd00::/64"); err == nil {
+		t.Fatal("expected ipv6 peer prefix to fail")
+	}
+}
+
+func TestValidateMasqueNetworkOnlyAllowsQUIC(t *testing.T) {
+	if err := validateMasqueNetwork(""); err != nil {
+		t.Fatalf("empty network should normalize to quic: %v", err)
+	}
+	if err := validateMasqueNetwork("quic"); err != nil {
+		t.Fatalf("quic should be accepted: %v", err)
+	}
+	if err := validateMasqueNetwork("h2"); err == nil {
+		t.Fatal("h2 must be rejected until a real HTTP/2 server is implemented")
+	}
+}
+
+func TestGenerateMasqueTLSCertificateFromPrivateKey(t *testing.T) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	der, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		t.Fatalf("marshal key: %v", err)
+	}
+
+	cert, err := generateMasqueTLSCertificate(base64.StdEncoding.EncodeToString(der))
+	if err != nil {
+		t.Fatalf("generate cert: %v", err)
+	}
+	if len(cert.Certificate) != 1 || cert.PrivateKey == nil {
+		t.Fatalf("unexpected generated cert: %#v", cert)
+	}
+}
+
+func TestResolveMasqueCertFilesFallsBackToSettings(t *testing.T) {
+	workDir := t.TempDir()
+	if err := database.InitDB(filepath.Join(workDir, "masque-cert.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	certFile := filepath.Join(workDir, "panel.crt")
+	keyFile := filepath.Join(workDir, "panel.key")
+	if err := os.WriteFile(certFile, []byte("cert"), 0o644); err != nil {
+		t.Fatalf("write cert: %v", err)
+	}
+	if err := os.WriteFile(keyFile, []byte("key"), 0o644); err != nil {
+		t.Fatalf("write key: %v", err)
+	}
+
+	svc := &MasqueService{}
+	if _, err := svc.GetAllSetting(); err != nil {
+		t.Fatalf("init settings: %v", err)
+	}
+	if err := svc.saveSetting("subCertFile", certFile); err != nil {
+		t.Fatalf("save sub cert: %v", err)
+	}
+	if err := svc.saveSetting("subKeyFile", keyFile); err != nil {
+		t.Fatalf("save sub key: %v", err)
+	}
+
+	gotCert, gotKey, err := svc.resolveMasqueCertFiles("")
+	if err != nil {
+		t.Fatalf("resolve cert files: %v", err)
+	}
+	if gotCert != certFile || gotKey != keyFile {
+		t.Fatalf("unexpected resolved files: %s %s", gotCert, gotKey)
+	}
+}

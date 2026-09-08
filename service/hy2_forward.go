@@ -1,0 +1,340 @@
+package service
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+
+	"github.com/CatMsg/NovaPanel/database"
+	"github.com/CatMsg/NovaPanel/database/model"
+	"github.com/CatMsg/NovaPanel/logger"
+)
+
+const hy2ForwardScript = "scripts/hy2-forward.sh"
+
+func hy2ForwardScriptPath() string {
+	executable, err := os.Executable()
+	if err != nil {
+		return hy2ForwardScript
+	}
+	return resolveHY2ForwardScript(executable)
+}
+
+func resolveHY2ForwardScript(executable string) string {
+	if strings.TrimSpace(executable) != "" {
+		candidate := filepath.Join(filepath.Dir(executable), hy2ForwardScript)
+		if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return hy2ForwardScript
+}
+
+func (s *InboundService) RebuildInboundPortForwarding() error {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+
+	backend, err := ensureFirewallBackend()
+	if err != nil {
+		return err
+	}
+	logger.Info("rebuilding inbound port forwarding with backend: ", backend)
+
+	if err := runInboundForwardScript("purge", "", 0, nil); err != nil {
+		return err
+	}
+
+	return s.rebuildInboundPortForwardingFromCurrentState()
+}
+
+func (s *InboundService) rebuildInboundPortForwardingFromCurrentState() error {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+
+	var inbounds []*model.Inbound
+	if err := database.GetDB().Model(model.Inbound{}).Find(&inbounds).Error; err != nil {
+		return err
+	}
+
+	var errs []error
+	mieruRemoved := false
+	for _, inbound := range inbounds {
+		if err := s.syncInboundPortForwarding(nil, inbound); err != nil {
+			var conflictErr *sshPortConflictError
+			if errors.As(err, &conflictErr) {
+				logger.Warning("inbound port forwarding conflict detected, removing inbound: ", inbound.Tag, " ports: ", conflictErr.ports)
+				if removeErr := s.removeInboundByTag(inbound.Tag); removeErr != nil {
+					wrapped := fmt.Errorf("remove conflicted inbound %s: %w", inbound.Tag, removeErr)
+					errs = append(errs, wrapped)
+					logger.Warning("remove conflicted inbound failed: ", wrapped)
+				}
+				if inbound.Type == "mieru" {
+					mieruRemoved = true
+				}
+				continue
+			}
+			wrapped := fmt.Errorf("rebuild %s: %w", inbound.Tag, err)
+			errs = append(errs, wrapped)
+			logger.Warning("inbound port forwarding rebuild failed: ", wrapped)
+		}
+	}
+	if mieruRemoved && mieruPtr != nil {
+		if err := mieruPtr.SyncFromDB(); err != nil {
+			errs = append(errs, fmt.Errorf("stop conflicted Mieru inbound: %w", err))
+		}
+	}
+
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+
+	return nil
+}
+
+func (s *InboundService) RebuildHy2PortForwarding() error {
+	return s.RebuildInboundPortForwarding()
+}
+
+func (s *InboundService) syncInboundPortForwarding(oldInbound *model.Inbound, inbound *model.Inbound) error {
+	var oldSpec managedForwardSpec
+	var err error
+	if oldInbound != nil {
+		oldSpec, err = collectInboundForwardSpec(oldInbound)
+		if err != nil {
+			return err
+		}
+	}
+
+	var newSpec managedForwardSpec
+	if inbound != nil {
+		newSpec, err = collectInboundForwardSpec(inbound)
+		if err != nil {
+			return err
+		}
+		if err := validateInboundPortRangesAgainstSSH(inbound, newSpec.portRanges); err != nil {
+			return err
+		}
+	}
+
+	return syncManagedForwardSpecs(oldSpec, newSpec)
+}
+
+func collectInboundForwardRanges(inbound *model.Inbound) (int, []managedPortRange, error) {
+	listenPort, err := getInboundListenPort(inbound)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	ranges := []managedPortRange{{start: listenPort, end: listenPort}}
+	if inbound.Type == "hysteria2" {
+		extraRanges, err := getHy2ServerPortRanges(inbound.OutJson)
+		if err != nil {
+			return 0, nil, err
+		}
+		ranges = normalizeManagedPortRanges(append(ranges, extraRanges...))
+	}
+	if inbound.Type == "mieru" {
+		config, err := parseMieruInbound(inbound)
+		if err != nil {
+			return 0, nil, err
+		}
+		if strings.TrimSpace(config.PortRange) != "" {
+			item, rangeErr := parseManagedPortRange(config.PortRange)
+			if rangeErr != nil {
+				return 0, nil, rangeErr
+			}
+			return config.ListenPort, []managedPortRange{item}, nil
+		}
+		return config.ListenPort, []managedPortRange{{start: config.ListenPort, end: config.ListenPort}}, nil
+	}
+
+	return listenPort, ranges, nil
+}
+
+func collectInboundForwardSpec(inbound *model.Inbound) (managedForwardSpec, error) {
+	if inbound == nil {
+		return managedForwardSpec{}, nil
+	}
+
+	listenPort, ranges, err := collectInboundForwardRanges(inbound)
+	if err != nil {
+		return managedForwardSpec{}, err
+	}
+	protocols := []string{"tcp", "udp"}
+	if inbound.Type == "hysteria2" {
+		protocols = []string{"udp"}
+	}
+	if inbound.Type == "mieru" {
+		config, err := parseMieruInbound(inbound)
+		if err != nil {
+			return managedForwardSpec{}, err
+		}
+		protocols = []string{strings.ToLower(config.Transport)}
+	}
+	if inbound.Type == "masque" {
+		protocols = []string{"udp"}
+	}
+	return managedForwardSpec{
+		tag:             inbound.Tag,
+		listenPort:      listenPort,
+		portRanges:      ranges,
+		protocols:       protocols,
+		removeProtocols: []string{"tcp", "udp"},
+		active:          true,
+	}.normalized(), nil
+}
+
+func runInboundForwardScript(action string, tag string, listenPort int, ports []int) error {
+	return runPortForwardScript(action, tag, listenPort, ports, []string{"tcp", "udp"})
+}
+
+func getInboundListenPort(inbound *model.Inbound) (int, error) {
+	full, err := inbound.MarshalFull()
+	if err != nil {
+		return 0, err
+	}
+
+	rawPort, ok := (*full)["listen_port"]
+	if !ok || rawPort == nil {
+		return 0, fmt.Errorf("missing listen_port for inbound %s", inbound.Tag)
+	}
+
+	switch v := rawPort.(type) {
+	case float64:
+		if v < 1 || v > 65535 {
+			return 0, fmt.Errorf("invalid listen_port for inbound %s", inbound.Tag)
+		}
+		return int(v), nil
+	case json.Number:
+		port, err := v.Int64()
+		if err != nil {
+			return 0, err
+		}
+		return int(port), nil
+	default:
+		port, err := strconv.Atoi(fmt.Sprint(rawPort))
+		if err != nil {
+			return 0, err
+		}
+		return port, nil
+	}
+}
+
+func getHy2ServerPortRanges(outJson json.RawMessage) ([]managedPortRange, error) {
+	if len(outJson) == 0 {
+		return nil, nil
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(outJson, &payload); err != nil {
+		return nil, err
+	}
+
+	rawPorts, ok := payload["server_ports"]
+	if !ok || rawPorts == nil {
+		return nil, nil
+	}
+
+	ranges := make([]managedPortRange, 0)
+	appendToken := func(raw string) error {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return nil
+		}
+		if strings.Count(raw, "-") == 1 {
+			start, end, err := parseHy2PortRange(raw)
+			if err != nil {
+				return err
+			}
+			ranges = append(ranges, managedPortRange{start: start, end: end})
+			return nil
+		}
+		port, err := strconv.Atoi(raw)
+		if err != nil {
+			return fmt.Errorf("invalid server_ports token: %s", raw)
+		}
+		if port < 1 || port > 65535 {
+			return fmt.Errorf("invalid server_ports token: %s", raw)
+		}
+		ranges = append(ranges, managedPortRange{start: port, end: port})
+		return nil
+	}
+
+	switch typed := rawPorts.(type) {
+	case []interface{}:
+		for _, item := range typed {
+			if item == nil {
+				continue
+			}
+			if err := appendToken(fmt.Sprint(item)); err != nil {
+				return nil, err
+			}
+		}
+	case []string:
+		for _, item := range typed {
+			if err := appendToken(item); err != nil {
+				return nil, err
+			}
+		}
+	case string:
+		for _, item := range strings.Split(typed, ",") {
+			if err := appendToken(item); err != nil {
+				return nil, err
+			}
+		}
+	default:
+		return nil, fmt.Errorf("unsupported server_ports format")
+	}
+
+	ranges = normalizeManagedPortRanges(ranges)
+	if len(ranges) > maxManagedPortRangeSegments {
+		return nil, fmt.Errorf("too many server_ports ranges: maximum %d", maxManagedPortRangeSegments)
+	}
+	return ranges, nil
+}
+
+func parseHy2PortRange(raw string) (int, int, error) {
+	parts := strings.SplitN(raw, "-", 2)
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("invalid server_ports token: %s", raw)
+	}
+
+	start, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid server_ports token: %s", raw)
+	}
+
+	end, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid server_ports token: %s", raw)
+	}
+
+	if start < 1 || start > 65535 || end < 1 || end > 65535 {
+		return 0, 0, fmt.Errorf("invalid server_ports token: %s", raw)
+	}
+
+	if start > end {
+		return 0, 0, fmt.Errorf("invalid server_ports range: %s", raw)
+	}
+
+	return start, end, nil
+}
+
+func joinPorts(ports []int) string {
+	if len(ports) == 0 {
+		return ""
+	}
+
+	values := make([]string, 0, len(ports))
+	for _, port := range ports {
+		values = append(values, strconv.Itoa(port))
+	}
+	return strings.Join(values, ",")
+}

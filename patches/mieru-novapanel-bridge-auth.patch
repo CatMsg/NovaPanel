@@ -1,0 +1,86 @@
+diff --git a/pkg/socks5/socks5.go b/pkg/socks5/socks5.go
+index fea4bdd..40ba955 100644
+--- a/pkg/socks5/socks5.go
++++ b/pkg/socks5/socks5.go
+@@ -5,6 +5,7 @@ import (
+ 	"errors"
+ 	"fmt"
+ 	"net"
++	"os"
+ 	"strconv"
+ 	"time"
+ 
+@@ -236,6 +237,9 @@ func (s *Server) serverServeConn(proxyConn net.Conn) error {
+ 		}
+ 	}
+ 	action := s.FindAction(ctx, egressInput)
++	if action.Action == appctlpb.EgressAction_PROXY {
++		action.Proxy = novaPanelBridgeProxy(action.Proxy, userName, s.config.Users)
++	}
+ 	if action.Action == appctlpb.EgressAction_PROXY {
+ 		proxy := action.Proxy
+ 		if proxy.GetSocks5Authentication().GetUser() != "" && proxy.GetSocks5Authentication().GetPassword() != "" {
+@@ -266,6 +270,20 @@ func (s *Server) serverServeConn(proxyConn net.Conn) error {
+ 	return nil
+ }
+ 
++func novaPanelBridgeProxy(proxy *appctlpb.EgressProxy, userName string, users map[string]*appctlpb.User) *appctlpb.EgressProxy {
++	if os.Getenv("MITA_NOVAPANEL_BRIDGE_AUTH") != "1" || proxy == nil || userName == "" {
++		return proxy
++	}
++	user := users[userName]
++	if user == nil || user.GetHashedPassword() == "" {
++		return proxy
++	}
++	proxyCopy := *proxy
++	password := user.GetHashedPassword()
++	proxyCopy.Socks5Authentication = &appctlpb.Auth{User: &userName, Password: &password}
++	return &proxyCopy
++}
++
+ // clientServeConn serves the incoming socks5 connection in proxy client.
+ // The connection is initiated by the user.
+ func (s *Server) clientServeConn(userConn net.Conn) error {
+diff --git a/pkg/socks5/novapanel_bridge_test.go b/pkg/socks5/novapanel_bridge_test.go
+new file mode 100644
+index 0000000..8f96589
+--- /dev/null
++++ b/pkg/socks5/novapanel_bridge_test.go
+@@ -0,0 +1,37 @@
++package socks5
++
++import (
++	"testing"
++
++	"github.com/enfein/mieru/v3/pkg/appctl/appctlpb"
++)
++
++func TestNovaPanelBridgeProxyAddsAuthenticatedUserWithoutMutatingConfig(t *testing.T) {
++	t.Setenv("MITA_NOVAPANEL_BRIDGE_AUTH", "1")
++	name := "alice"
++	hash := "hashed-password"
++	proxy := &appctlpb.EgressProxy{}
++	users := map[string]*appctlpb.User{name: {Name: &name, HashedPassword: &hash}}
++
++	got := novaPanelBridgeProxy(proxy, name, users)
++	if got == proxy {
++		t.Fatal("expected a per-connection proxy copy")
++	}
++	if got.GetSocks5Authentication().GetUser() != name || got.GetSocks5Authentication().GetPassword() != hash {
++		t.Fatalf("unexpected bridge credentials: %#v", got.GetSocks5Authentication())
++	}
++	if proxy.GetSocks5Authentication() != nil {
++		t.Fatal("shared egress proxy was mutated")
++	}
++}
++
++func TestNovaPanelBridgeProxyIsOptIn(t *testing.T) {
++	name := "alice"
++	hash := "hashed-password"
++	proxy := &appctlpb.EgressProxy{}
++	users := map[string]*appctlpb.User{name: {Name: &name, HashedPassword: &hash}}
++
++	if got := novaPanelBridgeProxy(proxy, name, users); got != proxy {
++		t.Fatal("bridge authentication must remain disabled without the environment flag")
++	}
++}

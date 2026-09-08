@@ -1,0 +1,339 @@
+name: 发布 NovaPanel
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "发布标签，留空则读取 config/version"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: write
+  actions: write
+
+env:
+  NODE_VERSION: "25"
+  CRONET_GO_VERSION: "2fef65f9dba90ddb89a87d00a6eb6165487c10c1"
+  CRONET_GO_REPO: https://github.com/sagernet/cronet-go.git
+  BOOTLIN_BASE_URL: https://toolchains.bootlin.com/downloads/releases/toolchains
+  GOPROXY: https://proxy.golang.org
+  GOSUMDB: sum.golang.org
+
+jobs:
+  test-frontend:
+    name: 前端检查
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v6.0.2
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 同步前端版本
+        run: node ./scripts/sync-frontend-version.mjs
+
+      - name: 安装前端依赖
+        run: |
+          cd frontend
+          npm ci
+
+      - name: 运行前端检查
+        run: |
+          cd frontend
+          npm audit
+          npm run lint:check
+          npm run typecheck
+
+  build-frontend:
+    needs: test-frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v6.0.2
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 同步前端版本
+        run: node ./scripts/sync-frontend-version.mjs
+
+      - name: 构建前端
+        run: |
+          cd frontend
+          npm ci
+          npm run build:assets
+
+      - name: 上传前端构建产物
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+          retention-days: 1
+
+  test-backend:
+    name: 后端测试
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v6.0.2
+
+      - name: 设置 Go
+        uses: actions/setup-go@v6
+        with:
+          cache: false
+          go-version-file: go.mod
+
+      - name: 检查脚本语法
+        run: |
+          sh -n entrypoint.sh
+          bash -n install.sh novas.sh runNovas.sh build.sh scripts/*.sh
+
+      - name: 运行静态检查
+        run: |
+          go vet ./...
+          go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
+          go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
+
+      - name: 运行 Go 测试
+        run: bash ./scripts/go-test-packages.sh
+
+  build-linux:
+    name: 构建-${{ matrix.platform }}
+    needs:
+      - build-frontend
+      - test-backend
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: amd64, arch: amd64, goarm: "", bootlin: x86-64, naive: true }
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v6.0.2
+
+      - name: 下载前端构建产物
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: web/html
+
+      - name: 设置 Go
+        uses: actions/setup-go@v6
+        with:
+          cache: false
+          go-version-file: go.mod
+
+      - name: 克隆 cronet-go（naive 平台）
+        if: matrix.naive
+        run: |
+          set -e
+          git init ~/cronet-go
+          git -C ~/cronet-go remote add origin ${{ env.CRONET_GO_REPO }}
+          git -C ~/cronet-go fetch --depth=1 origin "${{ env.CRONET_GO_VERSION }}"
+          git -C ~/cronet-go checkout FETCH_HEAD
+          git -C ~/cronet-go submodule update --init --recursive --depth=1
+
+      - name: 重新生成 Debian keyring（cronet sysroot）
+        if: matrix.naive
+        run: |
+          set -e
+          rm -f ~/cronet-go/naiveproxy/src/build/linux/sysroot_scripts/keyring.gpg
+          cd ~/cronet-go
+          GPG_TTY=/dev/null ./naiveproxy/src/build/linux/sysroot_scripts/generate_keyring.sh
+
+      - name: 构建 cronet 库并设置工具链环境
+        if: matrix.naive
+        run: |
+          set -e
+          cd ~/cronet-go
+          retry_cmd() {
+            local attempt=1
+            local max_attempts=6
+            while true; do
+              if "$@"; then
+                return 0
+              fi
+              if [ "$attempt" -ge "$max_attempts" ]; then
+                return 1
+              fi
+              echo "命令失败，$attempt/$max_attempts 次，20 秒后重试: $*"
+              attempt=$((attempt + 1))
+              sleep 20
+            done
+          }
+          retry_cmd go run ./cmd/build-naive --target=linux/${{ matrix.arch }} --libc=musl download-toolchain
+          retry_cmd go run ./cmd/build-naive --target=linux/${{ matrix.arch }} --libc=musl env | while IFS= read -r line; do
+            line="${line#export }"
+            [[ -z "$line" ]] && continue
+            echo "$line" >> $GITHUB_ENV
+          done
+
+      - name: 设置 Go 构建环境
+        run: |
+          echo "CGO_ENABLED=1" >> $GITHUB_ENV
+          echo "GOOS=linux" >> $GITHUB_ENV
+          echo "GOARCH=${{ matrix.arch }}" >> $GITHUB_ENV
+          if [ -n "${{ matrix.goarm }}" ]; then echo "GOARM=${{ matrix.goarm }}" >> $GITHUB_ENV; fi
+
+      - name: 设置 Bootlin musl（非 naive 平台）
+        if: ${{ matrix.naive != true }}
+        run: |
+          set -e
+          BOOTLIN_ARCH="${{ matrix.bootlin }}"
+          echo "正在解析 arch=$BOOTLIN_ARCH 的 Bootlin musl 工具链（平台=${{ matrix.platform }}）"
+          TARBALL_BASE="${{ env.BOOTLIN_BASE_URL }}/$BOOTLIN_ARCH/tarballs/"
+          TARBALL_URL=$(curl -fsSL "$TARBALL_BASE" | grep -oE "${BOOTLIN_ARCH}--musl--stable-[^\"]+\\.tar\\.xz" | sort -r | head -n1)
+          [ -z "$TARBALL_URL" ] && { echo "未找到 arch=$BOOTLIN_ARCH 的 Bootlin musl 工具链" >&2; exit 1; }
+          echo "正在下载：$TARBALL_URL"
+          cd /tmp
+          curl -fL -sS -o "$(basename "$TARBALL_URL")" "$TARBALL_BASE/$TARBALL_URL"
+          tar -xf "$(basename "$TARBALL_URL")"
+          TOOLCHAIN_DIR=$(find . -maxdepth 1 -type d -name "${BOOTLIN_ARCH}--musl--stable-*" | head -n1)
+          TOOLCHAIN_DIR="$(realpath "$TOOLCHAIN_DIR")"
+          BIN_DIR="$TOOLCHAIN_DIR/bin"
+          echo "PATH=$BIN_DIR:$PATH" >> $GITHUB_ENV
+          CC=$(find "$BIN_DIR" -maxdepth 1 \( -name '*-gcc.br_real' -o -name '*-gcc' \) -type f -executable 2>/dev/null | grep -v g++ | head -n1)
+          [ -z "$CC" ] && { echo "在 $BIN_DIR 中未找到 gcc" >&2; exit 1; }
+          echo "CC=$(realpath "$CC")" >> $GITHUB_ENV
+          SYSROOT=""
+          F=$(find "$TOOLCHAIN_DIR" -name "libc-header-start.h" 2>/dev/null | head -1)
+          if [ -n "$F" ]; then SYSROOT=$(dirname "$(dirname "$(dirname "$(dirname "$F")")")"); fi
+          if [ -n "$SYSROOT" ] && [ -d "$SYSROOT" ]; then
+            echo "CGO_CFLAGS=--sysroot=$SYSROOT" >> $GITHUB_ENV
+            echo "CGO_LDFLAGS=--sysroot=$SYSROOT -static" >> $GITHUB_ENV
+          fi
+
+      - name: 构建 NovaPanel
+        run: |
+          set -e
+          BUILD_TAGS="with_quic,with_grpc,with_utls,with_acme,with_gvisor,badlinkname,tfogo_checklinkname0,with_tailscale"
+          [ "${{ matrix.naive }}" = "true" ] && BUILD_TAGS="${BUILD_TAGS},with_naive_outbound,with_musl"
+          go build -ldflags="-w -s -checklinkname=0 -linkmode external -extldflags '-static'" -tags "$BUILD_TAGS" -o novas main.go
+          file novas
+          ldd novas 2>/dev/null || echo "已确认静态二进制文件"
+
+          mkdir -p release/novas/bin release/novas/scripts
+          cp novas novas.service novas.sh LICENSE THIRD_PARTY_NOTICES.md release/novas/
+          cp scripts/hy2-forward.sh scripts/install-runtime.sh release/novas/scripts/
+
+      - name: 构建 Mieru 服务端
+        run: |
+          set -e
+          CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} bash ./scripts/build-mita.sh release/novas/bin/mita
+          chmod 755 release/novas/bin/mita
+          release/novas/bin/mita version
+
+      - name: 打包
+        run: |
+          set -e
+          CC=gcc CGO_CFLAGS= CGO_LDFLAGS= NOVAS_TEST_BINARY="$PWD/novas" go test ./cmd -run TestRuntimeBinarySmoke -count=1
+          tar -zcvf NovaPanel-linux-${{ matrix.platform }}.tar.gz -C release novas
+          sha256sum NovaPanel-linux-${{ matrix.platform }}.tar.gz > NovaPanel-linux-${{ matrix.platform }}.tar.gz.sha256
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v7
+        with:
+          name: NovaPanel-linux-${{ matrix.platform }}
+          path: ./NovaPanel-linux-${{ matrix.platform }}.tar.gz*
+          retention-days: 1
+
+  publish-release:
+    name: 发布 Release 产物
+    needs:
+      - build-linux
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v6.0.2
+
+      - name: 规范化发布标签
+        id: vars
+        run: |
+          VERSION="$(tr -d '[:space:]' < config/version)"
+          TAG="${{ inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="v$VERSION"
+          fi
+          case "$TAG" in
+            v*) echo "tag=$TAG" >> "$GITHUB_OUTPUT" ;;
+            *) echo "tag=v$TAG" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: 下载构建产物
+        uses: actions/download-artifact@v8
+        with:
+          pattern: NovaPanel-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: 准备 Release 说明
+        id: body
+        run: |
+          set -e
+          BODY_PATH=".github/release-notes/${{ steps.vars.outputs.tag }}.md"
+          if [ ! -f "$BODY_PATH" ]; then
+            echo "未找到 $BODY_PATH，使用临时说明文件"
+            BODY_PATH="$(mktemp)"
+            printf '# NovaPanel %s\n\n' "${{ steps.vars.outputs.tag }}" > "$BODY_PATH"
+          fi
+          echo "body_path=$BODY_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: 发布到当前仓库 Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: NovaPanel ${{ steps.vars.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          fail_on_unmatched_files: true
+          body_path: ${{ steps.body.outputs.body_path }}
+          files: release-assets/*
+
+  cleanup-failed-runs:
+    name: 清理失败的旧 Run
+    needs:
+      - publish-release
+    if: ${{ needs.publish-release.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: 删除同提交失败的旧 Run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          WORKFLOW_FILE: release.yml
+          CURRENT_SHA: ${{ github.sha }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          runs=$(gh api "repos/$REPO/actions/workflows/$WORKFLOW_FILE/runs?status=completed&per_page=100" \
+            --jq '.workflow_runs[]
+              | select(.head_sha == env.CURRENT_SHA and .conclusion != "success" and (.id | tostring) != env.CURRENT_RUN_ID)
+              | .id')
+
+          if [ -z "$runs" ]; then
+            echo "没有需要清理的失败 Run"
+            exit 0
+          fi
+
+          for run_id in $runs; do
+            echo "删除失败的 workflow run: $run_id"
+            gh api -X DELETE "repos/$REPO/actions/runs/$run_id"
+          done

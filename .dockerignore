@@ -1,0 +1,45 @@
+.DS_Store
+dist/
+release/
+backup/
+bin/
+db/
+novas
+.runNovas.pid
+web/html
+main
+tmp
+.sync*
+*.tar.gz
+frontend/node_modules
+frontend/.vite
+
+# local env files
+.env.local
+.env.*.local
+
+# Log files
+*.log*
+.cache
+
+# Editor directories and files
+.idea
+.vscode
+
+# Local data, credentials and tooling output
+*.db
+*.db-*
+*.db.*
+*.sqlite*
+*.pem
+*.key
+*.crt
+*.cer
+cert/
+.env
+*.pid
+output/
+node_modules/
+.git/
+.github/
+.playwright-cli/

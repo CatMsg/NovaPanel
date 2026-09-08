@@ -1,0 +1,591 @@
+package api
+
+import (
+	"encoding/json"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/CatMsg/NovaPanel/database"
+	"github.com/CatMsg/NovaPanel/logger"
+	"github.com/CatMsg/NovaPanel/service"
+	"github.com/CatMsg/NovaPanel/util"
+	"github.com/CatMsg/NovaPanel/util/common"
+
+	"github.com/gin-gonic/gin"
+)
+
+type ApiService struct {
+	service.SettingService
+	service.UserService
+	service.ConfigService
+	service.ClientService
+	service.TlsService
+	service.InboundService
+	service.OutboundService
+	service.EndpointService
+	service.FleetService
+	service.ServicesService
+	service.PanelService
+	service.StatsService
+	service.ServerService
+	service.HealthService
+	service.AlertService
+}
+
+func (a *ApiService) LoadData(c *gin.Context) {
+	data, err := a.getData(c)
+	if err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
+	jsonObj(c, data, nil)
+}
+
+func (a *ApiService) getData(c *gin.Context) (interface{}, error) {
+	data := make(map[string]interface{}, 0)
+	lu := c.Query("lu")
+	isUpdated, err := a.ConfigService.CheckChanges(lu)
+	if err != nil {
+		return "", err
+	}
+	onlines, err := a.StatsService.GetOnlines()
+
+	sysInfo := a.ServerService.GetSingboxInfo()
+	if sysInfo["running"] == false {
+		logs := a.ServerService.GetLogs("1", "debug")
+		if len(logs) > 0 {
+			data["lastLog"] = logs[0]
+		}
+	}
+
+	if err != nil {
+		return "", err
+	}
+	if isUpdated {
+		cacheKey := "load:" + getHostname(c)
+		if cached, ok := getCachedLoadData(cacheKey); ok {
+			cached["onlines"] = onlines
+			cached["lastUpdate"] = service.CurrentDataVersion()
+			if _, ok := data["lastLog"]; ok {
+				cached["lastLog"] = data["lastLog"]
+			}
+			return cached, nil
+		}
+
+		config, err := a.SettingService.GetConfig()
+		if err != nil {
+			return "", err
+		}
+		clients, err := a.ClientService.GetAll()
+		if err != nil {
+			return "", err
+		}
+		tlsConfigs, err := a.TlsService.GetAll()
+		if err != nil {
+			return "", err
+		}
+		inbounds, err := a.InboundService.GetAll()
+		if err != nil {
+			return "", err
+		}
+		outbounds, err := a.OutboundService.GetAll()
+		if err != nil {
+			return "", err
+		}
+		endpoints, err := a.EndpointService.GetAll()
+		if err != nil {
+			return "", err
+		}
+		services, err := a.ServicesService.GetAll()
+		if err != nil {
+			return "", err
+		}
+		subURI, err := a.SettingService.GetFinalSubURI(getHostname(c))
+		if err != nil {
+			return "", err
+		}
+		subMode, err := a.SettingService.GetSubMode()
+		if err != nil {
+			return "", err
+		}
+		trafficAge, err := a.SettingService.GetTrafficAge()
+		if err != nil {
+			return "", err
+		}
+		data["config"] = json.RawMessage(config)
+		data["clients"] = clients
+		data["tls"] = tlsConfigs
+		data["inbounds"] = inbounds
+		data["outbounds"] = outbounds
+		data["endpoints"] = endpoints
+		data["services"] = services
+		data["subURI"] = subURI
+		data["subMode"] = subMode
+		if subMode == "master" {
+			data["subAggregateURI"] = subURI + "aggregate"
+		}
+		data["enableTraffic"] = trafficAge > 0
+		data["onlines"] = onlines
+		if err := storeCachedLoadData(cacheKey, data); err != nil {
+			logger.Warning("store load cache failed:", err)
+		}
+	} else {
+		data["onlines"] = onlines
+	}
+	data["lastUpdate"] = service.CurrentDataVersion()
+
+	return data, nil
+}
+
+func (a *ApiService) LoadPartialData(c *gin.Context, objs []string) error {
+	data := make(map[string]interface{}, 0)
+	id := c.Query("id")
+
+	for _, obj := range objs {
+		switch obj {
+		case "inbounds":
+			inbounds, err := a.InboundService.Get(id)
+			if err != nil {
+				return err
+			}
+			data[obj] = inbounds
+		case "outbounds":
+			outbounds, err := a.OutboundService.GetAll()
+			if err != nil {
+				return err
+			}
+			data[obj] = outbounds
+		case "endpoints":
+			endpoints, err := a.EndpointService.GetAll()
+			if err != nil {
+				return err
+			}
+			data[obj] = endpoints
+		case "services":
+			services, err := a.ServicesService.GetAll()
+			if err != nil {
+				return err
+			}
+			data[obj] = services
+		case "tls":
+			tlsConfigs, err := a.TlsService.GetAll()
+			if err != nil {
+				return err
+			}
+			data[obj] = tlsConfigs
+		case "clients":
+			clients, err := a.ClientService.Get(id)
+			if err != nil {
+				return err
+			}
+			data[obj] = clients
+		case "config":
+			config, err := a.SettingService.GetConfig()
+			if err != nil {
+				return err
+			}
+			data[obj] = json.RawMessage(config)
+		case "settings":
+			settings, err := a.SettingService.GetAllSetting()
+			if err != nil {
+				return err
+			}
+			data[obj] = settings
+		}
+	}
+
+	jsonObj(c, data, nil)
+	return nil
+}
+
+func (a *ApiService) GetUsers(c *gin.Context) {
+	users, err := a.UserService.GetUsers()
+	if err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
+	jsonObj(c, *users, nil)
+}
+
+func (a *ApiService) GetSettings(c *gin.Context) {
+	data, err := a.SettingService.GetAllSetting()
+	if err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
+	jsonObj(c, data, err)
+}
+
+func (a *ApiService) GetStats(c *gin.Context) {
+	resource := c.Query("resource")
+	tag := c.Query("tag")
+	limit, err := strconv.Atoi(c.Query("limit"))
+	if err != nil || limit < 1 {
+		limit = 100
+	} else if limit > 8760 {
+		limit = 8760
+	}
+	data, err := a.StatsService.GetStats(resource, tag, limit)
+	if err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
+	jsonObj(c, data, err)
+}
+
+func (a *ApiService) GetStatus(c *gin.Context) {
+	request := c.Query("r")
+	result := a.ServerService.GetStatus(request)
+	jsonObj(c, result, nil)
+}
+
+func (a *ApiService) GetPublicIP(c *gin.Context) {
+	ip := a.ServerService.GetPublicIP()
+	jsonObj(c, ip, nil)
+}
+
+func (a *ApiService) GetHealth(c *gin.Context) {
+	force := c.Query("force") == "1" || strings.EqualFold(c.Query("force"), "true")
+	jsonObj(c, a.HealthService.GetHealthReport(force), nil)
+}
+
+func (a *ApiService) GetAlertSettings(c *gin.Context) {
+	settings, err := a.AlertService.GetAlertSettings()
+	jsonObj(c, settings, err)
+}
+
+func (a *ApiService) SaveAlertSettings(c *gin.Context) {
+	var settings service.AlertSettings
+	if err := json.Unmarshal([]byte(c.Request.FormValue("data")), &settings); err != nil {
+		jsonMsg(c, "save", err)
+		return
+	}
+	jsonMsg(c, "save", a.AlertService.SaveAlertSettings(settings))
+}
+
+func (a *ApiService) TestAlert(c *gin.Context) {
+	jsonMsg(c, "save", a.AlertService.TestAlert())
+}
+
+func (a *ApiService) PreflightSave(c *gin.Context) {
+	obj := c.Request.FormValue("object")
+	act := c.Request.FormValue("action")
+	data := json.RawMessage(c.Request.FormValue("data"))
+	initUsers := c.Request.FormValue("initUsers")
+	report, err := a.ConfigService.PreflightSave(obj, act, data, initUsers, getHostname(c))
+	jsonObj(c, report, err)
+}
+
+func (a *ApiService) GetPorts(c *gin.Context) {
+	result := a.ServerService.GetPortStatus()
+	jsonObj(c, result, nil)
+}
+
+func (a *ApiService) GetFleetStatus(c *gin.Context) {
+	result := a.FleetService.GetFleetStatus()
+	jsonObj(c, result, nil)
+}
+
+func (a *ApiService) GetMasqueStatus(c *gin.Context) {
+	tag := c.Query("tag")
+	masqueService := service.GetMasqueService()
+	if masqueService == nil {
+		jsonMsg(c, "", common.NewError("masque service not initialized"))
+		return
+	}
+	result, err := masqueService.GetStatus(tag)
+	if err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
+	jsonObj(c, result, nil)
+}
+
+func (a *ApiService) GetMieruStatus(c *gin.Context) {
+	tag := c.Query("tag")
+	mieruService := service.GetMieruService()
+	if mieruService == nil {
+		jsonMsg(c, "", common.NewError("mieru service not initialized"))
+		return
+	}
+	result, err := mieruService.GetStatus(tag)
+	if err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
+	jsonObj(c, result, nil)
+}
+
+func (a *ApiService) EnableMieruDebug(c *gin.Context) {
+	mieruService := service.GetMieruService()
+	if mieruService == nil {
+		jsonMsg(c, "", common.NewError("mieru service not initialized"))
+		return
+	}
+	deadline, err := mieruService.EnableTemporaryDebug()
+	if err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
+	jsonObj(c, map[string]interface{}{
+		"debug_until": deadline.Format(time.RFC3339),
+	}, nil)
+}
+
+func (a *ApiService) GetFleet(c *gin.Context) {
+	result, err := a.FleetService.GetFleet()
+	jsonObj(c, result, err)
+}
+
+func (a *ApiService) SaveFleet(c *gin.Context) {
+	var inputs []service.FleetServerInput
+	data := c.Request.FormValue("data")
+	if err := json.Unmarshal([]byte(data), &inputs); err != nil {
+		jsonMsg(c, "save", err)
+		return
+	}
+	if err := a.FleetService.SaveFleet(inputs); err != nil {
+		jsonMsg(c, "save", err)
+		return
+	}
+	jsonMsg(c, "save", nil)
+}
+
+func (a *ApiService) FleetAction(c *gin.Context) {
+	id := strings.TrimSpace(c.Request.FormValue("id"))
+	action := strings.TrimSpace(c.Request.FormValue("action"))
+	obj, err := a.FleetService.FleetAction(id, action)
+	jsonObj(c, obj, err)
+}
+
+func (a *ApiService) FleetRefresh(c *gin.Context) {
+	id := strings.TrimSpace(c.Request.FormValue("id"))
+	server, err := a.FleetService.GetFleetServer(id)
+	jsonObj(c, server, err)
+}
+
+func (a *ApiService) GetUpdateStatus(c *gin.Context) {
+	status, err := service.GetUpdateStatus()
+	jsonObj(c, status, err)
+}
+
+func (a *ApiService) ReconcilePorts(c *gin.Context) {
+	err := a.ConfigService.SettingService.RebuildAllManagedPortForwarding(&a.ConfigService.InboundService, &a.ConfigService.EndpointService)
+	jsonMsg(c, "reconcilePorts", err)
+}
+
+func (a *ApiService) RepairPortIssue(c *gin.Context) {
+	err := service.RepairPortDriftIssue(c.Request.FormValue("issueId"))
+	jsonMsg(c, "repairPortIssue", err)
+}
+
+func (a *ApiService) GetOnlines(c *gin.Context) {
+	onlines, err := a.StatsService.GetOnlines()
+	jsonObj(c, onlines, err)
+}
+
+func (a *ApiService) GetLogs(c *gin.Context) {
+	count := c.Query("c")
+	level := c.Query("l")
+	logs := a.ServerService.GetLogs(count, level)
+	jsonObj(c, logs, nil)
+}
+
+func (a *ApiService) CheckChanges(c *gin.Context) {
+	actor := c.Query("a")
+	chngKey := c.Query("k")
+	count := c.Query("c")
+	changes := a.ConfigService.GetChanges(actor, chngKey, count)
+	jsonObj(c, changes, nil)
+}
+
+func (a *ApiService) GetKeypairs(c *gin.Context) {
+	kType := c.Query("k")
+	options := c.Query("o")
+	keypair := a.ServerService.GenKeypair(kType, options)
+	jsonObj(c, keypair, nil)
+}
+
+func (a *ApiService) GetDb(c *gin.Context) {
+	exclude := c.Query("exclude")
+	dbPath, cleanup, err := database.CreateDBBackup(exclude)
+	if err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
+	defer cleanup()
+	c.Header("Content-Type", "application/octet-stream")
+	c.FileAttachment(dbPath, "novas_"+time.Now().Format("20060102-150405")+".db")
+}
+
+func (a *ApiService) Login(c *gin.Context) {
+	remoteIP := getRemoteIp(c)
+	var payload struct {
+		User string `form:"user" json:"user"`
+		Pass string `form:"pass" json:"pass"`
+	}
+	if err := c.ShouldBind(&payload); err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
+
+	loginUser, err := a.UserService.Login(payload.User, payload.Pass, remoteIP)
+	if err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
+
+	sessionMaxAge, err := a.SettingService.GetSessionMaxAge()
+	if err != nil {
+		logger.Infof("Unable to get session's max age from DB")
+	}
+
+	err = SetLoginUser(c, loginUser, sessionMaxAge)
+	if err == nil {
+		logger.Info("user ", loginUser, " login success")
+	} else {
+		logger.Warning("login failed: ", err)
+	}
+
+	jsonMsg(c, "", nil)
+}
+
+func (a *ApiService) ChangePass(c *gin.Context) {
+	id := c.Request.FormValue("id")
+	oldPass := c.Request.FormValue("oldPass")
+	newUsername := c.Request.FormValue("newUsername")
+	newPass := c.Request.FormValue("newPass")
+	err := a.UserService.ChangePass(id, oldPass, newUsername, newPass)
+	if err == nil {
+		logger.Info("change user credentials success")
+		jsonMsg(c, "save", nil)
+	} else {
+		logger.Warning("change user credentials failed:", err)
+		jsonMsg(c, "", err)
+	}
+}
+
+func (a *ApiService) Save(c *gin.Context, loginUser string) {
+	hostname := getHostname(c)
+	obj := c.Request.FormValue("object")
+	act := c.Request.FormValue("action")
+	data := c.Request.FormValue("data")
+	initUsers := c.Request.FormValue("initUsers")
+	objs, changed, err := a.ConfigService.Save(obj, act, json.RawMessage(data), initUsers, loginUser, hostname)
+	if err != nil {
+		jsonMsg(c, "save", err)
+		return
+	}
+	if obj == "settings" && changed {
+		if restartErr := a.PanelService.RestartPanel(3 * time.Second); restartErr != nil {
+			logger.Warning("schedule panel restart failed:", restartErr)
+		}
+	}
+	err = a.LoadPartialData(c, objs)
+	if err != nil {
+		jsonMsg(c, obj, err)
+	}
+}
+
+func (a *ApiService) RestartApp(c *gin.Context) {
+	err := a.PanelService.RestartPanel(3 * time.Second)
+	jsonMsg(c, "restartApp", err)
+}
+
+func (a *ApiService) RestartSb(c *gin.Context) {
+	err := a.ConfigService.RestartCore()
+	jsonMsg(c, "restartSb", err)
+}
+
+func (a *ApiService) LinkConvert(c *gin.Context) {
+	link := c.Request.FormValue("link")
+	result, _, err := util.GetOutbound(link, 0)
+	jsonObj(c, result, err)
+}
+
+func (a *ApiService) SubConvert(c *gin.Context) {
+	link := c.Request.FormValue("link")
+	result, err := util.GetExternalSub(link)
+	jsonObj(c, result, err)
+}
+
+func (a *ApiService) ImportDb(c *gin.Context) {
+	file, _, err := c.Request.FormFile("db")
+	if err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
+	defer file.Close()
+	err = database.ImportDB(file)
+	jsonMsg(c, "", err)
+}
+
+func (a *ApiService) ValidateDb(c *gin.Context) {
+	file, _, err := c.Request.FormFile("db")
+	if err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
+	defer file.Close()
+	report, err := database.ValidateDB(file)
+	jsonObj(c, report, err)
+}
+
+func (a *ApiService) Logout(c *gin.Context) {
+	loginUser := GetLoginUser(c)
+	if loginUser != "" {
+		logger.Infof("user %s logout", loginUser)
+	}
+	jsonMsg(c, "", ClearSession(c))
+}
+
+func (a *ApiService) LoadTokens() ([]byte, error) {
+	return a.UserService.LoadTokens()
+}
+
+func (a *ApiService) GetTokens(c *gin.Context) {
+	loginUser := GetLoginUser(c)
+	tokens, err := a.UserService.GetUserTokens(loginUser)
+	jsonObj(c, tokens, err)
+}
+
+func (a *ApiService) AddToken(c *gin.Context) {
+	loginUser := GetLoginUser(c)
+	expiry := c.Request.FormValue("expiry")
+	expiryInt, err := strconv.ParseInt(expiry, 10, 64)
+	if err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
+	desc := c.Request.FormValue("desc")
+	token, err := a.UserService.AddToken(loginUser, expiryInt, desc)
+	jsonObj(c, token, err)
+}
+
+func (a *ApiService) DeleteToken(c *gin.Context) {
+	tokenId := c.Request.FormValue("id")
+	err := a.UserService.DeleteToken(tokenId)
+	jsonMsg(c, "", err)
+}
+
+func (a *ApiService) GetSingboxConfig(c *gin.Context) {
+	rawConfig, err := a.ConfigService.GetConfig("")
+	if err != nil {
+		c.Status(400)
+		_, _ = c.Writer.WriteString(err.Error())
+		return
+	}
+	c.Header("Content-Type", "application/json")
+	c.Header("Content-Disposition", "attachment; filename=config_"+time.Now().Format("20060102-150405")+".json")
+	if _, err := c.Writer.Write(*rawConfig); err != nil {
+		logger.Warning("write config download failed: ", err)
+	}
+}
+
+func (a *ApiService) GetCheckOutbound(c *gin.Context) {
+	tag := c.Query("tag")
+	link := c.Query("link")
+	result := a.ConfigService.CheckOutbound(tag, link)
+	jsonObj(c, result, nil)
+}

@@ -1,0 +1,12 @@
+services:
+  novas:
+    image: ghcr.io/catmsg/novapanel-app
+    container_name: novas
+    hostname: "novas"
+    network_mode: host
+    volumes:
+      - "./db:/app/db"
+      - "./cert:/app/cert"
+    tty: true
+    restart: unless-stopped
+    entrypoint: "./entrypoint.sh"
