@@ -95,14 +95,6 @@ func deleteManagedPortEntriesTx(tx *gorm.DB, scope string, ownerID uint) error {
 	return tx.Where("scope = ? AND owner_id = ?", scope, ownerID).Delete(&model.ManagedPortEntry{}).Error
 }
 
-func createManagedPortEntriesTx(tx *gorm.DB, scope string, ownerID uint, ownerTag string, ports []int) error {
-	return createManagedPortRangeEntriesTx(tx, scope, ownerID, ownerTag, managedPortRangesFromPorts(ports))
-}
-
-func createManagedPortRangeEntriesTx(tx *gorm.DB, scope string, ownerID uint, ownerTag string, ranges []managedPortRange) error {
-	return createManagedPortRangeProtocolEntriesTx(tx, scope, ownerID, ownerTag, ranges, managedForwardProtocols)
-}
-
 func createManagedPortRangeProtocolEntriesTx(tx *gorm.DB, scope string, ownerID uint, ownerTag string, ranges []managedPortRange, protocols []string) error {
 	ranges = normalizeManagedPortRanges(ranges)
 	protocols = normalizeManagedProtocols(protocols)

@@ -192,10 +192,6 @@ func validateInboundPortsAgainstSSH(inbound *model.Inbound, ports []int) error {
 	return validateInboundPortRangesAgainstSSHProtocols(inbound, managedPortRangesFromPorts(ports), managedForwardProtocols)
 }
 
-func validateInboundPortRangesAgainstSSH(inbound *model.Inbound, ranges []managedPortRange) error {
-	return validateInboundPortRangesAgainstSSHProtocols(inbound, ranges, managedForwardProtocols)
-}
-
 func validateInboundPortRangesAgainstSSHProtocols(inbound *model.Inbound, ranges []managedPortRange, protocols []string) error {
 	if !containsManagedProtocol(protocols, "tcp") {
 		return nil

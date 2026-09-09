@@ -178,21 +178,6 @@ func intersectManagedProtocols(left, right []string) []string {
 	return intersection
 }
 
-func collectEndpointManagedPorts(endpoint *model.Endpoint) ([]int, error) {
-	if endpoint == nil {
-		return nil, nil
-	}
-
-	_, ports, _, active, err := collectEndpointForwardPorts(endpoint)
-	if err != nil {
-		return nil, err
-	}
-	if !active {
-		return nil, nil
-	}
-	return ports, nil
-}
-
 func normalizeManagedPorts(ports []int) []int {
 	if len(ports) == 0 {
 		return nil
