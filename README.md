@@ -52,6 +52,15 @@ bash <(curl -Ls https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.
 | `novas admin -reset` | 重置管理员账号 |
 | `novas uninstall` | 卸载 NovaPanel |
 
+### 登录防爆破
+
+Linux systemd 主机的安装脚本会自动安装并配置 Fail2ban。网页登录在 10 分钟内连续失败 10 次后，来源 IP 会被永久封禁；规则只匹配当前面板 TCP 端口，不会封禁 SSH 端口。
+
+- 在“设置 -> 界面”维护可信反向代理 IP/CIDR 和登录封禁白名单。
+- 在“健康诊断 -> 登录防爆破”查看状态并解除单个 IP 的封禁。
+- 命令行支持 `novas security status`、`novas security bans`、`novas security sync` 和 `novas security unban <IP>`。
+- 启用 Telegram 告警后，达到登录失败阈值时会发送通知。
+
 ## 本地开发
 
 ```sh

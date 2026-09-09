@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -37,6 +38,28 @@ func TestUpdateFirstUserCreatesAndUpdatesUser(t *testing.T) {
 	}
 	if user.Username != "gamma" || user.Password != "delta" {
 		t.Fatalf("unexpected first user after update: %#v", user)
+	}
+}
+
+func TestLoginDistinguishesInvalidCredentials(t *testing.T) {
+	workDir := t.TempDir()
+	if err := database.InitDB(filepath.Join(workDir, "user-login.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	svc := &UserService{}
+	if err := svc.UpdateFirstUser("alpha", "beta"); err != nil {
+		t.Fatalf("update first user: %v", err)
+	}
+	if _, err := svc.Login("alpha", "wrong", "192.0.2.1"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("expected ErrInvalidCredentials, got %v", err)
+	}
+	username, err := svc.Login("alpha", "beta", "192.0.2.1")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if username != "alpha" {
+		t.Fatalf("unexpected username: %q", username)
 	}
 }
 

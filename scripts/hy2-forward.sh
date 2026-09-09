@@ -380,6 +380,10 @@ rewrite_ufw_file() {
 reload_ufw() {
   if has_cmd ufw && ufw status 2>/dev/null | grep -q '^Status: active'; then
     ufw reload >/dev/null
+    if has_cmd fail2ban-client && fail2ban-client status novapanel >/dev/null 2>&1; then
+      fail2ban-client reload --restart --if-exists novapanel >/dev/null 2>&1 || \
+        fail2ban-client reload novapanel >/dev/null 2>&1 || true
+    fi
   fi
 }
 

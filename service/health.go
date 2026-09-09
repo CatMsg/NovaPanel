@@ -34,6 +34,7 @@ type HealthReport struct {
 type HealthService struct {
 	SettingService
 	ServerService
+	LoginGuardService
 }
 
 func (s *HealthService) GetHealthReport(force bool) *HealthReport {
@@ -46,7 +47,7 @@ func (s *HealthService) GetHealthReport(force bool) *HealthReport {
 		Status:      "healthy",
 		CheckedAt:   started.Format(time.RFC3339),
 		Summary:     map[string]int{"ok": 0, "warning": 0, "error": 0, "info": 0},
-		Checks:      make([]HealthCheck, 0, 10),
+		Checks:      make([]HealthCheck, 0, 12),
 		Diagnostics: make(map[string]interface{}),
 	}
 	report.add(s.checkDatabase())
@@ -59,6 +60,7 @@ func (s *HealthService) GetHealthReport(force bool) *HealthReport {
 	report.add(s.checkMasque(report.Diagnostics))
 	report.add(s.checkMieru(report.Diagnostics))
 	report.add(s.checkDefaultCredentials())
+	report.add(s.checkLoginProtection(report.Diagnostics))
 	report.add(s.checkUpdate(report.Diagnostics))
 
 	sort.SliceStable(report.Checks, func(i, j int) bool {
@@ -71,6 +73,24 @@ func (s *HealthService) GetHealthReport(force bool) *HealthReport {
 	}
 	report.DurationMs = time.Since(started).Milliseconds()
 	return report
+}
+
+func (s *HealthService) checkLoginProtection(diagnostics map[string]interface{}) HealthCheck {
+	status := s.LoginGuardService.GetLoginProtectionStatus()
+	diagnostics["loginProtection"] = status
+	if !status.Supported {
+		return HealthCheck{ID: "login-protection", Title: "登录防爆破", Status: "info", Summary: "仅在 Linux 服务器上启用"}
+	}
+	if !status.Installed {
+		return HealthCheck{ID: "login-protection", Title: "登录防爆破", Status: "error", Summary: "Fail2ban 未安装", Detail: status.Error, Action: "login-security"}
+	}
+	if !status.Active {
+		return HealthCheck{ID: "login-protection", Title: "登录防爆破", Status: "error", Summary: "NovaPanel jail 未运行", Detail: status.Error, Action: "login-security"}
+	}
+	if len(status.BannedIPs) > 0 {
+		return HealthCheck{ID: "login-protection", Title: "登录防爆破", Status: "warning", Summary: fmt.Sprintf("已永久封禁 %d 个来源 IP", len(status.BannedIPs)), Action: "login-security"}
+	}
+	return HealthCheck{ID: "login-protection", Title: "登录防爆破", Status: "ok", Summary: "10 次失败/10 分钟后永久封禁"}
 }
 
 func (r *HealthReport) add(check HealthCheck) {

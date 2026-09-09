@@ -61,6 +61,10 @@ const en = {
     copyFailed: 'Copy failed. Check clipboard permission.', missingRule: 'Missing rule', duplicateRule: 'Duplicate rule',
     orphanRule: 'Orphan rule', targetMismatch: 'Target mismatch', duplicateConfig: 'Duplicate configuration', inspectionFailed: 'Inspection failed',
     unsupported: 'Unsupported on this platform', inbound: 'Inbound', endpoint: 'Endpoint', panel: 'Panel', managedRule: 'Managed rule',
+    loginSecurityEyebrow: 'Access security', loginSecurity: 'Login protection',
+    loginSecurityHint: '10 failed logins within 10 minutes trigger a permanent IP ban. Manage trusted sources in Settings.',
+    protectionActive: 'Protection active', protectionInactive: 'Protection inactive', unban: 'Unban',
+    noBannedIps: 'No source IP is currently banned.', unbanned: 'IP address unbanned',
   },
 }
 
@@ -118,6 +122,10 @@ const zhHans = {
     repaired: '端口规则已修复', testSent: '测试通知已发送', reportCopied: '诊断报告已复制', copyFailed: '复制失败，请检查浏览器剪贴板权限',
     missingRule: '缺失规则', duplicateRule: '重复规则', orphanRule: '孤立规则', targetMismatch: '目标不匹配', duplicateConfig: '配置重复',
     inspectionFailed: '检查失败', unsupported: '当前平台不支持', inbound: '入站', endpoint: '节点', panel: '面板', managedRule: '受管规则',
+    loginSecurityEyebrow: '访问安全', loginSecurity: '登录防爆破',
+    loginSecurityHint: '10 分钟内登录失败 10 次即永久封禁来源 IP；可信管理地址在设置页维护。',
+    protectionActive: '防护运行中', protectionInactive: '防护未运行', unban: '解除封禁',
+    noBannedIps: '当前没有被封禁的来源 IP。', unbanned: '已解除 IP 封禁',
   },
 }
 

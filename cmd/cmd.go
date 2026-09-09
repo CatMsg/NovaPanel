@@ -58,6 +58,7 @@ func ParseCmd() {
 		fmt.Println("    checkdb        validate the offline database")
 		fmt.Println("    healthcheck    check local panel availability")
 		fmt.Println("    setting        set/reset/show settings")
+		fmt.Println("    security       status/list/sync/unban login protection")
 		fmt.Println()
 		adminCmd.Usage()
 		fmt.Println()
@@ -127,6 +128,8 @@ func ParseCmd() {
 			updateSetting(port, path, subPort, subPath, webCertFile, webKeyFile, subCertFile, subKeyFile, clearWebTLS, clearSubTLS)
 			showSetting()
 		}
+	case "security":
+		runSecurityCommand(os.Args[2:])
 	default:
 		fmt.Println("Invalid subcommands")
 		flag.Usage()

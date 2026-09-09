@@ -13,7 +13,7 @@ novas_deploy() (
     source_dir="" old_name="" snapshot="" stage=""
     stopped=0 deployed=0 committed=0 old_active=0 old_enabled=0
 
-    for file in novas novas.sh novas.service scripts/hy2-forward.sh bin/mita; do
+    for file in novas novas.sh novas.service scripts/hy2-forward.sh scripts/login-guard.sh bin/mita; do
         [[ -f "$package/$file" && ! -L "$package/$file" ]] || { echo "Incomplete novas archive: $file" >&2; exit 1; }
     done
     [[ -x "$package/novas" ]] || exit 1
@@ -95,7 +95,7 @@ novas_deploy() (
     fi
     stage=$(mktemp -d "${root}/usr/local/.novas-stage.XXXXXX")
     if [[ -n "$source_dir" ]]; then cp -a "$source_dir/." "$stage/"; fi
-    rm -f "$stage/novas" "$stage/novas.sh" "$stage/novas.service" "$stage/bin/mita" "$stage/scripts/hy2-forward.sh" "$stage/scripts/install-runtime.sh"
+    rm -f "$stage/novas" "$stage/novas.sh" "$stage/novas.service" "$stage/bin/mita" "$stage/scripts/hy2-forward.sh" "$stage/scripts/login-guard.sh" "$stage/scripts/install-runtime.sh"
     cp -a "$package/." "$stage/"
     chmod 755 "$stage"
     chmod 755 "$stage/novas" "$stage/novas.sh" "$stage/scripts/"*.sh

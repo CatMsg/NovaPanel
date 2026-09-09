@@ -91,6 +91,14 @@ func Warningf(format string, args ...interface{}) {
 	addToBuffer("WARNING", fmt.Sprintf(format, args...))
 }
 
+// AuditWarningf writes security events directly to stderr so systemd-journald
+// reliably associates them with novas.service for Fail2ban matching.
+func AuditWarningf(format string, args ...interface{}) {
+	message := fmt.Sprintf(format, args...)
+	fmt.Fprintln(os.Stderr, "WARNING - "+message)
+	addToBuffer("WARNING", message)
+}
+
 func Error(args ...interface{}) {
 	logger.Error(args...)
 	addToBuffer("ERROR", fmt.Sprint(args...))

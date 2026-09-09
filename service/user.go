@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/CatMsg/NovaPanel/database"
@@ -13,6 +14,8 @@ import (
 
 type UserService struct {
 }
+
+var ErrInvalidCredentials = errors.New("invalid credentials")
 
 func (s *UserService) saveUserTx(tx *gorm.DB, user *model.User) error {
 	if user == nil {
@@ -69,14 +72,28 @@ func (s *UserService) UpdateFirstUser(username string, password string) error {
 }
 
 func (s *UserService) Login(username string, password string, remoteIP string) (string, error) {
-	user := s.CheckUser(username, password, remoteIP)
-	if user == nil {
-		return "", common.NewError("wrong user or password! IP: ", remoteIP)
+	user, err := s.checkUser(username, password, remoteIP)
+	if database.IsNotFound(err) {
+		return "", ErrInvalidCredentials
+	}
+	if err != nil {
+		return "", err
 	}
 	return user.Username, nil
 }
 
 func (s *UserService) CheckUser(username string, password string, remoteIP string) *model.User {
+	user, err := s.checkUser(username, password, remoteIP)
+	if err != nil {
+		if !database.IsNotFound(err) {
+			logger.Warning("check user err:", err, " IP: ", remoteIP)
+		}
+		return nil
+	}
+	return user
+}
+
+func (s *UserService) checkUser(username string, password string, remoteIP string) (*model.User, error) {
 	db := database.GetDB()
 
 	user := &model.User{}
@@ -84,11 +101,8 @@ func (s *UserService) CheckUser(username string, password string, remoteIP strin
 		Where("username = ? and password = ?", username, password).
 		First(user).
 		Error
-	if database.IsNotFound(err) {
-		return nil
-	} else if err != nil {
-		logger.Warning("check user err:", err, " IP: ", remoteIP)
-		return nil
+	if err != nil {
+		return nil, err
 	}
 
 	lastLoginTxt := time.Now().Format("2006-01-02 15:04:05") + " " + remoteIP
@@ -100,7 +114,7 @@ func (s *UserService) CheckUser(username string, password string, remoteIP strin
 	if err != nil {
 		logger.Warning("unable to log login data", err)
 	}
-	return user
+	return user, nil
 }
 
 func (s *UserService) GetUsers() (*[]model.User, error) {

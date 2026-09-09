@@ -56,6 +56,8 @@ var defaultValueMap = map[string]string{
 	"webPath":              "/app/",
 	"webURI":               "",
 	"sessionMaxAge":        "0",
+	"loginTrustedProxies":  "",
+	"loginBanAllowlist":    "",
 	"trafficAge":           "30",
 	"timeLocation":         "Asia/Shanghai",
 	"subListen":            "",
@@ -611,6 +613,11 @@ func (s *SettingService) normalizeSettingValue(key, value string) string {
 		if !strings.HasSuffix(value, "/") {
 			value += "/"
 		}
+	case "loginTrustedProxies", "loginBanAllowlist":
+		normalized, err := normalizeNetworkList(value)
+		if err == nil {
+			value = normalized
+		}
 	}
 	return value
 }
@@ -623,6 +630,10 @@ func (s *SettingService) validateSettingValue(key, value string) error {
 	case "webCertFile", "webKeyFile", "subCertFile", "subKeyFile":
 		if err := s.fileExists(value); err != nil {
 			return common.NewError(" -> ", value, " is not exists")
+		}
+	case "loginTrustedProxies", "loginBanAllowlist":
+		if _, err := normalizeNetworkList(value); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -638,12 +649,19 @@ func (s *SettingService) applySettingSideEffects(tx *gorm.DB, key, value string)
 func (s *SettingService) buildSavePostCommit(change settingPortChange, changedSettings map[string]string) func() error {
 	portsChanged := change.webPortChanged || change.subPortChanged
 	needsRestart := requiresSubServerRestart(changedSettings)
-	if !portsChanged && !needsRestart {
+	_, allowlistChanged := changedSettings["loginBanAllowlist"]
+	needsLoginGuardSync := change.webPortChanged || allowlistChanged
+	if !portsChanged && !needsRestart && !needsLoginGuardSync {
 		return nil
 	}
 	return func() error {
 		if portsChanged {
 			if err := s.SyncManagedPanelPortForwarding(change.oldWebPort, change.newWebPort, change.oldSubPort, change.newSubPort); err != nil {
+				return err
+			}
+		}
+		if needsLoginGuardSync {
+			if err := (&LoginGuardService{}).SyncLoginProtection(); err != nil {
 				return err
 			}
 		}

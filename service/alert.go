@@ -105,6 +105,14 @@ func (s *AlertService) TestAlert() error {
 	return s.sendAlert(values, "NovaPanel 告警测试\n通知通道配置正常。")
 }
 
+func (s *AlertService) NotifyLoginBan(remoteIP string) error {
+	values, err := s.alertSettingValues()
+	if err != nil || values["alertEnabled"] != "true" {
+		return err
+	}
+	return s.sendAlert(values, fmt.Sprintf("NovaPanel 登录安全告警\nIP %s 在 10 分钟内连续失败 10 次，Fail2ban 已按当前永久封禁与白名单策略处理。", remoteIP))
+}
+
 func (s *AlertService) EvaluateAndNotify() error {
 	if !alertRunMu.TryLock() {
 		return nil

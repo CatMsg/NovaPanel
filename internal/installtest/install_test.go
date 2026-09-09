@@ -69,7 +69,7 @@ case "$1" in
   healthcheck) [[ "$SCENARIO" != health-failure ]];;
 esac
 `, 0755)
-			for _, file := range []string{"novas.sh", "novas.service", "scripts/hy2-forward.sh", "bin/mita"} {
+			for _, file := range []string{"novas.sh", "novas.service", "scripts/hy2-forward.sh", "scripts/login-guard.sh", "bin/mita"} {
 				write(t, filepath.Join(pkg, file), "#!/bin/sh\nexit 0\n", 0755)
 			}
 			if scenario == "bad-package" {

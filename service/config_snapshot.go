@@ -120,6 +120,9 @@ func (s *ConfigService) compensateFailedSave(snapshot *configSnapshot, obj strin
 		errs = append(errs, fmt.Errorf("restore managed ports: %w", err))
 	}
 	if obj == "settings" {
+		if err := (&LoginGuardService{}).SyncLoginProtection(); err != nil {
+			errs = append(errs, fmt.Errorf("restore login protection: %w", err))
+		}
 		if err := restartSubServer(); err != nil {
 			errs = append(errs, fmt.Errorf("restore subscription listener: %w", err))
 		}

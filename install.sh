@@ -147,6 +147,43 @@ install_firewall_backend() {
     exit 1
 }
 
+install_login_protection() {
+    if [[ ! -d /run/systemd/system ]] || ! command -v systemctl >/dev/null 2>&1; then
+        echo -e "${yellow}当前环境未运行 systemd，跳过 Fail2ban 登录防护安装。${plain}"
+        return 0
+    fi
+    if command -v fail2ban-client >/dev/null 2>&1; then
+        echo -e "${green}已检测到 Fail2ban 登录防护组件。${plain}"
+        return 0
+    fi
+
+    echo -e "${yellow}正在安装 Fail2ban 登录防护组件...${plain}"
+    local installed=0
+    case "${release}" in
+    centos | almalinux | rocky | oracle)
+        yum install -y -q fail2ban && installed=1
+        ;;
+    fedora)
+        dnf install -y -q fail2ban && installed=1
+        ;;
+    arch | manjaro | parch)
+        pacman -S --noconfirm --needed fail2ban && installed=1
+        ;;
+    opensuse-tumbleweed)
+        zypper -q install -y fail2ban && installed=1
+        ;;
+    *)
+        apt-get install -y -q fail2ban && installed=1
+        ;;
+    esac
+    if [[ "$installed" == "1" ]] && command -v fail2ban-client >/dev/null 2>&1; then
+        echo -e "${green}Fail2ban 安装完成，NovaPanel 启动后将自动加载登录防护。${plain}"
+        return 0
+    fi
+    echo -e "${yellow}Fail2ban 自动安装失败；面板会继续安装，请在健康诊断中查看并手动处理。${plain}"
+    return 0
+}
+
 config_after_install() {
 
     if [[ "${AUTO_UPGRADE}" == "1" ]]; then
@@ -263,4 +300,5 @@ set -e
 echo -e "${green}正在执行...${plain}"
 install_base
 install_firewall_backend
+install_login_protection
 install_novas "${1:-}"

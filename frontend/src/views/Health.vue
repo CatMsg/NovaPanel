@@ -96,6 +96,28 @@
       <v-alert v-else type="success" variant="tonal" class="mt-4" :text="$t('ui.health.noRepairable')" />
     </v-card>
 
+    <v-card id="login-security" class="login-security glass-card" elevation="0">
+      <div class="health-diagnostics__header">
+        <div>
+          <div class="alert-settings__eyebrow">{{ $t('ui.health.loginSecurityEyebrow') }}</div>
+          <h2>{{ $t('ui.health.loginSecurity') }}</h2>
+          <p>{{ $t('ui.health.loginSecurityHint') }}</p>
+        </div>
+        <v-chip :color="!loginProtection?.supported ? 'info' : loginProtection.active ? 'success' : 'error'" variant="tonal">
+          {{ !loginProtection?.supported ? $t('ui.health.unsupported') : loginProtection.active ? $t('ui.health.protectionActive') : $t('ui.health.protectionInactive') }}
+        </v-chip>
+      </div>
+      <div v-if="loginProtection?.bannedIps?.length" class="login-security__list">
+        <div v-for="ip in loginProtection.bannedIps" :key="ip" class="login-security__item">
+          <code>{{ ip }}</code>
+          <v-btn size="small" color="warning" variant="tonal" :loading="unbanningIp === ip" @click="unbanLoginIP(ip)">
+            {{ $t('ui.health.unban') }}
+          </v-btn>
+        </div>
+      </div>
+      <v-alert v-else type="success" variant="tonal" class="mt-4" :text="$t('ui.health.noBannedIps')" />
+    </v-card>
+
     <v-card class="alert-settings glass-card" elevation="0">
       <div class="alert-settings__header">
         <div>
@@ -149,6 +171,7 @@ interface HealthCheck { id: string; title: string; status: string; summary: stri
 interface HealthReport { status: string; checkedAt: string; durationMs: number; summary: Record<string, number>; checks: HealthCheck[]; diagnostics: Record<string, unknown> }
 interface AlertSettings { enabled: boolean; telegramToken: string; telegramTokenSet: boolean; telegramChatId: string; intervalMinutes: number; cooldownMinutes: number }
 interface PortDriftIssue { id: string; type: string; severity: string; scope?: string; family?: string; protocol?: string; port?: string; to_ports?: string; owner_tag?: string; detail: string; repairable: boolean }
+interface LoginProtectionStatus { supported: boolean; installed: boolean; active: boolean; jail: string; bannedIps: string[]; error?: string }
 
 const router = useRouter()
 const t = i18n.global.t
@@ -158,6 +181,7 @@ const repairingIssueId = ref('')
 const report = ref<HealthReport | null>(null)
 const savingAlerts = ref(false)
 const testingAlert = ref(false)
+const unbanningIp = ref('')
 const showAlertSettings = ref(false)
 const alerts = ref<AlertSettings>({ enabled: false, telegramToken: '', telegramTokenSet: false, telegramChatId: '', intervalMinutes: 5, cooldownMinutes: 60 })
 
@@ -172,6 +196,9 @@ const summaryCards = computed(() => [
 const portIssues = computed<PortDriftIssue[]>(() => {
   const diagnostics = report.value?.diagnostics as any
   return Array.isArray(diagnostics?.ports?.drift?.issues) ? diagnostics.ports.drift.issues : []
+})
+const loginProtection = computed<LoginProtectionStatus | null>(() => {
+  return (report.value?.diagnostics?.loginProtection as LoginProtectionStatus | undefined) ?? null
 })
 
 const loadHealth = async (force = false) => {
@@ -217,6 +244,16 @@ const testAlert = async () => {
   if (msg.success) push.success({ message: t('ui.health.testSent') })
 }
 
+const unbanLoginIP = async (ip: string) => {
+  unbanningIp.value = ip
+  const msg = await HttpUtils.post('api/loginUnban', { ip })
+  unbanningIp.value = ''
+  if (msg.success) {
+    push.success({ message: t('ui.health.unbanned') })
+    await loadHealth(true)
+  }
+}
+
 const copyReport = async () => {
   if (!report.value) return
   try {
@@ -230,6 +267,10 @@ const copyReport = async () => {
 const handleAction = async (action: string) => {
   const routes: Record<string, string> = { ports: '/ports', settings: '/settings', inbounds: '/inbounds', endpoints: '/endpoints', admins: '/admins', fleet: '/fleet' }
   if (action === 'reconcile-ports') return reconcilePorts()
+  if (action === 'login-security') {
+    document.getElementById('login-security')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    return
+  }
   if (action === 'restart-core') {
     const msg = await HttpUtils.post('api/restartSb', {})
     if (msg.success) window.setTimeout(() => loadHealth(true), 1200)
@@ -298,6 +339,10 @@ onMounted(() => {
 .port-issue__heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .port-issue__body span, .port-issue__body small { color: var(--np-text-muted); overflow-wrap: anywhere; }
 .alert-settings { margin-top: 14px; padding: 24px; border-radius: 24px; }
+.login-security { margin-top: 14px; padding: 24px; border-radius: 24px; }
+.login-security__list { display: grid; gap: 8px; margin-top: 16px; }
+.login-security__item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--np-border); border-radius: 14px; background: var(--np-surface-soft); }
+.login-security__item code { min-width: 0; overflow-wrap: anywhere; color: var(--np-text); }
 .alert-settings__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 .alert-settings__header-actions { display: flex; align-items: center; gap: 10px; }
 .alert-settings__header h2 { margin: 3px 0 0; font-size: 20px; }

@@ -55,6 +55,8 @@ func (a *APIv2Handler) postHandler(c *gin.Context) {
 		a.ApiService.SaveAlertSettings(c)
 	case "alertTest":
 		a.ApiService.TestAlert(c)
+	case "loginUnban":
+		a.ApiService.UnbanLoginIP(c)
 	case "mieruDebug":
 		a.ApiService.EnableMieruDebug(c)
 	case "repairPortIssue":
@@ -98,6 +100,8 @@ func (a *APIv2Handler) getHandler(c *gin.Context) {
 		a.ApiService.GetHealth(c)
 	case "alert-settings":
 		a.ApiService.GetAlertSettings(c)
+	case "login-security":
+		a.ApiService.GetLoginProtection(c)
 	case "ports":
 		a.ApiService.GetPorts(c)
 	case "fleet-status":

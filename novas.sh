@@ -259,6 +259,9 @@ uninstall() {
     if [[ -x /usr/local/novas/scripts/hy2-forward.sh ]]; then
         /usr/local/novas/scripts/hy2-forward.sh purge || true
     fi
+    if [[ -x /usr/local/novas/scripts/login-guard.sh ]]; then
+        /usr/local/novas/scripts/login-guard.sh remove || true
+    fi
 
     rm /etc/systemd/system/novas.service -f
     systemctl daemon-reload

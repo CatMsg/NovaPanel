@@ -108,6 +108,26 @@
           <v-col cols="12" sm="6" md="4">
             <v-text-field v-model="settings.timeLocation" :label="$t('setting.timeLoc')" hide-details></v-text-field>
           </v-col>
+          <v-col cols="12" md="6">
+            <v-textarea
+              v-model="settings.loginTrustedProxies"
+              :label="$t('setting.loginTrustedProxies')"
+              :hint="$t('setting.loginTrustedProxiesHint')"
+              persistent-hint
+              rows="2"
+              auto-grow
+            />
+          </v-col>
+          <v-col cols="12" md="6">
+            <v-textarea
+              v-model="settings.loginBanAllowlist"
+              :label="$t('setting.loginBanAllowlist')"
+              :hint="$t('setting.loginBanAllowlistHint')"
+              persistent-hint
+              rows="2"
+              auto-grow
+            />
+          </v-col>
         </v-row>
         </v-window-item>
 
@@ -242,6 +262,8 @@ const settings = ref({
   webPath: "/app/",
   webURI: "",
 	sessionMaxAge: "0",
+  loginTrustedProxies: "",
+  loginBanAllowlist: "",
   trafficAge: "30",
 	timeLocation: "Asia/Shanghai",
   subListen: "",

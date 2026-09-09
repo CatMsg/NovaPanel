@@ -106,6 +106,9 @@ func (a *APP) Start() error {
 }
 
 func (a *APP) runDeferredStartupTasks() {
+	if err := (&service.LoginGuardService{}).SyncLoginProtection(); err != nil {
+		logger.Warning("sync login protection failed:", err)
+	}
 	if a.masqueService != nil {
 		if err := a.masqueService.SyncFromDB(); err != nil {
 			logger.Warning("rebuild masque service failed:", err)

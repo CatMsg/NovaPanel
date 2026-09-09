@@ -232,7 +232,7 @@ jobs:
 
           mkdir -p release/novas/bin release/novas/scripts
           cp novas novas.service novas.sh LICENSE THIRD_PARTY_NOTICES.md release/novas/
-          cp scripts/hy2-forward.sh scripts/install-runtime.sh release/novas/scripts/
+          cp scripts/hy2-forward.sh scripts/login-guard.sh scripts/install-runtime.sh release/novas/scripts/
 
       - name: 构建 Mieru 服务端
         run: |

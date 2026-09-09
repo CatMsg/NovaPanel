@@ -238,6 +238,13 @@ func TestRunHy2ForwardScriptUFW(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(binDir, "ufw"), []byte(mockUfw), 0o755); err != nil {
 		t.Fatalf("write mock ufw: %v", err)
 	}
+	fail2banClient := `#!/usr/bin/env bash
+printf 'fail2ban-client %s\n' "$*" >> "${HY2_MOCK_LOG:?}"
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(binDir, "fail2ban-client"), []byte(fail2banClient), 0o755); err != nil {
+		t.Fatalf("write mock fail2ban-client: %v", err)
+	}
 	for _, name := range []string{"chmod", "chown"} {
 		if err := os.WriteFile(filepath.Join(binDir, name), []byte("#!/usr/bin/env bash\nexit 0\n"), 0o755); err != nil {
 			t.Fatalf("write mock %s: %v", name, err)
@@ -287,6 +294,9 @@ func TestRunHy2ForwardScriptUFW(t *testing.T) {
 		!bytes.Contains(ufwLog, []byte("ufw allow 8443/udp comment NovaPanel ")) ||
 		bytes.Count(ufwLog, []byte("ufw allow 20000:49999/udp comment NovaPanel ")) != 1 {
 		t.Fatalf("ufw apply did not add allow rules:\n%s", string(ufwLog))
+	}
+	if !bytes.Contains(ufwLog, []byte("fail2ban-client reload --restart --if-exists novapanel")) {
+		t.Fatalf("ufw reload did not restore the NovaPanel jail:\n%s", string(ufwLog))
 	}
 
 	markerHex := fmt.Sprintf("%x", []byte("NovaPanel "+hy2ChainName("hy2-demo-ufw")))

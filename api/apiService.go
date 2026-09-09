@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +32,7 @@ type ApiService struct {
 	service.ServerService
 	service.HealthService
 	service.AlertService
+	service.LoginGuardService
 }
 
 func (a *ApiService) LoadData(c *gin.Context) {
@@ -268,6 +270,19 @@ func (a *ApiService) TestAlert(c *gin.Context) {
 	jsonMsg(c, "save", a.AlertService.TestAlert())
 }
 
+func (a *ApiService) GetLoginProtection(c *gin.Context) {
+	jsonObj(c, a.LoginGuardService.GetLoginProtectionStatus(), nil)
+}
+
+func (a *ApiService) UnbanLoginIP(c *gin.Context) {
+	ip := c.Request.FormValue("ip")
+	err := a.LoginGuardService.UnbanLoginIP(ip)
+	if err == nil {
+		clearLoginFailures(strings.TrimSpace(ip))
+	}
+	jsonMsg(c, "unban", err)
+}
+
 func (a *ApiService) PreflightSave(c *gin.Context) {
 	obj := c.Request.FormValue("object")
 	act := c.Request.FormValue("action")
@@ -420,22 +435,39 @@ func (a *ApiService) GetDb(c *gin.Context) {
 }
 
 func (a *ApiService) Login(c *gin.Context) {
-	remoteIP := getRemoteIp(c)
+	started := time.Now()
+	respondInvalidLogin := func() {
+		if remaining := 400*time.Millisecond - time.Since(started); remaining > 0 {
+			time.Sleep(remaining)
+		}
+		pureJsonMsg(c, false, "wrong user or password")
+	}
+	trustedProxies, err := a.SettingService.GetLoginTrustedProxies()
+	if err != nil {
+		logger.Warning("read trusted proxies failed: ", err)
+		trustedProxies = ""
+	}
+	remoteIP := getRemoteIPWithTrustedProxies(c, trustedProxies)
 	var payload struct {
 		User string `form:"user" json:"user"`
 		Pass string `form:"pass" json:"pass"`
 	}
 	if err := c.ShouldBind(&payload); err != nil {
-		jsonMsg(c, "", err)
+		recordLoginFailure(remoteIP, &a.AlertService)
+		respondInvalidLogin()
 		return
 	}
 
 	loginUser, err := a.UserService.Login(payload.User, payload.Pass, remoteIP)
 	if err != nil {
-		jsonMsg(c, "", err)
+		if errors.Is(err, service.ErrInvalidCredentials) {
+			recordLoginFailure(remoteIP, &a.AlertService)
+		} else {
+			logger.Warning("login authentication failed: ", err)
+		}
+		respondInvalidLogin()
 		return
 	}
-
 	sessionMaxAge, err := a.SettingService.GetSessionMaxAge()
 	if err != nil {
 		logger.Infof("Unable to get session's max age from DB")
