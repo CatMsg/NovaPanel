@@ -258,6 +258,13 @@ printf '%s\n' "$*" >> "${HY2_MOCK_LOG:?}"
 	if err := os.WriteFile(filepath.Join(scriptsDir, "hy2-forward.sh"), []byte(script), 0o755); err != nil {
 		t.Fatalf("write script: %v", err)
 	}
+	guardScript := `#!/usr/bin/env bash
+set -euo pipefail
+printf 'login-guard %s\n' "$*" >> "${HY2_MOCK_LOG:?}"
+`
+	if err := os.WriteFile(filepath.Join(scriptsDir, "login-guard.sh"), []byte(guardScript), 0o755); err != nil {
+		t.Fatalf("write login guard script: %v", err)
+	}
 
 	oldWd, err := os.Getwd()
 	if err != nil {
@@ -315,6 +322,9 @@ printf '%s\n' "$*" >> "${HY2_MOCK_LOG:?}"
 	}
 	if !strings.Contains(log, "apply panel-sub-port 3001 3001 tcp") {
 		t.Fatalf("sub port forwarding was not applied post-commit:\n%s", log)
+	}
+	if loginProtectionSupported() && !strings.Contains(log, "login-guard sync 3000 ") {
+		t.Fatalf("login protection was not synced with the new port post-commit:\n%s", log)
 	}
 }
 
