@@ -106,7 +106,7 @@ func validateManagedForwardSpecPorts(spec managedForwardSpec) error {
 	if !spec.active {
 		return nil
 	}
-	return validateInboundPortRangesAgainstSSH(nil, spec.portRanges)
+	return validateInboundPortRangesAgainstSSHProtocols(nil, spec.portRanges, spec.protocols)
 }
 
 func applyManagedForwardSpec(spec managedForwardSpec) error {
@@ -360,7 +360,7 @@ func collectEndpointForwardPorts(endpoint *model.Endpoint) (int, []int, []string
 
 	portKey := model.EndpointPortKey(endpoint.Type)
 	protocols := managedForwardProtocols
-	if strings.EqualFold(endpoint.Type, "masque") {
+	if strings.EqualFold(endpoint.Type, "masque") || strings.EqualFold(endpoint.Type, "wireguard") {
 		protocols = []string{"udp"}
 	}
 	if strings.EqualFold(endpoint.Type, "mieru") {

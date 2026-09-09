@@ -134,10 +134,74 @@ func TestManagedPortRangesStayCompressedAndDetectOverlap(t *testing.T) {
 	if len(entries) != 1 || entries[0].Port != 20000 || entries[0].EndPort != 49999 {
 		t.Fatalf("large range was expanded instead of compressed: %#v", entries)
 	}
+	if entries[0].Protocols != "udp" {
+		t.Fatalf("unexpected protocols for Hysteria2 range: %q", entries[0].Protocols)
+	}
 	if err := validateManagedPortRangeConflicts(db, "入站", "overlap", 0, 0, []managedPortRange{{start: 49990, end: 50010}}); err == nil || !strings.Contains(err.Error(), "49990-49999") {
 		t.Fatalf("expected compact overlap conflict, got %v", err)
 	}
 	if err := validateManagedPortRangeConflicts(db, "入站", "safe", 0, 0, []managedPortRange{{start: 50000, end: 50010}}); err != nil {
 		t.Fatalf("unexpected non-overlapping conflict: %v", err)
+	}
+}
+
+func TestManagedPortConflictsAllowSamePortAcrossTCPAndUDP(t *testing.T) {
+	logger.InitLogger(logging.ERROR)
+	dir := t.TempDir()
+	if err := database.InitDB(filepath.Join(dir, "protocol-ports.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	db := database.GetDB()
+	inbound := model.Inbound{
+		Type:    "hysteria2",
+		Tag:     "hy2-udp",
+		Options: json.RawMessage(`{"listen_port":443}`),
+	}
+	if err := db.Create(&inbound).Error; err != nil {
+		t.Fatalf("create inbound: %v", err)
+	}
+	if err := RebuildManagedPortEntries(); err != nil {
+		t.Fatalf("rebuild managed port entries: %v", err)
+	}
+
+	if err := validateManagedPortProtocolConflicts(db, "入站", "mieru-tcp", 0, 0, []int{443}, []string{"tcp"}); err != nil {
+		t.Fatalf("expected TCP and UDP to share the same numeric port: %v", err)
+	}
+	err := validateManagedPortProtocolConflicts(db, "入站", "mieru-udp", 0, 0, []int{443}, []string{"udp"})
+	if err == nil || !strings.Contains(err.Error(), "443/udp") {
+		t.Fatalf("expected UDP conflict with protocol in message, got %v", err)
+	}
+}
+
+func TestManagedPanelTCPPortCanShareUDPOnlyInboundPort(t *testing.T) {
+	logger.InitLogger(logging.ERROR)
+
+	originalPorts := getSSHListenPorts()
+	t.Cleanup(func() {
+		_ = storeSSHListenPorts(originalPorts, nil)
+	})
+	if err := storeSSHListenPorts([]int{2222}, nil); err != nil {
+		t.Fatalf("store ssh listen ports: %v", err)
+	}
+
+	dir := t.TempDir()
+	if err := database.InitDB(filepath.Join(dir, "panel-protocol-ports.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+	db := database.GetDB()
+	if err := db.Create(&model.Inbound{
+		Type:    "hysteria2",
+		Tag:     "hy2-panel-port",
+		Options: json.RawMessage(`{"listen_port":2095}`),
+	}).Error; err != nil {
+		t.Fatalf("create inbound: %v", err)
+	}
+	if err := RebuildManagedPortEntries(); err != nil {
+		t.Fatalf("rebuild managed port entries: %v", err)
+	}
+
+	if err := ValidateManagedPanelPortsWithConflicts(db, 2095, 2096); err != nil {
+		t.Fatalf("expected panel TCP port to share UDP-only inbound port: %v", err)
 	}
 }

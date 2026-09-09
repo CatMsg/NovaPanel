@@ -189,10 +189,18 @@ func normalizePortList(matches [][]string, group int) []int {
 }
 
 func validateInboundPortsAgainstSSH(inbound *model.Inbound, ports []int) error {
-	return validateInboundPortRangesAgainstSSH(inbound, managedPortRangesFromPorts(ports))
+	return validateInboundPortRangesAgainstSSHProtocols(inbound, managedPortRangesFromPorts(ports), managedForwardProtocols)
 }
 
 func validateInboundPortRangesAgainstSSH(inbound *model.Inbound, ranges []managedPortRange) error {
+	return validateInboundPortRangesAgainstSSHProtocols(inbound, ranges, managedForwardProtocols)
+}
+
+func validateInboundPortRangesAgainstSSHProtocols(inbound *model.Inbound, ranges []managedPortRange, protocols []string) error {
+	if !containsManagedProtocol(protocols, "tcp") {
+		return nil
+	}
+
 	sshPorts := getSSHListenPorts()
 	if len(sshPorts) == 0 {
 		return nil
@@ -229,4 +237,14 @@ func validateInboundPortRangesAgainstSSH(inbound *model.Inbound, ranges []manage
 		tag = inbound.Tag
 	}
 	return &sshPortConflictError{inboundTag: tag, ports: conflicts}
+}
+
+func containsManagedProtocol(protocols []string, expected string) bool {
+	expected = strings.ToLower(strings.TrimSpace(expected))
+	for _, protocol := range normalizeManagedProtocols(protocols) {
+		if protocol == expected {
+			return true
+		}
+	}
+	return false
 }

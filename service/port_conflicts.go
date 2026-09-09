@@ -32,12 +32,21 @@ func (e *managedPortConflictError) Error() string {
 }
 
 func validateManagedPortConflicts(tx *gorm.DB, ownerKind string, ownerTag string, skipInboundID uint, skipEndpointID uint, candidatePorts []int) error {
-	return validateManagedPortRangeConflicts(tx, ownerKind, ownerTag, skipInboundID, skipEndpointID, managedPortRangesFromPorts(candidatePorts))
+	return validateManagedPortProtocolConflicts(tx, ownerKind, ownerTag, skipInboundID, skipEndpointID, candidatePorts, managedForwardProtocols)
+}
+
+func validateManagedPortProtocolConflicts(tx *gorm.DB, ownerKind string, ownerTag string, skipInboundID uint, skipEndpointID uint, candidatePorts []int, candidateProtocols []string) error {
+	return validateManagedPortRangeProtocolConflicts(tx, ownerKind, ownerTag, skipInboundID, skipEndpointID, managedPortRangesFromPorts(candidatePorts), candidateProtocols)
 }
 
 func validateManagedPortRangeConflicts(tx *gorm.DB, ownerKind string, ownerTag string, skipInboundID uint, skipEndpointID uint, candidateRanges []managedPortRange) error {
+	return validateManagedPortRangeProtocolConflicts(tx, ownerKind, ownerTag, skipInboundID, skipEndpointID, candidateRanges, managedForwardProtocols)
+}
+
+func validateManagedPortRangeProtocolConflicts(tx *gorm.DB, ownerKind string, ownerTag string, skipInboundID uint, skipEndpointID uint, candidateRanges []managedPortRange, candidateProtocols []string) error {
 	candidateRanges = normalizeManagedPortRanges(candidateRanges)
-	if len(candidateRanges) == 0 {
+	candidateProtocols = normalizeManagedProtocols(candidateProtocols)
+	if len(candidateRanges) == 0 || len(candidateProtocols) == 0 {
 		return nil
 	}
 
@@ -53,12 +62,16 @@ func validateManagedPortRangeConflicts(tx *gorm.DB, ownerKind string, ownerTag s
 			entryEnd = entry.Port
 		}
 		entryRange := managedPortRange{start: entry.Port, end: entryEnd}
+		protocols := intersectManagedProtocols(candidateProtocols, managedPortEntryProtocols(entry.Protocols))
+		if len(protocols) == 0 {
+			continue
+		}
 		for _, candidate := range candidateRanges {
 			overlap, ok := managedPortRangesOverlap(candidate, entryRange)
 			if !ok {
 				continue
 			}
-			key := formatManagedPortRange(overlap, "-")
+			key := fmt.Sprintf("%s/%s", formatManagedPortRange(overlap, "-"), strings.Join(protocols, ","))
 			conflictMap[key] = appendUniqueUsage(conflictMap[key], fmt.Sprintf("%s %s", managedPortEntryKind(entry.Scope), entry.OwnerTag))
 		}
 	}
@@ -72,8 +85,13 @@ func validateManagedPortRangeConflicts(tx *gorm.DB, ownerKind string, ownerTag s
 		conflictRanges = append(conflictRanges, item)
 	}
 	sort.Slice(conflictRanges, func(i, j int) bool {
-		left, _ := parseManagedPortRange(conflictRanges[i])
-		right, _ := parseManagedPortRange(conflictRanges[j])
+		leftRange, _, _ := strings.Cut(conflictRanges[i], "/")
+		rightRange, _, _ := strings.Cut(conflictRanges[j], "/")
+		left, _ := parseManagedPortRange(leftRange)
+		right, _ := parseManagedPortRange(rightRange)
+		if left.start == right.start {
+			return conflictRanges[i] < conflictRanges[j]
+		}
 		return left.start < right.start
 	})
 
@@ -94,7 +112,7 @@ func validateManagedPanelPortConflicts(tx *gorm.DB, webPort int, subPort int) er
 	if len(candidatePorts) == 0 {
 		return nil
 	}
-	return validateManagedPortConflicts(tx, "面板", fmt.Sprintf("web=%d sub=%d", webPort, subPort), 0, 0, candidatePorts)
+	return validateManagedPortProtocolConflicts(tx, "面板", fmt.Sprintf("web=%d sub=%d", webPort, subPort), 0, 0, candidatePorts, managedPanelApplyProtocols)
 }
 
 func findManagedPortRangeConflictEntries(tx *gorm.DB, ranges []managedPortRange, skipInboundID uint, skipEndpointID uint) ([]model.ManagedPortEntry, error) {
@@ -130,6 +148,34 @@ func managedPortEntryKind(scope string) string {
 	default:
 		return "对象"
 	}
+}
+
+func managedPortEntryProtocols(raw string) []string {
+	protocols := normalizeManagedProtocols(strings.Split(raw, ","))
+	if len(protocols) == 0 {
+		return append([]string(nil), managedForwardProtocols...)
+	}
+	return protocols
+}
+
+func intersectManagedProtocols(left, right []string) []string {
+	left = normalizeManagedProtocols(left)
+	right = normalizeManagedProtocols(right)
+	if len(left) == 0 || len(right) == 0 {
+		return nil
+	}
+
+	rightSet := make(map[string]struct{}, len(right))
+	for _, protocol := range right {
+		rightSet[protocol] = struct{}{}
+	}
+	intersection := make([]string, 0, len(left))
+	for _, protocol := range left {
+		if _, ok := rightSet[protocol]; ok {
+			intersection = append(intersection, protocol)
+		}
+	}
+	return intersection
 }
 
 func collectEndpointManagedPorts(endpoint *model.Endpoint) ([]int, error) {

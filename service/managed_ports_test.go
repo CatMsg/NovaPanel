@@ -115,6 +115,25 @@ func TestCollectHysteria2InboundForwardPortsAreUDPOnly(t *testing.T) {
 	}
 }
 
+func TestCollectWireGuardEndpointForwardPortIsUDPOnly(t *testing.T) {
+	endpoint := &model.Endpoint{
+		Type:    "wireguard",
+		Tag:     "wireguard-endpoint",
+		Options: json.RawMessage(`{"listen_port":505}`),
+	}
+
+	spec, err := collectEndpointForwardSpec(endpoint)
+	if err != nil {
+		t.Fatalf("collect WireGuard port: %v", err)
+	}
+	if !spec.active || spec.listenPort != 505 || len(spec.portRanges) != 1 || spec.portRanges[0].start != 505 {
+		t.Fatalf("unexpected WireGuard forwarding state: %#v", spec)
+	}
+	if len(spec.protocols) != 1 || spec.protocols[0] != "udp" {
+		t.Fatalf("unexpected WireGuard protocols: %#v", spec.protocols)
+	}
+}
+
 func TestManagedPortRangesMergeWithoutExpansion(t *testing.T) {
 	ranges := normalizeManagedPortRanges([]managedPortRange{
 		{start: 500, end: 500},
@@ -624,7 +643,7 @@ printf '%s\n' "$*" >> "${HY2_MOCK_LOG:?}"
 	if !strings.Contains(log, "apply inbound-a 4100 4100 tcp,udp") {
 		t.Fatalf("inbound port forwarding was not rebuilt:\n%s", log)
 	}
-	if !strings.Contains(log, "apply endpoint-a 4200 4200 tcp,udp") {
+	if !strings.Contains(log, "apply endpoint-a 4200 4200 udp") {
 		t.Fatalf("endpoint port forwarding was not rebuilt:\n%s", log)
 	}
 }

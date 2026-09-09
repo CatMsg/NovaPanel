@@ -223,12 +223,12 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 				return nil, ErrNoChanges
 			}
 		}
-		if _, ports, _, active, err := collectEndpointForwardPorts(&endpoint); err == nil {
+		if _, ports, protocols, active, err := collectEndpointForwardPorts(&endpoint); err == nil {
 			if active {
-				if err := validateInboundPortsAgainstSSH(nil, ports); err != nil {
+				if err := validateInboundPortRangesAgainstSSHProtocols(nil, managedPortRangesFromPorts(ports), protocols); err != nil {
 					return nil, err
 				}
-				if err := validateManagedPortConflicts(tx, "节点", endpoint.Tag, 0, endpoint.Id, ports); err != nil {
+				if err := validateManagedPortProtocolConflicts(tx, "节点", endpoint.Tag, 0, endpoint.Id, ports, protocols); err != nil {
 					return nil, err
 				}
 			}

@@ -1,6 +1,8 @@
 package service
 
 import (
+	"strings"
+
 	"github.com/CatMsg/NovaPanel/database/model"
 	"gorm.io/gorm"
 )
@@ -51,11 +53,14 @@ func syncManagedPortEntriesForInboundTx(tx *gorm.DB, inbound *model.Inbound) err
 	if err := deleteManagedPortEntriesTx(tx, managedPortScopeInbound, inbound.Id); err != nil {
 		return err
 	}
-	_, ranges, err := collectInboundForwardRanges(inbound)
+	spec, err := collectInboundForwardSpec(inbound)
 	if err != nil {
 		return err
 	}
-	return createManagedPortRangeEntriesTx(tx, managedPortScopeInbound, inbound.Id, inbound.Tag, ranges)
+	if !spec.active {
+		return nil
+	}
+	return createManagedPortRangeProtocolEntriesTx(tx, managedPortScopeInbound, inbound.Id, inbound.Tag, spec.portRanges, spec.protocols)
 }
 
 func syncManagedPortEntriesForEndpointTx(tx *gorm.DB, endpoint *model.Endpoint) error {
@@ -65,11 +70,14 @@ func syncManagedPortEntriesForEndpointTx(tx *gorm.DB, endpoint *model.Endpoint) 
 	if err := deleteManagedPortEntriesTx(tx, managedPortScopeEndpoint, endpoint.Id); err != nil {
 		return err
 	}
-	ports, err := collectEndpointManagedPorts(endpoint)
+	spec, err := collectEndpointForwardSpec(endpoint)
 	if err != nil {
 		return err
 	}
-	return createManagedPortEntriesTx(tx, managedPortScopeEndpoint, endpoint.Id, endpoint.Tag, ports)
+	if !spec.active {
+		return nil
+	}
+	return createManagedPortRangeProtocolEntriesTx(tx, managedPortScopeEndpoint, endpoint.Id, endpoint.Tag, spec.portRanges, spec.protocols)
 }
 
 func deleteManagedPortEntriesForInboundTx(tx *gorm.DB, inboundID uint) error {
@@ -92,19 +100,26 @@ func createManagedPortEntriesTx(tx *gorm.DB, scope string, ownerID uint, ownerTa
 }
 
 func createManagedPortRangeEntriesTx(tx *gorm.DB, scope string, ownerID uint, ownerTag string, ranges []managedPortRange) error {
+	return createManagedPortRangeProtocolEntriesTx(tx, scope, ownerID, ownerTag, ranges, managedForwardProtocols)
+}
+
+func createManagedPortRangeProtocolEntriesTx(tx *gorm.DB, scope string, ownerID uint, ownerTag string, ranges []managedPortRange, protocols []string) error {
 	ranges = normalizeManagedPortRanges(ranges)
-	if ownerID == 0 || len(ranges) == 0 {
+	protocols = normalizeManagedProtocols(protocols)
+	if ownerID == 0 || len(ranges) == 0 || len(protocols) == 0 {
 		return nil
 	}
 
+	protocolList := strings.Join(protocols, ",")
 	entries := make([]model.ManagedPortEntry, 0, len(ranges))
 	for _, item := range ranges {
 		entries = append(entries, model.ManagedPortEntry{
-			Scope:    scope,
-			OwnerId:  ownerID,
-			OwnerTag: ownerTag,
-			Port:     item.start,
-			EndPort:  item.end,
+			Scope:     scope,
+			OwnerId:   ownerID,
+			OwnerTag:  ownerTag,
+			Port:      item.start,
+			EndPort:   item.end,
+			Protocols: protocolList,
 		})
 	}
 	return tx.Create(&entries).Error

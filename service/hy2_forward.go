@@ -118,7 +118,7 @@ func (s *InboundService) syncInboundPortForwarding(oldInbound *model.Inbound, in
 		if err != nil {
 			return err
 		}
-		if err := validateInboundPortRangesAgainstSSH(inbound, newSpec.portRanges); err != nil {
+		if err := validateInboundPortRangesAgainstSSHProtocols(inbound, newSpec.portRanges, newSpec.protocols); err != nil {
 			return err
 		}
 	}

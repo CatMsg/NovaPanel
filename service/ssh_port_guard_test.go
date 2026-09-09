@@ -54,3 +54,20 @@ func TestValidateInboundPortsAgainstSSH(t *testing.T) {
 		t.Fatalf("unexpected conflict message: %v", err)
 	}
 }
+
+func TestValidateInboundPortsAgainstSSHOnlyChecksTCP(t *testing.T) {
+	t.Cleanup(func() {
+		_ = storeSSHListenPorts(nil, nil)
+	})
+	if err := storeSSHListenPorts([]int{2222}, nil); err != nil {
+		t.Fatalf("store ports: %v", err)
+	}
+
+	ranges := []managedPortRange{{start: 2222, end: 2222}}
+	if err := validateInboundPortRangesAgainstSSHProtocols(&model.Inbound{Tag: "udp-only"}, ranges, []string{"udp"}); err != nil {
+		t.Fatalf("UDP-only inbound should be allowed on the SSH TCP port number: %v", err)
+	}
+	if err := validateInboundPortRangesAgainstSSHProtocols(&model.Inbound{Tag: "tcp-inbound"}, ranges, []string{"tcp"}); err == nil {
+		t.Fatal("expected TCP inbound to conflict with SSH")
+	}
+}
