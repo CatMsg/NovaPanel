@@ -203,6 +203,8 @@ func (s *ConfigService) StopCore() error {
 }
 
 func (s *ConfigService) CheckOutbound(tag string, link string) core.CheckOutboundResult {
+	startCoreMu.Lock()
+	defer startCoreMu.Unlock()
 	if tag == "" {
 		return core.CheckOutboundResult{Error: "missing query parameter: tag"}
 	}

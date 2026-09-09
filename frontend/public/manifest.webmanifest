@@ -1,0 +1,28 @@
+{
+  "name": "NovaPanel",
+  "short_name": "NovaPanel",
+  "description": "NovaPanel control center",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#eef5ff",
+  "theme_color": "#eef5ff",
+  "icons": [
+    {
+      "src": "assets/pwa-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "assets/pwa-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "assets/pwa-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

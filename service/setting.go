@@ -74,6 +74,7 @@ var defaultValueMap = map[string]string{
 	"subMasterSources":     "",
 	"endpointMode":         "slave",
 	"endpointSources":      "",
+	"outboundFailover":     "[]",
 	"alertEnabled":         "false",
 	"alertTelegramToken":   "",
 	"alertTelegramChatID":  "",
@@ -142,6 +143,7 @@ func (s *SettingService) GetAllSetting() (*map[string]string, error) {
 	delete(allSetting, "alertWebhookURL")
 	delete(allSetting, "alertLastFingerprint")
 	delete(allSetting, "alertLastSentAt")
+	delete(allSetting, "outboundFailover")
 
 	return &allSetting, nil
 }

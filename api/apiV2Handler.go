@@ -59,6 +59,12 @@ func (a *APIv2Handler) postHandler(c *gin.Context) {
 		a.ApiService.UnbanLoginIP(c)
 	case "mieruDebug":
 		a.ApiService.EnableMieruDebug(c)
+	case "routeExplain":
+		a.ApiService.ExplainRoute(c)
+	case "failoverSave":
+		a.ApiService.SaveFailoverPolicy(c)
+	case "failoverDelete":
+		a.ApiService.DeleteFailoverPolicy(c)
 	case "repairPortIssue":
 		a.ApiService.RepairPortIssue(c)
 	case "restartSb":
@@ -124,6 +130,10 @@ func (a *APIv2Handler) getHandler(c *gin.Context) {
 		a.ApiService.GetDb(c)
 	case "checkOutbound":
 		a.ApiService.GetCheckOutbound(c)
+	case "ruleset-health":
+		a.ApiService.GetRuleSetHealth(c)
+	case "failover-status":
+		a.ApiService.GetFailoverStatus(c)
 	default:
 		jsonMsg(c, "failed", common.NewError("unknown action: ", action))
 	}

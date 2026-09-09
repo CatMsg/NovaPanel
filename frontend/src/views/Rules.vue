@@ -37,6 +37,15 @@
     @save="saveImportRulesets"
     @close="closeImportRulesets"
   />
+  <RuleCatalog
+    :visible="catalogModal"
+    :outbound-tags="outboundTags"
+    :inbound-tags="inboundTags"
+    :clients="clients"
+    :loading="catalogLoading"
+    @close="catalogModal = false"
+    @apply="applyCatalog"
+  />
   <PageHero
     :eyebrow="$t('pages.rules')"
     :title="$t('pages.rules')"
@@ -47,6 +56,9 @@
       <span>规则集 {{ rulesets.length }}</span><span>•</span><span>路由规则 {{ rules.length }}</span><span>•</span><span>顺序优先匹配</span>
     </template>
     <template #actions>
+      <v-btn color="primary" variant="tonal" @click="catalogModal = true">
+        <v-icon icon="mdi-bookshelf" start />规则目录
+      </v-btn>
       <v-menu v-model="actionMenu" :close-on-content-click="false" location="bottom center">
         <template v-slot:activator="{ props }">
           <v-btn v-bind="props" hide-details variant="outlined">
@@ -94,16 +106,50 @@
       </v-row>
     </v-col>
   </v-row>
+  <v-row class="rules-section route-explain np-section-card">
+    <v-col class="rules-section__heading" cols="12">
+      <div><h2>路由命中诊断</h2><p>按当前运行态规则模拟一次匹配，不产生真实连接。</p></div>
+      <v-btn color="primary" variant="tonal" :loading="explainLoading" @click="runRouteExplain"><v-icon icon="mdi-radar" start />分析</v-btn>
+    </v-col>
+    <v-col cols="12">
+      <v-row dense>
+        <v-col cols="12" md="4"><v-text-field v-model="explainInput.domain" label="域名" placeholder="www.netflix.com" hide-details /></v-col>
+        <v-col cols="6" md="2"><v-text-field v-model.number="explainInput.port" type="number" min="1" max="65535" label="端口" hide-details /></v-col>
+        <v-col cols="6" md="2"><v-select v-model="explainInput.network" :items="['tcp', 'udp']" label="网络" hide-details /></v-col>
+        <v-col cols="12" md="4"><v-text-field v-model="explainInput.destination" label="目标 IP（可选）" placeholder="1.1.1.1" clearable hide-details /></v-col>
+        <v-col cols="12" md="4"><v-select v-model="explainInput.inbound" :items="inboundTags" label="入站（可选）" clearable hide-details /></v-col>
+        <v-col cols="12" md="4"><v-select v-model="explainInput.user" :items="clients" label="用户（可选）" clearable hide-details /></v-col>
+        <v-col cols="12" md="4"><v-text-field v-model="explainInput.protocol" label="嗅探协议（可选）" placeholder="tls / http / dns" clearable hide-details /></v-col>
+      </v-row>
+      <div v-if="explainResult" class="route-explain__result" :class="{ 'route-explain__result--default': explainResult.defaultUsed }">
+        <v-icon :icon="explainResult.defaultUsed ? 'mdi-sign-direction' : 'mdi-check-decagram-outline'" size="22" />
+        <div>
+          <strong>{{ explainResult.defaultUsed ? '使用默认出口' : `命中第 ${explainResult.ruleIndex + 1} 条规则` }}</strong>
+          <span>{{ explainResult.action || explainResult.note }}</span>
+          <code v-if="explainResult.rule">{{ explainResult.rule }}</code>
+        </div>
+      </div>
+    </v-col>
+  </v-row>
   <v-row class="rules-section">
     <v-col class="rules-section__heading" cols="12">
       <div><h2>{{ $t('rule.ruleset') }}</h2><p>远程或本地规则集，可被下方路由规则复用。</p></div>
-      <v-btn color="primary" variant="tonal" @click="showRulesetModal(-1)"><v-icon icon="mdi-playlist-plus" start />{{ $t('ruleset.add') }}</v-btn>
+      <div class="rules-section__actions">
+        <v-btn variant="text" :loading="healthLoading" @click="loadRuleSetHealth"><v-icon icon="mdi-refresh" start />刷新状态</v-btn>
+        <v-btn color="primary" variant="tonal" @click="showRulesetModal(-1)"><v-icon icon="mdi-playlist-plus" start />{{ $t('ruleset.add') }}</v-btn>
+      </div>
     </v-col>
     <v-col v-if="rulesets.length === 0" cols="12">
       <EmptyState icon="mdi-file-tree-outline" title="暂无规则集" description="添加规则集后，可在路由规则中按标签引用。" />
     </v-col>
     <v-col cols="12" sm="6" md="4" lg="3" v-for="(item, index) in <any[]>rulesets" :key="item.tag">
-      <v-card class="np-resource-card" rounded="xl" variant="flat" :title="item.tag">
+      <v-card class="np-resource-card" rounded="xl" variant="flat">
+        <v-card-title class="ruleset-card__title">
+          <span>{{ item.tag }}</span>
+          <v-chip size="small" :color="healthByTag[item.tag]?.loaded ? 'success' : 'warning'" variant="tonal">
+            {{ healthByTag[item.tag]?.loaded ? '已加载' : '未加载' }}
+          </v-chip>
+        </v-card-title>
         <v-card-subtitle style="margin-top: -15px;">
           <v-row><v-col>{{ $t('ruleset.' + item.type) }}</v-col></v-row>
         </v-card-subtitle>
@@ -191,11 +237,13 @@ import { actionKeys, ruleset } from '@/types/rules'
 import { FindDiff } from '@/plugins/utils'
 import PageHero from '@/components/PageHero.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import HttpUtils from '@/plugins/httputil'
 
 const RuleVue = defineAsyncComponent(() => import('@/layouts/modals/Rule.vue'))
 const RulesetVue = defineAsyncComponent(() => import('@/layouts/modals/Ruleset.vue'))
 const RulesetImport = defineAsyncComponent(() => import('@/layouts/modals/RulesetImport.vue'))
 const RuleImport = defineAsyncComponent(() => import('@/layouts/modals/RuleImport.vue'))
+const RuleCatalog = defineAsyncComponent(() => import('@/layouts/modals/RuleCatalog.vue'))
 
 const oldConfig = ref({})
 const loading = ref(false)
@@ -210,6 +258,7 @@ onBeforeMount(async () => {
     await new Promise(resolve => setTimeout(resolve, 100))
   }
   oldConfig.value = JSON.parse(JSON.stringify(Data().config))
+  await loadRuleSetHealth()
   loading.value = false
 })
 
@@ -260,6 +309,81 @@ const inboundTags = computed((): string[] => [
   ...Data().inbounds?.map((o:any) => o.tag),
   ...Data().endpoints?.filter((e:any) => e.listen_port > 0 && e.type != "masque").map((e:any) => e.tag)
 ])
+
+const catalogModal = ref(false)
+const catalogLoading = ref(false)
+
+async function applyCatalog(payload: any) {
+  catalogLoading.value = true
+  try {
+    const draft: any = JSON.parse(JSON.stringify(appConfig.value))
+    draft.route = draft.route ?? {}
+    draft.route.rules = Array.isArray(draft.route.rules) ? draft.route.rules : []
+    draft.route.rule_set = Array.isArray(draft.route.rule_set) ? draft.route.rule_set : []
+    const knownTags = new Set(draft.route.rule_set.map((item: any) => item.tag))
+    for (const asset of payload.item.assets) {
+      if (knownTags.has(asset.tag)) continue
+      const ruleSet: any = {
+        type: 'remote',
+        tag: asset.tag,
+        format: 'binary',
+        url: asset.url,
+        update_interval: '1d',
+      }
+      if (payload.downloadDetour) ruleSet.download_detour = payload.downloadDetour
+      draft.route.rule_set.push(ruleSet)
+      knownTags.add(asset.tag)
+    }
+    const rule: any = { ...(payload.item.directRule ?? {}) }
+    if (payload.item.assets.length > 0) rule.rule_set = payload.item.assets.map((asset: any) => asset.tag)
+    if (payload.inbound) rule.inbound = [payload.inbound]
+    if (payload.user) rule.auth_user = [payload.user]
+    rule.action = payload.action
+    if (payload.action === 'route') rule.outbound = payload.outbound
+
+    let insertAt = 0
+    const setupActions = new Set(['sniff', 'resolve', 'hijack-dns'])
+    while (insertAt < draft.route.rules.length && setupActions.has(draft.route.rules[insertAt]?.action)) insertAt++
+    draft.route.rules.splice(insertAt, 0, rule)
+
+    const success = await Data().save('config', 'set', draft)
+    if (success) {
+      oldConfig.value = JSON.parse(JSON.stringify(Data().config))
+      catalogModal.value = false
+      await loadRuleSetHealth()
+    }
+  } finally {
+    catalogLoading.value = false
+  }
+}
+
+const healthLoading = ref(false)
+const ruleSetHealth = ref<any[]>([])
+const healthByTag = computed(() => Object.fromEntries(ruleSetHealth.value.map((item) => [item.tag, item])))
+
+async function loadRuleSetHealth() {
+  healthLoading.value = true
+  try {
+    const response = await HttpUtils.get('api/ruleset-health')
+    if (response.success) ruleSetHealth.value = response.obj ?? []
+  } finally {
+    healthLoading.value = false
+  }
+}
+
+const explainInput = ref({ domain: '', destination: '', port: 443, inbound: '', user: '', network: 'tcp', protocol: '' })
+const explainResult = ref<any | null>(null)
+const explainLoading = ref(false)
+
+async function runRouteExplain() {
+  explainLoading.value = true
+  try {
+    const response = await HttpUtils.post('api/routeExplain', explainInput.value)
+    if (response.success) explainResult.value = response.obj
+  } finally {
+    explainLoading.value = false
+  }
+}
 
 let delRuleOverlay = ref(new Array<boolean>)
 let delRulesetOverlay = ref(new Array<boolean>)
@@ -377,6 +501,51 @@ function saveImportRulesets(items: any[]) {
   font-size: 13px;
 }
 
+.rules-section__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ruleset-card__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.route-explain__result {
+  display: flex;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid rgba(52, 199, 89, .28);
+  border-radius: 18px;
+  background: rgba(52, 199, 89, .08);
+}
+
+.route-explain__result--default {
+  border-color: var(--np-border);
+  background: var(--np-surface-muted);
+}
+
+.route-explain__result div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.route-explain__result span {
+  color: var(--np-text-muted);
+}
+
+.route-explain__result code {
+  overflow: auto;
+  padding-top: 5px;
+  color: var(--np-text-muted);
+  font-size: 12px;
+}
+
 @media (max-width: 599px) {
   .rules-section { border-radius: 22px; }
 
@@ -396,6 +565,10 @@ function saveImportRulesets(items: any[]) {
   .rules-section__heading .v-btn :deep(.v-icon) {
     margin: 0;
     font-size: 20px;
+  }
+
+  .rules-section__actions {
+    gap: 2px;
   }
 }
 </style>

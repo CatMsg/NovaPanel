@@ -1,5 +1,5 @@
 <template>
-  <OutboundVue 
+  <OutboundVue
     v-model="modal.visible"
     :visible="modal.visible"
     :id="modal.id"
@@ -20,12 +20,27 @@
     :tag="stats.tag"
     @close="closeStats"
   />
+  <StrategyBuilder
+    :visible="strategyModal"
+    :member-tags="outboundTags"
+    :loading="strategyLoading"
+    @close="strategyModal = false"
+    @save="saveStrategy"
+  />
+  <ProxyChainBuilder
+    :visible="chainModal"
+    :outbounds="outbounds"
+    :all-tags="outboundTags"
+    :loading="chainLoading"
+    @close="chainModal = false"
+    @save="saveChain"
+  />
   <v-card class="resource-hero resource-hero--outbounds" rounded="xl" variant="flat">
     <div class="resource-hero__topline">
       <span class="resource-hero__badge">{{ $t('pages.outbounds') }}</span>
     </div>
     <v-row class="resource-hero__content" align="center">
-      <v-col cols="12" lg="8">
+      <v-col cols="12" lg="7">
         <div class="resource-hero__title-row">
           <div class="resource-hero__icon">
             <v-icon icon="mdi-cloud-upload-outline" size="32" />
@@ -45,29 +60,51 @@
           <span>已测试 {{ Object.keys(checkResults).length }}</span>
         </div>
       </v-col>
-      <v-col cols="12" lg="4" class="resource-hero__actions">
+      <v-col cols="12" lg="5" class="resource-hero__actions">
+        <v-btn color="primary" variant="tonal" size="large" @click="strategyModal = true">
+          <v-icon icon="mdi-call-split" start />策略组
+        </v-btn>
         <v-btn v-if="outbounds.length > 0" color="primary" size="large" @click="showModal(0)">
           <v-icon icon="mdi-plus" start />
           {{ $t('actions.add') }}
         </v-btn>
-        <v-btn color="primary" variant="tonal" size="large" @click="showBulkModal">
-          <v-icon icon="mdi-playlist-plus" start />
-          {{ $t('actions.addbulk') }}
-        </v-btn>
-        <v-btn
-          v-if="outbounds.length > 0"
-          color="secondary"
-          variant="outlined"
-          :loading="testingAll"
-          append-icon="mdi-speedometer"
-          :disabled="testingAll || outbounds.length === 0"
-          @click="checkAllOutbounds"
-        >
-          {{ $t('actions.testAll') || 'Test all' }}
-        </v-btn>
+        <v-menu location="bottom end">
+          <template #activator="{ props }">
+            <v-btn v-bind="props" variant="outlined" size="large" append-icon="mdi-chevron-down">更多</v-btn>
+          </template>
+          <v-list density="compact" nav min-width="210">
+            <v-list-item prepend-icon="mdi-link-variant" title="代理链" :disabled="outbounds.length === 0" @click="chainModal = true" />
+            <v-list-item prepend-icon="mdi-playlist-plus" :title="$t('actions.addbulk')" @click="showBulkModal" />
+            <v-list-item prepend-icon="mdi-speedometer" :title="$t('actions.testAll') || 'Test all'" :disabled="testingAll || outbounds.length === 0" @click="checkAllOutbounds" />
+          </v-list>
+        </v-menu>
       </v-col>
     </v-row>
   </v-card>
+
+  <section v-if="failoverStatuses.length > 0" class="failover-panel">
+    <div class="failover-panel__heading">
+      <div><span>AUTOMATIC FAILOVER</span><h2>有序故障回退</h2></div>
+      <v-btn icon="mdi-refresh" variant="text" :loading="failoverLoading" aria-label="刷新回退状态" @click="loadFailoverStatus" />
+    </div>
+    <div class="failover-grid">
+      <article v-for="status in failoverStatuses" :key="status.policy.tag" class="failover-card">
+        <div class="failover-card__top">
+          <div><strong>{{ status.policy.tag }}</strong><small>{{ status.policy.members.join(' → ') }}</small></div>
+          <v-chip size="small" :color="status.error ? 'warning' : 'success'" variant="tonal">{{ status.error ? '需检查' : '运行中' }}</v-chip>
+        </div>
+        <div class="failover-card__state">
+          <span>当前出口</span><strong>{{ status.current || '等待首次探测' }}</strong>
+          <span>候选出口</span><strong>{{ status.candidate || '-' }}</strong>
+        </div>
+        <p v-if="status.error">{{ status.error }}</p>
+        <div class="failover-card__footer">
+          <small>{{ status.lastChecked ? `最近探测 ${formatStatusTime(status.lastChecked)}` : '尚未探测' }}</small>
+          <v-btn size="small" variant="text" color="warning" @click="deleteFailover(status.policy.tag)">停止回退</v-btn>
+        </div>
+      </article>
+    </div>
+  </section>
 
   <v-row class="resource-grid">
     <v-col v-if="outbounds.length === 0" cols="12">
@@ -188,12 +225,14 @@
 import Data from '@/store/modules/data'
 import HttpUtils from '@/plugins/httputil'
 import { Outbound } from '@/types/outbounds'
-import { computed, defineAsyncComponent, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
 
 const OutboundVue = defineAsyncComponent(() => import('@/layouts/modals/Outbound.vue'))
 const OutboundBulk = defineAsyncComponent(() => import('@/layouts/modals/OutboundBulk.vue'))
 const Stats = defineAsyncComponent(() => import('@/layouts/modals/Stats.vue'))
+const StrategyBuilder = defineAsyncComponent(() => import('@/layouts/modals/StrategyBuilder.vue'))
+const ProxyChainBuilder = defineAsyncComponent(() => import('@/layouts/modals/ProxyChainBuilder.vue'))
 
 interface CheckResult {
   loading?: boolean
@@ -231,6 +270,70 @@ const checkAllOutbounds = async () => {
 const outbounds = computed((): Outbound[] => {
   return <Outbound[]> Data().outbounds
 })
+
+const strategyModal = ref(false)
+const strategyLoading = ref(false)
+const chainModal = ref(false)
+const chainLoading = ref(false)
+const failoverStatuses = ref<any[]>([])
+const failoverLoading = ref(false)
+
+async function saveStrategy(payload: any) {
+  if (Data().checkTag('outbound', 0, payload.outbound.tag)) return
+  strategyLoading.value = true
+  try {
+    const saved = await Data().save('outbounds', 'new', payload.outbound)
+    if (!saved) return
+    if (payload.policy) {
+      const response = await HttpUtils.post('api/failoverSave', payload.policy)
+      if (!response.success) {
+        await Data().save('outbounds', 'del', payload.outbound.tag)
+        return
+      }
+    }
+    strategyModal.value = false
+    await loadFailoverStatus()
+  } finally {
+    strategyLoading.value = false
+  }
+}
+
+async function saveChain(payload: { target: string; detour: string }) {
+  const source = outbounds.value.find((item) => item.tag === payload.target)
+  if (!source) return
+  const updated: any = JSON.parse(JSON.stringify(source))
+  if (payload.detour) updated.detour = payload.detour
+  else delete updated.detour
+  chainLoading.value = true
+  try {
+    const saved = await Data().save('outbounds', 'edit', updated)
+    if (saved) chainModal.value = false
+  } finally {
+    chainLoading.value = false
+  }
+}
+
+async function loadFailoverStatus() {
+  failoverLoading.value = true
+  try {
+    const response = await HttpUtils.get('api/failover-status')
+    if (response.success) failoverStatuses.value = response.obj ?? []
+  } finally {
+    failoverLoading.value = false
+  }
+}
+
+async function deleteFailover(tag: string) {
+  const response = await HttpUtils.post('api/failoverDelete', { tag })
+  if (response.success) await loadFailoverStatus()
+}
+
+function formatStatusTime(value: string) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
+onMounted(loadFailoverStatus)
 
 const outboundTags = computed((): string[] => {
   return [...Data().outbounds?.map((o:Outbound) => o.tag), ...Data().endpoints?.filter((e:any) => e.type != "masque").map((e:any) => e.tag)]
@@ -277,7 +380,11 @@ const stats = ref({
 const delOutbound = async (tag: string) => {
   const index = outbounds.value.findIndex(i => i.tag == tag)
   const success = await Data().save("outbounds", "del", tag)
-  if (success) delOverlay.value[index] = false
+  if (success) {
+    delOverlay.value[index] = false
+    await HttpUtils.post('api/failoverDelete', { tag })
+    await loadFailoverStatus()
+  }
 }
 
 const showStats = (tag: string) => {
@@ -381,6 +488,88 @@ const closeStats = () => {
 
 .resource-grid {
   margin-top: 0;
+}
+
+.failover-panel {
+  margin-bottom: 18px;
+  padding: 18px;
+  border: 1px solid var(--np-border);
+  border-radius: 26px;
+  background: var(--np-surface-muted);
+}
+
+.failover-panel__heading,
+.failover-card__top,
+.failover-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.failover-panel__heading span {
+  color: var(--np-accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .12em;
+}
+
+.failover-panel__heading h2 {
+  margin: 2px 0 0;
+  font-size: 19px;
+}
+
+.failover-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.failover-card {
+  padding: 16px;
+  border: 1px solid var(--np-border);
+  border-radius: 20px;
+  background: var(--np-surface);
+}
+
+.failover-card__top div {
+  min-width: 0;
+}
+
+.failover-card__top strong,
+.failover-card__top small {
+  display: block;
+}
+
+.failover-card__top small,
+.failover-card__footer small,
+.failover-card p {
+  color: var(--np-text-muted);
+}
+
+.failover-card__top small {
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.failover-card__state {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 7px 14px;
+  margin: 15px 0;
+  font-size: 13px;
+}
+
+.failover-card__state span {
+  color: var(--np-text-muted);
+}
+
+.failover-card p {
+  margin: 0 0 10px;
+  font-size: 12px;
 }
 
 .v-theme--dark .resource-hero,

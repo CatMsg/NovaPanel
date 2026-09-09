@@ -104,6 +104,26 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 
 	engine.StaticFS(assetsBasePath, http.FS(assetsFS))
 
+	// PWA entry files live beside index.html and must respect a custom panel path.
+	// Keep them out of the immutable asset cache so upgrades take effect promptly.
+	for _, name := range []string{"manifest.webmanifest", "service-worker.js"} {
+		assetName := name
+		engine.GET(base_url+assetName, func(c *gin.Context) {
+			data, readErr := content.ReadFile("html/" + assetName)
+			if readErr != nil {
+				c.String(http.StatusNotFound, "")
+				return
+			}
+			c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+			switch assetName {
+			case "manifest.webmanifest":
+				c.Data(http.StatusOK, "application/manifest+json", data)
+			default:
+				c.Data(http.StatusOK, "text/javascript; charset=utf-8", data)
+			}
+		})
+	}
+
 	group_apiv2 := engine.Group(base_url + "apiv2")
 	apiv2 := api.NewAPIv2Handler(group_apiv2)
 

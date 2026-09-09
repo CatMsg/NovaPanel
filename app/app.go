@@ -17,13 +17,14 @@ import (
 
 type APP struct {
 	service.SettingService
-	configService *service.ConfigService
-	masqueService *service.MasqueService
-	mieruService  *service.MieruService
-	webServer     *web.Server
-	subServer     *sub.Server
-	cronJob       *cronjob.CronJob
-	core          *core.Core
+	configService   *service.ConfigService
+	masqueService   *service.MasqueService
+	mieruService    *service.MieruService
+	failoverService *service.FailoverService
+	webServer       *web.Server
+	subServer       *sub.Server
+	cronJob         *cronjob.CronJob
+	core            *core.Core
 }
 
 func NewApp() *APP {
@@ -64,6 +65,7 @@ func (a *APP) Init() error {
 	a.subServer = sub.NewServer()
 
 	a.configService = service.NewConfigService(a.core)
+	a.failoverService = service.NewFailoverService(a.configService)
 	service.SetSubServerRestartFunc(a.subServer.Restart)
 
 	return nil
@@ -106,6 +108,9 @@ func (a *APP) Start() error {
 }
 
 func (a *APP) runDeferredStartupTasks() {
+	if a.failoverService != nil {
+		a.failoverService.Start()
+	}
 	if err := (&service.LoginGuardService{}).SyncLoginProtection(); err != nil {
 		logger.Warning("sync login protection failed:", err)
 	}
@@ -127,6 +132,9 @@ func (a *APP) runDeferredStartupTasks() {
 }
 
 func (a *APP) Stop() {
+	if a.failoverService != nil {
+		a.failoverService.Stop()
+	}
 	a.cronJob.Stop()
 	err := a.subServer.Stop()
 	if err != nil {

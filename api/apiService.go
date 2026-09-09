@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/CatMsg/NovaPanel/core"
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/logger"
 	"github.com/CatMsg/NovaPanel/service"
@@ -15,6 +16,59 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+func (a *ApiService) GetRuleSetHealth(c *gin.Context) {
+	health, err := a.ConfigService.GetRuleSetHealth()
+	jsonObj(c, health, err)
+}
+
+func (a *ApiService) ExplainRoute(c *gin.Context) {
+	var input core.RouteExplainInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		jsonMsg(c, "failed", err)
+		return
+	}
+	result, err := a.ConfigService.ExplainRoute(input)
+	jsonObj(c, result, err)
+}
+
+func (a *ApiService) GetFailoverStatus(c *gin.Context) {
+	failover, err := service.GetFailoverService()
+	if err != nil {
+		jsonObj(c, nil, err)
+		return
+	}
+	statuses, err := failover.Statuses()
+	jsonObj(c, statuses, err)
+}
+
+func (a *ApiService) SaveFailoverPolicy(c *gin.Context) {
+	var policy service.FailoverPolicy
+	if err := c.ShouldBindJSON(&policy); err != nil {
+		jsonMsg(c, "failed", err)
+		return
+	}
+	failover, err := service.GetFailoverService()
+	if err == nil {
+		err = failover.SavePolicy(policy)
+	}
+	jsonMsg(c, "save", err)
+}
+
+func (a *ApiService) DeleteFailoverPolicy(c *gin.Context) {
+	var input struct {
+		Tag string `json:"tag"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		jsonMsg(c, "failed", err)
+		return
+	}
+	failover, err := service.GetFailoverService()
+	if err == nil {
+		err = failover.DeletePolicy(input.Tag)
+	}
+	jsonMsg(c, "del", err)
+}
 
 type ApiService struct {
 	service.SettingService

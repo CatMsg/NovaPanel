@@ -217,16 +217,16 @@ export interface SSH extends OutboundBasics, Dial  {
 
 export interface Selector extends OutboundBasics {
   outbounds: string[]
-  url?: string
-  interval?: string
-  tolerance?: number
-  idle_timeout?: string
+  default?: string
   interrupt_exist_connections?: boolean
 }
 
 export interface URLTest extends OutboundBasics {
   outbounds: string[]
-  default?: string
+  url?: string
+  interval?: string
+  tolerance?: number
+  idle_timeout?: string
   interrupt_exist_connections?: boolean
 }
 

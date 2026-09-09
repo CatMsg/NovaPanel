@@ -80,6 +80,12 @@ func (a *APIHandler) postHandler(c *gin.Context) {
 		a.ApiService.UnbanLoginIP(c)
 	case "mieruDebug":
 		a.ApiService.EnableMieruDebug(c)
+	case "routeExplain":
+		a.ApiService.ExplainRoute(c)
+	case "failoverSave":
+		a.ApiService.SaveFailoverPolicy(c)
+	case "failoverDelete":
+		a.ApiService.DeleteFailoverPolicy(c)
 	default:
 		jsonMsg(c, "failed", common.NewError("unknown action: ", action))
 	}
@@ -143,6 +149,10 @@ func (a *APIHandler) getHandler(c *gin.Context) {
 		a.ApiService.GetFleet(c)
 	case "update-status":
 		a.ApiService.GetUpdateStatus(c)
+	case "ruleset-health":
+		a.ApiService.GetRuleSetHealth(c)
+	case "failover-status":
+		a.ApiService.GetFailoverStatus(c)
 	default:
 		jsonMsg(c, "failed", common.NewError("unknown action: ", action))
 	}

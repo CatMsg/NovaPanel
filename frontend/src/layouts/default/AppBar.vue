@@ -11,6 +11,7 @@
       </div>
       <v-spacer />
       <div class="app-bar__actions">
+        <PwaInstallButton />
         <v-menu>
           <template v-slot:activator="{ props }">
             <v-btn icon v-bind="props" variant="text" class="app-bar__icon-btn" :aria-label="$t('menu.language')" :title="$t('menu.language')">
@@ -56,6 +57,7 @@ import { useLocale, useTheme } from 'vuetify'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { languages } from '@/locales'
+import PwaInstallButton from '@/components/PwaInstallButton.vue'
 
 defineProps(['isMobile'])
 
