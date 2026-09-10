@@ -25,6 +25,7 @@
 /* Keep this curated map in sync with icons used by the application. */
 .mdi-dots-horizontal::before { content: "\F01D8"; }
 .mdi-download-outline::before { content: "\F0B8F"; }
+.mdi-monitor-arrow-down-variant::before { content: "\F19D1"; }
 .mdi-send-check-outline::before { content: "\F1162"; }
 .mdi-server-plus::before { content: "\F0490"; }
 .mdi-text-box-outline::before { content: "\F09ED"; }
