@@ -171,6 +171,11 @@ func collectInboundForwardSpec(inbound *model.Inbound) (managedForwardSpec, erro
 	if inbound.Type == "hysteria2" {
 		protocols = []string{"udp"}
 	}
+	if inbound.Type == "vless" {
+		// VLESS carries proxied UDP inside its stream, but the server socket itself
+		// listens on TCP. Reserving UDP here incorrectly conflicts with HY2/TUIC.
+		protocols = []string{"tcp"}
+	}
 	if inbound.Type == "mieru" {
 		config, err := parseMieruInbound(inbound)
 		if err != nil {

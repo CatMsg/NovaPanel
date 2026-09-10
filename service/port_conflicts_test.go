@@ -174,6 +174,43 @@ func TestManagedPortConflictsAllowSamePortAcrossTCPAndUDP(t *testing.T) {
 	}
 }
 
+func TestVLESSCanShareNumericPortWithHysteria2(t *testing.T) {
+	logger.InitLogger(logging.ERROR)
+	dir := t.TempDir()
+	if err := database.InitDB(filepath.Join(dir, "vless-hy2-protocol-ports.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	db := database.GetDB()
+	hy2 := model.Inbound{
+		Type:    "hysteria2",
+		Tag:     "hy2-udp",
+		Options: json.RawMessage(`{"listen_port":443}`),
+	}
+	if err := db.Create(&hy2).Error; err != nil {
+		t.Fatalf("create Hysteria2 inbound: %v", err)
+	}
+	if err := RebuildManagedPortEntries(); err != nil {
+		t.Fatalf("rebuild managed port entries: %v", err)
+	}
+
+	vless := &model.Inbound{
+		Type:    "vless",
+		Tag:     "vless-tcp",
+		Options: json.RawMessage(`{"listen_port":443}`),
+	}
+	spec, err := collectInboundForwardSpec(vless)
+	if err != nil {
+		t.Fatalf("collect VLESS forwarding spec: %v", err)
+	}
+	if len(spec.protocols) != 1 || spec.protocols[0] != "tcp" {
+		t.Fatalf("expected VLESS to reserve TCP only, got %#v", spec.protocols)
+	}
+	if err := validateManagedPortRangeProtocolConflicts(db, "入站", vless.Tag, 0, 0, spec.portRanges, spec.protocols); err != nil {
+		t.Fatalf("expected VLESS TCP and Hysteria2 UDP to share port 443: %v", err)
+	}
+}
+
 func TestManagedPanelTCPPortCanShareUDPOnlyInboundPort(t *testing.T) {
 	logger.InitLogger(logging.ERROR)
 
