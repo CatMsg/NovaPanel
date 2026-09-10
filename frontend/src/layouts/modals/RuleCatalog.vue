@@ -5,7 +5,7 @@
         <div>
           <span class="catalog-dialog__eyebrow">RULE CATALOG</span>
           <h2>规则目录</h2>
-          <p>从常用分类或 SagerNet 完整规则库中选择，NovaPanel 会同时创建 SRS 规则集和路由规则。</p>
+          <p>选择规则集后按需指定流量出口或 DNS；默认只添加规则集，不改变现有路由。</p>
         </div>
         <v-btn icon="mdi-close" variant="text" aria-label="关闭" @click="$emit('close')" />
       </v-card-title>
@@ -93,20 +93,44 @@
           <code v-if="selected.assets[0]">{{ selected.assets[0].tag }}</code>
         </div>
         <v-alert v-else type="info" variant="tonal" density="compact" class="mb-4">请先选择一项规则。</v-alert>
-        <v-row dense>
-          <v-col cols="12" md="4"><v-select v-model="action" :items="actionItems" label="动作" hide-details /></v-col>
-          <v-col v-if="action === 'route'" cols="12" md="8"><v-select v-model="outbound" :items="outboundTags" label="目标出口" hide-details /></v-col>
-          <v-col cols="12" md="6"><v-select v-model="inbound" :items="inboundTags" label="仅限入站（可选）" clearable hide-details /></v-col>
-          <v-col cols="12" md="6"><v-select v-model="user" :items="clients" label="仅限用户（可选）" clearable hide-details /></v-col>
-          <v-col v-if="selected?.assets.length" cols="12" md="6"><v-select v-model="downloadDetour" :items="outboundTags" label="规则集下载出口（可选）" clearable hide-details /></v-col>
-        </v-row>
+        <div class="catalog-purpose">
+          <v-select v-model="action" :items="actionItems" label="流量处理" hide-details />
+          <v-select
+            v-model="dnsServer"
+            :items="dnsServerTags"
+            label="DNS 解析（可选）"
+            clearable
+            hide-details
+            no-data-text="暂无 DNS 服务器"
+          />
+        </div>
+        <v-select
+          v-if="action === 'route'"
+          v-model="outbound"
+          :items="outboundTags"
+          label="目标出口"
+          class="mt-3"
+          hide-details
+        />
+        <v-expansion-panels class="catalog-advanced mt-3" variant="accordion">
+          <v-expansion-panel>
+            <v-expansion-panel-title>高级选项</v-expansion-panel-title>
+            <v-expansion-panel-text>
+              <v-row dense>
+                <v-col v-if="action !== 'none'" cols="12" md="6"><v-select v-model="inbound" :items="inboundTags" label="仅限入站" clearable hide-details /></v-col>
+                <v-col v-if="action !== 'none'" cols="12" md="6"><v-select v-model="user" :items="clients" label="仅限用户" clearable hide-details /></v-col>
+                <v-col v-if="selected?.assets.length" cols="12"><v-select v-model="downloadDetour" :items="outboundTags" label="规则集下载出口" clearable hide-details /></v-col>
+              </v-row>
+            </v-expansion-panel-text>
+          </v-expansion-panel>
+        </v-expansion-panels>
         <v-alert class="mt-4" type="info" variant="tonal">
           远端目录来自 SagerNet 官方 sing-box 规则集分支；保存时会下载并校验，失败则自动回滚。
         </v-alert>
       </v-card-text>
       <v-card-actions class="catalog-dialog__actions">
         <v-btn variant="text" @click="$emit('close')">取消</v-btn>
-        <v-btn color="primary" :loading="loading" :disabled="!canApply" @click="apply">创建并保存</v-btn>
+        <v-btn color="primary" :loading="loading" :disabled="!canApply" @click="apply">{{ applyLabel }}</v-btn>
       </v-card-actions>
     </v-card>
   </v-dialog>
@@ -129,6 +153,7 @@ const props = defineProps<{
   outboundTags: string[]
   inboundTags: string[]
   clients: string[]
+  dnsServerTags: string[]
   loading?: boolean
 }>()
 
@@ -136,8 +161,9 @@ const emit = defineEmits(['close', 'apply'])
 const source = ref<'popular' | 'remote'>('popular')
 const search = ref('')
 const selected = ref<RuleCatalogItem | null>(ruleCatalog[0])
-const action = ref<'route' | 'reject'>('route')
+const action = ref<'none' | 'route' | 'reject'>('none')
 const outbound = ref('')
+const dnsServer = ref('')
 const inbound = ref('')
 const user = ref('')
 const downloadDetour = ref('')
@@ -162,14 +188,24 @@ const filteredCatalog = computed(() => {
 })
 const remotePages = computed(() => Math.ceil(remoteTotal.value / remotePageSize))
 const actionItems = [
-  { title: '路由到指定出口', value: 'route' },
-  { title: '拒绝连接', value: 'reject' },
+  { title: '保持默认（不添加路由）', value: 'none' },
+  { title: '指定出口', value: 'route' },
+  { title: '拒绝访问', value: 'reject' },
 ]
-const canApply = computed(() => Boolean(selected.value && (action.value !== 'route' || outbound.value)))
+const canApply = computed(() => Boolean(
+  selected.value &&
+  (selected.value.assets.length > 0 || action.value !== 'none') &&
+  (action.value !== 'route' || outbound.value)
+))
+const applyLabel = computed(() => {
+  if (action.value === 'none' && !dnsServer.value) return '添加规则集'
+  if (action.value === 'none') return '添加并配置 DNS'
+  return '创建并保存'
+})
 
 function selectItem(item: RuleCatalogItem) {
   selected.value = item
-  action.value = item.suggestedAction ?? 'route'
+  action.value = item.suggestedAction ?? 'none'
 }
 
 function toCatalogItem(entry: RemoteCatalogEntry): RuleCatalogItem {
@@ -236,6 +272,11 @@ watch(source, (value) => {
 })
 watch(() => props.visible, (value) => {
   if (!value) return
+  action.value = selected.value?.suggestedAction ?? 'none'
+  dnsServer.value = ''
+  inbound.value = ''
+  user.value = ''
+  downloadDetour.value = ''
   if (!props.outboundTags.includes(outbound.value)) outbound.value = defaultOutbound()
   if (source.value === 'remote') scheduleRemoteSearch()
 })
@@ -253,6 +294,7 @@ function apply() {
     item: selected.value,
     action: action.value,
     outbound: outbound.value,
+    dnsServer: dnsServer.value,
     inbound: inbound.value,
     user: user.value,
     downloadDetour: downloadDetour.value,
@@ -292,6 +334,9 @@ function onDialogUpdate(value: boolean) {
 .catalog-selection div { display: grid; min-width: 0; }
 .catalog-selection span { color: var(--np-text-muted); font-size: 11px; }
 .catalog-selection code { margin-left: auto; overflow: hidden; color: var(--np-text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.catalog-purpose { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.catalog-advanced { border: 1px solid var(--np-border); border-radius: 16px; overflow: hidden; }
+.catalog-advanced :deep(.v-expansion-panel) { background: var(--np-surface-muted); }
 .catalog-dialog__actions { justify-content: flex-end; padding: 14px 24px 22px; }
 @media (hover: hover) and (pointer: fine) { .catalog-item:hover { border-color: rgba(10, 132, 255, .35); } }
 @media (max-width: 760px) {
@@ -300,6 +345,7 @@ function onDialogUpdate(value: boolean) {
   .catalog-source-toggle { width: 100%; }
   .catalog-source-toggle :deep(.v-btn) { flex: 1; }
   .catalog-grid, .catalog-grid--remote { grid-template-columns: 1fr; }
+  .catalog-purpose { grid-template-columns: 1fr; }
   .catalog-remote-toolbar { align-items: flex-start; flex-direction: column; }
   .catalog-selection { align-items: flex-start; }
   .catalog-selection code { max-width: 45%; }

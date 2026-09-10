@@ -9,26 +9,14 @@
     @close="closeDnsModal"
     @save="saveDnsModal"
   />
-  <DnsRuleVue
-    v-model="dnsRuleModal.visible"
-    :visible="dnsRuleModal.visible"
-    :index="dnsRuleModal.index"
-    :data="dnsRuleModal.data"
-    :clients="clients"
-    :inTags="inboundTags"
-    :serverTags="dnsServerTags"
-    :ruleSets="ruleSets"
-    @close="closeDnsRuleModal"
-    @save="saveDnsRuleModal"
-  />
   <PageHero
     :eyebrow="$t('pages.dns')"
     :title="$t('pages.dns')"
-    description="集中维护 DNS 服务器、缓存策略与匹配规则，拖动规则即可调整解析优先级。"
+    description="集中维护 DNS 服务器、默认解析器与缓存策略；DNS 分流规则统一在路由列表中管理。"
     icon="mdi-dns-outline"
   >
     <template #meta>
-      <span>服务器 {{ dns.servers.length }}</span><span>•</span><span>规则 {{ dnsRules.length }}</span><span>•</span><span>默认 {{ finalDns || $t('dns.firstServer') }}</span>
+      <span>服务器 {{ dns.servers.length }}</span><span>•</span><span>默认 {{ finalDns || $t('dns.firstServer') }}</span>
     </template>
     <template #actions>
       <v-btn variant="outlined" color="warning" @click="saveConfig" :loading="loading" :disabled="stateChange">
@@ -92,7 +80,7 @@
       <v-btn color="primary" variant="tonal" @click="showDnsModal(-1)"><v-icon icon="mdi-plus" start />{{ $t('dns.add') }}</v-btn>
     </v-col>
     <v-col v-if="dns.servers.length === 0" cols="12">
-      <EmptyState icon="mdi-server-network-outline" title="暂无 DNS 服务器" description="添加解析服务器后即可在默认解析和规则中使用。" />
+      <EmptyState icon="mdi-server-network-outline" title="暂无 DNS 服务器" description="添加解析服务器后即可设为默认解析器或在路由列表中用于 DNS 分流。" />
     </v-col>
     <v-col cols="12" sm="6" md="4" lg="3" v-for="(item, index) in <any[]>dns.servers" :key="item.id">
       <v-card class="np-resource-card" rounded="xl" variant="flat" :title="item.tag">
@@ -149,94 +137,17 @@
       </v-card>
     </v-col>
   </v-row>
-  <v-row class="dns-section">
-    <v-col class="dns-section__heading" cols="12">
-      <div><h2>{{ $t('dns.rule.title') }}</h2><p>从上到下依次匹配，拖动卡片调整规则顺序。</p></div>
-      <v-btn color="primary" variant="tonal" @click="showDnsRuleModal(-1)"><v-icon icon="mdi-playlist-plus" start />{{ $t('dns.rule.add') }}</v-btn>
-    </v-col>
-    <v-col v-if="dnsRules.length === 0" cols="12">
-      <EmptyState icon="mdi-filter-cog-outline" title="暂无 DNS 规则" description="添加规则后，可按域名、入站或用户选择不同解析器。" />
-    </v-col>
-    <v-col cols="12" sm="6" md="4" lg="3" v-for="(item, index) in <any[]>dnsRules"
-      :key="item.id"
-      :draggable="true"
-      @dragstart="onDragStart(index)"
-      @dragover.prevent
-      @drop="onDrop(index)"
-      >
-      <v-card class="np-resource-card" rounded="xl" variant="flat" :title="index+1">
-        <v-card-subtitle style="margin-top: -15px;">
-          <v-row>
-            <v-col>{{ item.type != undefined ? $t('rule.logical') + ' (' + item.mode + ')' : $t('rule.simple') }}</v-col>
-          </v-row>
-        </v-card-subtitle>
-        <v-card-text>
-          <v-row>
-            <v-col>{{ $t('admin.action') }}</v-col>
-            <v-col>
-              {{ item.action }}
-            </v-col>
-          </v-row>
-          <v-row>
-            <v-col>{{ $t('dns.server') }}</v-col>
-            <v-col>
-              {{ item.server?? '-' }}
-            </v-col>
-          </v-row>
-          <v-row>
-            <v-col>{{ $t('pages.rules') }}</v-col>
-            <v-col>
-              {{ item.rules ? item.rules.length : Object.keys(item).filter(r => !actionDnsRuleKeys.includes(r)).length }}
-            </v-col>
-          </v-row>
-          <v-row>
-            <v-col>{{ $t('rule.invert') }}</v-col>
-            <v-col>
-              {{ $t( (item.invert?? false)? 'yes' : 'no') }}
-            </v-col>
-          </v-row>
-        </v-card-text>
-        <v-divider></v-divider>
-        <v-card-actions class="np-resource-card__actions">
-          <v-btn class="np-card-action" variant="text" @click="showDnsRuleModal(index)">
-            <v-icon icon="mdi-file-edit" /><span>{{ $t('actions.edit') }}</span>
-            <v-tooltip activator="parent" location="top" :text="$t('actions.edit')"></v-tooltip>
-          </v-btn>
-          <v-btn class="np-card-action" variant="text" color="warning" @click="delDnsRuleOverlay[index] = true">
-            <v-icon icon="mdi-file-remove" /><span>{{ $t('actions.del') }}</span>
-            <v-tooltip activator="parent" location="top" :text="$t('actions.del')"></v-tooltip>
-          </v-btn>
-          <v-overlay
-            v-model="delDnsRuleOverlay[index]"
-            contained
-            class="align-center justify-center"
-          >
-            <v-card :title="$t('actions.del')" rounded="lg">
-              <v-divider></v-divider>
-              <v-card-text>{{ $t('confirm') }}</v-card-text>
-              <v-card-actions>
-                <v-btn color="error" variant="outlined" @click="delDnsRule(index)">{{ $t('yes') }}</v-btn>
-                <v-btn color="success" variant="outlined" @click="delDnsRuleOverlay[index] = false">{{ $t('no') }}</v-btn>
-              </v-card-actions>
-            </v-card>
-          </v-overlay>
-        </v-card-actions>
-      </v-card>
-    </v-col>
-  </v-row>
 </template>
 
 <script lang="ts" setup>
 import Data from '@/store/modules/data'
 import { computed, defineAsyncComponent, ref, onBeforeMount } from 'vue'
 import { Config } from '@/types/config'
-import { actionDnsRuleKeys, dnsRule } from '@/types/dns'
 import { FindDiff } from '@/plugins/utils'
 import PageHero from '@/components/PageHero.vue'
 import EmptyState from '@/components/EmptyState.vue'
 
 const DnsVue = defineAsyncComponent(() => import('@/layouts/modals/Dns.vue'))
-const DnsRuleVue = defineAsyncComponent(() => import('@/layouts/modals/DnsRule.vue'))
 
 const oldConfig = ref(<any>{})
 const loading = ref(false)
@@ -267,10 +178,6 @@ const rslvdTags = computed((): string[] => {
   return Data().services?.filter((e:any) => e.type == "resolved").map((e:any) => e.tag)
 })
 
-const clients = computed((): string[] => {
-  return Data().clients.map((c:any) => c.name)
-})
-
 const stateChange = computed(() => {
   return FindDiff.deepCompare(appConfig.value.dns,oldConfig.value.dns)
 })
@@ -283,10 +190,6 @@ const saveConfig = async () => {
   }
   loading.value = false
 }
-
-const inboundTags = computed((): string[] => {
-  return [...Data().inbounds?.map((o:any) => o.tag), ...Data().endpoints?.filter((e:any) => e.listen_port > 0 && e.type != "masque").map((e:any) => e.tag)]
-})
 
 const dns = computed((): any => {
   return appConfig.value.dns
@@ -302,16 +205,7 @@ const finalDns = computed({
 })
 
 
-const dnsRules = computed((): dnsRule[] => {
-  return <dnsRule[]>dns.value.rules
-})
-
-const ruleSets = computed((): string[] => {
-  return appConfig.value?.route?.rule_set?.map((r:any) => r.tag) ?? []
-})
-
 let delDnsOverlay = ref(new Array<boolean>)
-let delDnsRuleOverlay = ref(new Array<boolean>)
 
 const dnsModal = ref({
   visible: false,
@@ -344,52 +238,6 @@ const delDns = (index: number) => {
   delDnsOverlay.value[index] = false
 }
 
-const dnsRuleModal = ref({
-  visible: false,
-  index: -1,
-  data: "",
-})
-
-const showDnsRuleModal = (index: number) => {
-  dnsRuleModal.value.index = index
-  dnsRuleModal.value.data = index == -1 ? '' : JSON.stringify(dnsRules.value[index])
-  dnsRuleModal.value.visible = true
-}
-
-const closeDnsRuleModal = () => {
-  dnsRuleModal.value.visible = false
-}
-
-const saveDnsRuleModal = (data:dnsRule) => {
-  // New or Edit
-  if (dnsRuleModal.value.index == -1) {
-    dnsRules.value.push(data)
-  } else {
-    dnsRules.value[dnsRuleModal.value.index] = data
-  }
-  dnsRuleModal.value.visible = false
-}
-
-const delDnsRule = (index: number) => {
-  dnsRules.value.splice(index,1)
-  delDnsRuleOverlay.value[index] = false
-}
-
-const draggedItemIndex = ref(null)
-
-const onDragStart = (index: any) => {
-  draggedItemIndex.value = index
-}
-
-const onDrop = (index: any) => {
-  if (draggedItemIndex.value !== null) {
-    // Swap the dragged item with the dropped one
-    const draggedItem = dnsRules.value[draggedItemIndex.value]
-    dnsRules.value.splice(draggedItemIndex.value, 1)
-    dnsRules.value.splice(index, 0, draggedItem)
-    draggedItemIndex.value = null
-  }
-}
 </script>
 
 <style scoped>

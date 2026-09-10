@@ -42,18 +42,31 @@
     :outbound-tags="outboundTags"
     :inbound-tags="inboundTags"
     :clients="clients"
+    :dns-server-tags="dnsServerTags"
     :loading="catalogLoading"
     @close="catalogModal = false"
     @apply="applyCatalog"
   />
+  <DnsRuleVue
+    v-model="dnsRuleModal.visible"
+    :visible="dnsRuleModal.visible"
+    :index="dnsRuleModal.index"
+    :data="dnsRuleModal.data"
+    :clients="clients"
+    :inTags="inboundTags"
+    :serverTags="dnsServerTags"
+    :ruleSets="rulesetTags"
+    @close="closeDnsRuleModal"
+    @save="saveDnsRuleModal"
+  />
   <PageHero
     :eyebrow="$t('pages.rules')"
     :title="$t('pages.rules')"
-    description="统一编排默认出口、规则集和路由规则，支持拖动调整匹配顺序。"
+    description="集中管理规则集、DNS 分流与流量出口，常用场景通过规则目录快速配置。"
     icon="mdi-routes"
   >
     <template #meta>
-      <span>规则集 {{ rulesets.length }}</span><span>•</span><span>路由规则 {{ rules.length }}</span><span>•</span><span>顺序优先匹配</span>
+      <span>规则集 {{ rulesets.length }}</span><span>•</span><span>DNS 分流 {{ dnsRules.length }}</span><span>•</span><span>流量规则 {{ rules.length }}</span>
     </template>
     <template #actions>
       <v-btn color="primary" variant="tonal" @click="catalogModal = true">
@@ -133,7 +146,56 @@
   </v-row>
   <v-row class="rules-section">
     <v-col class="rules-section__heading" cols="12">
-      <div><h2>{{ $t('rule.ruleset') }}</h2><p>远程或本地规则集，可被下方路由规则复用。</p></div>
+      <div><h2>DNS 分流</h2><p>选择哪些域名使用指定的 DNS 服务器；从上到下优先匹配。</p></div>
+      <v-btn color="primary" variant="tonal" @click="showDnsRuleModal(-1)"><v-icon icon="mdi-dns-outline" start />添加 DNS 分流</v-btn>
+    </v-col>
+    <v-col v-if="dnsRules.length === 0" cols="12">
+      <EmptyState icon="mdi-dns-outline" title="暂无 DNS 分流" description="默认使用 DNS 页面设置的解析器；需要特殊解析时再添加规则。" />
+    </v-col>
+    <v-col cols="12" sm="6" md="4" lg="3" v-for="(item, index) in <any[]>dnsRules"
+      :key="item.id ?? index" :draggable="true"
+      @dragstart="onDnsDragStart(index)" @dragover.prevent @drop="onDnsDrop(index)">
+      <v-card class="np-resource-card" rounded="xl" variant="flat">
+        <v-card-title class="route-rule-card__title">
+          <span class="route-rule-card__index">{{ index + 1 }}</span>
+          <div>
+            <strong>{{ dnsRuleActionLabel(item) }}</strong>
+            <small>{{ item.type != undefined ? `逻辑规则 · ${item.mode}` : 'DNS 规则' }}</small>
+          </div>
+        </v-card-title>
+        <v-card-text>
+          <v-row><v-col>匹配</v-col><v-col>{{ dnsRuleMatchLabel(item) }}</v-col></v-row>
+          <v-row><v-col>解析器</v-col><v-col>{{ dnsRuleTargetLabel(item) }}</v-col></v-row>
+          <v-row v-if="dnsRuleOptionLabel(item)"><v-col>选项</v-col><v-col>{{ dnsRuleOptionLabel(item) }}</v-col></v-row>
+          <v-row v-if="item.invert"><v-col>结果</v-col><v-col>反选匹配</v-col></v-row>
+        </v-card-text>
+        <v-divider></v-divider>
+        <v-card-actions class="np-resource-card__actions">
+          <v-btn class="np-card-action" variant="text" @click="showDnsRuleModal(index)">
+            <v-icon icon="mdi-file-edit" /><span>{{ $t('actions.edit') }}</span>
+            <v-tooltip activator="parent" location="top" :text="$t('actions.edit')"></v-tooltip>
+          </v-btn>
+          <v-btn class="np-card-action" variant="text" color="warning" @click="delDnsRuleOverlay[index] = true">
+            <v-icon icon="mdi-file-remove" /><span>{{ $t('actions.del') }}</span>
+            <v-tooltip activator="parent" location="top" :text="$t('actions.del')"></v-tooltip>
+          </v-btn>
+          <v-overlay v-model="delDnsRuleOverlay[index]" contained class="align-center justify-center">
+            <v-card :title="$t('actions.del')" rounded="lg">
+              <v-divider></v-divider>
+              <v-card-text>{{ $t('confirm') }}</v-card-text>
+              <v-card-actions>
+                <v-btn color="error" variant="outlined" @click="delDnsRule(index)">{{ $t('yes') }}</v-btn>
+                <v-btn color="success" variant="outlined" @click="delDnsRuleOverlay[index] = false">{{ $t('no') }}</v-btn>
+              </v-card-actions>
+            </v-card>
+          </v-overlay>
+        </v-card-actions>
+      </v-card>
+    </v-col>
+  </v-row>
+  <v-row class="rules-section">
+    <v-col class="rules-section__heading" cols="12">
+      <div><h2>{{ $t('rule.ruleset') }}</h2><p>远程或本地规则集，可被 DNS 分流和流量规则复用。</p></div>
       <div class="rules-section__actions">
         <v-btn variant="text" :loading="healthLoading" @click="loadRuleSetHealth"><v-icon icon="mdi-refresh" start />刷新状态</v-btn>
         <v-btn color="primary" variant="tonal" @click="showRulesetModal(-1)"><v-icon icon="mdi-playlist-plus" start />{{ $t('ruleset.add') }}</v-btn>
@@ -184,8 +246,8 @@
   </v-row>
   <v-row class="rules-section">
     <v-col class="rules-section__heading" cols="12">
-      <div><h2>{{ $t('rule.listTitle') }}</h2><p>从上到下依次匹配；拖动卡片即可调整优先级。</p></div>
-      <v-btn color="primary" variant="tonal" @click="showRuleModal(-1)"><v-icon icon="mdi-plus" start />{{ $t('rule.add') }}</v-btn>
+      <div><h2>{{ $t('rule.listTitle') }}</h2><p>这里显示实际生效的流量规则；常用分流优先使用上方“规则目录”。</p></div>
+      <v-btn color="primary" variant="tonal" @click="showRuleModal(-1)"><v-icon icon="mdi-plus" start />手动添加</v-btn>
     </v-col>
     <v-col v-if="rules.length === 0" cols="12">
       <EmptyState icon="mdi-routes" title="暂无路由规则" description="添加第一条规则后，流量会按列表顺序执行匹配。" />
@@ -193,15 +255,19 @@
     <v-col cols="12" sm="6" md="4" lg="3" v-for="(item, index) in <any[]>rules"
         :key="item.id ?? index" :draggable="true"
         @dragstart="onDragStart(index)" @dragover.prevent @drop="onDrop(index)">
-      <v-card class="np-resource-card" rounded="xl" variant="flat" :title="index+1">
-        <v-card-subtitle style="margin-top: -15px;">
-          <v-row><v-col>{{ item.type != undefined ? $t('rule.logical') + ' (' + item.mode + ')' : $t('rule.simple') }}</v-col></v-row>
-        </v-card-subtitle>
+      <v-card class="np-resource-card" rounded="xl" variant="flat">
+        <v-card-title class="route-rule-card__title">
+          <span class="route-rule-card__index">{{ index + 1 }}</span>
+          <div>
+            <strong>{{ ruleActionLabel(item) }}</strong>
+            <small>{{ item.type != undefined ? `逻辑规则 · ${item.mode}` : ruleCategoryLabel(item) }}</small>
+          </div>
+        </v-card-title>
         <v-card-text>
-          <v-row><v-col>{{ $t('admin.action') }}</v-col><v-col>{{ item.action }}</v-col></v-row>
-          <v-row><v-col>{{ $t('objects.outbound') }}</v-col><v-col>{{ item.outbound ?? '-' }}</v-col></v-row>
-          <v-row><v-col>{{ $t('pages.rules') }}</v-col><v-col>{{ item.rules ? item.rules.length : Object.keys(item).filter(r => !actionKeys.includes(r)).length }}</v-col></v-row>
-          <v-row><v-col>{{ $t('rule.invert') }}</v-col><v-col>{{ $t((item.invert ?? false) ? 'yes' : 'no') }}</v-col></v-row>
+          <v-row><v-col>匹配</v-col><v-col>{{ ruleMatchLabel(item) }}</v-col></v-row>
+          <v-row v-if="ruleTargetLabel(item)"><v-col>目标</v-col><v-col>{{ ruleTargetLabel(item) }}</v-col></v-row>
+          <v-row v-if="ruleScopeLabel(item)"><v-col>范围</v-col><v-col>{{ ruleScopeLabel(item) }}</v-col></v-row>
+          <v-row v-if="item.invert"><v-col>结果</v-col><v-col>反选匹配</v-col></v-row>
         </v-card-text>
         <v-divider></v-divider>
         <v-card-actions class="np-resource-card__actions">
@@ -233,7 +299,8 @@
 import Data from '@/store/modules/data'
 import { computed, defineAsyncComponent, ref, onBeforeMount } from 'vue'
 import { Config } from '@/types/config'
-import { actionKeys, ruleset } from '@/types/rules'
+import { ruleset } from '@/types/rules'
+import { dnsRule } from '@/types/dns'
 import { FindDiff } from '@/plugins/utils'
 import PageHero from '@/components/PageHero.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -245,6 +312,7 @@ const RulesetVue = defineAsyncComponent(() => import('@/layouts/modals/Ruleset.v
 const RulesetImport = defineAsyncComponent(() => import('@/layouts/modals/RulesetImport.vue'))
 const RuleImport = defineAsyncComponent(() => import('@/layouts/modals/RuleImport.vue'))
 const RuleCatalog = defineAsyncComponent(() => import('@/layouts/modals/RuleCatalog.vue'))
+const DnsRuleVue = defineAsyncComponent(() => import('@/layouts/modals/DnsRule.vue'))
 
 const oldConfig = ref({})
 const loading = ref(false)
@@ -311,6 +379,16 @@ const inboundTags = computed((): string[] => [
   ...Data().endpoints?.filter((e:any) => e.listen_port > 0 && e.type != "masque").map((e:any) => e.tag)
 ])
 
+const dnsServerTags = computed((): string[] =>
+  appConfig.value.dns?.servers?.filter((server: any) => server.tag)?.map((server: any) => server.tag) ?? []
+)
+
+const dnsRules = computed((): dnsRule[] => {
+  if (!appConfig.value.dns) return []
+  if (!Array.isArray(appConfig.value.dns.rules)) appConfig.value.dns.rules = []
+  return appConfig.value.dns.rules
+})
+
 const catalogModal = ref(false)
 const catalogLoading = ref(false)
 
@@ -322,6 +400,7 @@ async function applyCatalog(payload: any) {
     draft.route.rules = Array.isArray(draft.route.rules) ? draft.route.rules : []
     draft.route.rule_set = Array.isArray(draft.route.rule_set) ? draft.route.rule_set : []
     const knownTags = new Set(draft.route.rule_set.map((item: any) => item.tag))
+    let changed = false
     for (const asset of payload.item.assets) {
       if (knownTags.has(asset.tag)) continue
       const ruleSet: any = {
@@ -334,18 +413,60 @@ async function applyCatalog(payload: any) {
       if (payload.downloadDetour) ruleSet.download_detour = payload.downloadDetour
       draft.route.rule_set.push(ruleSet)
       knownTags.add(asset.tag)
+      changed = true
     }
-    const rule: any = { ...(payload.item.directRule ?? {}) }
-    if (payload.item.assets.length > 0) rule.rule_set = payload.item.assets.map((asset: any) => asset.tag)
-    if (payload.inbound) rule.inbound = [payload.inbound]
-    if (payload.user) rule.auth_user = [payload.user]
-    rule.action = payload.action
-    if (payload.action === 'route') rule.outbound = payload.outbound
+    const selectedTags = payload.item.assets.map((asset: any) => asset.tag)
+    if (payload.action !== 'none') {
+      const rule: any = { ...(payload.item.directRule ?? {}) }
+      if (selectedTags.length > 0) rule.rule_set = selectedTags
+      if (payload.inbound) rule.inbound = [payload.inbound]
+      if (payload.user) rule.auth_user = [payload.user]
+      rule.action = payload.action
+      if (payload.action === 'route') rule.outbound = payload.outbound
 
-    let insertAt = 0
-    const setupActions = new Set(['sniff', 'resolve', 'hijack-dns'])
-    while (insertAt < draft.route.rules.length && setupActions.has(draft.route.rules[insertAt]?.action)) insertAt++
-    draft.route.rules.splice(insertAt, 0, rule)
+      let insertAt = 0
+      const setupActions = new Set(['sniff', 'resolve', 'hijack-dns'])
+      while (insertAt < draft.route.rules.length && setupActions.has(draft.route.rules[insertAt]?.action)) insertAt++
+      const duplicate = draft.route.rules.some((item: any) => JSON.stringify(item) === JSON.stringify(rule))
+      if (!duplicate) {
+        draft.route.rules.splice(insertAt, 0, rule)
+        changed = true
+      }
+    }
+
+    if (payload.dnsServer && selectedTags.length > 0) {
+      draft.dns = draft.dns ?? {}
+      draft.dns.rules = Array.isArray(draft.dns.rules) ? draft.dns.rules : []
+      const reusableRuleIndex = draft.dns.rules.findIndex((rule: any) =>
+        rule?.action === 'route' &&
+        rule?.server === payload.dnsServer &&
+        Array.isArray(rule.rule_set) &&
+        !rule.type &&
+        !rule.inbound &&
+        !rule.auth_user
+      )
+      if (reusableRuleIndex >= 0) {
+        const reusableRule = draft.dns.rules[reusableRuleIndex]
+        const mergedTags = [...new Set([...reusableRule.rule_set, ...selectedTags])]
+        if (mergedTags.length !== reusableRule.rule_set.length || reusableRuleIndex !== 0) changed = true
+        reusableRule.rule_set = mergedTags
+        draft.dns.rules.splice(reusableRuleIndex, 1)
+        draft.dns.rules.unshift(reusableRule)
+      } else {
+        draft.dns.rules.unshift({
+          rule_set: selectedTags,
+          action: 'route',
+          server: payload.dnsServer,
+        })
+        changed = true
+      }
+    }
+
+    if (!changed) {
+      push.info({ message: '所选规则已经配置，无需重复添加。' })
+      catalogModal.value = false
+      return
+    }
 
     const success = await Data().save('config', 'set', draft)
     if (success) {
@@ -388,8 +509,114 @@ async function runRouteExplain() {
   }
 }
 
+function listRuleValues(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String).filter(Boolean)
+  return value === undefined || value === null || value === '' ? [] : [String(value)]
+}
+
+function compactRuleValues(values: string[]): string {
+  if (values.length <= 2) return values.join('、')
+  return `${values.slice(0, 2).join('、')} 等 ${values.length} 项`
+}
+
+function ruleActionLabel(rule: any): string {
+  switch (rule?.action) {
+    case 'route': return '流量分流'
+    case 'reject': return '拒绝访问'
+    case 'sniff': return '识别目标域名'
+    case 'hijack-dns': return '接管 DNS 请求'
+    case 'resolve': return '解析目标域名'
+    default: return rule?.action || '未设置动作'
+  }
+}
+
+function ruleCategoryLabel(rule: any): string {
+  if (['sniff', 'hijack-dns', 'resolve'].includes(rule?.action)) return '系统规则'
+  return '自定义规则'
+}
+
+function ruleMatchLabel(rule: any): string {
+  if (Array.isArray(rule?.rules)) return `${rule.rules.length} 条子规则`
+  const candidates = [
+    rule?.rule_set,
+    rule?.domain,
+    rule?.domain_suffix,
+    rule?.domain_keyword,
+    rule?.ip_cidr,
+    rule?.protocol,
+    rule?.network,
+    rule?.port,
+    rule?.port_range,
+  ]
+  for (const candidate of candidates) {
+    const values = listRuleValues(candidate)
+    if (values.length > 0) return compactRuleValues(values)
+  }
+  if (['sniff', 'hijack-dns', 'resolve'].includes(rule?.action)) return '符合该系统动作的连接'
+  if (rule?.ip_is_private) return '私有网络地址'
+  return '全部流量'
+}
+
+function ruleTargetLabel(rule: any): string {
+  if (rule?.action === 'route') return rule.outbound || route.value.final || '默认出口'
+  return ''
+}
+
+function ruleScopeLabel(rule: any): string {
+  const inbound = listRuleValues(rule?.inbound)
+  const users = listRuleValues(rule?.auth_user)
+  const parts = []
+  if (inbound.length > 0) parts.push(`入站 ${compactRuleValues(inbound)}`)
+  if (users.length > 0) parts.push(`用户 ${compactRuleValues(users)}`)
+  return parts.join(' · ')
+}
+
+function dnsRuleActionLabel(rule: any): string {
+  switch (rule?.action) {
+    case 'route': return 'DNS 分流'
+    case 'reject': return '拒绝解析'
+    case 'route-options': return '调整解析选项'
+    case 'predefined': return '固定响应'
+    default: return rule?.action || 'DNS 分流'
+  }
+}
+
+function dnsRuleMatchLabel(rule: any): string {
+  if (Array.isArray(rule?.rules)) return `${rule.rules.length} 条子规则`
+  const candidates = [
+    rule?.rule_set,
+    rule?.domain,
+    rule?.domain_suffix,
+    rule?.domain_keyword,
+    rule?.query_type,
+    rule?.inbound,
+    rule?.auth_user,
+    rule?.source_ip_cidr,
+  ]
+  for (const candidate of candidates) {
+    const values = listRuleValues(candidate)
+    if (values.length > 0) return compactRuleValues(values)
+  }
+  return '全部 DNS 查询'
+}
+
+function dnsRuleTargetLabel(rule: any): string {
+  if (rule?.action === 'reject') return '拒绝'
+  if (rule?.action === 'predefined') return '预定义响应'
+  return rule?.server || appConfig.value.dns?.final || '默认 DNS'
+}
+
+function dnsRuleOptionLabel(rule: any): string {
+  const options = []
+  if (rule?.strategy) options.push(String(rule.strategy))
+  if (rule?.disable_cache) options.push('禁用缓存')
+  if (rule?.rewrite_ttl !== undefined) options.push(`TTL ${rule.rewrite_ttl}`)
+  return options.join(' · ')
+}
+
 let delRuleOverlay = ref(new Array<boolean>)
 let delRulesetOverlay = ref(new Array<boolean>)
+let delDnsRuleOverlay = ref(new Array<boolean>)
 
 const ruleModal = ref({ visible: false, index: -1, data: "" })
 const showRuleModal = (index: number) => {
@@ -404,6 +631,23 @@ const saveRuleModal = (data:any) => {
   ruleModal.value.visible = false
 }
 const delRule = (index: number) => { rules.value.splice(index, 1); delRuleOverlay.value[index] = false }
+
+const dnsRuleModal = ref({ visible: false, index: -1, data: '' })
+const showDnsRuleModal = (index: number) => {
+  dnsRuleModal.value.index = index
+  dnsRuleModal.value.data = index == -1 ? '' : JSON.stringify(dnsRules.value[index])
+  dnsRuleModal.value.visible = true
+}
+const closeDnsRuleModal = () => { dnsRuleModal.value.visible = false }
+const saveDnsRuleModal = (data: dnsRule) => {
+  if (dnsRuleModal.value.index == -1) dnsRules.value.push(data)
+  else dnsRules.value[dnsRuleModal.value.index] = data
+  dnsRuleModal.value.visible = false
+}
+const delDnsRule = (index: number) => {
+  dnsRules.value.splice(index, 1)
+  delDnsRuleOverlay.value[index] = false
+}
 
 const rulesetModal = ref({ visible: false, index: -1, data: "" })
 const showRulesetModal = (index: number) => {
@@ -489,8 +733,8 @@ function replaceRuleSetReferences(value: unknown, previousTag: string, nextTag: 
   }
 }
 
-const draggedItemIndex = ref(null)
-const onDragStart = (index: any) => { draggedItemIndex.value = index }
+const draggedItemIndex = ref<number | null>(null)
+const onDragStart = (index: number) => { draggedItemIndex.value = index }
 const onDrop = (index: any) => {
   if (draggedItemIndex.value !== null) {
     const draggedItem = rules.value[draggedItemIndex.value]
@@ -498,6 +742,16 @@ const onDrop = (index: any) => {
     rules.value.splice(index, 0, draggedItem)
     draggedItemIndex.value = null
   }
+}
+
+const draggedDnsRuleIndex = ref<number | null>(null)
+const onDnsDragStart = (index: number) => { draggedDnsRuleIndex.value = index }
+const onDnsDrop = (index: number) => {
+  if (draggedDnsRuleIndex.value === null) return
+  const draggedItem = dnsRules.value[draggedDnsRuleIndex.value]
+  dnsRules.value.splice(draggedDnsRuleIndex.value, 1)
+  dnsRules.value.splice(index, 0, draggedItem)
+  draggedDnsRuleIndex.value = null
 }
 
 const importRulesModal = ref({ visible: false })
@@ -585,6 +839,44 @@ function saveImportRulesets(items: any[]) {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+.route-rule-card__title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 72px;
+}
+
+.route-rule-card__title > div {
+  display: grid;
+  min-width: 0;
+}
+
+.route-rule-card__title strong {
+  overflow: hidden;
+  font-size: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.route-rule-card__title small {
+  margin-top: 2px;
+  color: var(--np-text-muted);
+  font-size: 12px;
+}
+
+.route-rule-card__index {
+  display: grid;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 12px;
+  color: var(--np-accent);
+  background: rgba(10, 132, 255, .1);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .route-explain__result {

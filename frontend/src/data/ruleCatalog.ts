@@ -42,6 +42,7 @@ export const ruleCatalog: RuleCatalogItem[] = [
     icon: 'mdi-lan',
     assets: [],
     directRule: { ip_is_private: true },
+    suggestedAction: 'route',
   },
   {
     id: 'ads',
