@@ -238,6 +238,7 @@ import { FindDiff } from '@/plugins/utils'
 import PageHero from '@/components/PageHero.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import HttpUtils from '@/plugins/httputil'
+import { push } from 'notivue'
 
 const RuleVue = defineAsyncComponent(() => import('@/layouts/modals/Rule.vue'))
 const RulesetVue = defineAsyncComponent(() => import('@/layouts/modals/Ruleset.vue'))
@@ -412,11 +413,81 @@ const showRulesetModal = (index: number) => {
 }
 const closeRulesetModal = () => { rulesetModal.value.visible = false }
 const saveRulesetModal = (data:ruleset) => {
-  if (rulesetModal.value.index == -1) rulesets.value.push(data)
-  else rulesets.value[rulesetModal.value.index] = data
+  if (rulesetModal.value.index == -1) {
+    rulesets.value.push(data)
+  } else {
+    const previousTag = rulesets.value[rulesetModal.value.index]?.tag
+    rulesets.value[rulesetModal.value.index] = data
+    if (previousTag && previousTag !== data.tag) {
+      replaceRuleSetReferences(route.value.rules, previousTag, data.tag)
+      replaceRuleSetReferences(appConfig.value.dns?.rules, previousTag, data.tag)
+    }
+  }
   rulesetModal.value.visible = false
 }
-const delRuleset = (index: number) => { rulesets.value.splice(index, 1); delRulesetOverlay.value[index] = false }
+const delRuleset = (index: number) => {
+  const tag = rulesets.value[index]?.tag
+  const references = findRuleSetReferences(tag)
+  delRulesetOverlay.value[index] = false
+  if (references.length > 0) {
+    const visibleReferences = references.slice(0, 3).join('、')
+    const remainder = references.length > 3 ? `，另有 ${references.length - 3} 处` : ''
+    push.error({
+      title: '无法删除规则集',
+      message: `${tag} 仍被 ${visibleReferences}${remainder} 引用，请先删除或修改对应规则。`,
+    })
+    return
+  }
+  rulesets.value.splice(index, 1)
+}
+
+function findRuleSetReferences(tag: string): string[] {
+  if (!tag) return []
+  return [
+    ...collectRuleSetReferencePaths(route.value.rules, tag, 'route.rules'),
+    ...collectRuleSetReferencePaths(appConfig.value.dns?.rules, tag, 'dns.rules'),
+  ]
+}
+
+function collectRuleSetReferencePaths(value: unknown, tag: string, path: string): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => collectRuleSetReferencePaths(item, tag, `${path}[${index}]`))
+  }
+  if (!value || typeof value !== 'object') return []
+
+  const references: string[] = []
+  for (const [key, item] of Object.entries(value)) {
+    const itemPath = `${path}.${key}`
+    if (key === 'rule_set') {
+      const tags = Array.isArray(item) ? item : [item]
+      if (tags.includes(tag)) references.push(itemPath)
+      continue
+    }
+    references.push(...collectRuleSetReferencePaths(item, tag, itemPath))
+  }
+  return references
+}
+
+function replaceRuleSetReferences(value: unknown, previousTag: string, nextTag: string): void {
+  if (Array.isArray(value)) {
+    value.forEach((item) => replaceRuleSetReferences(item, previousTag, nextTag))
+    return
+  }
+  if (!value || typeof value !== 'object') return
+
+  for (const [key, item] of Object.entries(value)) {
+    if (key === 'rule_set') {
+      const target = value as Record<string, unknown>
+      if (Array.isArray(item)) {
+        target[key] = item.map((tag) => tag === previousTag ? nextTag : tag)
+      } else if (item === previousTag) {
+        target[key] = nextTag
+      }
+      continue
+    }
+    replaceRuleSetReferences(item, previousTag, nextTag)
+  }
+}
 
 const draggedItemIndex = ref(null)
 const onDragStart = (index: any) => { draggedItemIndex.value = index }
