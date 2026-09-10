@@ -150,6 +150,11 @@ const remotePageSize = 48
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 let searchGeneration = 0
 
+function defaultOutbound(tags = props.outboundTags) {
+  if (tags.includes('direct')) return 'direct'
+  return tags.length === 1 ? tags[0] : ''
+}
+
 const filteredCatalog = computed(() => {
   const keyword = search.value.trim().toLowerCase()
   if (!keyword) return ruleCatalog
@@ -230,8 +235,13 @@ watch(source, (value) => {
   if (value === 'remote') scheduleRemoteSearch(true)
 })
 watch(() => props.visible, (value) => {
-  if (value && source.value === 'remote') scheduleRemoteSearch()
+  if (!value) return
+  if (!props.outboundTags.includes(outbound.value)) outbound.value = defaultOutbound()
+  if (source.value === 'remote') scheduleRemoteSearch()
 })
+watch(() => props.outboundTags, (tags) => {
+  if (!tags.includes(outbound.value)) outbound.value = defaultOutbound(tags)
+}, { immediate: true })
 onBeforeUnmount(() => {
   searchGeneration++
   if (searchTimer) clearTimeout(searchTimer)
