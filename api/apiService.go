@@ -22,6 +22,13 @@ func (a *ApiService) GetRuleSetHealth(c *gin.Context) {
 	jsonObj(c, health, err)
 }
 
+func (a *ApiService) SearchRuleCatalog(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "48"))
+	result, err := service.SearchRuleCatalog(c.Request.Context(), c.Query("q"), c.DefaultQuery("kind", "all"), page, pageSize)
+	jsonObj(c, result, err)
+}
+
 func (a *ApiService) ExplainRoute(c *gin.Context) {
 	var input core.RouteExplainInput
 	if err := c.ShouldBindJSON(&input); err != nil {

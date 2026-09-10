@@ -1,59 +1,107 @@
 <template>
-  <v-dialog :model-value="visible" max-width="980" scrollable @update:model-value="onDialogUpdate">
+  <v-dialog :model-value="visible" max-width="1040" scrollable @update:model-value="onDialogUpdate">
     <v-card class="catalog-dialog" rounded="xl">
       <v-card-title class="catalog-dialog__title">
         <div>
           <span class="catalog-dialog__eyebrow">RULE CATALOG</span>
           <h2>规则目录</h2>
-          <p>选择分类与出口，NovaPanel 会同时创建 SRS 规则集和路由规则。</p>
+          <p>从常用分类或 SagerNet 完整规则库中选择，NovaPanel 会同时创建 SRS 规则集和路由规则。</p>
         </div>
         <v-btn icon="mdi-close" variant="text" aria-label="关闭" @click="$emit('close')" />
       </v-card-title>
       <v-divider />
       <v-card-text class="catalog-dialog__body">
+        <v-btn-toggle v-model="source" mandatory color="primary" variant="tonal" density="comfortable" class="catalog-source-toggle">
+          <v-btn value="popular"><v-icon icon="mdi-star-four-points-outline" start />常用规则</v-btn>
+          <v-btn value="remote"><v-icon icon="mdi-cloud-search-outline" start />远端规则库</v-btn>
+        </v-btn-toggle>
+
         <v-text-field
           v-model="search"
           prepend-inner-icon="mdi-magnify"
-          label="搜索分类"
+          :label="source === 'remote' ? '搜索远端规则，例如 netflix、openai、jp' : '搜索常用分类'"
           clearable
           hide-details
-          class="mb-4"
+          class="catalog-search"
         />
-        <div class="catalog-grid">
-          <button
-            v-for="item in filteredCatalog"
-            :key="item.id"
-            type="button"
-            class="catalog-item"
-            :class="{ 'catalog-item--active': selectedId === item.id }"
-            @click="selectItem(item)"
-          >
-            <v-icon :icon="item.icon" size="24" />
-            <span><strong>{{ item.name }}</strong><small>{{ item.description }}</small></span>
-            <v-icon v-if="selectedId === item.id" icon="mdi-check-circle" color="primary" />
-          </button>
-        </div>
+
+        <template v-if="source === 'popular'">
+          <div class="catalog-grid">
+            <button
+              v-for="item in filteredCatalog"
+              :key="item.id"
+              type="button"
+              class="catalog-item"
+              :class="{ 'catalog-item--active': selected?.id === item.id }"
+              @click="selectItem(item)"
+            >
+              <v-icon :icon="item.icon" size="24" />
+              <span><strong>{{ item.name }}</strong><small>{{ item.description }}</small></span>
+              <v-icon v-if="selected?.id === item.id" icon="mdi-check-circle" color="primary" />
+            </button>
+          </div>
+          <div v-if="filteredCatalog.length === 0" class="catalog-empty">
+            <v-icon icon="mdi-magnify-close" size="30" />
+            <strong>没有匹配的常用规则</strong>
+            <span>切换到远端规则库可搜索完整目录。</span>
+          </div>
+        </template>
+
+        <template v-else>
+          <div class="catalog-remote-toolbar">
+            <v-chip-group v-model="remoteKind" mandatory selected-class="text-primary">
+              <v-chip value="all" filter>全部</v-chip>
+              <v-chip value="geosite" filter>GeoSite</v-chip>
+              <v-chip value="geoip" filter>GeoIP</v-chip>
+            </v-chip-group>
+            <span v-if="remoteTotal > 0">找到 {{ remoteTotal }} 项</span>
+          </div>
+          <v-progress-linear v-if="remoteLoading" indeterminate color="primary" rounded class="mb-3" />
+          <div v-if="remoteItems.length" class="catalog-grid catalog-grid--remote">
+            <button
+              v-for="item in remoteItems"
+              :key="item.id"
+              type="button"
+              class="catalog-item catalog-item--remote"
+              :class="{ 'catalog-item--active': selected?.id === item.id }"
+              @click="selectItem(item)"
+            >
+              <v-icon :icon="item.icon" size="23" />
+              <span><strong>{{ item.name }}</strong><small>{{ item.description }}</small></span>
+              <v-icon v-if="selected?.id === item.id" icon="mdi-check-circle" color="primary" />
+            </button>
+          </div>
+          <div v-else-if="!remoteLoading" class="catalog-empty">
+            <v-icon :icon="search.trim() ? 'mdi-database-search-outline' : 'mdi-text-search'" size="30" />
+            <strong>{{ search.trim() ? '远端规则库中没有匹配项' : '输入关键词搜索完整规则库' }}</strong>
+            <span>覆盖 SagerNet sing-geosite 与 sing-geoip 的全部 SRS 规则。</span>
+          </div>
+          <v-pagination
+            v-if="remotePages > 1"
+            v-model="remotePage"
+            :length="remotePages"
+            :total-visible="7"
+            density="comfortable"
+            class="catalog-pagination"
+          />
+        </template>
 
         <v-divider class="my-5" />
+        <div v-if="selected" class="catalog-selection">
+          <v-icon :icon="selected.icon" color="primary" />
+          <div><span>当前选择</span><strong>{{ selected.name }}</strong></div>
+          <code v-if="selected.assets[0]">{{ selected.assets[0].tag }}</code>
+        </div>
+        <v-alert v-else type="info" variant="tonal" density="compact" class="mb-4">请先选择一项规则。</v-alert>
         <v-row dense>
-          <v-col cols="12" md="4">
-            <v-select v-model="action" :items="actionItems" label="动作" hide-details />
-          </v-col>
-          <v-col v-if="action === 'route'" cols="12" md="8">
-            <v-select v-model="outbound" :items="outboundTags" label="目标出口" hide-details />
-          </v-col>
-          <v-col cols="12" md="6">
-            <v-select v-model="inbound" :items="inboundTags" label="仅限入站（可选）" clearable hide-details />
-          </v-col>
-          <v-col cols="12" md="6">
-            <v-select v-model="user" :items="clients" label="仅限用户（可选）" clearable hide-details />
-          </v-col>
-          <v-col v-if="selected?.assets.length" cols="12" md="6">
-            <v-select v-model="downloadDetour" :items="outboundTags" label="规则集下载出口（可选）" clearable hide-details />
-          </v-col>
+          <v-col cols="12" md="4"><v-select v-model="action" :items="actionItems" label="动作" hide-details /></v-col>
+          <v-col v-if="action === 'route'" cols="12" md="8"><v-select v-model="outbound" :items="outboundTags" label="目标出口" hide-details /></v-col>
+          <v-col cols="12" md="6"><v-select v-model="inbound" :items="inboundTags" label="仅限入站（可选）" clearable hide-details /></v-col>
+          <v-col cols="12" md="6"><v-select v-model="user" :items="clients" label="仅限用户（可选）" clearable hide-details /></v-col>
+          <v-col v-if="selected?.assets.length" cols="12" md="6"><v-select v-model="downloadDetour" :items="outboundTags" label="规则集下载出口（可选）" clearable hide-details /></v-col>
         </v-row>
         <v-alert class="mt-4" type="info" variant="tonal">
-          远程分类来自 SagerNet 的 sing-box 规则集分支；保存时会先下载并校验，失败则自动回滚。
+          远端目录来自 SagerNet 官方 sing-box 规则集分支；保存时会下载并校验，失败则自动回滚。
         </v-alert>
       </v-card-text>
       <v-card-actions class="catalog-dialog__actions">
@@ -65,8 +113,16 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ruleCatalog, type RuleCatalogItem } from '@/data/ruleCatalog'
+import HttpUtils from '@/plugins/httputil'
+
+interface RemoteCatalogEntry {
+  kind: 'geosite' | 'geoip'
+  name: string
+  tag: string
+  url: string
+}
 
 const props = defineProps<{
   visible: boolean
@@ -77,20 +133,29 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits(['close', 'apply'])
+const source = ref<'popular' | 'remote'>('popular')
 const search = ref('')
-const selectedId = ref(ruleCatalog[0].id)
+const selected = ref<RuleCatalogItem | null>(ruleCatalog[0])
 const action = ref<'route' | 'reject'>('route')
 const outbound = ref('')
 const inbound = ref('')
 const user = ref('')
 const downloadDetour = ref('')
+const remoteKind = ref<'all' | 'geosite' | 'geoip'>('all')
+const remoteItems = ref<RuleCatalogItem[]>([])
+const remoteLoading = ref(false)
+const remoteTotal = ref(0)
+const remotePage = ref(1)
+const remotePageSize = 48
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+let searchGeneration = 0
 
-const selected = computed(() => ruleCatalog.find((item) => item.id === selectedId.value))
 const filteredCatalog = computed(() => {
   const keyword = search.value.trim().toLowerCase()
   if (!keyword) return ruleCatalog
-  return ruleCatalog.filter((item) => `${item.name} ${item.description}`.toLowerCase().includes(keyword))
+  return ruleCatalog.filter((item) => `${item.name} ${item.description} ${item.assets.map((asset) => asset.tag).join(' ')}`.toLowerCase().includes(keyword))
 })
+const remotePages = computed(() => Math.ceil(remoteTotal.value / remotePageSize))
 const actionItems = [
   { title: '路由到指定出口', value: 'route' },
   { title: '拒绝连接', value: 'reject' },
@@ -98,9 +163,79 @@ const actionItems = [
 const canApply = computed(() => Boolean(selected.value && (action.value !== 'route' || outbound.value)))
 
 function selectItem(item: RuleCatalogItem) {
-  selectedId.value = item.id
+  selected.value = item
   action.value = item.suggestedAction ?? 'route'
 }
+
+function toCatalogItem(entry: RemoteCatalogEntry): RuleCatalogItem {
+  const label = entry.kind === 'geosite' ? 'GeoSite 域名规则' : 'GeoIP 地址规则'
+  return {
+    id: `remote-${entry.kind}-${entry.name}`,
+    name: entry.name,
+    description: `${label} · SagerNet/${entry.kind === 'geosite' ? 'sing-geosite' : 'sing-geoip'}`,
+    icon: entry.kind === 'geosite' ? 'mdi-web' : 'mdi-ip-network-outline',
+    assets: [{ tag: entry.tag, url: entry.url }],
+  }
+}
+
+async function searchRemoteCatalog() {
+  const keyword = search.value.trim()
+  if (source.value !== 'remote' || !keyword) {
+    remoteItems.value = []
+    remoteTotal.value = 0
+    remoteLoading.value = false
+    return
+  }
+  const generation = ++searchGeneration
+  remoteLoading.value = true
+  try {
+    const response = await HttpUtils.get('api/rule-catalog', {
+      q: keyword,
+      kind: remoteKind.value,
+      page: remotePage.value,
+      pageSize: remotePageSize,
+    })
+    if (generation !== searchGeneration) return
+    if (response.success) {
+      remoteItems.value = (response.obj?.items ?? []).map(toCatalogItem)
+      remoteTotal.value = response.obj?.total ?? 0
+    } else {
+      remoteItems.value = []
+      remoteTotal.value = 0
+    }
+  } finally {
+    if (generation === searchGeneration) remoteLoading.value = false
+  }
+}
+
+function scheduleRemoteSearch(resetPage = false) {
+  if (resetPage) remotePage.value = 1
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(searchRemoteCatalog, 280)
+}
+
+watch(search, () => {
+  if (source.value === 'remote') {
+    selected.value = null
+    scheduleRemoteSearch(true)
+  }
+})
+watch(remoteKind, () => {
+  selected.value = null
+  scheduleRemoteSearch(true)
+})
+watch(remotePage, () => scheduleRemoteSearch())
+watch(source, (value) => {
+  selected.value = value === 'popular' ? ruleCatalog[0] : null
+  if (value === 'remote') scheduleRemoteSearch(true)
+})
+watch(() => props.visible, (value) => {
+  if (value && source.value === 'remote') scheduleRemoteSearch()
+})
+onBeforeUnmount(() => {
+  searchGeneration++
+  if (searchTimer) clearTimeout(searchTimer)
+})
 
 function apply() {
   if (!selected.value || !canApply.value) return
@@ -126,17 +261,38 @@ function onDialogUpdate(value: boolean) {
 .catalog-dialog__title p { margin: 6px 0 0; color: var(--np-text-muted); font-size: 13px; white-space: normal; }
 .catalog-dialog__eyebrow { color: var(--np-accent); font-size: 11px; font-weight: 700; letter-spacing: .12em; }
 .catalog-dialog__body { padding: 22px 24px; }
+.catalog-source-toggle { margin-bottom: 14px; }
+.catalog-search { margin-bottom: 16px; }
 .catalog-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.catalog-item { display: grid; grid-template-columns: 30px minmax(0, 1fr) 22px; align-items: center; gap: 10px; width: 100%; padding: 14px; border: 1px solid var(--np-border); border-radius: 18px; color: inherit; background: var(--np-surface-muted); text-align: left; cursor: pointer; transition: transform 140ms cubic-bezier(.23, 1, .32, 1), border-color 140ms ease; }
+.catalog-grid--remote { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.catalog-item { display: grid; grid-template-columns: 30px minmax(0, 1fr) 22px; align-items: center; gap: 10px; width: 100%; padding: 14px; border: 1px solid var(--np-border); border-radius: 18px; color: inherit; background: var(--np-surface-muted); text-align: left; cursor: pointer; transition: transform 140ms cubic-bezier(.23, 1, .32, 1), border-color 140ms ease, background-color 140ms ease; }
 .catalog-item:active { transform: scale(.985); }
 .catalog-item--active { border-color: rgba(10, 132, 255, .6); background: rgba(10, 132, 255, .1); }
 .catalog-item span { min-width: 0; }
 .catalog-item strong, .catalog-item small { display: block; }
+.catalog-item strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .catalog-item small { margin-top: 3px; color: var(--np-text-muted); line-height: 1.35; }
+.catalog-remote-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; margin-bottom: 8px; }
+.catalog-remote-toolbar > span { color: var(--np-text-muted); font-size: 12px; white-space: nowrap; }
+.catalog-empty { display: grid; justify-items: center; gap: 5px; padding: 40px 16px; border: 1px dashed var(--np-border); border-radius: 20px; color: var(--np-text-muted); text-align: center; }
+.catalog-empty strong { color: var(--np-text); }
+.catalog-empty span { font-size: 12px; }
+.catalog-pagination { margin-top: 16px; }
+.catalog-selection { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; padding: 11px 14px; border: 1px solid rgba(10, 132, 255, .25); border-radius: 16px; background: rgba(10, 132, 255, .07); }
+.catalog-selection div { display: grid; min-width: 0; }
+.catalog-selection span { color: var(--np-text-muted); font-size: 11px; }
+.catalog-selection code { margin-left: auto; overflow: hidden; color: var(--np-text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .catalog-dialog__actions { justify-content: flex-end; padding: 14px 24px 22px; }
+@media (hover: hover) and (pointer: fine) { .catalog-item:hover { border-color: rgba(10, 132, 255, .35); } }
 @media (max-width: 760px) {
   .catalog-dialog__title, .catalog-dialog__body { padding-inline: 16px; }
-  .catalog-grid { grid-template-columns: 1fr; }
+  .catalog-dialog__title p { max-width: 34ch; }
+  .catalog-source-toggle { width: 100%; }
+  .catalog-source-toggle :deep(.v-btn) { flex: 1; }
+  .catalog-grid, .catalog-grid--remote { grid-template-columns: 1fr; }
+  .catalog-remote-toolbar { align-items: flex-start; flex-direction: column; }
+  .catalog-selection { align-items: flex-start; }
+  .catalog-selection code { max-width: 45%; }
 }
 @media (prefers-reduced-motion: reduce) { .catalog-item { transition: none; } }
 </style>

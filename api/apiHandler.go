@@ -121,6 +121,8 @@ func (a *APIHandler) getHandler(c *gin.Context) {
 		a.ApiService.GetAlertSettings(c)
 	case "login-security":
 		a.ApiService.GetLoginProtection(c)
+	case "rule-catalog":
+		a.ApiService.SearchRuleCatalog(c)
 	case "ports":
 		a.ApiService.GetPorts(c)
 	case "masque-status":
