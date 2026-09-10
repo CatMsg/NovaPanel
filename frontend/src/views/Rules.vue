@@ -378,7 +378,9 @@ const explainLoading = ref(false)
 async function runRouteExplain() {
   explainLoading.value = true
   try {
-    const response = await HttpUtils.post('api/routeExplain', explainInput.value)
+    const response = await HttpUtils.post('api/routeExplain', explainInput.value, {
+      headers: { 'Content-Type': 'application/json' },
+    })
     if (response.success) explainResult.value = response.obj
   } finally {
     explainLoading.value = false

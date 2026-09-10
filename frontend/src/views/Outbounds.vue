@@ -285,7 +285,9 @@ async function saveStrategy(payload: any) {
     const saved = await Data().save('outbounds', 'new', payload.outbound)
     if (!saved) return
     if (payload.policy) {
-      const response = await HttpUtils.post('api/failoverSave', payload.policy)
+      const response = await HttpUtils.post('api/failoverSave', payload.policy, {
+        headers: { 'Content-Type': 'application/json' },
+      })
       if (!response.success) {
         await Data().save('outbounds', 'del', payload.outbound.tag)
         return
@@ -324,7 +326,9 @@ async function loadFailoverStatus() {
 }
 
 async function deleteFailover(tag: string) {
-  const response = await HttpUtils.post('api/failoverDelete', { tag })
+  const response = await HttpUtils.post('api/failoverDelete', { tag }, {
+    headers: { 'Content-Type': 'application/json' },
+  })
   if (response.success) await loadFailoverStatus()
 }
 
@@ -382,7 +386,9 @@ const delOutbound = async (tag: string) => {
   const success = await Data().save("outbounds", "del", tag)
   if (success) {
     delOverlay.value[index] = false
-    await HttpUtils.post('api/failoverDelete', { tag })
+    await HttpUtils.post('api/failoverDelete', { tag }, {
+      headers: { 'Content-Type': 'application/json' },
+    })
     await loadFailoverStatus()
   }
 }
