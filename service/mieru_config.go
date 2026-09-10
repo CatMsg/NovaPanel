@@ -241,8 +241,8 @@ func validateMieruInboundConfig(config *mieruInboundConfig) error {
 }
 
 func parseMieruInboundPorts(listenPort int, portRange string) ([]int, error) {
-	if listenPort < 1025 || listenPort > 65535 {
-		return nil, fmt.Errorf("invalid mieru listen port %d: expected 1025-65535", listenPort)
+	if listenPort < 1 || listenPort > 65535 {
+		return nil, fmt.Errorf("invalid mieru listen port %d: expected 1-65535", listenPort)
 	}
 	portRange = strings.TrimSpace(portRange)
 	if portRange == "" {
@@ -260,11 +260,8 @@ func parseMieruInboundPorts(listenPort int, portRange string) ([]int, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid mieru port range %q", portRange)
 	}
-	if start < 1025 || end > 65535 || start > end {
+	if start < 1 || end > 65535 || start > end {
 		return nil, fmt.Errorf("invalid mieru port range %q", portRange)
-	}
-	if listenPort != start {
-		return nil, fmt.Errorf("mieru listen port must match the first port in range %q", portRange)
 	}
 	if end-start+1 > maxMieruPortRangeSize {
 		return nil, fmt.Errorf("mieru port range is too large: maximum %d ports", maxMieruPortRangeSize)
@@ -305,12 +302,9 @@ func buildMitaServerConfig(config *mieruInboundConfig, credentials []mieruClient
 			}},
 		},
 	}
-	binding := mitaPortBinding{Protocol: config.Transport}
-	if config.PortRange != "" {
-		binding.PortRange = config.PortRange
-	} else {
-		binding.Port = config.ListenPort
-	}
+	// As with Hysteria2 port hopping, the runtime listens on one stable port.
+	// Managed NAT rules fan the advertised public range into this listener.
+	binding := mitaPortBinding{Port: config.ListenPort, Protocol: config.Transport}
 	result.PortBindings = append(result.PortBindings, binding)
 
 	seenUsers := make(map[string]struct{}, len(credentials))

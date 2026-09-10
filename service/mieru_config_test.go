@@ -50,7 +50,7 @@ func TestParseMieruInboundPortRange(t *testing.T) {
 		Tag:  "mieru-range",
 		Options: json.RawMessage(`{
 			"listen_port":23000,
-			"port_range":"23000-23002",
+			"port_range":"443-445",
 			"transport":"udp",
 			"multiplexing":"multiplexing_middle",
 			"handshake_mode":"handshake_no_wait",
@@ -69,8 +69,18 @@ func TestParseMieruInboundPortRange(t *testing.T) {
 	if config.TrafficPattern != "BALANCED" {
 		t.Fatalf("unexpected traffic policy: %#v", config)
 	}
-	if !reflect.DeepEqual(config.Ports, []int{23000, 23001, 23002}) {
+	if !reflect.DeepEqual(config.Ports, []int{443, 444, 445}) {
 		t.Fatalf("unexpected ports: %#v", config.Ports)
+	}
+}
+
+func TestParseMieruInboundPortsAllowsPrivilegedPorts(t *testing.T) {
+	ports, err := parseMieruInboundPorts(443, "80-82")
+	if err != nil {
+		t.Fatalf("parse privileged Mieru ports: %v", err)
+	}
+	if !reflect.DeepEqual(ports, []int{80, 81, 82}) {
+		t.Fatalf("unexpected privileged ports: %#v", ports)
 	}
 }
 
@@ -79,9 +89,10 @@ func TestParseMieruInboundPortsRejectsInvalidRanges(t *testing.T) {
 		port      int
 		portRange string
 	}{
-		{port: 443, portRange: "500-510"},
-		{port: 1024},
-		{port: 1025, portRange: "1024-1030"},
+		{port: 0},
+		{port: 65536},
+		{port: 1025, portRange: "0-10"},
+		{port: 1025, portRange: "65535-65536"},
 		{port: 510, portRange: "510-500"},
 		{port: 1000, portRange: "1000-1512"},
 		{port: 20000, portRange: "invalid"},
@@ -155,8 +166,8 @@ func TestBuildMitaServerConfigUsesOneInboundAndManyUsers(t *testing.T) {
 	if len(config.PortBindings) != 1 || len(config.Users) != 2 {
 		t.Fatalf("unexpected shared config: %#v", config)
 	}
-	if config.PortBindings[0].PortRange != "20100-20102" {
-		t.Fatalf("unexpected range binding: %#v", config.PortBindings[0])
+	if config.PortBindings[0].Port != 20100 || config.PortBindings[0].PortRange != "" {
+		t.Fatalf("Mieru runtime must bind only its stable listener port: %#v", config.PortBindings[0])
 	}
 	if config.MTU != 1380 || config.DNS.DualStack != "PREFER_IPv4" {
 		t.Fatalf("unexpected runtime defaults: %#v", config)

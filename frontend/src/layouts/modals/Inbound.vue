@@ -258,8 +258,8 @@ export default {
           const match = range.match(/^(\d+)-(\d+)$/)
           const start = Number(match?.[1])
           const end = Number(match?.[2])
-          if (!match || start != Number(this.inbound.listen_port) || start < 1025 || end > 65535 || end < start || end - start + 1 > 512) {
-            push.error({ message: 'Mieru 端口范围必须从监听端口开始，且最多连续 512 个端口' })
+          if (!match || start < 1 || end > 65535 || end < start || end - start + 1 > 512) {
+            push.error({ message: 'Mieru 端口范围必须在 1-65535 内，且最多连续 512 个端口' })
             return
           }
         }
