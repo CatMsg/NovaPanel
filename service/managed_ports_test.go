@@ -115,6 +115,66 @@ func TestCollectHysteria2InboundForwardPortsAreUDPOnly(t *testing.T) {
 	}
 }
 
+func TestCollectInboundForwardProtocolsMatchesListenerTransport(t *testing.T) {
+	tests := []struct {
+		name     string
+		typeName string
+		options  string
+		want     []string
+	}{
+		{name: "mixed", typeName: "mixed", want: []string{"tcp"}},
+		{name: "socks ignores proxy network", typeName: "socks", options: `,"network":"udp"`, want: []string{"tcp"}},
+		{name: "http", typeName: "http", want: []string{"tcp"}},
+		{name: "shadowsocks default", typeName: "shadowsocks", want: []string{"tcp", "udp"}},
+		{name: "shadowsocks tcp", typeName: "shadowsocks", options: `,"network":"tcp"`, want: []string{"tcp"}},
+		{name: "shadowsocks udp array", typeName: "shadowsocks", options: `,"network":["udp"]`, want: []string{"udp"}},
+		{name: "vmess", typeName: "vmess", want: []string{"tcp"}},
+		{name: "vmess quic transport", typeName: "vmess", options: `,"transport":{"type":"quic"}`, want: []string{"udp"}},
+		{name: "trojan", typeName: "trojan", want: []string{"tcp"}},
+		{name: "trojan quic transport", typeName: "trojan", options: `,"transport":{"type":"quic"}`, want: []string{"udp"}},
+		{name: "naive default", typeName: "naive", want: []string{"tcp", "udp"}},
+		{name: "naive udp", typeName: "naive", options: `,"network":"udp"`, want: []string{"udp"}},
+		{name: "hysteria", typeName: "hysteria", want: []string{"udp"}},
+		{name: "shadowtls", typeName: "shadowtls", want: []string{"tcp"}},
+		{name: "tuic", typeName: "tuic", want: []string{"udp"}},
+		{name: "hysteria2", typeName: "hysteria2", want: []string{"udp"}},
+		{name: "vless", typeName: "vless", want: []string{"tcp"}},
+		{name: "vless quic transport", typeName: "vless", options: `,"transport":{"type":"quic"}`, want: []string{"udp"}},
+		{name: "anytls", typeName: "anytls", want: []string{"tcp"}},
+		{name: "masque", typeName: "masque", want: []string{"udp"}},
+		{name: "mieru tcp", typeName: "mieru", options: `,"transport":"TCP"`, want: []string{"tcp"}},
+		{name: "mieru udp", typeName: "mieru", options: `,"transport":"UDP"`, want: []string{"udp"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inbound := &model.Inbound{
+				Type:    tt.typeName,
+				Tag:     tt.name,
+				Options: json.RawMessage(`{"listen_port":24000` + tt.options + `}`),
+			}
+			got, err := collectInboundForwardProtocols(inbound)
+			if err != nil {
+				t.Fatalf("collect protocols: %v", err)
+			}
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Fatalf("protocols = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCollectInboundForwardProtocolsRejectsInvalidDynamicNetwork(t *testing.T) {
+	inbound := &model.Inbound{
+		Type:    "shadowsocks",
+		Tag:     "invalid-network",
+		Options: json.RawMessage(`{"listen_port":24000,"network":"icmp"}`),
+	}
+	if _, err := collectInboundForwardProtocols(inbound); err == nil {
+		t.Fatal("expected invalid network to be rejected")
+	}
+}
+
 func TestCollectWireGuardEndpointForwardPortIsUDPOnly(t *testing.T) {
 	endpoint := &model.Endpoint{
 		Type:    "wireguard",
@@ -640,7 +700,7 @@ printf '%s\n' "$*" >> "${HY2_MOCK_LOG:?}"
 	if !strings.Contains(log, "apply panel-sub-port 2096 2096 tcp") {
 		t.Fatalf("panel sub port forwarding was not rebuilt:\n%s", log)
 	}
-	if !strings.Contains(log, "apply inbound-a 4100 4100 tcp,udp") {
+	if !strings.Contains(log, "apply inbound-a 4100 4100 tcp") {
 		t.Fatalf("inbound port forwarding was not rebuilt:\n%s", log)
 	}
 	if !strings.Contains(log, "apply endpoint-a 4200 4200 udp") {

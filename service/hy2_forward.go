@@ -167,24 +167,9 @@ func collectInboundForwardSpec(inbound *model.Inbound) (managedForwardSpec, erro
 	if err != nil {
 		return managedForwardSpec{}, err
 	}
-	protocols := []string{"tcp", "udp"}
-	if inbound.Type == "hysteria2" {
-		protocols = []string{"udp"}
-	}
-	if inbound.Type == "vless" {
-		// VLESS carries proxied UDP inside its stream, but the server socket itself
-		// listens on TCP. Reserving UDP here incorrectly conflicts with HY2/TUIC.
-		protocols = []string{"tcp"}
-	}
-	if inbound.Type == "mieru" {
-		config, err := parseMieruInbound(inbound)
-		if err != nil {
-			return managedForwardSpec{}, err
-		}
-		protocols = []string{strings.ToLower(config.Transport)}
-	}
-	if inbound.Type == "masque" {
-		protocols = []string{"udp"}
+	protocols, err := collectInboundForwardProtocols(inbound)
+	if err != nil {
+		return managedForwardSpec{}, err
 	}
 	return managedForwardSpec{
 		tag:             inbound.Tag,
@@ -194,6 +179,90 @@ func collectInboundForwardSpec(inbound *model.Inbound) (managedForwardSpec, erro
 		removeProtocols: []string{"tcp", "udp"},
 		active:          true,
 	}.normalized(), nil
+}
+
+func collectInboundForwardProtocols(inbound *model.Inbound) ([]string, error) {
+	if inbound == nil {
+		return nil, nil
+	}
+
+	switch inbound.Type {
+	case "mixed", "socks", "http", "shadowtls", "anytls":
+		return []string{"tcp"}, nil
+	case "vmess", "trojan", "vless":
+		quic, err := inboundUsesQUICTransport(inbound)
+		if err != nil {
+			return nil, err
+		}
+		if quic {
+			return []string{"udp"}, nil
+		}
+		return []string{"tcp"}, nil
+	case "hysteria", "tuic", "hysteria2", "masque":
+		return []string{"udp"}, nil
+	case "shadowsocks", "naive":
+		return configuredInboundNetworkProtocols(inbound)
+	case "mieru":
+		config, err := parseMieruInbound(inbound)
+		if err != nil {
+			return nil, err
+		}
+		return []string{strings.ToLower(config.Transport)}, nil
+	default:
+		// Preserve compatibility for uncommon or externally imported inbound types.
+		return []string{"tcp", "udp"}, nil
+	}
+}
+
+func inboundUsesQUICTransport(inbound *model.Inbound) (bool, error) {
+	full, err := inbound.MarshalFull()
+	if err != nil {
+		return false, err
+	}
+	transport, ok := (*full)["transport"].(map[string]interface{})
+	if !ok || transport == nil {
+		return false, nil
+	}
+	transportType, _ := transport["type"].(string)
+	return strings.EqualFold(strings.TrimSpace(transportType), "quic"), nil
+}
+
+func configuredInboundNetworkProtocols(inbound *model.Inbound) ([]string, error) {
+	full, err := inbound.MarshalFull()
+	if err != nil {
+		return nil, err
+	}
+
+	rawNetwork, ok := (*full)["network"]
+	if !ok || rawNetwork == nil {
+		return []string{"tcp", "udp"}, nil
+	}
+
+	var configured []string
+	switch value := rawNetwork.(type) {
+	case string:
+		configured = strings.FieldsFunc(value, func(r rune) bool {
+			return r == ',' || r == '\n' || r == '\r' || r == ' ' || r == '\t'
+		})
+	case []interface{}:
+		configured = make([]string, 0, len(value))
+		for _, item := range value {
+			configured = append(configured, fmt.Sprint(item))
+		}
+	case []string:
+		configured = append(configured, value...)
+	default:
+		return nil, fmt.Errorf("invalid network for inbound %s", inbound.Tag)
+	}
+
+	protocols := normalizeManagedProtocols(configured)
+	if len(protocols) == 0 {
+		if value, isString := rawNetwork.(string); isString && strings.TrimSpace(value) == "" {
+			return []string{"tcp", "udp"}, nil
+		}
+		return nil, fmt.Errorf("invalid network for inbound %s", inbound.Tag)
+	}
+	return protocols, nil
 }
 
 func runInboundForwardScript(action string, tag string, listenPort int, ports []int) error {
