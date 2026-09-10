@@ -9,6 +9,8 @@ export default {
   confirm: "Are you sure ?",
   yes: "yes",
   no: "no",
+  selected: "Selected",
+  notSelected: "Not selected",
   unlimited: "infinite",
   type: "Type",
   protocol: "Protocol",

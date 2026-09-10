@@ -9,6 +9,8 @@ export default {
   confirm: "是否确定？",
   yes: "确认",
   no: "取消",
+  selected: "已选择",
+  notSelected: "未选择",
   unlimited: "无限",
   type: "类型",
   protocol: "协议",

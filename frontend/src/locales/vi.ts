@@ -9,6 +9,8 @@ export default {
   confirm: "Bạn chắc chắn chứ?",
   yes: "có",
   no: "không",
+  selected: "Đã chọn",
+  notSelected: "Chưa chọn",
   unlimited: "vô hạn",
   type: "Loại",
   protocol: "Giao thức",

@@ -255,8 +255,34 @@
           :label="$t('rule.ruleset')"
           multiple
           chips
+          closable-chips
           hide-details
-        ></v-combobox>
+        >
+          <template #item="{ props: itemProps, item }">
+            <v-list-item
+              v-bind="itemProps"
+              :active="isRuleSetSelected(item)"
+              :class="{ 'rule-set-option--selected': isRuleSetSelected(item) }"
+              class="rule-set-option"
+              color="primary"
+              rounded="lg"
+            >
+              <template #prepend>
+                <span
+                  class="rule-set-option__indicator"
+                  :class="{ 'rule-set-option__indicator--selected': isRuleSetSelected(item) }"
+                >
+                  <v-icon v-if="isRuleSetSelected(item)" icon="mdi-check" size="14" />
+                </span>
+              </template>
+              <template #append>
+                <span class="rule-set-option__state">
+                  {{ $t(isRuleSetSelected(item) ? 'selected' : 'notSelected') }}
+                </span>
+              </template>
+            </v-list-item>
+          </template>
+        </v-combobox>
       </v-col>
       <v-col cols="12" sm="6">
         <v-switch v-model="rule.rule_set_ip_cidr_match_source" color="primary" :label="$t('rule.rulesetMatchSrc')" hide-details></v-switch>
@@ -352,6 +378,15 @@ export default {
     }
   },
   methods: {
+    ruleSetValue(item: unknown) {
+      if (typeof item === 'object' && item !== null && 'value' in item) {
+        return String((item as { value: unknown }).value)
+      }
+      return String(item ?? '')
+    },
+    isRuleSetSelected(item: unknown) {
+      return Array.isArray(this.$props.rule.rule_set) && this.$props.rule.rule_set.includes(this.ruleSetValue(item))
+    },
     updateDomainOption(option:string) {
       this.domainKeys.forEach(k => delete this.$props.rule[k])
       this.$props.rule[option] = option == 'ip_is_private' ? false : []
@@ -566,3 +601,40 @@ export default {
   }
 }
 </script>
+
+<style scoped>
+.rule-set-option {
+  margin: 3px 6px;
+  border: 1px solid transparent;
+}
+
+.rule-set-option--selected {
+  border-color: rgba(var(--v-theme-primary), 0.24);
+  background: rgba(var(--v-theme-primary), 0.1);
+}
+
+.rule-set-option__indicator {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1.5px solid rgba(var(--v-theme-on-surface), 0.28);
+  border-radius: 50%;
+  color: rgb(var(--v-theme-on-primary));
+}
+
+.rule-set-option__indicator--selected {
+  border-color: rgb(var(--v-theme-primary));
+  background: rgb(var(--v-theme-primary));
+}
+
+.rule-set-option__state {
+  color: rgba(var(--v-theme-on-surface), 0.56);
+  font-size: 12px;
+}
+
+.rule-set-option--selected .rule-set-option__state {
+  color: rgb(var(--v-theme-primary));
+  font-weight: 600;
+}
+</style>

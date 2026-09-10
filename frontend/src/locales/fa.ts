@@ -9,6 +9,8 @@ export default {
   confirm: "آیا مطمئن هستید ؟",
   yes: "بله",
   no: "خیر",
+  selected: "انتخاب شده",
+  notSelected: "انتخاب نشده",
   unlimited: "نامحدود",
   type: "مدل",
   protocol: "پروتکل",

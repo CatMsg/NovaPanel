@@ -9,6 +9,8 @@ export default {
   confirm: "是否確定？",
   yes: "確認",
   no: "取消",
+  selected: "已選擇",
+  notSelected: "未選擇",
   unlimited: "無限",
   type: "類型",
   protocol: "協定",

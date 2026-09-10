@@ -9,6 +9,8 @@ export default {
   confirm: "Вы уверены?",
   yes: "да",
   no: "нет",
+  selected: "Выбрано",
+  notSelected: "Не выбрано",
   unlimited: "бесконечный",
   type: "Тип",
   protocol: "Протокол",
