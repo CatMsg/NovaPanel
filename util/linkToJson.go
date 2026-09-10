@@ -83,15 +83,11 @@ func mieru(u *url.URL, i int) (*map[string]interface{}, string, error) {
 		"multiplexing":   defaultString(strings.ToUpper(query.Get("multiplexing")), "MULTIPLEXING_LOW"),
 		"handshake-mode": defaultString(strings.ToUpper(query.Get("handshake-mode")), "HANDSHAKE_STANDARD"),
 	}
-	if strings.Contains(portValue, "-") {
-		outbound["port-range"] = portValue
-	} else {
-		port, err := strconv.Atoi(portValue)
-		if err != nil || port < 1 || port > 65535 {
-			return nil, "", common.NewError("Invalid Mieru port")
-		}
-		outbound["server_port"] = port
+	port, err := strconv.Atoi(portValue)
+	if err != nil || port < 1 || port > 65535 {
+		return nil, "", common.NewError("Invalid Mieru port")
 	}
+	outbound["server_port"] = port
 	if mtu, err := strconv.Atoi(query.Get("mtu")); err == nil && mtu > 0 {
 		outbound["mtu"] = mtu
 	}

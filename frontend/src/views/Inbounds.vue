@@ -87,7 +87,7 @@
           <v-row>
             <v-col>{{ $t('in.port') }}</v-col>
             <v-col>
-              {{ item.type == 'mieru' ? (item.port_range || item.listen_port) : item.listen_port }}
+              {{ item.listen_port }}
             </v-col>
           </v-row>
           <v-row>

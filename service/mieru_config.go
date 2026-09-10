@@ -12,8 +12,6 @@ import (
 	"github.com/CatMsg/NovaPanel/util/common"
 )
 
-const maxMieruPortRangeSize = 512
-
 var validMieruMultiplexing = map[string]struct{}{
 	"MULTIPLEXING_OFF":    {},
 	"MULTIPLEXING_LOW":    {},
@@ -36,8 +34,6 @@ type mieruInboundConfig struct {
 	ID             uint
 	Tag            string
 	ListenPort     int
-	PortRange      string
-	Ports          []int
 	Transport      string
 	Multiplexing   string
 	HandshakeMode  string
@@ -61,9 +57,8 @@ type mitaServerConfig struct {
 }
 
 type mitaPortBinding struct {
-	Port      int    `json:"port,omitempty"`
-	PortRange string `json:"portRange,omitempty"`
-	Protocol  string `json:"protocol"`
+	Port     int    `json:"port,omitempty"`
+	Protocol string `json:"protocol"`
 }
 
 type mitaUser struct {
@@ -132,7 +127,6 @@ func parseMieruInbound(inbound *model.Inbound) (*mieruInboundConfig, error) {
 		ID:             inbound.Id,
 		Tag:            strings.TrimSpace(inbound.Tag),
 		ListenPort:     mieruInt((*full)["listen_port"]),
-		PortRange:      mieruString((*full)["port_range"]),
 		Transport:      strings.ToUpper(mieruString((*full)["transport"])),
 		Multiplexing:   strings.ToUpper(mieruString((*full)["multiplexing"])),
 		HandshakeMode:  strings.ToUpper(mieruString((*full)["handshake_mode"])),
@@ -155,14 +149,30 @@ func parseMieruInbound(inbound *model.Inbound) (*mieruInboundConfig, error) {
 		config.MTU = 1400
 	}
 
-	config.Ports, err = parseMieruInboundPorts(config.ListenPort, config.PortRange)
-	if err != nil {
-		return nil, err
-	}
 	if err := validateMieruInboundConfig(config); err != nil {
 		return nil, err
 	}
 	return config, nil
+}
+
+func removeMieruLegacyPortRange(inbound *model.Inbound) error {
+	if inbound == nil || len(inbound.Options) == 0 {
+		return nil
+	}
+	var options map[string]json.RawMessage
+	if err := json.Unmarshal(inbound.Options, &options); err != nil {
+		return err
+	}
+	if _, exists := options["port_range"]; !exists {
+		return nil
+	}
+	delete(options, "port_range")
+	cleaned, err := json.Marshal(options)
+	if err != nil {
+		return err
+	}
+	inbound.Options = cleaned
+	return nil
 }
 
 func parseMieruClientCredential(client *model.Client) (mieruClientCredential, error) {
@@ -222,6 +232,9 @@ func validateMieruInboundConfig(config *mieruInboundConfig) error {
 	if config.Tag == "" {
 		return common.NewError("mieru tag is required")
 	}
+	if config.ListenPort < 1 || config.ListenPort > 65535 {
+		return fmt.Errorf("invalid mieru listen port %d: expected 1-65535", config.ListenPort)
+	}
 	if config.Transport != "TCP" && config.Transport != "UDP" {
 		return fmt.Errorf("unsupported mieru transport %q", config.Transport)
 	}
@@ -238,39 +251,6 @@ func validateMieruInboundConfig(config *mieruInboundConfig) error {
 		return fmt.Errorf("invalid mieru MTU %d: expected 1280-1500", config.MTU)
 	}
 	return nil
-}
-
-func parseMieruInboundPorts(listenPort int, portRange string) ([]int, error) {
-	if listenPort < 1 || listenPort > 65535 {
-		return nil, fmt.Errorf("invalid mieru listen port %d: expected 1-65535", listenPort)
-	}
-	portRange = strings.TrimSpace(portRange)
-	if portRange == "" {
-		return []int{listenPort}, nil
-	}
-	parts := strings.Split(portRange, "-")
-	if len(parts) != 2 {
-		return nil, fmt.Errorf("invalid mieru port range %q: expected start-end", portRange)
-	}
-	start, err := strconv.Atoi(strings.TrimSpace(parts[0]))
-	if err != nil {
-		return nil, fmt.Errorf("invalid mieru port range %q", portRange)
-	}
-	end, err := strconv.Atoi(strings.TrimSpace(parts[1]))
-	if err != nil {
-		return nil, fmt.Errorf("invalid mieru port range %q", portRange)
-	}
-	if start < 1 || end > 65535 || start > end {
-		return nil, fmt.Errorf("invalid mieru port range %q", portRange)
-	}
-	if end-start+1 > maxMieruPortRangeSize {
-		return nil, fmt.Errorf("mieru port range is too large: maximum %d ports", maxMieruPortRangeSize)
-	}
-	ports := make([]int, 0, end-start+1)
-	for current := start; current <= end; current++ {
-		ports = append(ports, current)
-	}
-	return ports, nil
 }
 
 func buildMitaServerConfig(config *mieruInboundConfig, credentials []mieruClientCredential) (*mitaServerConfig, error) {
@@ -302,8 +282,6 @@ func buildMitaServerConfig(config *mieruInboundConfig, credentials []mieruClient
 			}},
 		},
 	}
-	// As with Hysteria2 port hopping, the runtime listens on one stable port.
-	// Managed NAT rules fan the advertised public range into this listener.
 	binding := mitaPortBinding{Port: config.ListenPort, Protocol: config.Transport}
 	result.PortBindings = append(result.PortBindings, binding)
 

@@ -134,7 +134,7 @@ export default {
   },
   computed: {
     endpointPort() {
-      return this.status.port_range || this.status.port || '-'
+      return this.status.port || '-'
     },
     shortVersion() {
       const version = String(this.status.version ?? '').trim()

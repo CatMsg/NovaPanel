@@ -192,7 +192,7 @@ func TestCollectRestoreHy2LargeRangeStaysCompressed(t *testing.T) {
 	}
 }
 
-func TestCollectRestoreMieruAllowsPrivilegedIndependentRange(t *testing.T) {
+func TestCollectRestoreMieruIgnoresLegacyPortRange(t *testing.T) {
 	inbound := model.Inbound{
 		Type:    "mieru",
 		Tag:     "mieru-low-range",
@@ -203,9 +203,8 @@ func TestCollectRestoreMieruAllowsPrivilegedIndependentRange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collect Mieru restore ranges: %v", err)
 	}
-	if !active || len(ranges) != 2 ||
-		ranges[0] != (restorePortRange{start: 443, end: 445}) ||
-		ranges[1] != (restorePortRange{start: 24000, end: 24000}) {
+	if !active || len(ranges) != 1 ||
+		ranges[0] != (restorePortRange{start: 24000, end: 24000}) {
 		t.Fatalf("unexpected Mieru restore ranges: %#v", ranges)
 	}
 }

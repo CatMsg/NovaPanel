@@ -164,20 +164,6 @@ func collectInboundPortRangesForRestore(inbound *model.Inbound) ([]restorePortRa
 		}
 		ranges = normalizeRestorePortRanges(append(ranges, extraRanges...))
 	}
-	if inbound.Type == "mieru" {
-		rawPortRange := strings.TrimSpace(fmt.Sprint((*full)["port_range"]))
-		if rawPortRange != "" && rawPortRange != "<nil>" {
-			start, end, err := parseRestorePortRange(rawPortRange)
-			if err != nil {
-				return nil, false, err
-			}
-			if end-start+1 > 512 {
-				return nil, false, fmt.Errorf("mieru port range is too large: maximum 512 ports")
-			}
-			ranges = append(ranges, restorePortRange{start: start, end: end})
-		}
-	}
-
 	return normalizeRestorePortRanges(ranges), true, nil
 }
 

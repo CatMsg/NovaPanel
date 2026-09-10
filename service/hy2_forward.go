@@ -145,15 +145,7 @@ func collectInboundForwardRanges(inbound *model.Inbound) (int, []managedPortRang
 		if err != nil {
 			return 0, nil, err
 		}
-		ranges = []managedPortRange{{start: config.ListenPort, end: config.ListenPort}}
-		if strings.TrimSpace(config.PortRange) != "" {
-			item, rangeErr := parseManagedPortRange(config.PortRange)
-			if rangeErr != nil {
-				return 0, nil, rangeErr
-			}
-			ranges = append(ranges, item)
-		}
-		return config.ListenPort, normalizeManagedPortRanges(ranges), nil
+		return config.ListenPort, []managedPortRange{{start: config.ListenPort, end: config.ListenPort}}, nil
 	}
 
 	return listenPort, ranges, nil

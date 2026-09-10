@@ -68,9 +68,8 @@ func TestCollectMieruInboundForwardPortsUsesConfiguredTransport(t *testing.T) {
 	if !spec.active || spec.listenPort != 24000 {
 		t.Fatalf("unexpected Mieru forwarding state: active=%v listen=%d", spec.active, spec.listenPort)
 	}
-	if got := len(spec.portRanges); got != 2 ||
-		spec.portRanges[0] != (managedPortRange{start: 443, end: 445}) ||
-		spec.portRanges[1] != (managedPortRange{start: 24000, end: 24000}) {
+	if got := len(spec.portRanges); got != 1 ||
+		spec.portRanges[0] != (managedPortRange{start: 24000, end: 24000}) {
 		t.Fatalf("unexpected Mieru port ranges: %#v", spec.portRanges)
 	}
 	if len(spec.protocols) != 1 || spec.protocols[0] != "udp" {

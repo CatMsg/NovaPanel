@@ -151,7 +151,6 @@ export interface Hysteria2 extends InboundBasics {
   brutal_debug?: boolean
 }
 export interface Mieru extends InboundBasics {
-  port_range?: string
   transport: 'TCP' | 'UDP'
   multiplexing: 'MULTIPLEXING_OFF' | 'MULTIPLEXING_LOW' | 'MULTIPLEXING_MIDDLE' | 'MULTIPLEXING_HIGH'
   handshake_mode: 'HANDSHAKE_STANDARD' | 'HANDSHAKE_NO_WAIT'
@@ -255,7 +254,6 @@ const defaultValues: Record<InType, Inbound> = {
   ]},
   mieru: <Mieru>{
     type: InTypes.Mieru,
-    port_range: '',
     transport: 'TCP',
     multiplexing: 'MULTIPLEXING_LOW',
     handshake_mode: 'HANDSHAKE_STANDARD',

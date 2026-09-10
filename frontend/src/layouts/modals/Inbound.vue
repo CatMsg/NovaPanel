@@ -253,16 +253,6 @@ export default {
           push.error({ message: '每台服务器只能创建一个 Mieru 入站' })
           return
         }
-        const range = String((this.inbound as any).port_range ?? '').trim()
-        if (range) {
-          const match = range.match(/^(\d+)-(\d+)$/)
-          const start = Number(match?.[1])
-          const end = Number(match?.[2])
-          if (!match || start < 1 || end > 65535 || end < start || end - start + 1 > 512) {
-            push.error({ message: 'Mieru 端口范围必须在 1-65535 内，且最多连续 512 个端口' })
-            return
-          }
-        }
       }
       if (this.inbound.type == InTypes.Masque) {
         ;(this.inbound as any).network = 'quic'

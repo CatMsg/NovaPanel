@@ -124,7 +124,6 @@ func mieruLink(
 	if transport == "" {
 		transport = "TCP"
 	}
-	portRange, _ := inbound["port_range"].(string)
 	multiplexing, _ := inbound["multiplexing"].(string)
 	handshakeMode, _ := inbound["handshake_mode"].(string)
 	trafficPattern, _ := inbound["traffic_pattern"].(string)
@@ -141,11 +140,7 @@ func mieruLink(
 			remark, _ = inbound["tag"].(string)
 		}
 		query.Set("profile", remark)
-		if strings.TrimSpace(portRange) != "" {
-			query.Add("port", strings.TrimSpace(portRange))
-		} else {
-			query.Add("port", fmt.Sprintf("%.0f", numberAsFloat64(addr["server_port"])))
-		}
+		query.Add("port", fmt.Sprintf("%.0f", numberAsFloat64(addr["server_port"])))
 		query.Add("protocol", transport)
 		if mtu := int(numberAsFloat64(inbound["mtu"])); mtu > 0 {
 			query.Set("mtu", fmt.Sprint(mtu))

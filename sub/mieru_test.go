@@ -50,7 +50,7 @@ func TestAppendMieruSubscriptionOutboundSupportsLegacyEmptyOutJSON(t *testing.T)
 
 func TestMieruLinkParsesForOrdinaryAggregate(t *testing.T) {
 	node, tag, err := util.GetOutbound(
-		"mierus://alice:secret@proxy.example.com?profile=mieru-main&port=22000-22010&protocol=TCP&multiplexing=MULTIPLEXING_MIDDLE&handshake-mode=HANDSHAKE_NO_WAIT&mtu=1380&traffic-pattern=CIcIEAAaBAgAEAAiCAgCEAAYBCAGKgQIIBBA",
+		"mierus://alice:secret@proxy.example.com?profile=mieru-main&port=22000&protocol=TCP&multiplexing=MULTIPLEXING_MIDDLE&handshake-mode=HANDSHAKE_NO_WAIT&mtu=1380&traffic-pattern=CIcIEAAaBAgAEAAiCAgCEAAYBCAGKgQIIBBA",
 		0,
 	)
 	if err != nil {
@@ -59,8 +59,8 @@ func TestMieruLinkParsesForOrdinaryAggregate(t *testing.T) {
 	if tag != "mieru-main" {
 		t.Fatalf("unexpected tag: %q", tag)
 	}
-	if got := (*node)["port-range"]; got != "22000-22010" {
-		t.Fatalf("unexpected port range: %#v", got)
+	if got := (*node)["server_port"]; got != 22000 {
+		t.Fatalf("unexpected server port: %#v", got)
 	}
 	if got := (*node)["transport"]; got != "TCP" {
 		t.Fatalf("unexpected transport: %#v", got)
@@ -76,6 +76,15 @@ func TestMieruLinkParsesForOrdinaryAggregate(t *testing.T) {
 	}
 	if got := (*node)["mtu"]; got != 1380 {
 		t.Fatalf("unexpected MTU: %#v", got)
+	}
+}
+
+func TestMieruLinkRejectsPortRange(t *testing.T) {
+	if _, _, err := util.GetOutbound(
+		"mierus://alice:secret@proxy.example.com?profile=mieru-main&port=22000-22010&protocol=TCP",
+		0,
+	); err == nil {
+		t.Fatal("expected Mieru port range to be rejected")
 	}
 }
 

@@ -733,7 +733,6 @@ func (s *MieruService) GetStatus(tag string) (map[string]interface{}, error) {
 	result := map[string]interface{}{
 		"tag":                    config.Tag,
 		"port":                   config.ListenPort,
-		"port_range":             config.PortRange,
 		"transport":              config.Transport,
 		"user_count":             len(usernames),
 		"usernames":              usernames,

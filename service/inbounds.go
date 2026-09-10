@@ -116,7 +116,6 @@ func (s *InboundService) GetAll() (*[]map[string]interface{}, error) {
 			inbData["listen"] = restFields["listen"]
 			inbData["listen_port"] = restFields["listen_port"]
 			if inbound.Type == "mieru" {
-				inbData["port_range"] = restFields["port_range"]
 				inbData["transport"] = restFields["transport"]
 			}
 			if inbound.Type == "shadowtls" {
@@ -208,6 +207,9 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			}
 		}
 		if inbound.Type == "mieru" {
+			if err := removeMieruLegacyPortRange(&inbound); err != nil {
+				return nil, err
+			}
 			if _, err := parseMieruInbound(&inbound); err != nil {
 				return nil, err
 			}

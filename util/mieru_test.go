@@ -43,7 +43,7 @@ func TestMieruLinkGeneratorUsesClientCredentialAndInboundSettings(t *testing.T) 
 		t.Fatalf("unexpected generated password: %q", password)
 	}
 	query := parsed.Query()
-	if query.Get("profile") != "mieru main" || query.Get("port") != "22000-22010" || query.Get("protocol") != "TCP" {
+	if query.Get("profile") != "mieru main" || query.Get("port") != "22000" || query.Get("protocol") != "TCP" {
 		t.Fatalf("unexpected generated query: %#v", query)
 	}
 	if strings.Contains(parsed.RawQuery, "+") || !strings.Contains(parsed.RawQuery, "profile=mieru%20main") {
