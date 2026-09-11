@@ -31,6 +31,8 @@ type CheckOutboundResult struct {
 }
 
 func CheckOutbound(ctx context.Context, tag string, link string) (result CheckOutboundResult) {
+	outboundManagerMu.RLock()
+	defer outboundManagerMu.RUnlock()
 	if outbound_manager == nil {
 		result.Error = "core not running"
 		return result
@@ -61,6 +63,8 @@ type OutboundIdentity struct {
 }
 
 func FetchOutboundIdentity(ctx context.Context, tag string) (OutboundIdentity, error) {
+	outboundManagerMu.RLock()
+	defer outboundManagerMu.RUnlock()
 	if outbound_manager == nil {
 		return OutboundIdentity{}, errors.New("core not running")
 	}

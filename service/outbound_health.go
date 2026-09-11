@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -82,16 +81,7 @@ func newOutboundHealthTracker(windowSize int, fetcher outboundIdentityFetcher) *
 	}
 }
 
-func fetchTrackedOutboundIdentity(ctx context.Context, tag string) (core.OutboundIdentity, error) {
-	startCoreMu.Lock()
-	defer startCoreMu.Unlock()
-	if corePtr == nil || !corePtr.IsRunning() {
-		return core.OutboundIdentity{}, errors.New("core not running")
-	}
-	return core.FetchOutboundIdentity(ctx, tag)
-}
-
-var sharedOutboundHealth = newOutboundHealthTracker(defaultOutboundHealthWindow, fetchTrackedOutboundIdentity)
+var sharedOutboundHealth = newOutboundHealthTracker(defaultOutboundHealthWindow, core.FetchOutboundIdentity)
 
 func (t *outboundHealthTracker) record(tag string, result core.CheckOutboundResult, checkedAt time.Time) {
 	if tag == "" {

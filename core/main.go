@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"sync"
 
 	"github.com/CatMsg/NovaPanel/logger"
 
@@ -16,13 +17,14 @@ import (
 )
 
 var (
-	globalCtx        context.Context
-	inbound_manager  adapter.InboundManager
-	outbound_manager adapter.OutboundManager
-	service_manager  adapter.ServiceManager
-	endpoint_manager adapter.EndpointManager
-	router           adapter.Router
-	factory          log.Factory
+	globalCtx         context.Context
+	inbound_manager   adapter.InboundManager
+	outbound_manager  adapter.OutboundManager
+	service_manager   adapter.ServiceManager
+	endpoint_manager  adapter.EndpointManager
+	router            adapter.Router
+	factory           log.Factory
+	outboundManagerMu sync.RWMutex
 )
 
 type Core struct {
@@ -72,7 +74,9 @@ func (c *Core) Start(sbConfig []byte) error {
 
 	globalCtx = service.ContextWith(globalCtx, c)
 	inbound_manager = service.FromContext[adapter.InboundManager](globalCtx)
+	outboundManagerMu.Lock()
 	outbound_manager = service.FromContext[adapter.OutboundManager](globalCtx)
+	outboundManagerMu.Unlock()
 	service_manager = service.FromContext[adapter.ServiceManager](globalCtx)
 	endpoint_manager = service.FromContext[adapter.EndpointManager](globalCtx)
 	router = service.FromContext[adapter.Router](globalCtx)
@@ -95,11 +99,15 @@ func (c *Core) ValidateConfig(sbConfig []byte) error {
 
 func (c *Core) Stop() error {
 	c.isRunning = false
+	outboundManagerMu.Lock()
+	defer outboundManagerMu.Unlock()
 	if c.instance == nil {
+		outbound_manager = nil
 		return nil
 	}
 	err := c.instance.Close()
 	c.instance = nil
+	outbound_manager = nil
 	return err
 }
 
