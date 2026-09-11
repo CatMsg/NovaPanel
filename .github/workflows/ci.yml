@@ -1,0 +1,93 @@
+name: NovaPanel CI
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "25"
+
+jobs:
+  frontend:
+    name: 前端检查与构建
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v6.0.2
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 同步前端版本
+        run: node ./scripts/sync-frontend-version.mjs
+
+      - name: 安装前端依赖
+        working-directory: frontend
+        run: npm ci
+
+      - name: 依赖安全检查
+        working-directory: frontend
+        run: npm audit
+
+      - name: ESLint 检查
+        working-directory: frontend
+        run: npm run lint:check
+
+      - name: TypeScript 类型检查
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: 构建前端
+        working-directory: frontend
+        run: npm run build:assets
+
+  backend:
+    name: 后端检查与构建
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v6.0.2
+
+      - name: 设置 Go
+        uses: actions/setup-go@v6
+        with:
+          cache: false
+          go-version-file: go.mod
+
+      - name: 检查脚本语法
+        run: |
+          sh -n entrypoint.sh
+          bash -n install.sh novas.sh runNovas.sh build.sh scripts/*.sh
+
+      - name: Go Vet
+        run: go vet ./...
+
+      - name: Staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
+
+      - name: 漏洞检查
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
+
+      - name: 运行 Go 测试
+        run: bash ./scripts/go-test-packages.sh
+
+      - name: 基础 Go 构建
+        run: go build ./...
