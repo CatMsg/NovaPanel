@@ -136,6 +136,8 @@ func (a *APIv2Handler) getHandler(c *gin.Context) {
 		a.ApiService.GetRuleSetHealth(c)
 	case "failover-status":
 		a.ApiService.GetFailoverStatus(c)
+	case "outbound-health":
+		a.ApiService.GetOutboundHealth(c)
 	default:
 		jsonMsg(c, "failed", common.NewError("unknown action: ", action))
 	}

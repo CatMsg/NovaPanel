@@ -82,6 +82,18 @@
     </v-row>
   </v-card>
 
+  <OutboundHealthDashboard
+    :cards="healthCards"
+    :check-loading="healthCheckLoading"
+    :can-test-all="outbounds.length > 0"
+    :loading="healthLoading"
+    :testing-all="testingAll"
+    :window-size="healthWindowSize"
+    @refresh="refreshDashboard"
+    @test="checkOutbound"
+    @test-all="checkAllOutbounds"
+  />
+
   <section v-if="failoverStatuses.length > 0" class="failover-panel">
     <div class="failover-panel__heading">
       <div><span>AUTOMATIC FAILOVER</span><h2>有序故障回退</h2></div>
@@ -96,6 +108,20 @@
         <div class="failover-card__state">
           <span>当前出口</span><strong>{{ status.current || '等待首次探测' }}</strong>
           <span>候选出口</span><strong>{{ status.candidate || '-' }}</strong>
+        </div>
+        <div class="failover-members">
+          <div v-for="member in status.policy.members" :key="member" class="failover-member">
+            <span class="health-status-dot" :class="`health-status-dot--${healthFor(member).status}`" aria-hidden="true"></span>
+            <div class="failover-member__name">
+              <strong>{{ member }}</strong>
+              <small>{{ memberRoleLabel(status, member) }}</small>
+            </div>
+            <div class="failover-member__route">
+              <strong>{{ formatMemberProbe(status, member) }}</strong>
+              <small>{{ compactIdentity(healthFor(member)) }}</small>
+            </div>
+            <span class="failover-member__availability">{{ formatAvailability(healthFor(member)) }}</span>
+          </div>
         </div>
         <p v-if="status.error">{{ status.error }}</p>
         <div class="failover-card__footer">
@@ -225,8 +251,16 @@
 import Data from '@/store/modules/data'
 import HttpUtils from '@/plugins/httputil'
 import { Outbound } from '@/types/outbounds'
-import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
+import type {
+  FailoverPolicy,
+  FailoverRelation,
+  FailoverRole,
+  FailoverStatus,
+  OutboundHealthSnapshot,
+} from '@/types/outboundHealth'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
+import OutboundHealthDashboard from '@/components/outbounds/OutboundHealthDashboard.vue'
 
 const OutboundVue = defineAsyncComponent(() => import('@/layouts/modals/Outbound.vue'))
 const OutboundBulk = defineAsyncComponent(() => import('@/layouts/modals/OutboundBulk.vue'))
@@ -241,9 +275,57 @@ interface CheckResult {
   errorMessage?: string
 }
 
-const checkResults = ref<Record<string, CheckResult>>({})
+interface StrategyPayload {
+  outbound: Outbound
+  policy?: FailoverPolicy
+}
 
-const checkOutbound = async (tag: string) => {
+const healthWindowSize = 64
+
+const checkResults = ref<Record<string, CheckResult>>({})
+const healthCheckLoading = computed(() => Object.fromEntries(
+  Object.entries(checkResults.value).map(([tag, result]) => [tag, result.loading]),
+))
+const healthSnapshots = ref<OutboundHealthSnapshot[]>([])
+const healthLoading = ref(false)
+let healthPollTimer: ReturnType<typeof setInterval> | undefined
+let identityRefreshTimer: ReturnType<typeof setTimeout> | undefined
+
+const emptyHealth = (tag: string): OutboundHealthSnapshot => ({
+  tag,
+  status: 'untested',
+  latestDelay: 0,
+  averageDelay: 0,
+  observedAvailability: 0,
+  samples: 0,
+  successes: 0,
+  failures: 0,
+})
+
+const healthByTag = computed(() => new Map(healthSnapshots.value.map((health) => [health.tag, health])))
+
+function healthFor(tag: string): OutboundHealthSnapshot {
+  return healthByTag.value.get(tag) ?? emptyHealth(tag)
+}
+
+async function loadOutboundHealth(silent = false) {
+  if (!silent) healthLoading.value = true
+  try {
+    const response = await HttpUtils.get('api/outbound-health')
+    if (response.success && Array.isArray(response.obj)) {
+      healthSnapshots.value = response.obj as OutboundHealthSnapshot[]
+    }
+  } finally {
+    if (!silent) healthLoading.value = false
+  }
+}
+
+function scheduleIdentityHealthRefresh() {
+  if (identityRefreshTimer) clearTimeout(identityRefreshTimer)
+  identityRefreshTimer = setTimeout(() => loadOutboundHealth(true), 1800)
+}
+
+const checkOutbound = async (tag: string, refreshHealth = true) => {
   checkResults.value = { ...checkResults.value, [tag]: { loading: true, success: false } }
   const msg = await HttpUtils.get('api/checkOutbound', { tag })
   const success = msg.success && msg.obj?.OK
@@ -251,6 +333,10 @@ const checkOutbound = async (tag: string) => {
   checkResults.value = {
     ...checkResults.value,
     [tag]: { loading: false, success, data: msg.obj ?? null, errorMessage }
+  }
+  if (refreshHealth) {
+    await loadOutboundHealth(true)
+    if (success) scheduleIdentityHealthRefresh()
   }
 }
 
@@ -261,9 +347,11 @@ const checkAllOutbounds = async () => {
   if (list.length === 0) return
   testingAll.value = true
   try {
-    await Promise.all(list.map((o) => checkOutbound(o.tag)))
+    await Promise.all(list.map((o) => checkOutbound(o.tag, false)))
   } finally {
     testingAll.value = false
+    await loadOutboundHealth(true)
+    scheduleIdentityHealthRefresh()
   }
 }
 
@@ -275,10 +363,10 @@ const strategyModal = ref(false)
 const strategyLoading = ref(false)
 const chainModal = ref(false)
 const chainLoading = ref(false)
-const failoverStatuses = ref<any[]>([])
+const failoverStatuses = ref<FailoverStatus[]>([])
 const failoverLoading = ref(false)
 
-async function saveStrategy(payload: any) {
+async function saveStrategy(payload: StrategyPayload) {
   if (Data().checkTag('outbound', 0, payload.outbound.tag)) return
   strategyLoading.value = true
   try {
@@ -294,7 +382,7 @@ async function saveStrategy(payload: any) {
       }
     }
     strategyModal.value = false
-    await loadFailoverStatus()
+    await refreshDashboard()
   } finally {
     strategyLoading.value = false
   }
@@ -319,7 +407,9 @@ async function loadFailoverStatus() {
   failoverLoading.value = true
   try {
     const response = await HttpUtils.get('api/failover-status')
-    if (response.success) failoverStatuses.value = response.obj ?? []
+    if (response.success && Array.isArray(response.obj)) {
+      failoverStatuses.value = response.obj as FailoverStatus[]
+    }
   } finally {
     failoverLoading.value = false
   }
@@ -329,15 +419,101 @@ async function deleteFailover(tag: string) {
   const response = await HttpUtils.post('api/failoverDelete', { tag }, {
     headers: { 'Content-Type': 'application/json' },
   })
-  if (response.success) await loadFailoverStatus()
+  if (response.success) await refreshDashboard()
+}
+
+async function refreshDashboard() {
+  await Promise.all([loadOutboundHealth(), loadFailoverStatus()])
 }
 
 function formatStatusTime(value: string) {
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-onMounted(loadFailoverStatus)
+function formatDelay(delay: number, status: OutboundHealthSnapshot['status']) {
+  return status === 'healthy' ? `${delay} ms` : '—'
+}
+
+function formatAvailability(health: OutboundHealthSnapshot) {
+  return health.samples > 0 ? `${health.observedAvailability.toFixed(health.samples > 9 ? 1 : 0)}%` : '—'
+}
+
+let regionNames: Intl.DisplayNames | undefined
+try {
+  regionNames = new Intl.DisplayNames([navigator.language], { type: 'region' })
+} catch {
+  regionNames = undefined
+}
+
+function formatRegion(health: OutboundHealthSnapshot) {
+  const country = health.countryCode
+    ? (regionNames?.of(health.countryCode) || health.countryCode)
+    : ''
+  if (country && health.colo) return `${country} · ${health.colo}`
+  return country || health.colo || '地区待获取'
+}
+
+function compactIdentity(health: OutboundHealthSnapshot) {
+  const ip = health.publicIp || 'IP 待获取'
+  const region = formatRegion(health)
+  return region === '地区待获取' ? ip : `${ip} · ${region}`
+}
+
+function memberRoleLabel(status: FailoverStatus, member: string) {
+  const roles: string[] = []
+  if (status.current === member) roles.push('当前')
+  if (status.candidate === member) roles.push('候选')
+  if (roles.length === 0) roles.push('成员')
+  return roles.join(' · ')
+}
+
+function formatMemberProbe(status: FailoverStatus, member: string) {
+  const probe = status.probes.find((item) => item.tag === member)
+  if (probe) return probe.ok ? `${probe.delay} ms` : '本轮失败'
+  const health = healthFor(member)
+  return formatDelay(health.latestDelay, health.status)
+}
+
+onMounted(async () => {
+  await refreshDashboard()
+  healthPollTimer = setInterval(() => loadOutboundHealth(true), 15_000)
+})
+
+onBeforeUnmount(() => {
+  if (healthPollTimer) clearInterval(healthPollTimer)
+  if (identityRefreshTimer) clearTimeout(identityRefreshTimer)
+})
+
+const failoverRelations = computed(() => {
+  const relations = new Map<string, FailoverRelation[]>()
+  for (const status of failoverStatuses.value) {
+    for (const member of status.policy.members) {
+      const role: FailoverRole = status.current === member
+        ? 'current'
+        : status.candidate === member ? 'candidate' : 'member'
+      const current = relations.get(member) ?? []
+      current.push({ key: `${status.policy.tag}:${member}`, policy: status.policy.tag, role })
+      relations.set(member, current)
+    }
+  }
+  return relations
+})
+
+const healthCards = computed(() => {
+  const tags = new Set<string>()
+  for (const outbound of outbounds.value) tags.add(outbound.tag)
+  for (const status of failoverStatuses.value) {
+    for (const member of status.policy.members) tags.add(member)
+  }
+  return [...tags].map((tag) => ({
+    tag,
+    health: healthFor(tag),
+    relations: failoverRelations.value.get(tag) ?? [],
+  }))
+})
 
 const outboundTags = computed((): string[] => {
   return [...Data().outbounds?.map((o:Outbound) => o.tag), ...Data().endpoints?.filter((e:any) => e.type != "masque").map((e:any) => e.tag)]
@@ -389,7 +565,7 @@ const delOutbound = async (tag: string) => {
     await HttpUtils.post('api/failoverDelete', { tag }, {
       headers: { 'Content-Type': 'application/json' },
     })
-    await loadFailoverStatus()
+    await refreshDashboard()
   }
 }
 
@@ -578,6 +754,62 @@ const closeStats = () => {
   font-size: 12px;
 }
 
+.failover-members {
+  display: grid;
+  gap: 2px;
+  margin: 4px 0 14px;
+  padding: 6px;
+  border-radius: 15px;
+  background: rgba(118, 118, 128, 0.06);
+}
+
+.failover-member {
+  display: grid;
+  grid-template-columns: auto minmax(70px, 0.75fr) minmax(100px, 1.4fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 8px;
+  border-radius: 11px;
+}
+
+.failover-member + .failover-member {
+  border-top: 1px solid var(--np-border);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.failover-member__name,
+.failover-member__route {
+  min-width: 0;
+}
+
+.failover-member__name strong,
+.failover-member__name small,
+.failover-member__route strong,
+.failover-member__route small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.failover-member__name strong,
+.failover-member__route strong {
+  font-size: 12px;
+}
+
+.failover-member__name small,
+.failover-member__route small,
+.failover-member__availability {
+  color: var(--np-text-muted);
+  font-size: 10px;
+}
+
+.failover-member__availability {
+  font-variant-numeric: tabular-nums;
+}
+
 .v-theme--dark .resource-hero,
 .v-theme--dark .resource-card {
   background:
@@ -586,6 +818,20 @@ const closeStats = () => {
   border-color: rgba(148, 163, 184, 0.16);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
 }
+
+.health-status-dot {
+  --health-color: #8e8e93;
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--health-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--health-color) 13%, transparent);
+}
+
+.health-status-dot--healthy { --health-color: #30a46c; }
+.health-status-dot--unhealthy { --health-color: #ff453a; }
+.health-status-dot--untested { --health-color: #8e8e93; }
 
 @media (max-width: 960px) {
   .resource-hero {
@@ -605,6 +851,14 @@ const closeStats = () => {
 
   .resource-hero__title {
     font-size: 24px;
+  }
+
+  .failover-member {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .failover-member__route {
+    grid-column: 2 / -1;
   }
 }
 </style>

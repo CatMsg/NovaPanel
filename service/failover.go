@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/CatMsg/NovaPanel/core"
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
 )
@@ -44,8 +45,12 @@ type FailoverStatus struct {
 	Probes      []FailoverProbe `json:"probes"`
 }
 
+type outboundChecker interface {
+	CheckOutbound(tag string, link string) core.CheckOutboundResult
+}
+
 type FailoverService struct {
-	config *ConfigService
+	config outboundChecker
 
 	mu         sync.RWMutex
 	statuses   map[string]FailoverStatus
@@ -315,18 +320,10 @@ func (s *FailoverService) evaluate(policy FailoverPolicy, now time.Time) {
 		return
 	}
 	status.Current = current
-	for _, member := range policy.Members {
-		if !slices.Contains(runtimeMembers, member) {
-			status.Error = "策略组运行态成员已变化，请重新保存回退策略"
-			s.storeStatus(status, now)
-			return
-		}
-		probe := s.config.CheckOutbound(member, policy.TestURL)
-		status.Probes = append(status.Probes, FailoverProbe{Tag: member, OK: probe.OK, Delay: probe.Delay, Error: probe.Error})
-		if probe.OK {
-			status.Candidate = member
-			break
-		}
+	status.Probes, status.Candidate, status.Error = s.probeMembers(policy, runtimeMembers)
+	if status.Error != "" {
+		s.storeStatus(status, now)
+		return
 	}
 	if status.Candidate == "" {
 		status.Error = "所有成员探测失败，保留当前出口"
@@ -375,6 +372,21 @@ func (s *FailoverService) evaluate(policy FailoverPolicy, now time.Time) {
 	delete(s.pendingFor, policy.Tag)
 	s.statuses[policy.Tag] = status
 	s.mu.Unlock()
+}
+
+func (s *FailoverService) probeMembers(policy FailoverPolicy, runtimeMembers []string) ([]FailoverProbe, string, string) {
+	probes := make([]FailoverProbe, 0, len(policy.Members))
+	for _, member := range policy.Members {
+		if !slices.Contains(runtimeMembers, member) {
+			return probes, "", "策略组运行态成员已变化，请重新保存回退策略"
+		}
+		probe := s.config.CheckOutbound(member, policy.TestURL)
+		probes = append(probes, FailoverProbe{Tag: member, OK: probe.OK, Delay: probe.Delay, Error: probe.Error})
+		if probe.OK {
+			return probes, member, ""
+		}
+	}
+	return probes, "", ""
 }
 
 func (s *FailoverService) storeStatus(status FailoverStatus, now time.Time) {

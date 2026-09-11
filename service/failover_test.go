@@ -3,7 +3,19 @@ package service
 import (
 	"reflect"
 	"testing"
+
+	"github.com/CatMsg/NovaPanel/core"
 )
+
+type recordingOutboundChecker struct {
+	results map[string]core.CheckOutboundResult
+	calls   []string
+}
+
+func (c *recordingOutboundChecker) CheckOutbound(tag string, _ string) core.CheckOutboundResult {
+	c.calls = append(c.calls, tag)
+	return c.results[tag]
+}
 
 func TestNormalizeFailoverPolicy(t *testing.T) {
 	policy := normalizeFailoverPolicy(FailoverPolicy{
@@ -59,5 +71,32 @@ func TestValidateFailoverPolicy(t *testing.T) {
 				t.Fatal("invalid policy accepted")
 			}
 		})
+	}
+}
+
+func TestFailoverProbesUseOrderedCheckOutboundResults(t *testing.T) {
+	checker := &recordingOutboundChecker{results: map[string]core.CheckOutboundResult{
+		"primary": {Error: "timeout"},
+		"backup":  {OK: true, Delay: 42},
+		"reserve": {OK: true, Delay: 90},
+	}}
+	service := &FailoverService{config: checker}
+	policy := FailoverPolicy{
+		Members: []string{"primary", "backup", "reserve"},
+		TestURL: defaultFailoverTestURL,
+	}
+
+	probes, candidate, statusError := service.probeMembers(policy, policy.Members)
+	if statusError != "" {
+		t.Fatalf("unexpected status error: %s", statusError)
+	}
+	if candidate != "backup" {
+		t.Fatalf("unexpected candidate: %q", candidate)
+	}
+	if !reflect.DeepEqual(checker.calls, []string{"primary", "backup"}) {
+		t.Fatalf("failover did not retain ordered first-success behavior: %#v", checker.calls)
+	}
+	if len(probes) != 2 || probes[0].Error != "timeout" || !probes[1].OK || probes[1].Delay != 42 {
+		t.Fatalf("CheckOutbound semantics were not preserved: %#v", probes)
 	}
 }

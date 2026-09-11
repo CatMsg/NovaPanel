@@ -205,13 +205,18 @@ func (s *ConfigService) StopCore() error {
 func (s *ConfigService) CheckOutbound(tag string, link string) core.CheckOutboundResult {
 	startCoreMu.Lock()
 	defer startCoreMu.Unlock()
+	checkedAt := time.Now()
 	if tag == "" {
 		return core.CheckOutboundResult{Error: "missing query parameter: tag"}
 	}
 	if corePtr == nil || !corePtr.IsRunning() {
-		return core.CheckOutboundResult{Error: "core not running"}
+		result := core.CheckOutboundResult{Error: "core not running"}
+		sharedOutboundHealth.record(tag, result, checkedAt)
+		return result
 	}
-	return core.CheckOutbound(corePtr.GetCtx(), tag, link)
+	result := core.CheckOutbound(corePtr.GetCtx(), tag, link)
+	sharedOutboundHealth.record(tag, result, checkedAt)
+	return result
 }
 
 func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initUsers string, loginUser string, hostname string) ([]string, bool, error) {

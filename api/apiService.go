@@ -49,6 +49,32 @@ func (a *ApiService) GetFailoverStatus(c *gin.Context) {
 	jsonObj(c, statuses, err)
 }
 
+func (a *ApiService) GetOutboundHealth(c *gin.Context) {
+	tags := make([]string, 0)
+	outbounds, err := a.OutboundService.GetAll()
+	if err != nil {
+		jsonObj(c, nil, err)
+		return
+	}
+	for _, outbound := range *outbounds {
+		if tag, ok := outbound["tag"].(string); ok && tag != "" {
+			tags = append(tags, tag)
+		}
+	}
+	failover, failoverErr := service.GetFailoverService()
+	if failoverErr == nil {
+		policies, policiesErr := failover.GetPolicies()
+		if policiesErr != nil {
+			jsonObj(c, nil, policiesErr)
+			return
+		}
+		for _, policy := range policies {
+			tags = append(tags, policy.Members...)
+		}
+	}
+	jsonObj(c, service.OutboundHealthSnapshots(tags), nil)
+}
+
 func (a *ApiService) SaveFailoverPolicy(c *gin.Context) {
 	var policy service.FailoverPolicy
 	if err := c.ShouldBindJSON(&policy); err != nil {
