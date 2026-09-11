@@ -187,6 +187,19 @@ func (s *StatsService) GetOnlines() (onlines, error) {
 	return sampled, nil
 }
 
+func (s *StatsService) IsUserOnline(name string) (bool, error) {
+	online, err := s.GetOnlines()
+	if err != nil {
+		return false, err
+	}
+	for _, user := range online.User {
+		if user == name {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func mergeOnlines(left, right onlines) onlines {
 	return onlines{
 		Inbound:  mergeOnlineTags(left.Inbound, right.Inbound),

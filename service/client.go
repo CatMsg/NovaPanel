@@ -17,6 +17,15 @@ import (
 
 type ClientService struct{}
 
+func (s *ClientService) GetByName(name string) (*model.Client, error) {
+	db := database.GetDB()
+	client := &model.Client{}
+	if err := db.Model(model.Client{}).Where("name = ?", name).Order("enable DESC, id ASC").First(client).Error; err != nil {
+		return nil, err
+	}
+	return client, nil
+}
+
 func decodeClientInboundIDs(raw json.RawMessage) ([]uint, error) {
 	if len(raw) == 0 {
 		return nil, nil
