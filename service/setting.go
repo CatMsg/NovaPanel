@@ -47,45 +47,61 @@ var defaultConfig = `{
 }`
 
 var defaultValueMap = map[string]string{
-	"webListen":            "",
-	"webDomain":            "",
-	"webPort":              "2095",
-	"secret":               common.Random(32),
-	"webCertFile":          "",
-	"webKeyFile":           "",
-	"webPath":              "/app/",
-	"webURI":               "",
-	"sessionMaxAge":        "0",
-	"loginTrustedProxies":  "",
-	"loginBanAllowlist":    "",
-	"trafficAge":           "30",
-	"timeLocation":         "Asia/Shanghai",
-	"subListen":            "",
-	"subPort":              "2096",
-	"subPath":              "/sub/",
-	"subDomain":            "",
-	"subCertFile":          "",
-	"subKeyFile":           "",
-	"subUpdates":           "12",
-	"subEncode":            "true",
-	"subShowInfo":          "true",
-	"subURI":               "",
-	"subMode":              "slave",
-	"subMasterSources":     "",
-	"endpointMode":         "slave",
-	"endpointSources":      "",
-	"outboundFailover":     "[]",
-	"alertEnabled":         "false",
-	"alertTelegramToken":   "",
-	"alertTelegramChatID":  "",
-	"alertIntervalMinutes": "5",
-	"alertCooldownMinutes": "60",
-	"alertLastFingerprint": "",
-	"alertLastSentAt":      "0",
-	"subJsonExt":           "",
-	"subClashExt":          "",
-	"config":               defaultConfig,
-	"version":              config.GetVersion(),
+	"webListen":                    "",
+	"webDomain":                    "",
+	"webPort":                      "2095",
+	"secret":                       common.Random(32),
+	"webCertFile":                  "",
+	"webKeyFile":                   "",
+	"webPath":                      "/app/",
+	"webURI":                       "",
+	"sessionMaxAge":                "0",
+	"loginTrustedProxies":          "",
+	"loginBanAllowlist":            "",
+	"trafficAge":                   "30",
+	"timeLocation":                 "Asia/Shanghai",
+	"trafficBudgetEnabled":         "false",
+	"trafficBudgetLimitBytes":      "0",
+	"trafficBudgetReserveBytes":    "0",
+	"trafficBudgetOffsetBytes":     "0",
+	"trafficBudgetAccountingMode":  "tx",
+	"trafficBudgetInterface":       "auto",
+	"trafficBudgetCycleDay":        "1",
+	"trafficBudgetCycleHour":       "0",
+	"trafficBudgetWarningPercent":  "80",
+	"trafficBudgetCriticalPercent": "90",
+	"trafficBudgetPeriodStart":     "0",
+	"trafficBudgetAccumulatedRx":   "0",
+	"trafficBudgetAccumulatedTx":   "0",
+	"trafficBudgetLastRx":          "0",
+	"trafficBudgetLastTx":          "0",
+	"trafficBudgetLastInterface":   "",
+	"subListen":                    "",
+	"subPort":                      "2096",
+	"subPath":                      "/sub/",
+	"subDomain":                    "",
+	"subCertFile":                  "",
+	"subKeyFile":                   "",
+	"subUpdates":                   "12",
+	"subEncode":                    "true",
+	"subShowInfo":                  "true",
+	"subURI":                       "",
+	"subMode":                      "slave",
+	"subMasterSources":             "",
+	"endpointMode":                 "slave",
+	"endpointSources":              "",
+	"outboundFailover":             "[]",
+	"alertEnabled":                 "false",
+	"alertTelegramToken":           "",
+	"alertTelegramChatID":          "",
+	"alertIntervalMinutes":         "5",
+	"alertCooldownMinutes":         "60",
+	"alertLastFingerprint":         "",
+	"alertLastSentAt":              "0",
+	"subJsonExt":                   "",
+	"subClashExt":                  "",
+	"config":                       defaultConfig,
+	"version":                      config.GetVersion(),
 }
 
 type SettingService struct {
@@ -144,6 +160,12 @@ func (s *SettingService) GetAllSetting() (*map[string]string, error) {
 	delete(allSetting, "alertLastFingerprint")
 	delete(allSetting, "alertLastSentAt")
 	delete(allSetting, "outboundFailover")
+	for _, key := range []string{
+		"trafficBudgetPeriodStart", "trafficBudgetAccumulatedRx", "trafficBudgetAccumulatedTx",
+		"trafficBudgetLastRx", "trafficBudgetLastTx", "trafficBudgetLastInterface",
+	} {
+		delete(allSetting, key)
+	}
 
 	return &allSetting, nil
 }
@@ -653,7 +675,8 @@ func (s *SettingService) buildSavePostCommit(change settingPortChange, changedSe
 	needsRestart := requiresSubServerRestart(changedSettings)
 	_, allowlistChanged := changedSettings["loginBanAllowlist"]
 	needsLoginGuardSync := change.webPortChanged || allowlistChanged
-	if !portsChanged && !needsRestart && !needsLoginGuardSync {
+	needsTrafficBudgetSync := hasTrafficBudgetSettingChange(changedSettings)
+	if !portsChanged && !needsRestart && !needsLoginGuardSync && !needsTrafficBudgetSync {
 		return nil
 	}
 	return func() error {
@@ -664,6 +687,11 @@ func (s *SettingService) buildSavePostCommit(change settingPortChange, changedSe
 		}
 		if needsLoginGuardSync {
 			if err := (&LoginGuardService{}).SyncLoginProtection(); err != nil {
+				return err
+			}
+		}
+		if needsTrafficBudgetSync {
+			if err := GetTrafficBudgetService().Reconcile(); err != nil {
 				return err
 			}
 		}
@@ -679,6 +707,15 @@ func (s *SettingService) buildSavePostCommit(change settingPortChange, changedSe
 		}
 		return nil
 	}
+}
+
+func hasTrafficBudgetSettingChange(changedSettings map[string]string) bool {
+	for key := range changedSettings {
+		if strings.HasPrefix(key, "trafficBudget") {
+			return true
+		}
+	}
+	return false
 }
 
 func requiresSubServerRestart(changedSettings map[string]string) bool {
@@ -738,6 +775,11 @@ func (s *SettingService) Save(tx *gorm.DB, data json.RawMessage) (func() error, 
 			return nil, err
 		}
 		if err := s.saveSettingTx(tx, key, value); err != nil {
+			return nil, err
+		}
+	}
+	if hasTrafficBudgetSettingChange(changedSettings) {
+		if err := validateTrafficBudgetSettingsTx(tx); err != nil {
 			return nil, err
 		}
 	}

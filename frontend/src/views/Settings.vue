@@ -59,6 +59,7 @@
       <v-tab value="t2">{{ $t('setting.sub') }}</v-tab>
       <v-tab value="t3">{{ $t('setting.jsonSub') }}</v-tab>
       <v-tab value="t4">{{ $t('setting.clashSub') }}</v-tab>
+      <v-tab value="t5">VPS 流量</v-tab>
     </v-tabs>
     <v-card-text>
       <v-window v-model="tab">
@@ -225,6 +226,10 @@
         <v-window-item value="t4">
           <SubClashExtVue :settings="settings" />
         </v-window-item>
+
+        <v-window-item value="t5">
+          <TrafficBudgetPanel :settings="settings" />
+        </v-window-item>
       </v-window>
     </v-card-text>
   </v-card>
@@ -241,6 +246,7 @@ import Data from '@/store/modules/data'
 
 const SubJsonExtVue = defineAsyncComponent(() => import('@/components/SubJsonExt.vue'))
 const SubClashExtVue = defineAsyncComponent(() => import('@/components/SubClashExt.vue'))
+const TrafficBudgetPanel = defineAsyncComponent(() => import('@/components/TrafficBudgetPanel.vue'))
 const tab = ref("t1")
 const { smAndDown } = useDisplay()
 const tabItems = computed(() => [
@@ -248,6 +254,7 @@ const tabItems = computed(() => [
   { title: i18n.global.t('setting.sub'), value: 't2' },
   { title: i18n.global.t('setting.jsonSub'), value: 't3' },
   { title: i18n.global.t('setting.clashSub'), value: 't4' },
+  { title: 'VPS 流量', value: 't5' },
 ])
 const tabLabel = computed(() => tabItems.value.find((item) => item.value === tab.value)?.title ?? '')
 const loading:Ref = inject('loading')?? ref(false)
@@ -265,6 +272,16 @@ const settings = ref({
   loginTrustedProxies: "",
   loginBanAllowlist: "",
   trafficAge: "30",
+  trafficBudgetEnabled: "false",
+  trafficBudgetLimitBytes: "0",
+  trafficBudgetReserveBytes: "0",
+  trafficBudgetOffsetBytes: "0",
+  trafficBudgetAccountingMode: "tx",
+  trafficBudgetInterface: "auto",
+  trafficBudgetCycleDay: "1",
+  trafficBudgetCycleHour: "0",
+  trafficBudgetWarningPercent: "80",
+  trafficBudgetCriticalPercent: "90",
 	timeLocation: "Asia/Shanghai",
   subListen: "",
 	subPort: "2096",

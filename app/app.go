@@ -72,6 +72,9 @@ func (a *APP) Init() error {
 }
 
 func (a *APP) Start() error {
+	if err := service.GetTrafficBudgetService().Initialize(); err != nil {
+		logger.Warning("initialize VPS traffic budget protection failed:", err)
+	}
 	loc, err := a.SettingService.GetTimeLocation()
 	if err != nil {
 		return err

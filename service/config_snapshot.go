@@ -126,6 +126,12 @@ func (s *ConfigService) compensateFailedSave(snapshot *configSnapshot, obj strin
 		if err := restartSubServer(); err != nil {
 			errs = append(errs, fmt.Errorf("restore subscription listener: %w", err))
 		}
+		if err := GetTrafficBudgetService().Reconcile(); err != nil {
+			errs = append(errs, fmt.Errorf("restore traffic budget protection: %w", err))
+		}
+	}
+	if IsTrafficBudgetBlocked() {
+		return errors.Join(errs...)
 	}
 	if masquePtr != nil {
 		if err := masquePtr.SyncFromDB(); err != nil {

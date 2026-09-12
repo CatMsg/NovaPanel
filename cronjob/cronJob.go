@@ -21,6 +21,7 @@ func (c *CronJob) Start(loc *time.Location, trafficAge int) error {
 		job  cron.Job
 	}{
 		{"@every 10s", NewStatsJob(trafficAge > 0)},
+		{"@every 10s", NewTrafficBudgetJob()},
 		{"@every 1m", NewDepleteJob()},
 		{"@every 5s", NewCheckCoreJob()},
 		{"@every 10m", NewWALCheckpointJob()},
@@ -44,6 +45,7 @@ func (c *CronJob) Start(loc *time.Location, trafficAge int) error {
 
 func (c *CronJob) Stop() {
 	if c.cron != nil {
-		c.cron.Stop()
+		ctx := c.cron.Stop()
+		<-ctx.Done()
 	}
 }

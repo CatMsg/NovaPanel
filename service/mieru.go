@@ -172,8 +172,14 @@ func (s *MieruService) SyncFromDB() error {
 	if s == nil {
 		return nil
 	}
+	if IsTrafficBudgetBlocked() {
+		return s.Stop()
+	}
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
+	if IsTrafficBudgetBlocked() {
+		return nil
+	}
 	return s.syncFromDBLocked()
 }
 
@@ -384,7 +390,7 @@ func (s *MieruService) EnableTemporaryDebug() (time.Time, error) {
 }
 
 func (s *MieruService) StartWatchdog() {
-	if s == nil || runtime.GOOS != "linux" {
+	if s == nil || runtime.GOOS != "linux" || IsTrafficBudgetBlocked() {
 		return
 	}
 	s.mu.Lock()
@@ -436,6 +442,9 @@ func (s *MieruService) runWatchdog(ctx context.Context, done chan struct{}) {
 }
 
 func (s *MieruService) runWatchdogCheck(ctx context.Context) {
+	if IsTrafficBudgetBlocked() {
+		return
+	}
 	s.mu.Lock()
 	runtimeState := s.active
 	total := s.total

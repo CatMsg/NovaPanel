@@ -119,8 +119,14 @@ func (s *ConfigService) getConfig(db *gorm.DB, data string) (*[]byte, error) {
 }
 
 func (s *ConfigService) StartCore() error {
+	if IsTrafficBudgetBlocked() {
+		return nil
+	}
 	startCoreMu.Lock()
 	defer startCoreMu.Unlock()
+	if IsTrafficBudgetBlocked() {
+		return nil
+	}
 	if corePtr.IsRunning() {
 		return nil
 	}
@@ -158,6 +164,9 @@ func (s *ConfigService) StartCore() error {
 }
 
 func (s *ConfigService) RestartCore() error {
+	if IsTrafficBudgetBlocked() {
+		return common.NewError("VPS 总流量预算已触发硬保护，当前禁止启动代理数据面")
+	}
 	return s.restartCoreWithConfig(nil)
 }
 
@@ -178,6 +187,15 @@ func (s *ConfigService) restartCoreWithConfig(config json.RawMessage) error {
 	if err := validateRuntimeConfig(*rawConfig); err != nil {
 		logger.Error("restart sing-box err (validate config):", err.Error())
 		return err
+	}
+	if IsTrafficBudgetBlocked() {
+		if corePtr.IsRunning() {
+			if err := corePtr.Stop(); err != nil {
+				return err
+			}
+		}
+		logger.Info("traffic budget protection active; validated config without starting sing-box")
+		return nil
 	}
 	if corePtr.IsRunning() {
 		if err := corePtr.Stop(); err != nil {
@@ -339,7 +357,7 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 			run:  masquePtr.SyncFromDB,
 		})
 	}
-	if obj != "config" && corePtr != nil && !corePtr.IsRunning() {
+	if obj != "config" && corePtr != nil && !corePtr.IsRunning() && !IsTrafficBudgetBlocked() {
 		actions = append(actions, postCommitAction{
 			name: "start core",
 			run:  s.StartCore,

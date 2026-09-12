@@ -120,6 +120,7 @@ type ApiService struct {
 	service.HealthService
 	service.AlertService
 	service.LoginGuardService
+	service.TrafficBudgetService
 }
 
 func (a *ApiService) LoadData(c *gin.Context) {
@@ -337,6 +338,10 @@ func (a *ApiService) GetPublicIP(c *gin.Context) {
 func (a *ApiService) GetHealth(c *gin.Context) {
 	force := c.Query("force") == "1" || strings.EqualFold(c.Query("force"), "true")
 	jsonObj(c, a.HealthService.GetHealthReport(force), nil)
+}
+
+func (a *ApiService) GetTrafficBudget(c *gin.Context) {
+	jsonObj(c, a.TrafficBudgetService.GetStatus(), nil)
 }
 
 func (a *ApiService) GetAlertSettings(c *gin.Context) {

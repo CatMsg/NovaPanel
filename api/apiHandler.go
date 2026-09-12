@@ -117,6 +117,8 @@ func (a *APIHandler) getHandler(c *gin.Context) {
 		a.ApiService.GetPublicIP(c)
 	case "health":
 		a.ApiService.GetHealth(c)
+	case "traffic-budget":
+		a.ApiService.GetTrafficBudget(c)
 	case "alert-settings":
 		a.ApiService.GetAlertSettings(c)
 	case "login-security":

@@ -51,6 +51,7 @@ func (s *HealthService) GetHealthReport(force bool) *HealthReport {
 		Diagnostics: make(map[string]interface{}),
 	}
 	report.add(s.checkDatabase())
+	report.add(s.checkTrafficBudget(report.Diagnostics))
 	report.add(s.checkCore())
 	report.add(s.checkDisk())
 	report.add(s.checkPorts(report.Diagnostics))
@@ -116,7 +117,32 @@ func (s *HealthService) checkDatabase() HealthCheck {
 	return HealthCheck{ID: "database", Title: "数据库", Status: "ok", Summary: "SQLite quick_check 通过"}
 }
 
+func (s *HealthService) checkTrafficBudget(diagnostics map[string]interface{}) HealthCheck {
+	status := GetTrafficBudgetService().GetStatus()
+	diagnostics["trafficBudget"] = status
+	if !status.Enabled {
+		return HealthCheck{ID: "traffic-budget", Title: "VPS 总流量", Status: "info", Summary: "未启用服务器总流量保护", Action: "settings"}
+	}
+	if !status.Supported {
+		return HealthCheck{ID: "traffic-budget", Title: "VPS 总流量", Status: "info", Summary: "当前系统不支持网卡总流量计量", Detail: status.Error, Action: "settings"}
+	}
+	summary := fmt.Sprintf("已使用 %.1f%%，剩余池 %.2f GB", status.UsedPercent, float64(status.PoolRemainingBytes)/1e9)
+	switch status.Level {
+	case "blocked":
+		return HealthCheck{ID: "traffic-budget", Title: "VPS 总流量", Status: "error", Summary: "已达到用户流量池上限，代理数据面已停止", Detail: summary, Action: "settings"}
+	case "critical", "error":
+		return HealthCheck{ID: "traffic-budget", Title: "VPS 总流量", Status: "error", Summary: summary, Detail: status.Error, Action: "settings"}
+	case "warning":
+		return HealthCheck{ID: "traffic-budget", Title: "VPS 总流量", Status: "warning", Summary: summary, Action: "settings"}
+	default:
+		return HealthCheck{ID: "traffic-budget", Title: "VPS 总流量", Status: "ok", Summary: summary, Action: "settings"}
+	}
+}
+
 func (s *HealthService) checkCore() HealthCheck {
+	if IsTrafficBudgetBlocked() {
+		return HealthCheck{ID: "core", Title: "Sing-Box 核心", Status: "info", Summary: "因 VPS 总流量硬保护暂停", Action: "settings"}
+	}
 	info := s.ServerService.GetSingboxInfo()
 	running, _ := info["running"].(bool)
 	if !running {
@@ -212,6 +238,9 @@ func (s *HealthService) checkSubscription() HealthCheck {
 }
 
 func (s *HealthService) checkMasque(diagnostics map[string]interface{}) HealthCheck {
+	if IsTrafficBudgetBlocked() {
+		return HealthCheck{ID: "masque", Title: "MASQUE", Status: "info", Summary: "因 VPS 总流量硬保护暂停", Action: "settings"}
+	}
 	masque := GetMasqueService()
 	if masque == nil {
 		return HealthCheck{ID: "masque", Title: "MASQUE", Status: "info", Summary: "服务未初始化"}
@@ -234,6 +263,9 @@ func (s *HealthService) checkMasque(diagnostics map[string]interface{}) HealthCh
 }
 
 func (s *HealthService) checkMieru(diagnostics map[string]interface{}) HealthCheck {
+	if IsTrafficBudgetBlocked() {
+		return HealthCheck{ID: "mieru", Title: "Mieru", Status: "info", Summary: "因 VPS 总流量硬保护暂停", Action: "settings"}
+	}
 	mieru := GetMieruService()
 	if mieru == nil {
 		return HealthCheck{ID: "mieru", Title: "Mieru", Status: "info", Summary: "服务未初始化"}

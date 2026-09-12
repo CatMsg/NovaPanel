@@ -160,6 +160,7 @@ type masqueTrafficSnapshot struct {
 type MasqueService struct {
 	SettingService
 
+	syncMu          sync.Mutex
 	mu              sync.Mutex
 	runtimes        map[string]*masqueRuntime
 	startErr        map[string]string
@@ -200,6 +201,11 @@ func (s *MasqueService) GetSummary() map[string]int {
 func (s *MasqueService) SyncFromDB() error {
 	if s == nil {
 		return nil
+	}
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+	if IsTrafficBudgetBlocked() {
+		return s.stopLocked()
 	}
 	inbounds, err := s.loadMasqueInbounds()
 	if err != nil {
@@ -245,6 +251,12 @@ func (s *MasqueService) Stop() error {
 	if s == nil {
 		return nil
 	}
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+	return s.stopLocked()
+}
+
+func (s *MasqueService) stopLocked() error {
 	s.mu.Lock()
 	runtimes := s.runtimes
 	s.runtimes = map[string]*masqueRuntime{}
