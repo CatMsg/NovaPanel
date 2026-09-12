@@ -165,12 +165,13 @@ function formatTime(value: string) {
   margin-bottom: 18px;
   padding: 20px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.48);
+  border: 1px solid var(--np-border);
   border-radius: 28px;
+  color: var(--np-text-main);
   background:
-    radial-gradient(circle at 8% 0%, rgba(10, 132, 255, 0.12), transparent 28%),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.74), rgba(245, 249, 255, 0.54));
-  box-shadow: 0 22px 60px rgba(35, 62, 98, 0.1), inset 0 1px rgba(255, 255, 255, 0.72);
+    radial-gradient(circle at 8% 0%, color-mix(in srgb, var(--np-accent) 12%, transparent), transparent 28%),
+    linear-gradient(145deg, color-mix(in srgb, var(--np-surface-strong) 88%, transparent), var(--np-surface));
+  box-shadow: var(--np-shadow), inset 0 1px color-mix(in srgb, var(--np-text-main) 8%, transparent);
   backdrop-filter: blur(30px) saturate(1.28);
 }
 
@@ -253,10 +254,10 @@ function formatTime(value: string) {
   min-width: 0;
   padding: 16px;
   overflow: hidden;
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  border: 1px solid var(--np-border);
   border-radius: 21px;
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: 0 9px 26px rgba(36, 52, 78, 0.06), inset 0 1px rgba(255, 255, 255, 0.74);
+  background: color-mix(in srgb, var(--np-surface-strong) 88%, transparent);
+  box-shadow: var(--np-shadow-soft), inset 0 1px color-mix(in srgb, var(--np-text-main) 6%, transparent);
   transition: transform var(--np-duration-fast) var(--np-ease-out), border-color var(--np-duration-fast) ease;
 }
 
@@ -284,7 +285,7 @@ function formatTime(value: string) {
 .relation-chip--current { color: #16774d; background: rgba(48, 164, 108, 0.12); }
 .relation-chip--candidate { color: #146fa8; background: rgba(10, 132, 255, 0.11); }
 
-.health-card__exit { margin: 15px 0; padding: 13px; border-radius: 15px; background: rgba(118, 118, 128, 0.065); }
+.health-card__exit { margin: 15px 0; padding: 13px; border-radius: 15px; background: var(--np-surface-muted); }
 .health-card__exit span, .health-card__exit small, .health-card__exit strong { display: block; }
 .health-card__exit span, .health-card__exit small { color: var(--np-text-muted); font-size: 11px; }
 .health-card__ip { margin: 3px 0 2px; overflow: hidden; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 14px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
@@ -310,15 +311,6 @@ function formatTime(value: string) {
 
 .health-dashboard__empty { padding: 28px; color: var(--np-text-muted); text-align: center; }
 
-:global(.v-theme--dark) .health-dashboard {
-  border-color: rgba(125, 211, 252, 0.13);
-  background:
-    radial-gradient(circle at 8% 0%, rgba(14, 165, 233, 0.11), transparent 30%),
-    linear-gradient(145deg, rgba(14, 25, 43, 0.88), rgba(7, 14, 27, 0.72));
-  box-shadow: 0 25px 65px rgba(0, 0, 0, 0.31), inset 0 1px rgba(255, 255, 255, 0.07);
-}
-
-:global(.v-theme--dark) .health-card { border-color: rgba(148, 163, 184, 0.13); background: rgba(16, 27, 46, 0.84); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18), inset 0 1px rgba(255, 255, 255, 0.04); }
 :global(.v-theme--dark) .health-card--unhealthy { border-color: rgba(255, 105, 97, 0.2); }
 :global(.v-theme--dark) .relation-chip--current { color: #83dab0; }
 :global(.v-theme--dark) .relation-chip--candidate { color: #82cfff; }
