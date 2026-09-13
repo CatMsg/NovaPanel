@@ -108,7 +108,7 @@ func (s *ClashService) GetClash(subId string, requestHosts ...string) (*string, 
 	}
 
 	updateInterval, _ := s.SettingService.GetSubUpdates()
-	headers := util.GetHeaders(client, updateInterval)
+	headers := getClientSubscriptionHeaders(client, updateInterval)
 
 	storeCachedSubResult(cacheKey, resultStr, headers)
 	return &resultStr, headers, nil

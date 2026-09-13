@@ -9,7 +9,6 @@ import (
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
 	"github.com/CatMsg/NovaPanel/service"
-	"github.com/CatMsg/NovaPanel/util"
 )
 
 type SubService struct {
@@ -62,15 +61,19 @@ func (j *SubService) getClientBySubId(subId string) (*model.Client, error) {
 
 func (s *SubService) getClientHeaders(client *model.Client) []string {
 	updateInterval, _ := s.SettingService.GetSubUpdates()
-	return util.GetHeaders(client, updateInterval)
+	return getClientSubscriptionHeaders(client, updateInterval)
 }
 
 func (s *SubService) getClientInfo(c *model.Client) string {
 	now := time.Now().Unix()
 
 	var result []string
-	if vol := c.Volume - (c.Up + c.Down); vol > 0 {
-		result = append(result, fmt.Sprintf("%s%s", s.formatTraffic(vol), "📊"))
+	if c.Volume > 0 {
+		if vol := c.Volume - (c.Up + c.Down); vol > 0 {
+			result = append(result, fmt.Sprintf("%s%s", s.formatTraffic(vol), "📊"))
+		}
+	} else if usage := resolveClientSubscriptionUsage(c); usage.inherited {
+		result = append(result, fmt.Sprintf("%s%s", s.formatTraffic(usage.remaining), "📊"))
 	}
 	if c.Expiry > 0 {
 		result = append(result, fmt.Sprintf("%d%s⏳", (c.Expiry-now)/86400, "Days"))

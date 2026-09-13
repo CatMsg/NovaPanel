@@ -94,6 +94,12 @@ func IsTrafficBudgetBlocked() bool                   { return trafficBudgetBlock
 func (s *TrafficBudgetService) Initialize() error { return s.CheckAndEnforce() }
 func (s *TrafficBudgetService) Reconcile() error  { return s.CheckAndEnforce() }
 
+func (s *TrafficBudgetService) GetStatusSnapshot() TrafficBudgetStatus {
+	trafficBudgetStatusMu.RLock()
+	defer trafficBudgetStatusMu.RUnlock()
+	return trafficBudgetLastStatus
+}
+
 func (s *TrafficBudgetService) GetStatus() TrafficBudgetStatus {
 	if err := s.CheckAndEnforce(); err != nil {
 		trafficBudgetStatusMu.Lock()

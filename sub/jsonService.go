@@ -105,7 +105,7 @@ func (j *JsonService) GetJson(subId string, format string) (*string, []string, e
 	if err != nil {
 		return nil, nil, err
 	}
-	headers := util.GetHeaders(client, updateInterval)
+	headers := getClientSubscriptionHeaders(client, updateInterval)
 
 	storeCachedSubResult(cacheKey, resultStr, headers)
 	return &resultStr, headers, nil

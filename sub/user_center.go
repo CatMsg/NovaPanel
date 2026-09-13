@@ -10,7 +10,6 @@ import (
 
 	"github.com/CatMsg/NovaPanel/database/model"
 	"github.com/CatMsg/NovaPanel/service"
-	"github.com/CatMsg/NovaPanel/util"
 )
 
 type UserCenterService struct {
@@ -57,7 +56,17 @@ func (s *UserCenterService) Build(subID string, now time.Time) (userCenterView, 
 	}
 
 	updateInterval, _ := s.SettingService.GetSubUpdates()
-	return newUserCenterView(client, online, updateInterval, now), util.GetHeaders(client, updateInterval), nil
+	view := newUserCenterView(client, online, updateInterval, now)
+	usage := resolveClientSubscriptionUsage(client)
+	if usage.inherited {
+		view.Remaining = formatUserCenterBytes(usage.remaining)
+		view.Quota = formatUserCenterBytes(usage.total) + "（VPS 共享）"
+		if usage.total > 0 {
+			used := saturatingTrafficAdd(usage.upload, usage.download)
+			view.UsagePercent = math.Min(100, float64(used)/float64(usage.total)*100)
+		}
+	}
+	return view, getClientSubscriptionHeaders(client, updateInterval), nil
 }
 
 func newUserCenterView(client *model.Client, online bool, updateInterval int, now time.Time) userCenterView {
