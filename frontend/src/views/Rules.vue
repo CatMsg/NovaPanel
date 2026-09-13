@@ -121,25 +121,23 @@
   </v-row>
   <v-row class="rules-section route-explain np-section-card">
     <v-col class="rules-section__heading" cols="12">
-      <div><h2>路由命中诊断</h2><p>按当前运行态规则模拟一次匹配，不产生真实连接。</p></div>
+      <div><h2>DNS 命中诊断</h2><p>按当前运行态规则检查域名会使用哪个 DNS 服务器，不会发起真实查询。</p></div>
       <v-btn color="primary" variant="tonal" :loading="explainLoading" @click="runRouteExplain"><v-icon icon="mdi-radar" start />分析</v-btn>
     </v-col>
     <v-col cols="12">
       <v-row dense>
-        <v-col cols="12" md="4"><v-text-field v-model="explainInput.domain" label="域名" placeholder="www.netflix.com" hide-details /></v-col>
-        <v-col cols="6" md="2"><v-text-field v-model.number="explainInput.port" type="number" min="1" max="65535" label="端口" hide-details /></v-col>
-        <v-col cols="6" md="2"><v-select v-model="explainInput.network" :items="['tcp', 'udp']" label="网络" hide-details /></v-col>
-        <v-col cols="12" md="4"><v-text-field v-model="explainInput.destination" label="目标 IP（可选）" placeholder="1.1.1.1" clearable hide-details /></v-col>
-        <v-col cols="12" md="4"><v-select v-model="explainInput.inbound" :items="inboundTags" label="入站（可选）" clearable hide-details /></v-col>
-        <v-col cols="12" md="4"><v-select v-model="explainInput.user" :items="clients" label="用户（可选）" clearable hide-details /></v-col>
-        <v-col cols="12" md="4"><v-text-field v-model="explainInput.protocol" label="嗅探协议（可选）" placeholder="tls / http / dns" clearable hide-details /></v-col>
+        <v-col cols="12" md="6"><v-text-field v-model="explainInput.domain" label="域名" placeholder="www.netflix.com" hide-details /></v-col>
+        <v-col cols="12" sm="4" md="2"><v-select v-model="explainInput.queryType" :items="['A', 'AAAA']" label="查询类型" hide-details /></v-col>
+        <v-col cols="12" sm="4" md="2"><v-select v-model="explainInput.inbound" :items="inboundTags" label="入站（可选）" clearable hide-details /></v-col>
+        <v-col cols="12" sm="4" md="2"><v-select v-model="explainInput.user" :items="clients" label="用户（可选）" clearable hide-details /></v-col>
       </v-row>
-      <div v-if="explainResult" class="route-explain__result" :class="{ 'route-explain__result--default': explainResult.defaultUsed }">
-        <v-icon :icon="explainResult.defaultUsed ? 'mdi-sign-direction' : 'mdi-check-decagram-outline'" size="22" />
+      <div v-if="explainResult?.dns" class="route-explain__result" :class="{ 'route-explain__result--default': explainResult.dns.defaultUsed }">
+        <v-icon icon="mdi-dns-outline" size="22" />
         <div>
-          <strong>{{ explainResult.defaultUsed ? '使用默认出口' : `命中第 ${explainResult.ruleIndex + 1} 条规则` }}</strong>
-          <span>{{ explainResult.action || explainResult.note }}</span>
-          <code v-if="explainResult.rule">{{ explainResult.rule }}</code>
+          <strong>{{ explainResult.dns.server ? `使用 ${explainResult.dns.server}` : dnsActionLabel(explainResult.dns) }}</strong>
+          <span>{{ dnsServerSummary(explainResult.dns) }}</span>
+          <small>{{ explainResult.dns.defaultUsed ? '未命中 DNS 分流，使用默认解析器' : `命中第 ${explainResult.dns.ruleIndex + 1} 条 DNS 分流` }}</small>
+          <code v-if="explainResult.dns.rule">{{ explainResult.dns.rule }}</code>
         </div>
       </div>
     </v-col>
@@ -493,7 +491,7 @@ async function loadRuleSetHealth() {
   }
 }
 
-const explainInput = ref({ domain: '', destination: '', port: 443, inbound: '', user: '', network: 'tcp', protocol: '' })
+const explainInput = ref({ domain: '', destination: '', port: 53, inbound: '', user: '', network: 'udp', protocol: 'dns', queryType: 'A' })
 const explainResult = ref<any | null>(null)
 const explainLoading = ref(false)
 
@@ -507,6 +505,20 @@ async function runRouteExplain() {
   } finally {
     explainLoading.value = false
   }
+}
+
+function dnsActionLabel(result: any): string {
+  if (result?.actionType === 'reject') return '拒绝解析'
+  if (result?.actionType === 'predefined') return '使用预定义响应'
+  return '未找到可用 DNS 服务器'
+}
+
+function dnsServerSummary(result: any): string {
+  const type = String(result?.serverType || 'DNS').toUpperCase()
+  const address = result?.serverAddress
+  const port = result?.serverPort
+  if (!address) return type
+  return `${type} · ${address}${port ? `:${port}` : ''} · ${result.queryType || 'A'}`
 }
 
 function listRuleValues(value: unknown): string[] {
@@ -902,6 +914,11 @@ function saveImportRulesets(items: any[]) {
 
 .route-explain__result span {
   color: var(--np-text-muted);
+}
+
+.route-explain__result small {
+  color: var(--np-text-muted);
+  font-size: 12px;
 }
 
 .route-explain__result code {

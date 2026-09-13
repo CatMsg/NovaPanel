@@ -17,14 +17,16 @@ import (
 )
 
 var (
-	globalCtx         context.Context
-	inbound_manager   adapter.InboundManager
-	outbound_manager  adapter.OutboundManager
-	service_manager   adapter.ServiceManager
-	endpoint_manager  adapter.EndpointManager
-	router            adapter.Router
-	factory           log.Factory
-	outboundManagerMu sync.RWMutex
+	globalCtx             context.Context
+	inbound_manager       adapter.InboundManager
+	outbound_manager      adapter.OutboundManager
+	service_manager       adapter.ServiceManager
+	endpoint_manager      adapter.EndpointManager
+	router                adapter.Router
+	dns_transport_manager adapter.DNSTransportManager
+	dns_options           *option.DNSOptions
+	factory               log.Factory
+	outboundManagerMu     sync.RWMutex
 )
 
 type Core struct {
@@ -80,6 +82,8 @@ func (c *Core) Start(sbConfig []byte) error {
 	service_manager = service.FromContext[adapter.ServiceManager](globalCtx)
 	endpoint_manager = service.FromContext[adapter.EndpointManager](globalCtx)
 	router = service.FromContext[adapter.Router](globalCtx)
+	dns_transport_manager = c.instance.dnsTransport
+	dns_options = opt.DNS
 
 	c.isRunning = true
 	return nil
@@ -103,11 +107,15 @@ func (c *Core) Stop() error {
 	defer outboundManagerMu.Unlock()
 	if c.instance == nil {
 		outbound_manager = nil
+		dns_transport_manager = nil
+		dns_options = nil
 		return nil
 	}
 	err := c.instance.Close()
 	c.instance = nil
 	outbound_manager = nil
+	dns_transport_manager = nil
+	dns_options = nil
 	return err
 }
 
