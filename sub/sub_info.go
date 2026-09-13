@@ -61,6 +61,32 @@ func getClientSubscriptionHeaders(client *model.Client, updateInterval int) []st
 	return util.GetHeaders(&effective, updateInterval)
 }
 
+func decorateSubscriptionOutboundTags(outbounds *[]map[string]interface{}, outTags *[]string, client *model.Client, enabled bool) {
+	if !enabled || outbounds == nil || outTags == nil {
+		return
+	}
+	info := (&SubService{}).getClientInfo(client)
+	if info == "" {
+		return
+	}
+
+	renamed := make(map[string]string, len(*outbounds))
+	for _, outbound := range *outbounds {
+		tag, _ := outbound["tag"].(string)
+		if tag == "" {
+			continue
+		}
+		decorated := tag + info
+		outbound["tag"] = decorated
+		renamed[tag] = decorated
+	}
+	for index, tag := range *outTags {
+		if decorated, ok := renamed[tag]; ok {
+			(*outTags)[index] = decorated
+		}
+	}
+}
+
 func clampTraffic(value int64) int64 {
 	if value < 0 {
 		return 0

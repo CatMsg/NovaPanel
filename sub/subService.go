@@ -68,11 +68,8 @@ func (s *SubService) getClientInfo(c *model.Client) string {
 	now := time.Now().Unix()
 
 	var result []string
-	if c.Volume > 0 {
-		if vol := c.Volume - (c.Up + c.Down); vol > 0 {
-			result = append(result, fmt.Sprintf("%s%s", s.formatTraffic(vol), "📊"))
-		}
-	} else if usage := resolveClientSubscriptionUsage(c); usage.inherited {
+	usage := resolveClientSubscriptionUsage(c)
+	if c.Volume > 0 || usage.inherited {
 		result = append(result, fmt.Sprintf("%s%s", s.formatTraffic(usage.remaining), "📊"))
 	}
 	if c.Expiry > 0 {

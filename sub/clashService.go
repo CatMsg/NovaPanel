@@ -96,6 +96,8 @@ func (s *ClashService) GetClash(subId string, requestHosts ...string) (*string, 
 			*outTags = append(*outTags, tag)
 		}
 	}
+	showInfo, _ := s.SettingService.GetSubShowInfo()
+	decorateSubscriptionOutboundTags(outbounds, outTags, client, showInfo)
 
 	basicConfig, err := s.getClashConfig()
 	if err != nil || len(basicConfig) == 0 {
