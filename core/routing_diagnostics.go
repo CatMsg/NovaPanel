@@ -194,7 +194,7 @@ func explainDNS(input RouteExplainInput) (*DNSExplainResult, error) {
 
 	rules := make([]adapter.DNSRule, 0, len(dns_options.Rules))
 	for index, ruleOptions := range dns_options.Rules {
-		rule, err := R.NewDNSRule(globalCtx, factory.NewLogger("dns-diagnostics"), ruleOptions, true)
+		rule, err := R.NewDNSRule(globalCtx, factory.NewLogger("dns-diagnostics"), ruleOptions, true, false)
 		if err != nil {
 			closeDNSDiagnosticRules(rules)
 			return nil, fmt.Errorf("parse DNS rule[%d]: %w", index, err)

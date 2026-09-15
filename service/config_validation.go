@@ -88,8 +88,8 @@ func validateConfigReferences(rawConfig []byte) error {
 					return fmt.Errorf("route.rule_set[%d] 远程规则集缺少 url", index)
 				}
 			}
-			if detour := stringValue(item["download_detour"]); detour != "" {
-				refs = append(refs, configReference{kind: "outbound", tag: detour, path: fmt.Sprintf("route.rule_set[%d].download_detour", index)})
+			if detour, path := ruleSetDownloadDetour(item); detour != "" {
+				refs = append(refs, configReference{kind: "outbound", tag: detour, path: fmt.Sprintf("route.rule_set[%d].%s", index, path)})
 			}
 		}
 		collectRuleReferences(route["rules"], "route.rules", &refs)
@@ -151,6 +151,18 @@ func validateConfigReferences(rawConfig []byte) error {
 		}
 	}
 	return validateOutboundDependencyCycles(graph)
+}
+
+func ruleSetDownloadDetour(ruleSet map[string]interface{}) (string, string) {
+	if httpClient, ok := ruleSet["http_client"].(map[string]interface{}); ok {
+		if detour := stringValue(httpClient["detour"]); detour != "" {
+			return detour, "http_client.detour"
+		}
+	}
+	if detour := stringValue(ruleSet["download_detour"]); detour != "" {
+		return detour, "download_detour"
+	}
+	return "", ""
 }
 
 func collectRuleReferences(value interface{}, path string, refs *[]configReference) {

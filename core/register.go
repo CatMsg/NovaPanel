@@ -1,6 +1,7 @@
 package core
 
 import (
+	"github.com/sagernet/sing-box/adapter/certificate"
 	"github.com/sagernet/sing-box/adapter/endpoint"
 	"github.com/sagernet/sing-box/adapter/inbound"
 	"github.com/sagernet/sing-box/adapter/outbound"
@@ -36,6 +37,7 @@ import (
 	"github.com/sagernet/sing-box/protocol/wireguard"
 	"github.com/sagernet/sing-box/service/ccm"
 	"github.com/sagernet/sing-box/service/ocm"
+	originca "github.com/sagernet/sing-box/service/origin_ca"
 	"github.com/sagernet/sing-box/service/resolved"
 	"github.com/sagernet/sing-box/service/ssmapi"
 	_ "github.com/sagernet/sing-box/transport/v2rayquic"
@@ -135,5 +137,12 @@ func ServiceRegistry() *service.Registry {
 	ccm.RegisterService(registry)
 	ocm.RegisterService(registry)
 
+	return registry
+}
+
+func CertificateProviderRegistry() *certificate.Registry {
+	registry := certificate.NewRegistry()
+	registerACMECertificateProvider(registry)
+	originca.RegisterCertificateProvider(registry)
 	return registry
 }

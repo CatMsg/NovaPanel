@@ -4,6 +4,16 @@
       <v-col cols="12" sm="6" md="4" v-if="direction == 'in'">
         <v-switch v-model="data.ignore_client_bandwidth" color="primary" :label="$t('types.hy.ignoreBw')" hide-details></v-switch>
       </v-col>
+      <v-col cols="12" sm="6" md="4">
+        <v-select
+          v-model="data.bbr_profile"
+          label="BBR 配置档"
+          :items="bbrProfiles"
+          clearable
+          @click:clear="delete data.bbr_profile"
+          hide-details>
+        </v-select>
+      </v-col>
       <v-col cols="12" sm="6" md="4" v-if="!data.ignore_client_bandwidth">
         <v-text-field
         :label="$t('stats.upload')"
@@ -129,6 +139,19 @@
             v-model.number="hop_interval">
           </v-text-field>
         </v-col>
+        <v-col cols="12" sm="6" md="4" v-if="optionMPort">
+          <v-text-field
+            label="最大跳跃间隔"
+            placeholder="45s"
+            v-model="data.hop_interval_max"
+            clearable
+            @click:clear="delete data.hop_interval_max"
+            hide-details>
+          </v-text-field>
+        </v-col>
+        <v-col cols="12" sm="6" md="4">
+          <v-switch v-model="data.disable_chrome_parrot" color="primary" label="禁用 Chrome QUIC 模拟" hide-details></v-switch>
+        </v-col>
       </v-row>
     </template>
     <v-card-actions>
@@ -174,7 +197,12 @@ export default {
         { title: "File server", value: "file" },
         { title: "Reverse Proxy", value: "proxy" },
         { title: "Fixed response", value: "string" },
-      ]
+      ],
+      bbrProfiles: [
+        { title: 'Standard', value: 'standard' },
+        { title: 'Conservative', value: 'conservative' },
+        { title: 'Aggressive', value: 'aggressive' },
+      ],
     }
   },
   computed: {

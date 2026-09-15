@@ -13,6 +13,7 @@ import (
 	"github.com/CatMsg/NovaPanel/logger"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common/network"
 )
 
@@ -40,6 +41,10 @@ func (c *HistoryTracker) RoutedConnection(ctx context.Context, conn net.Conn, me
 func (c *HistoryTracker) RoutedPacketConnection(ctx context.Context, conn network.PacketConn, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) network.PacketConn {
 	c.record(metadata, matchOutbound.Tag(), "udp")
 	return conn
+}
+
+func (c *HistoryTracker) RoutedFlow(context.Context, adapter.InboundContext, adapter.Rule, adapter.Outbound) tun.FlowTracker {
+	return nil
 }
 
 func (c *HistoryTracker) record(inboundCtx adapter.InboundContext, outboundTag string, networkType string) {

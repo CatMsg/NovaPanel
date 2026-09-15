@@ -26,14 +26,68 @@
       </v-col>
       <v-col cols="12" sm="6" md="4">
         <v-select
-          v-model="data.stack"
-          label="Stack"
-          :items="['system','gvisor','mixed']"
+          v-model="stack"
+          label="TUN 网络栈"
+          :items="tunStacks"
+          clearable
+          hint="留空使用 1.15 默认 Go 网络栈"
+          persistent-hint
+          hide-details="auto"
+        ></v-select>
+      </v-col>
+      <v-col cols="12" sm="6" md="4">
+        <v-select
+          v-model="data.dns_mode"
+          label="DNS 模式"
+          :items="['disabled','native','hijack']"
+          clearable
+          @click:clear="delete data.dns_mode"
+          hide-details
+        ></v-select>
+      </v-col>
+    </v-row>
+    <v-row>
+      <v-col v-if="data.dns_mode && data.dns_mode !== 'disabled'" cols="12" sm="6">
+        <v-text-field v-model="dnsAddresses" label="DNS 地址" placeholder="172.19.0.2" clearable hide-details></v-text-field>
+      </v-col>
+      <v-col cols="12" sm="6">
+        <v-text-field v-model="data.netns" label="网络命名空间" clearable @click:clear="delete data.netns" hide-details></v-text-field>
+      </v-col>
+      <v-col cols="12" sm="6">
+        <v-switch
+          v-model="data.multi_queue"
+          color="primary"
+          label="Linux 多队列"
+          :disabled="data.stack != null && data.stack !== 'go'"
+          hint="仅 Go 网络栈可用，让 TUN 流量分摊到多个 CPU 核心"
+          persistent-hint
+          hide-details="auto"
+        ></v-switch>
+      </v-col>
+    </v-row>
+    <v-row>
+      <v-col cols="12" sm="6" md="4">
+        <v-select
+          v-model="data.udp_mapping"
+          label="UDP 映射模式"
+          :items="udpNatBehaviors"
+          clearable
+          @click:clear="delete data.udp_mapping"
           hide-details
         ></v-select>
       </v-col>
       <v-col cols="12" sm="6" md="4">
-        <v-switch v-model="data.endpoint_independent_nat" color="primary" label="Independent NAT" hide-details></v-switch>
+        <v-select
+          v-model="data.udp_filtering"
+          label="UDP 过滤模式"
+          :items="udpNatBehaviors"
+          clearable
+          @click:clear="delete data.udp_filtering"
+          hide-details
+        ></v-select>
+      </v-col>
+      <v-col cols="12" sm="6" md="4">
+        <v-text-field type="number" min="0" v-model.number="data.udp_nat_max" label="UDP NAT 上限" clearable @click:clear="delete data.udp_nat_max" hide-details></v-text-field>
       </v-col>
     </v-row>
     <v-row>
@@ -68,13 +122,38 @@ export default {
   props: ['data'],
   data() {
     return {
-      menu: false
+      menu: false,
+      udpNatBehaviors: [
+        { title: '端点独立', value: 'endpoint_independent' },
+        { title: '地址相关', value: 'address_dependent' },
+        { title: '地址与端口相关', value: 'address_and_port_dependent' },
+      ],
+      tunStacks: [
+        { title: 'Go（推荐）', value: 'go' },
+        { title: 'System（兼容旧配置）', value: 'system' },
+        { title: 'gVisor（兼容旧配置）', value: 'gvisor' },
+        { title: 'Mixed（兼容旧配置）', value: 'mixed' },
+      ],
     }
   },
   computed: {
     addrs: {
       get() { return this.$props.data.address?.join(',') },
       set(v:string) { this.$props.data.address = v.length > 0 ? v.split(',') : undefined }
+    },
+    dnsAddresses: {
+      get() { return this.$props.data.dns_address?.join(',') ?? '' },
+      set(v:string) {
+        const addresses = v.split(',').map((item) => item.trim()).filter(Boolean)
+        this.$props.data.dns_address = addresses.length > 0 ? addresses : undefined
+      }
+    },
+    stack: {
+      get() { return this.$props.data.stack ?? undefined },
+      set(v:string|undefined) {
+        this.$props.data.stack = v || undefined
+        if (v && v !== 'go') this.$props.data.multi_queue = undefined
+      }
     },
     udpTimeout: {
       get() { return this.$props.data.udp_timeout ? parseInt(this.$props.data.udp_timeout.replace('m','')) : 5 },

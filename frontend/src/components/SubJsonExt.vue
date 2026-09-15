@@ -280,63 +280,63 @@ export default {
           type: "remote",
           format: "binary",
           url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/category-ads-all.srs",
-          download_detour: "direct"
+          http_client: { detour: "direct" }
         },
         {
           tag: "geosite-private",
           type: "remote",
           format: "binary",
           url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/private.srs",
-          download_detour: "direct"
+          http_client: { detour: "direct" }
         },
         {
           tag: "geosite-ir",
           type: "remote",
           format: "binary",
           url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/category-ir.srs",
-          download_detour: "direct"
+          http_client: { detour: "direct" }
         },
         {
           tag: "geosite-cn",
           type: "remote",
           format: "binary",
           url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/cn.srs",
-          download_detour: "direct"
+          http_client: { detour: "direct" }
         },
         {
           tag: "geosite-vn",
           type: "remote",
           format: "binary",
           url: "https://github.com/Thaomtam/Geosite-vn/raw/rule-set/Geosite-vn.srs",
-          download_detour: "direct"
+          http_client: { detour: "direct" }
         },
         {
           tag: "geoip-private",
           type: "remote",
           format: "binary",
           url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/private.srs",
-          download_detour: "direct"
+          http_client: { detour: "direct" }
         },
         {
           tag: "geoip-ir",
           type: "remote",
           format: "binary",
           url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/ir.srs",
-          download_detour: "direct"
+          http_client: { detour: "direct" }
         },
         {
           tag: "geoip-cn",
           type: "remote",
           format: "binary",
           url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/cn.srs",
-          download_detour: "direct"
+          http_client: { detour: "direct" }
         },
         {
           tag: "geoip-vn",
           type: "remote",
           format: "binary",
           url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/vn.srs",
-          download_detour: "direct"
+          http_client: { detour: "direct" }
         }
       ],
     }

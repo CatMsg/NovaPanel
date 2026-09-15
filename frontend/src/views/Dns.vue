@@ -60,13 +60,19 @@
             :label="$t('dns.cacheCapacity')"></v-text-field>
         </v-col>
         <v-col cols="12" sm="6" md="3">
+          <v-text-field
+            v-model="dns.timeout" hide-details
+            clearable @click:clear="delete dns.timeout"
+            label="查询超时" placeholder="10s"></v-text-field>
+        </v-col>
+        <v-col cols="12" sm="6" md="3">
           <v-checkbox v-model="dns.disable_cache" hide-details :label="$t('dns.disableCache')" />
         </v-col>
         <v-col cols="12" sm="6" md="3">
           <v-checkbox v-model="dns.disable_expire" hide-details :label="$t('dns.disableExpire')" />
         </v-col>
         <v-col cols="12" sm="6" md="3">
-          <v-checkbox v-model="dns.independent_cache" hide-details :label="$t('dns.independentCache')" />
+          <v-checkbox v-model="optimisticCache" hide-details label="乐观缓存" />
         </v-col>
         <v-col cols="12" sm="6" md="3">
           <v-checkbox v-model="dns.reverse_mapping" hide-details :label="$t('dns.reverseMapping')" />
@@ -202,6 +208,17 @@ const dnsServerTags = computed((): string[] => {
 const finalDns = computed({
   get() { return dns.value?.final?? '' },
   set(v:string) { dns.value.final = v.length>0 ? v : undefined }
+})
+
+const optimisticCache = computed({
+  get() {
+    return typeof dns.value?.optimistic === 'object'
+      ? dns.value.optimistic.enabled !== false
+      : dns.value?.optimistic === true
+  },
+  set(enabled:boolean) {
+    dns.value.optimistic = enabled ? true : undefined
+  }
 })
 
 

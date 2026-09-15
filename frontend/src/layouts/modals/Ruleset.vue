@@ -43,8 +43,7 @@
               :label="$t('objects.outbound')"
               :items="outTags"
               clearable
-              @click:clear="delete rule_set.download_detour"
-              v-model="rule_set.download_detour">
+              v-model="downloadDetour">
             </v-select>
           </v-col>
           <v-col cols="12" sm="6" md="4">
@@ -102,6 +101,7 @@ export default {
       if (t == 'local') {
         delete this.rule_set.url
         delete this.rule_set.download_detour
+        delete this.rule_set.http_client
         delete this.rule_set.update_interval
       } else {
         delete this.rule_set.path
@@ -117,6 +117,16 @@ export default {
     }
   },
   computed: {
+    downloadDetour: {
+      get() {
+        if (typeof this.rule_set.http_client === 'object') return this.rule_set.http_client.detour ?? ''
+        return this.rule_set.download_detour ?? ''
+      },
+      set(value:string) {
+        delete this.rule_set.download_detour
+        this.rule_set.http_client = value ? { detour: value } : undefined
+      }
+    },
     update_intervals: {
       get() { return this.rule_set.update_interval != undefined ? parseInt(this.rule_set.update_interval.replace('d','')) : 0 },
       set(v:number) { this.rule_set.update_interval = v>0 ?  v + 'd' : undefined }

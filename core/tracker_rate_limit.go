@@ -10,6 +10,7 @@ import (
 	"github.com/CatMsg/NovaPanel/database/model"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common/buf"
 	M "github.com/sagernet/sing/common/metadata"
 	"github.com/sagernet/sing/common/network"
@@ -123,6 +124,10 @@ func (t *UserRateLimitTracker) RoutedPacketConnection(ctx context.Context, conn 
 		return conn
 	}
 	return &rateLimitedPacketConn{PacketConn: conn, ctx: ctx, user: metadata.User, tracker: t}
+}
+
+func (t *UserRateLimitTracker) RoutedFlow(context.Context, adapter.InboundContext, adapter.Rule, adapter.Outbound) tun.FlowTracker {
+	return nil
 }
 
 type rateLimitedConn struct {

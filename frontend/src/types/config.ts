@@ -66,6 +66,7 @@ interface RouteRuleSet {
   path?: string
   url?: string
   download_detour?: string
+  http_client?: string | { detour?: string }
   update_interval?: string
 }
 
@@ -109,6 +110,10 @@ export interface Config {
   log: Log
   dns: Dns
   ntp?: Ntp
+  certificate?: Record<string, unknown>
+  certificate_providers?: Record<string, unknown>[]
+  http_clients?: Record<string, unknown>[]
+  network_namespaces?: Record<string, unknown>[]
   inbounds: Inbound[]
   outbounds: Outbound[]
   route: Route

@@ -77,5 +77,6 @@ export interface ruleset {
   path?: string
   url?: string
   download_detour?: string
+  http_client?: string | { detour?: string }
   update_interval?: string
 }

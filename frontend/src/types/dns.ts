@@ -3,12 +3,17 @@ export interface Dns {
   rules: dnsRule[]
   final?: string
   strategy?: string
+  timeout?: string
   disable_cache?: boolean,
   disable_expire?: boolean,
   independent_cache?: boolean,
   cache_capacity?: number,
   reverse_mapping?: boolean,
   client_subnet?: string,
+  optimistic?: boolean | {
+    enabled?: boolean
+    timeout?: string
+  },
 }
 
 export const DnsTypes = {

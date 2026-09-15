@@ -36,7 +36,7 @@ type Core struct {
 
 func NewCore() *Core {
 	globalCtx = context.Background()
-	globalCtx = sb.Context(globalCtx, InboundRegistry(), OutboundRegistry(), EndpointRegistry(), DNSTransportRegistry(), ServiceRegistry())
+	globalCtx = sb.Context(globalCtx, InboundRegistry(), OutboundRegistry(), EndpointRegistry(), DNSTransportRegistry(), ServiceRegistry(), CertificateProviderRegistry())
 	return &Core{
 		isRunning: false,
 		instance:  nil,
@@ -95,7 +95,7 @@ func (c *Core) Start(sbConfig []byte) error {
 func (c *Core) ValidateConfig(sbConfig []byte) error {
 	ctx := globalCtx
 	if ctx == nil {
-		ctx = sb.Context(context.Background(), InboundRegistry(), OutboundRegistry(), EndpointRegistry(), DNSTransportRegistry(), ServiceRegistry())
+		ctx = sb.Context(context.Background(), InboundRegistry(), OutboundRegistry(), EndpointRegistry(), DNSTransportRegistry(), ServiceRegistry(), CertificateProviderRegistry())
 	}
 	var opt option.Options
 	return opt.UnmarshalJSONContext(ctx, sbConfig)

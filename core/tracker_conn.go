@@ -8,6 +8,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common/buf"
 	M "github.com/sagernet/sing/common/metadata"
 	"github.com/sagernet/sing/common/network"
@@ -90,6 +91,10 @@ func (c *ConnTracker) RoutedPacketConnection(ctx context.Context, conn network.P
 	c.trackConnection(connID, connInfo)
 
 	return c.createWrappedPacketConn(conn, connID)
+}
+
+func (c *ConnTracker) RoutedFlow(context.Context, adapter.InboundContext, adapter.Rule, adapter.Outbound) tun.FlowTracker {
+	return nil
 }
 
 func (c *ConnTracker) CloseConnByInbound(inbound string) int {

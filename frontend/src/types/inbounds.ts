@@ -104,6 +104,13 @@ export interface Hysteria extends InboundBasics {
   recv_window_client?: number
   max_conn_client?: number
   disable_mtu_discovery?: boolean
+  idle_timeout?: string
+  keep_alive_period?: string
+  stream_receive_window?: string | number
+  connection_receive_window?: string | number
+  max_concurrent_streams?: number
+  initial_packet_size?: number
+  disable_path_mtu_discovery?: boolean
 }
 export interface ShadowTLS extends InboundBasics {
   version: 1|2|3
@@ -148,6 +155,14 @@ export interface Hysteria2 extends InboundBasics {
     headers?: Headers[]
     content?: string
   }
+  bbr_profile?: 'standard' | 'conservative' | 'aggressive'
+  idle_timeout?: string
+  keep_alive_period?: string
+  stream_receive_window?: string | number
+  connection_receive_window?: string | number
+  max_concurrent_streams?: number
+  initial_packet_size?: number
+  disable_path_mtu_discovery?: boolean
   brutal_debug?: boolean
 }
 export interface Mieru extends InboundBasics {
@@ -171,11 +186,17 @@ export interface Masque extends InboundBasics {
 }
 export interface Tun extends InboundBasics {
   interface_name?: string
+  netns?: string
   address?: string[]
   mtu?: number
-  endpoint_independent_nat?: boolean
+  dns_mode?: 'disabled' | 'native' | 'hijack'
+  dns_address?: string[]
   udp_timeout?: string
-  stack?: string
+  udp_mapping?: 'endpoint_independent' | 'address_dependent' | 'address_and_port_dependent'
+  udp_filtering?: 'endpoint_independent' | 'address_dependent' | 'address_and_port_dependent'
+  udp_nat_max?: number
+  multi_queue?: boolean
+  stack?: 'go' | 'system' | 'gvisor' | 'mixed'
   auto_route?: boolean
   strict_route?: boolean
   auto_redirect?: boolean
@@ -269,7 +290,7 @@ const defaultValues: Record<InType, Inbound> = {
     remote_dns_resolve: false,
     udp: true,
   },
-  tun: <Tun>{ type: InTypes.Tun, mtu: 9000, stack: 'system', udp_timeout: '5m', auto_route: false },
+  tun: <Tun>{ type: InTypes.Tun, mtu: 9000, udp_timeout: '5m', auto_route: false },
   redirect: <Redirect>{ type: InTypes.Redirect },
   tproxy: <TProxy>{ type: InTypes.TProxy },
 }

@@ -38,6 +38,10 @@ func (t *fakeDNSTransport) Exchange(context.Context, *dns.Msg) (*dns.Msg, error)
 	}
 	return &dns.Msg{}, t.err
 }
+func (t *fakeDNSTransport) ExchangeAsync(ctx context.Context, message *dns.Msg, callback func(*dns.Msg, error)) {
+	response, err := t.Exchange(ctx, message)
+	callback(response, err)
+}
 func (t *fakeDNSTransport) resetCount() int {
 	t.access.Lock()
 	defer t.access.Unlock()
@@ -94,5 +98,21 @@ func TestResilientUDPDNSTransportDefersResetUntilConcurrentExchangesFinish(t *te
 	<-done
 	if got := base.resetCount(); got != 1 {
 		t.Fatalf("expected one deferred reset, got %d", got)
+	}
+}
+
+func TestResilientUDPDNSTransportResetsAfterAsyncError(t *testing.T) {
+	base := &fakeDNSTransport{err: errors.New("timeout")}
+	transport := &resilientUDPDNSTransport{DNSTransport: base}
+	done := make(chan error, 1)
+
+	transport.ExchangeAsync(context.Background(), &dns.Msg{}, func(_ *dns.Msg, err error) {
+		done <- err
+	})
+	if err := <-done; err == nil {
+		t.Fatal("expected exchange error")
+	}
+	if got := base.resetCount(); got != 1 {
+		t.Fatalf("expected one async error reset, got %d", got)
 	}
 }

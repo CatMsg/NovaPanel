@@ -42,44 +42,35 @@
         <Network :data="data" />
       </v-col>
       <v-col cols="12" sm="6" md="4">
-        <v-switch v-model="data.disable_mtu_discovery" color="primary" label="Disable MTU discovery" hide-details></v-switch>
+        <v-switch v-model="disablePathMTUDiscovery" color="primary" label="Disable path MTU discovery" hide-details></v-switch>
       </v-col>
     </v-row>
     <v-row>
-      <v-col cols="12" sm="6" md="4" v-if="data.recv_window_conn != undefined">
+      <v-col cols="12" sm="6" md="4" v-if="connectionReceiveWindow != undefined">
         <v-text-field
-        label="Recv window conn"
+        label="Connection receive window"
         hide-details
         type="number"
         min="0"
-        v-model.number="data.recv_window_conn">
+        v-model.number="connectionReceiveWindow">
         </v-text-field>
       </v-col>
-      <v-col cols="12" sm="6" md="4" v-if="data.recv_window != undefined">
+      <v-col cols="12" sm="6" md="4" v-if="streamReceiveWindow != undefined">
         <v-text-field
-        label="Recv window"
+        label="Stream receive window"
         hide-details
         type="number"
         min="0"
-        v-model.number="data.recv_window">
+        v-model.number="streamReceiveWindow">
         </v-text-field>
       </v-col>
-      <v-col cols="12" sm="6" md="4" v-if="data.recv_window_client != undefined">
+      <v-col cols="12" sm="6" md="4" v-if="direction == 'in' && maxConcurrentStreams != undefined">
         <v-text-field
-        label="Recv window client"
+        label="Max concurrent streams"
         hide-details
         type="number"
         min="0"
-        v-model.number="data.recv_window_client">
-        </v-text-field>
-      </v-col>
-      <v-col cols="12" sm="6" md="4" v-if="data.max_conn_client != undefined">
-        <v-text-field
-        label="Max conn client"
-        hide-details
-        type="number"
-        min="0"
-        v-model.number="data.max_conn_client">
+        v-model.number="maxConcurrentStreams">
         </v-text-field>
       </v-col>
     </v-row>
@@ -92,16 +83,16 @@
         <v-card>
           <v-list>
             <v-list-item>
-              <v-switch v-model="optionRsvConn" color="primary" label="Recv window conn" hide-details></v-switch>
+              <v-switch v-model="optionConnectionWindow" color="primary" label="Connection receive window" hide-details></v-switch>
             </v-list-item>
             <v-list-item v-if="direction=='out'">
-              <v-switch v-model="optionRsvWin" color="primary" label="Recv window" hide-details></v-switch>
+              <v-switch v-model="optionStreamWindow" color="primary" label="Stream receive window" hide-details></v-switch>
             </v-list-item>
             <v-list-item v-if="direction=='in'">
-              <v-switch v-model="optionRsvClnt" color="primary" label="Recv window client" hide-details></v-switch>
+              <v-switch v-model="optionStreamWindow" color="primary" label="Stream receive window" hide-details></v-switch>
             </v-list-item>
             <v-list-item v-if="direction=='in'">
-              <v-switch v-model="optionMaxConn" color="primary" label="Max conn client" hide-details></v-switch>
+              <v-switch v-model="optionMaxStreams" color="primary" label="Max concurrent streams" hide-details></v-switch>
             </v-list-item>
           </v-list>
         </v-card>
@@ -121,21 +112,49 @@ export default {
     }
   },
   computed: {
-    optionRsvConn: {
-      get(): boolean { return this.$props.data.recv_window_conn != undefined },
-      set(v:boolean) { this.$props.data.recv_window_conn = v ? 15728640 : undefined }
+    disablePathMTUDiscovery: {
+      get(): boolean { return this.$props.data.disable_path_mtu_discovery ?? this.$props.data.disable_mtu_discovery ?? false },
+      set(v:boolean) {
+        delete this.$props.data.disable_mtu_discovery
+        this.$props.data.disable_path_mtu_discovery = v || undefined
+      }
     },
-    optionRsvWin: {
-      get(): boolean { return this.$props.data.recv_window != undefined },
-      set(v:boolean) { this.$props.data.recv_window = v ? 67108864 : undefined }
+    connectionReceiveWindow: {
+      get() { return this.$props.data.connection_receive_window ?? this.$props.data.recv_window_conn },
+      set(v:number|undefined) {
+        delete this.$props.data.recv_window_conn
+        this.$props.data.connection_receive_window = v
+      }
     },
-    optionRsvClnt: {
-      get(): boolean { return this.$props.data.recv_window_client != undefined },
-      set(v:boolean) { this.$props.data.recv_window_client = v ? 67108864 : undefined }
+    streamReceiveWindow: {
+      get() {
+        const legacy = this.$props.direction == 'in' ? this.$props.data.recv_window_client : this.$props.data.recv_window
+        return this.$props.data.stream_receive_window ?? legacy
+      },
+      set(v:number|undefined) {
+        delete this.$props.data.recv_window
+        delete this.$props.data.recv_window_client
+        this.$props.data.stream_receive_window = v
+      }
     },
-    optionMaxConn: {
-      get(): boolean { return this.$props.data.max_conn_client != undefined },
-      set(v:boolean) { this.$props.data.max_conn_client = v ? 1024 : undefined }
+    maxConcurrentStreams: {
+      get() { return this.$props.data.max_concurrent_streams ?? this.$props.data.max_conn_client },
+      set(v:number|undefined) {
+        delete this.$props.data.max_conn_client
+        this.$props.data.max_concurrent_streams = v
+      }
+    },
+    optionConnectionWindow: {
+      get(): boolean { return this.connectionReceiveWindow != undefined },
+      set(v:boolean) { this.connectionReceiveWindow = v ? 15728640 : undefined }
+    },
+    optionStreamWindow: {
+      get(): boolean { return this.streamReceiveWindow != undefined },
+      set(v:boolean) { this.streamReceiveWindow = v ? 67108864 : undefined }
+    },
+    optionMaxStreams: {
+      get(): boolean { return this.maxConcurrentStreams != undefined },
+      set(v:boolean) { this.maxConcurrentStreams = v ? 1024 : undefined }
     },
     down_mbps: {
       get() { return this.$props.data.down_mbps ? this.$props.data.down_mbps : 0 },

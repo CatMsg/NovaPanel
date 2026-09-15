@@ -128,6 +128,13 @@ export interface Hysteria extends OutboundBasics, Dial {
   recv_window_conn?: number
   recv_window?: number
   disable_mtu_discovery?: boolean
+  idle_timeout?: string
+  keep_alive_period?: string
+  stream_receive_window?: string | number
+  connection_receive_window?: string | number
+  max_concurrent_streams?: number
+  initial_packet_size?: number
+  disable_path_mtu_discovery?: boolean
   network?: "udp" | "tcp"
   tls: oTls
 }
@@ -171,6 +178,7 @@ export interface Hysteria2 extends OutboundBasics, Dial {
   server_port: number
   server_ports?: string[]
   hop_interval: string
+  hop_interval_max?: string
   up_mbps?: number
   down_mbps?: number
   obfs?: {
@@ -180,6 +188,15 @@ export interface Hysteria2 extends OutboundBasics, Dial {
   password?: string
   network?: "udp" | "tcp"
   tls: oTls
+  bbr_profile?: 'standard' | 'conservative' | 'aggressive'
+  idle_timeout?: string
+  keep_alive_period?: string
+  stream_receive_window?: string | number
+  connection_receive_window?: string | number
+  max_concurrent_streams?: number
+  initial_packet_size?: number
+  disable_path_mtu_discovery?: boolean
+  disable_chrome_parrot?: boolean
   brutal_debug?: boolean
 }
 

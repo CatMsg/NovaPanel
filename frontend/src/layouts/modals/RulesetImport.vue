@@ -162,7 +162,7 @@ export default {
     save() {
       const toAdd = this.importPreview.filter(i => !i.exists).map(item => {
         const rs: any = { type: 'remote', tag: item.tag, format: item.format, url: item.url }
-        if (this.importDetour) rs.download_detour = this.importDetour
+        if (this.importDetour) rs.http_client = { detour: this.importDetour }
         if (this.importInterval > 0) rs.update_interval = this.importInterval + 'd'
         return rs
       })

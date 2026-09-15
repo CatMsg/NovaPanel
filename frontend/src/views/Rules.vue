@@ -125,7 +125,7 @@
       <v-btn color="primary" variant="tonal" :loading="explainLoading" @click="runRouteExplain"><v-icon icon="mdi-radar" start />分析</v-btn>
     </v-col>
     <v-col cols="12">
-      <v-row dense>
+      <v-row density="comfortable">
         <v-col cols="12" md="6"><v-text-field v-model="explainInput.domain" label="域名" placeholder="www.netflix.com" hide-details /></v-col>
         <v-col cols="12" sm="4" md="2"><v-select v-model="explainInput.queryType" :items="['A', 'AAAA']" label="查询类型" hide-details /></v-col>
         <v-col cols="12" sm="4" md="2"><v-select v-model="explainInput.inbound" :items="inboundTags" label="入站（可选）" clearable hide-details /></v-col>
@@ -215,7 +215,7 @@
         </v-card-subtitle>
         <v-card-text>
           <v-row><v-col>{{ $t('ruleset.format') }}</v-col><v-col>{{ item.format }}</v-col></v-row>
-          <v-row><v-col>{{ $t('objects.outbound') }}</v-col><v-col>{{ item.download_detour ?? '-' }}</v-col></v-row>
+          <v-row><v-col>{{ $t('objects.outbound') }}</v-col><v-col>{{ ruleSetDetour(item) }}</v-col></v-row>
           <v-row><v-col>{{ $t('actions.update') }}</v-col><v-col>{{ item.update_interval ?? '-' }}</v-col></v-row>
         </v-card-text>
         <v-divider></v-divider>
@@ -365,6 +365,11 @@ const rulesets = computed((): any[] => {
   return data.rule_set
 })
 
+const ruleSetDetour = (item:any): string => {
+  if (typeof item.http_client === 'object') return item.http_client?.detour ?? '-'
+  return item.download_detour ?? '-'
+}
+
 const rulesetTags = computed((): string[] => rulesets.value.map((rs:any) => rs.tag))
 
 const outboundTags = computed((): string[] => [
@@ -408,7 +413,7 @@ async function applyCatalog(payload: any) {
         url: asset.url,
         update_interval: '1d',
       }
-      if (payload.downloadDetour) ruleSet.download_detour = payload.downloadDetour
+      if (payload.downloadDetour) ruleSet.http_client = { detour: payload.downloadDetour }
       draft.route.rule_set.push(ruleSet)
       knownTags.add(asset.tag)
       changed = true

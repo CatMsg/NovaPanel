@@ -23,6 +23,37 @@ func TestValidateConfigReferencesAcceptsValidRoute(t *testing.T) {
 	}
 }
 
+func TestValidateConfigReferencesAcceptsRuleSetHTTPClientDetour(t *testing.T) {
+	config := []byte(`{
+		"outbounds":[{"type":"direct","tag":"proxy-a"}],
+		"route":{"rule_set":[{
+			"type":"remote",
+			"tag":"remote",
+			"format":"binary",
+			"url":"https://example.com/rules.srs",
+			"http_client":{"detour":"proxy-a"}
+		}]}
+	}`)
+	if err := validateConfigReferences(config); err != nil {
+		t.Fatalf("valid HTTP client detour rejected: %v", err)
+	}
+}
+
+func TestValidateConfigReferencesRejectsMissingRuleSetHTTPClientDetour(t *testing.T) {
+	config := []byte(`{
+		"route":{"rule_set":[{
+			"type":"remote",
+			"tag":"remote",
+			"url":"https://example.com/rules.srs",
+			"http_client":{"detour":"missing"}
+		}]}
+	}`)
+	err := validateConfigReferences(config)
+	if err == nil || !strings.Contains(err.Error(), "http_client.detour") {
+		t.Fatalf("expected missing HTTP client detour error, got %v", err)
+	}
+}
+
 func TestValidateConfigReferencesRejectsMissingOutbound(t *testing.T) {
 	config := []byte(`{"outbounds":[{"type":"direct","tag":"proxy-a"}],"route":{"final":"missing"}}`)
 	err := validateConfigReferences(config)

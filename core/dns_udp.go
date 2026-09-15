@@ -46,6 +46,14 @@ func (t *resilientUDPDNSTransport) Exchange(ctx context.Context, message *dns.Ms
 	return response, err
 }
 
+func (t *resilientUDPDNSTransport) ExchangeAsync(ctx context.Context, message *dns.Msg, callback func(*dns.Msg, error)) {
+	t.beginExchange(time.Now())
+	t.DNSTransport.ExchangeAsync(ctx, message, func(response *dns.Msg, err error) {
+		t.endExchange(time.Now(), err)
+		callback(response, err)
+	})
+}
+
 func (t *resilientUDPDNSTransport) beginExchange(now time.Time) {
 	t.access.Lock()
 	defer t.access.Unlock()
