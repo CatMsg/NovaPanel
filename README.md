@@ -1,6 +1,6 @@
 # NovaPanel
 
-**语言 / Language:** **简体中文** | [English](README.en.md)
+**语言 / Language:** **简体中文** | [繁體中文](README.zh-TW.md) | [English](README.en.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Русский](README.ru.md)
 
 NovaPanel 是一个 Sing-Box 管理面板，提供协议配置、订阅、端口规则、监控与多服务器运维能力。
 
