@@ -1,6 +1,6 @@
 # NovaPanel
 
-**Language:** [简体中文](README.md) | **English**
+**Language:** [简体中文](README.md) | [繁體中文](README.zh-TW.md) | **English** | [日本語](README.ja.md) | [한국어](README.ko.md) | [Русский](README.ru.md)
 
 NovaPanel is a Sing-Box management panel for protocol configuration, subscriptions, port rules, monitoring, and multi-server operations.
 
