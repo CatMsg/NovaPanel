@@ -588,6 +588,9 @@ export default {
       action: {
         title: "Action",
         route: "Route",
+        evaluate: "Evaluate Response",
+        respond: "Respond with Evaluated Response",
+        responseTag: "Response Tag (Optional)",
         routeOptions: "Route Options",
         reject: "Reject",
         predefined: "Predefined",

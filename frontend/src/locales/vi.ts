@@ -580,6 +580,9 @@ export default {
       action: {
         title: "Hành động",
         route: "Định tuyến",
+        evaluate: "Đánh giá phản hồi",
+        respond: "Trả về phản hồi đã đánh giá",
+        responseTag: "Thẻ phản hồi (tùy chọn)",
         routeOptions: "Tùy chọn định tuyến",
         reject: "Từ chối",
         predefined: "Định nghĩa sẵn",

@@ -587,6 +587,9 @@ export default {
       action: {
         title: "操作",
         route: "路由",
+        evaluate: "预解析响应",
+        respond: "返回预解析响应",
+        responseTag: "响应标签（可选）",
         routeOptions: "路由选项",
         reject: "拒绝",
         predefined: "预定义",

@@ -21,6 +21,7 @@ interface Route {
   rules: RouteRule[] | RouteRuleLogical[]
   rule_set: RouteRuleSet[]
   final?: string,
+  default_http_client?: string
   auto_detect_interface?: boolean
   default_interface?: string
   default_mark?: number
@@ -65,7 +66,6 @@ interface RouteRuleSet {
   format: string
   path?: string
   url?: string
-  download_detour?: string
   http_client?: string | { detour?: string }
   update_interval?: string
 }
@@ -81,6 +81,7 @@ interface CacheFile {
   path?: string
   cache_id?: string
   store_fakeip?: boolean
+  store_dns?: boolean
 }
 
 interface V2rayApi {

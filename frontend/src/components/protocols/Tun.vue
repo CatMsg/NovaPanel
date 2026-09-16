@@ -26,17 +26,6 @@
       </v-col>
       <v-col cols="12" sm="6" md="4">
         <v-select
-          v-model="stack"
-          label="TUN 网络栈"
-          :items="tunStacks"
-          clearable
-          hint="留空使用 1.15 默认 Go 网络栈"
-          persistent-hint
-          hide-details="auto"
-        ></v-select>
-      </v-col>
-      <v-col cols="12" sm="6" md="4">
-        <v-select
           v-model="data.dns_mode"
           label="DNS 模式"
           :items="['disabled','native','hijack']"
@@ -58,8 +47,7 @@
           v-model="data.multi_queue"
           color="primary"
           label="Linux 多队列"
-          :disabled="data.stack != null && data.stack !== 'go'"
-          hint="仅 Go 网络栈可用，让 TUN 流量分摊到多个 CPU 核心"
+          hint="让原生 TUN 网络栈将流量分摊到多个 CPU 核心"
           persistent-hint
           hide-details="auto"
         ></v-switch>
@@ -128,12 +116,6 @@ export default {
         { title: '地址相关', value: 'address_dependent' },
         { title: '地址与端口相关', value: 'address_and_port_dependent' },
       ],
-      tunStacks: [
-        { title: 'Go（推荐）', value: 'go' },
-        { title: 'System（兼容旧配置）', value: 'system' },
-        { title: 'gVisor（兼容旧配置）', value: 'gvisor' },
-        { title: 'Mixed（兼容旧配置）', value: 'mixed' },
-      ],
     }
   },
   computed: {
@@ -146,13 +128,6 @@ export default {
       set(v:string) {
         const addresses = v.split(',').map((item) => item.trim()).filter(Boolean)
         this.$props.data.dns_address = addresses.length > 0 ? addresses : undefined
-      }
-    },
-    stack: {
-      get() { return this.$props.data.stack ?? undefined },
-      set(v:string|undefined) {
-        this.$props.data.stack = v || undefined
-        if (v && v !== 'go') this.$props.data.multi_queue = undefined
       }
     },
     udpTimeout: {

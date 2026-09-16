@@ -581,6 +581,9 @@ export default {
       action: {
         title: "Действие",
         route: "Маршрутизация",
+        evaluate: "Оценить ответ",
+        respond: "Вернуть оценённый ответ",
+        responseTag: "Метка ответа (необязательно)",
         routeOptions: "Параметры маршрутизации",
         reject: "Отклонить",
         predefined: "Предопределенные",

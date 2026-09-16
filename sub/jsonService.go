@@ -25,7 +25,6 @@ const defaultJson = `
       "auto_route": true,
       "strict_route": false,
       "endpoint_independent_nat": false,
-      "stack": "system",
       "platform": {
         "http_proxy": {
           "enabled": true,
@@ -96,6 +95,10 @@ func (j *JsonService) GetJson(subId string, format string) (*string, []string, e
 	}
 
 	result, err := json.MarshalIndent(jsonConfig, "", "  ")
+	if err != nil {
+		return nil, nil, err
+	}
+	result, err = service.NormalizeSingBoxConfig(result)
 	if err != nil {
 		return nil, nil, err
 	}

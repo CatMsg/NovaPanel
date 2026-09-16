@@ -580,6 +580,9 @@ export default {
       action: {
         title: "操作",
         route: "路由",
+        evaluate: "預解析回應",
+        respond: "返回預解析回應",
+        responseTag: "回應標籤（可選）",
         routeOptions: "路由選項",
         reject: "拒絕",
         predefined: "預設",

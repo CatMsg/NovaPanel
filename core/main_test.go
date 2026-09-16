@@ -21,10 +21,10 @@ func TestValidateConfigAcceptsSingBox115Options(t *testing.T) {
 	runtime := NewCore()
 	err := runtime.ValidateConfig([]byte(`{
 		"dns":{"servers":[{"type":"local","tag":"local"}],"optimistic":true,"timeout":"5s"},
-		"http_clients":[{"tag":"rules","detour":"direct"}],
+		"http_clients":[{"tag":"rules"}],
 		"inbounds":[{"type":"tun","tag":"tun-in","address":["172.19.0.1/30"],"multi_queue":true}],
 		"outbounds":[{"type":"direct","tag":"direct"}],
-		"route":{"rule_set":[{"type":"remote","tag":"test","url":"https://example.com/test.srs","http_client":"rules"}]}
+		"route":{"default_http_client":"rules","rule_set":[{"type":"remote","tag":"test","url":"https://example.com/test.srs","http_client":"rules"}]}
 	}`))
 	if err != nil {
 		t.Fatalf("expected sing-box 1.15 options to be accepted: %v", err)

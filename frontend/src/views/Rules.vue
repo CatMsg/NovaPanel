@@ -367,7 +367,7 @@ const rulesets = computed((): any[] => {
 
 const ruleSetDetour = (item:any): string => {
   if (typeof item.http_client === 'object') return item.http_client?.detour ?? '-'
-  return item.download_detour ?? '-'
+  return '-'
 }
 
 const rulesetTags = computed((): string[] => rulesets.value.map((rs:any) => rs.tag))

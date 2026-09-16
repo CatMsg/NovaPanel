@@ -196,7 +196,6 @@ export interface Tun extends InboundBasics {
   udp_filtering?: 'endpoint_independent' | 'address_dependent' | 'address_and_port_dependent'
   udp_nat_max?: number
   multi_queue?: boolean
-  stack?: 'go' | 'system' | 'gvisor' | 'mixed'
   auto_route?: boolean
   strict_route?: boolean
   auto_redirect?: boolean

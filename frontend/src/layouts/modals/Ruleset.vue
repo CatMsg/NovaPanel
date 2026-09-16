@@ -100,7 +100,6 @@ export default {
     updateType(t:string) {
       if (t == 'local') {
         delete this.rule_set.url
-        delete this.rule_set.download_detour
         delete this.rule_set.http_client
         delete this.rule_set.update_interval
       } else {
@@ -120,10 +119,9 @@ export default {
     downloadDetour: {
       get() {
         if (typeof this.rule_set.http_client === 'object') return this.rule_set.http_client.detour ?? ''
-        return this.rule_set.download_detour ?? ''
+        return ''
       },
       set(value:string) {
-        delete this.rule_set.download_detour
         this.rule_set.http_client = value ? { detour: value } : undefined
       }
     },

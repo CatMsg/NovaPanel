@@ -54,8 +54,8 @@
             <v-switch color="primary" v-model="ruleData.invert" :label="$t('rule.invert')" hide-details></v-switch>
           </v-col>
         </v-row>
-        <v-card :subtitle="$t('dns.rule.action.route')" v-if="['route', 'route-options'].includes(ruleData.action)">
-          <v-row v-if="ruleData.action == 'route'">
+        <v-card :subtitle="dnsActionTitle(ruleData.action)" v-if="['route', 'evaluate', 'route-options'].includes(ruleData.action)">
+          <v-row v-if="['route', 'evaluate'].includes(ruleData.action)">
             <v-col cols="12" sm="6" md="4">
               <v-select
                 v-model="ruleData.server"
@@ -64,15 +64,14 @@
                 hide-details
               ></v-select>
             </v-col>
-            <v-col cols="12" sm="6" md="4">
-              <v-select
-                v-model="ruleData.strategy"
-                :items="strategies"
-                :label="$t('rule.strategy')"
+            <v-col cols="12" sm="6" md="4" v-if="ruleData.action == 'evaluate'">
+              <v-text-field
+                v-model="ruleData.tag"
+                :label="$t('dns.rule.action.responseTag')"
                 clearable
-                @click:clear="delete ruleData.strategy"
+                @click:clear="delete ruleData.tag"
                 hide-details>
-              </v-select>
+              </v-text-field>
             </v-col>
           </v-row>
           <v-row>
@@ -173,15 +172,11 @@ export default {
       },
       actions: [
         { title: i18n.global.t('dns.rule.action.route'), value: 'route'},
+        { title: i18n.global.t('dns.rule.action.evaluate'), value: 'evaluate'},
+        { title: i18n.global.t('dns.rule.action.respond'), value: 'respond'},
         { title: i18n.global.t('dns.rule.action.routeOptions'), value: 'route-options'},
         { title: i18n.global.t('dns.rule.action.reject'), value: 'reject'},
         { title: i18n.global.t('dns.rule.action.predefined'), value: 'predefined'},
-      ],
-      strategies: [
-        { title: 'Prefer IPv4', value: 'prefer_ipv4' },
-        { title: 'Prefer IPv6', value: 'prefer_ipv6' },
-        { title: 'IPv4 Only', value: 'ipv4_only' },
-        { title: 'IPv6 Only', value: 'ipv6_only' },
       ],
       predefinedRcode: [
         { title: i18n.global.t('dns.rule.action.rcodes.noError'), value: 'NOERROR' },
@@ -194,6 +189,11 @@ export default {
     }
   },
   methods: {
+    dnsActionTitle(action:string) {
+      if (action === 'evaluate') return i18n.global.t('dns.rule.action.evaluate')
+      if (action === 'route-options') return i18n.global.t('dns.rule.action.routeOptions')
+      return i18n.global.t('dns.rule.action.route')
+    },
     updateData() {
       if (this.$props.index != -1) {
         const newData = JSON.parse(this.$props.data)
@@ -241,10 +241,18 @@ export default {
       switch (newRule.action){
         case 'route':
           newRule.server = this.ruleData.server
-          newRule.strategy = this.ruleData.strategy?.length > 0 ? this.ruleData.strategy : undefined
           newRule.disable_cache = this.ruleData.disable_cache? true : undefined
           newRule.rewrite_ttl = this.ruleData.rewrite_ttl > 0 ? this.ruleData.rewrite_ttl : undefined
           newRule.client_subnet = this.ruleData.client_subnet?.length > 0 ? this.ruleData.client_subnet : undefined
+          break
+        case 'evaluate':
+          newRule.server = this.ruleData.server
+          newRule.tag = this.ruleData.tag?.length > 0 ? this.ruleData.tag : undefined
+          newRule.disable_cache = this.ruleData.disable_cache? true : undefined
+          newRule.rewrite_ttl = this.ruleData.rewrite_ttl > 0 ? this.ruleData.rewrite_ttl : undefined
+          newRule.client_subnet = this.ruleData.client_subnet?.length > 0 ? this.ruleData.client_subnet : undefined
+          break
+        case 'respond':
           break
         case 'route-options':
           newRule.disable_cache = this.ruleData.disable_cache? true : undefined

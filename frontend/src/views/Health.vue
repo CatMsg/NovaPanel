@@ -265,7 +265,7 @@ const copyReport = async () => {
 }
 
 const handleAction = async (action: string) => {
-  const routes: Record<string, string> = { ports: '/ports', settings: '/settings', inbounds: '/inbounds', endpoints: '/endpoints', admins: '/admins', fleet: '/fleet' }
+  const routes: Record<string, string> = { ports: '/ports', settings: '/settings', inbounds: '/inbounds', endpoints: '/endpoints', admins: '/admins', fleet: '/fleet', rules: '/rules' }
   if (action === 'reconcile-ports') return reconcilePorts()
   if (action === 'login-security') {
     document.getElementById('login-security')?.scrollIntoView({ behavior: 'smooth', block: 'start' })

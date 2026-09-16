@@ -26,11 +26,17 @@ var defaultConfig = `{
   "log": {
     "level": "info"
   },
+  "http_clients": [
+    {
+      "tag": "novapanel-default"
+    }
+  ],
   "dns": {
     "servers": [],
     "rules": []
   },
   "route": {
+    "default_http_client": "novapanel-default",
     "rules": [
 		  {
         "action": "sniff"
@@ -558,15 +564,27 @@ func (s *SettingService) GetFinalSubURI(host string) (string, error) {
 }
 
 func (s *SettingService) GetConfig() (string, error) {
-	return s.getString("config")
+	config, err := s.getString("config")
+	if err != nil {
+		return "", err
+	}
+	normalized, err := NormalizeSingBoxConfig([]byte(config))
+	if err != nil {
+		return "", err
+	}
+	return string(normalized), nil
 }
 
 func (s *SettingService) SetConfig(config string) error {
-	return s.setString("config", config)
+	normalized, err := NormalizeSingBoxConfig([]byte(config))
+	if err != nil {
+		return err
+	}
+	return s.setString("config", string(normalized))
 }
 
 func (s *SettingService) SaveConfig(tx *gorm.DB, config json.RawMessage) error {
-	configs, err := json.MarshalIndent(config, "", "  ")
+	configs, err := NormalizeSingBoxConfig(config)
 	if err != nil {
 		return err
 	}

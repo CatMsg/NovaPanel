@@ -6,7 +6,6 @@ export interface Dns {
   timeout?: string
   disable_cache?: boolean,
   disable_expire?: boolean,
-  independent_cache?: boolean,
   cache_capacity?: number,
   reverse_mapping?: boolean,
   client_subnet?: string,
@@ -64,9 +63,9 @@ export function createDnsServer<T extends DnsServer>(type: string, json?: Partia
 
 interface generalDnsRule {
   invert: boolean
-  action: 'route' | 'route-options' | 'reject' | 'predefined'
+  action: 'route' | 'evaluate' | 'respond' | 'route-options' | 'reject' | 'predefined'
   server?: string
-  strategy?: string
+  tag?: string
   disable_cache?: boolean
   rewrite_ttl?: number
   client_subnet?: string
@@ -82,7 +81,7 @@ export const actionDnsRuleKeys = [
   'invert',
   'action',
   'server',
-  'strategy',
+  'tag',
   'disable_cache',
   'rewrite_ttl',
   'client_subnet',
@@ -128,5 +127,5 @@ export interface dnsRule extends generalDnsRule {
   clash_mode?: string
   rule_set?: string[]
   rule_set_ip_cidr_match_source?: boolean
-  rule_set_ip_cidr_accept_empty?: boolean
+  match_response?: boolean | string
 }

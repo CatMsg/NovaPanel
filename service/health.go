@@ -47,11 +47,12 @@ func (s *HealthService) GetHealthReport(force bool) *HealthReport {
 		Status:      "healthy",
 		CheckedAt:   started.Format(time.RFC3339),
 		Summary:     map[string]int{"ok": 0, "warning": 0, "error": 0, "info": 0},
-		Checks:      make([]HealthCheck, 0, 12),
+		Checks:      make([]HealthCheck, 0, 15),
 		Diagnostics: make(map[string]interface{}),
 	}
 	report.add(s.checkDatabase())
 	report.add(s.checkTrafficBudget(report.Diagnostics))
+	report.add(s.checkSingBoxCompatibility())
 	report.add(s.checkCore())
 	report.add(s.checkDisk())
 	report.add(s.checkPorts(report.Diagnostics))
@@ -74,6 +75,36 @@ func (s *HealthService) GetHealthReport(force bool) *HealthReport {
 	}
 	report.DurationMs = time.Since(started).Milliseconds()
 	return report
+}
+
+func (s *HealthService) checkSingBoxCompatibility() HealthCheck {
+	rawConfig, err := (&ConfigService{}).GetConfig("")
+	if err != nil {
+		return HealthCheck{
+			ID:      "sing-box-compatibility",
+			Title:   "Sing-Box 配置兼容性",
+			Status:  "error",
+			Summary: "无法归一化旧配置",
+			Detail:  err.Error(),
+			Action:  "rules",
+		}
+	}
+	if err := validateRuntimeConfig(*rawConfig); err != nil {
+		return HealthCheck{
+			ID:      "sing-box-compatibility",
+			Title:   "Sing-Box 配置兼容性",
+			Status:  "error",
+			Summary: "归一化后的配置校验失败",
+			Detail:  err.Error(),
+			Action:  "rules",
+		}
+	}
+	return HealthCheck{
+		ID:      "sing-box-compatibility",
+		Title:   "Sing-Box 配置兼容性",
+		Status:  "ok",
+		Summary: "未检测到已知的 1.16 阻断配置",
+	}
 }
 
 func (s *HealthService) checkLoginProtection(diagnostics map[string]interface{}) HealthCheck {

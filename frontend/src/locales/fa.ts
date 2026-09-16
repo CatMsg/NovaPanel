@@ -580,6 +580,9 @@ export default {
       action: {
         title: "عملیات",
         route: "مسیریابی",
+        evaluate: "ارزیابی پاسخ",
+        respond: "پاسخ با نتیجه ارزیابی‌شده",
+        responseTag: "برچسب پاسخ (اختیاری)",
         routeOptions: "گزینه‌های مسیریابی",
         reject: "رد کردن",
         predefined: "پیش تعریف شده",

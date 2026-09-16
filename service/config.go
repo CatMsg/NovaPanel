@@ -119,6 +119,10 @@ func (s *ConfigService) getConfig(db *gorm.DB, data string) (*[]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	rawConfig, err = NormalizeSingBoxConfig(rawConfig)
+	if err != nil {
+		return nil, err
+	}
 	return &rawConfig, nil
 }
 
