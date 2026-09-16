@@ -59,8 +59,8 @@
           <v-col cols="12" sm="6" md="4">
             <v-select
               hide-details
-              :label="$t('objects.outbound')"
-              :items="outTags"
+              label="规则集下载代理出口（留空为直连）"
+              :items="downloadOutTags"
               clearable
               @click:clear="importDetour=''"
               v-model="importDetour">
@@ -127,6 +127,9 @@ export default {
     }
   },
   computed: {
+    downloadOutTags(): string[] {
+      return this.$props.outTags.filter((tag:string) => tag !== 'direct')
+    },
     importSkipped(): number {
       return this.importPreview.filter(i => i.exists).length
     },
@@ -162,7 +165,7 @@ export default {
     save() {
       const toAdd = this.importPreview.filter(i => !i.exists).map(item => {
         const rs: any = { type: 'remote', tag: item.tag, format: item.format, url: item.url }
-        if (this.importDetour) rs.http_client = { detour: this.importDetour }
+        if (this.importDetour && this.importDetour !== 'direct') rs.http_client = { detour: this.importDetour }
         if (this.importInterval > 0) rs.update_interval = this.importInterval + 'd'
         return rs
       })

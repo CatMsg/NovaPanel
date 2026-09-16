@@ -278,64 +278,55 @@ export default {
           tag: "geosite-ads",
           type: "remote",
           format: "binary",
-          url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/category-ads-all.srs",
-          http_client: { detour: "direct" }
+          url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/category-ads-all.srs"
         },
         {
           tag: "geosite-private",
           type: "remote",
           format: "binary",
-          url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/private.srs",
-          http_client: { detour: "direct" }
+          url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/private.srs"
         },
         {
           tag: "geosite-ir",
           type: "remote",
           format: "binary",
-          url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/category-ir.srs",
-          http_client: { detour: "direct" }
+          url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/category-ir.srs"
         },
         {
           tag: "geosite-cn",
           type: "remote",
           format: "binary",
-          url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/cn.srs",
-          http_client: { detour: "direct" }
+          url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/cn.srs"
         },
         {
           tag: "geosite-vn",
           type: "remote",
           format: "binary",
-          url: "https://github.com/Thaomtam/Geosite-vn/raw/rule-set/Geosite-vn.srs",
-          http_client: { detour: "direct" }
+          url: "https://github.com/Thaomtam/Geosite-vn/raw/rule-set/Geosite-vn.srs"
         },
         {
           tag: "geoip-private",
           type: "remote",
           format: "binary",
-          url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/private.srs",
-          http_client: { detour: "direct" }
+          url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/private.srs"
         },
         {
           tag: "geoip-ir",
           type: "remote",
           format: "binary",
-          url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/ir.srs",
-          http_client: { detour: "direct" }
+          url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/ir.srs"
         },
         {
           tag: "geoip-cn",
           type: "remote",
           format: "binary",
-          url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/cn.srs",
-          http_client: { detour: "direct" }
+          url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/cn.srs"
         },
         {
           tag: "geoip-vn",
           type: "remote",
           format: "binary",
-          url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/vn.srs",
-          http_client: { detour: "direct" }
+          url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/vn.srs"
         }
       ],
     }

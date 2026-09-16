@@ -9,7 +9,7 @@ func TestSingBoxConfigPreservesExtendedTopLevelOptions(t *testing.T) {
 	raw := []byte(`{
 		"certificate":{"store":"system"},
 		"certificate_providers":[{"type":"origin-ca","tag":"origin"}],
-		"http_clients":[{"tag":"rules","detour":"direct"}],
+		"http_clients":[{"tag":"rules"}],
 		"network_namespaces":[{"tag":"isolated","path":"/run/netns/isolated"}]
 	}`)
 	var config SingBoxConfig

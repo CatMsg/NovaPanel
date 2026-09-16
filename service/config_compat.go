@@ -18,6 +18,7 @@ func NormalizeSingBoxConfig(raw []byte) ([]byte, error) {
 		return nil, err
 	}
 
+	normalizeHTTPClients(config)
 	normalizeDefaultHTTPClient(config)
 	normalizeRuleSetHTTPClients(config)
 	if err := normalizeDNSCompatibility(config); err != nil {
@@ -29,6 +30,16 @@ func NormalizeSingBoxConfig(raw []byte) ([]byte, error) {
 	}
 
 	return json.MarshalIndent(config, "", "  ")
+}
+
+func normalizeHTTPClients(config map[string]interface{}) {
+	clients, _ := config["http_clients"].([]interface{})
+	for _, item := range clients {
+		client := objectValue(item)
+		if client != nil && strings.TrimSpace(stringValue(client["detour"])) == "direct" {
+			delete(client, "detour")
+		}
+	}
 }
 
 func normalizeInboundCompatibility(inbound *model.Inbound) error {
@@ -82,10 +93,16 @@ func normalizeRuleSetHTTPClients(config map[string]interface{}) {
 			continue
 		}
 		detour := strings.TrimSpace(stringValue(ruleSet["download_detour"]))
-		if _, exists := ruleSet["http_client"]; !exists && detour != "" {
+		if _, exists := ruleSet["http_client"]; !exists && detour != "" && detour != "direct" {
 			ruleSet["http_client"] = map[string]interface{}{"detour": detour}
 		}
 		delete(ruleSet, "download_detour")
+		if httpClient := objectValue(ruleSet["http_client"]); httpClient != nil && strings.TrimSpace(stringValue(httpClient["detour"])) == "direct" {
+			delete(httpClient, "detour")
+			if len(httpClient) == 0 {
+				delete(ruleSet, "http_client")
+			}
+		}
 	}
 }
 

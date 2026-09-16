@@ -413,7 +413,7 @@ async function applyCatalog(payload: any) {
         url: asset.url,
         update_interval: '1d',
       }
-      if (payload.downloadDetour) ruleSet.http_client = { detour: payload.downloadDetour }
+      if (payload.downloadDetour && payload.downloadDetour !== 'direct') ruleSet.http_client = { detour: payload.downloadDetour }
       draft.route.rule_set.push(ruleSet)
       knownTags.add(asset.tag)
       changed = true

@@ -119,7 +119,7 @@
               <v-row dense>
                 <v-col v-if="action !== 'none'" cols="12" md="6"><v-select v-model="inbound" :items="inboundTags" label="仅限入站" clearable hide-details /></v-col>
                 <v-col v-if="action !== 'none'" cols="12" md="6"><v-select v-model="user" :items="clients" label="仅限用户" clearable hide-details /></v-col>
-                <v-col v-if="selected?.assets.length" cols="12"><v-select v-model="downloadDetour" :items="outboundTags" label="规则集下载出口" clearable hide-details /></v-col>
+                <v-col v-if="selected?.assets.length" cols="12"><v-select v-model="downloadDetour" :items="downloadOutboundTags" label="规则集下载代理出口（留空为直连）" clearable hide-details /></v-col>
               </v-row>
             </v-expansion-panel-text>
           </v-expansion-panel>
@@ -186,6 +186,7 @@ const filteredCatalog = computed(() => {
   if (!keyword) return ruleCatalog
   return ruleCatalog.filter((item) => `${item.name} ${item.description} ${item.assets.map((asset) => asset.tag).join(' ')}`.toLowerCase().includes(keyword))
 })
+const downloadOutboundTags = computed(() => props.outboundTags.filter((tag) => tag !== 'direct'))
 const remotePages = computed(() => Math.ceil(remoteTotal.value / remotePageSize))
 const actionItems = [
   { title: '保持默认（不添加路由）', value: 'none' },

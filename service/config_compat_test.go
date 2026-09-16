@@ -59,9 +59,8 @@ func TestNormalizeSingBoxConfigFor116(t *testing.T) {
 	if _, exists := ruleSets[0]["download_detour"]; exists {
 		t.Fatal("deprecated download_detour was retained")
 	}
-	httpClient := objectValue(ruleSets[0]["http_client"])
-	if stringValue(httpClient["detour"]) != "direct" {
-		t.Fatalf("download detour was not migrated: %#v", ruleSets[0])
+	if _, exists := ruleSets[0]["http_client"]; exists {
+		t.Fatalf("direct rule-set download must use the default HTTP client: %#v", ruleSets[0])
 	}
 
 	dns := objectValue(config["dns"])
@@ -157,6 +156,56 @@ func TestNormalizeSingBoxConfigPreservesExplicitDefaultHTTPClient(t *testing.T) 
 	}
 	if len(objectList(config["http_clients"])) != 1 {
 		t.Fatalf("an unnecessary HTTP client was added: %#v", config["http_clients"])
+	}
+	if _, exists := objectList(config["http_clients"])[0]["detour"]; exists {
+		t.Fatalf("a direct HTTP client detour was retained: %#v", config["http_clients"])
+	}
+}
+
+func TestNormalizeSingBoxConfigPreservesNonDirectRuleSetDetour(t *testing.T) {
+	normalized, err := NormalizeSingBoxConfig([]byte(`{
+		"dns":{},
+		"route":{"rule_set":[{
+			"type":"remote",
+			"tag":"remote-rules",
+			"url":"https://example.com/rules.srs",
+			"download_detour":"proxy-a"
+		}]}
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]interface{}
+	if err = json.Unmarshal(normalized, &config); err != nil {
+		t.Fatal(err)
+	}
+	ruleSet := objectList(objectValue(config["route"])["rule_set"])[0]
+	httpClient := objectValue(ruleSet["http_client"])
+	if stringValue(httpClient["detour"]) != "proxy-a" {
+		t.Fatalf("non-direct detour was not migrated: %#v", ruleSet)
+	}
+}
+
+func TestNormalizeSingBoxConfigRemovesDirectInlineRuleSetDetour(t *testing.T) {
+	normalized, err := NormalizeSingBoxConfig([]byte(`{
+		"dns":{},
+		"route":{"rule_set":[{
+			"type":"remote",
+			"tag":"remote-rules",
+			"url":"https://example.com/rules.srs",
+			"http_client":{"detour":"direct"}
+		}]}
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]interface{}
+	if err = json.Unmarshal(normalized, &config); err != nil {
+		t.Fatal(err)
+	}
+	ruleSet := objectList(objectValue(config["route"])["rule_set"])[0]
+	if _, exists := ruleSet["http_client"]; exists {
+		t.Fatalf("direct inline rule-set detour was retained: %#v", ruleSet)
 	}
 }
 

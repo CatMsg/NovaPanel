@@ -40,8 +40,8 @@
           <v-col cols="12" sm="6" md="4">
             <v-select
               hide-details
-              :label="$t('objects.outbound')"
-              :items="outTags"
+              label="规则集下载代理出口（留空为直连）"
+              :items="downloadOutTags"
               clearable
               v-model="downloadDetour">
             </v-select>
@@ -116,13 +116,16 @@ export default {
     }
   },
   computed: {
+    downloadOutTags() {
+      return this.$props.outTags.filter((tag:string) => tag !== 'direct')
+    },
     downloadDetour: {
       get() {
         if (typeof this.rule_set.http_client === 'object') return this.rule_set.http_client.detour ?? ''
         return ''
       },
       set(value:string) {
-        this.rule_set.http_client = value ? { detour: value } : undefined
+        this.rule_set.http_client = value && value !== 'direct' ? { detour: value } : undefined
       }
     },
     update_intervals: {
