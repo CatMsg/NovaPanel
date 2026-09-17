@@ -49,6 +49,7 @@ export default {
     ports: "مدیریت پورت‌ها",
     health: "سلامت و عیب‌یابی",
     fleet: "مجموعه سرورها",
+    sessions: "اتصالات زنده",
     inbounds: "ورودی‌ها",
     outbounds: "خروجی‌ها",
     endpoints: "درگاه‌ها",

@@ -266,6 +266,7 @@
                 <v-btn v-bind="props" size="small" icon="mdi-dots-horizontal" variant="text" :aria-label="$t('client.moreActions')" />
               </template>
               <v-list density="compact" min-width="190">
+                <v-list-item prepend-icon="mdi-link-variant" :title="$t('ui.sessions.copySubscription')" @click="copySubscription(item.name)" />
                 <v-list-item prepend-icon="mdi-qrcode" :title="$t('client.qrCode')" @click="showQrCode(item.id ?? 0)" />
                 <v-list-item v-if="Data().enableTraffic" prepend-icon="mdi-chart-line" :title="$t('stats.graphTitle')" @click="showStats(item.name)" />
                 <v-list-item v-if="Data().enableTraffic" prepend-icon="mdi-history" :title="$t('client.history')" @click="showHistory(item.id)" />
@@ -310,6 +311,7 @@
               <v-btn v-bind="props" variant="outlined"><v-icon icon="mdi-dots-horizontal" start />{{ $t('client.moreActions') }}</v-btn>
             </template>
             <v-list density="compact" min-width="190">
+              <v-list-item prepend-icon="mdi-link-variant" :title="$t('ui.sessions.copySubscription')" @click="copySubscription(item.name)" />
               <v-list-item prepend-icon="mdi-qrcode" :title="$t('client.qrCode')" @click="showQrCode(item.id ?? 0)" />
               <v-list-item v-if="Data().enableTraffic" prepend-icon="mdi-chart-line" :title="$t('stats.graphTitle')" @click="showStats(item.name)" />
               <v-list-item v-if="Data().enableTraffic" prepend-icon="mdi-history" :title="$t('client.history')" @click="showHistory(item.id)" />
@@ -827,6 +829,8 @@ import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { HumanReadable } from '@/plugins/utils'
 import { i18n } from '@/locales'
 import { useDisplay } from 'vuetify'
+import Clipboard from 'clipboard'
+import { push } from 'notivue'
 
 const ClientModal = defineAsyncComponent(() => import('@/layouts/modals/Client.vue'))
 const ClientAddBulk = defineAsyncComponent(() => import('@/layouts/modals/ClientAddBulk.vue'))
@@ -978,6 +982,26 @@ const showQrCode = (id: number) => {
 }
 const closeQrCode = () => {
   qrcode.value.visible = false
+}
+
+const copySubscription = (name: string) => {
+  const button = document.createElement('button')
+  button.className = 'client-subscription-copy'
+  document.body.appendChild(button)
+  const clipboard = new Clipboard(button, { text: () => `${Data().subURI}${name}?format=clash` })
+  const cleanup = () => {
+    clipboard.destroy()
+    button.remove()
+  }
+  clipboard.on('success', () => {
+    push.success({ message: i18n.global.t('ui.sessions.copiedSubscription') })
+    cleanup()
+  })
+  clipboard.on('error', () => {
+    push.error({ message: i18n.global.t('failed') + ': ' + i18n.global.t('copyToClipboard') })
+    cleanup()
+  })
+  button.click()
 }
 
 const stats = ref({

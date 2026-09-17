@@ -72,6 +72,8 @@ func (a *APIHandler) postHandler(c *gin.Context) {
 		a.ApiService.FleetAction(c)
 	case "fleetRefresh":
 		a.ApiService.FleetRefresh(c)
+	case "sessionClose":
+		a.ApiService.CloseSession(c)
 	case "alertSave":
 		a.ApiService.SaveAlertSettings(c)
 	case "alertTest":
@@ -151,6 +153,8 @@ func (a *APIHandler) getHandler(c *gin.Context) {
 		a.ApiService.GetCheckOutbound(c)
 	case "fleet":
 		a.ApiService.GetFleet(c)
+	case "sessions":
+		a.ApiService.GetFleetSessions(c)
 	case "update-status":
 		a.ApiService.GetUpdateStatus(c)
 	case "ruleset-health":

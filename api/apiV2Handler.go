@@ -75,6 +75,8 @@ func (a *APIv2Handler) postHandler(c *gin.Context) {
 		a.ApiService.SubConvert(c)
 	case "importdb":
 		a.ApiService.ImportDb(c)
+	case "session-close":
+		a.ApiService.CloseLocalSession(c)
 	default:
 		jsonMsg(c, "failed", common.NewError("unknown action: ", action))
 	}
@@ -140,6 +142,8 @@ func (a *APIv2Handler) getHandler(c *gin.Context) {
 		a.ApiService.GetFailoverStatus(c)
 	case "outbound-health":
 		a.ApiService.GetOutboundHealth(c)
+	case "sessions":
+		a.ApiService.GetSessions(c)
 	default:
 		jsonMsg(c, "failed", common.NewError("unknown action: ", action))
 	}

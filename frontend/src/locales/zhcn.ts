@@ -49,6 +49,7 @@ export default {
     ports: "端口管理",
     health: "健康与诊断",
     fleet: "服务器集合",
+    sessions: "实时连接",
     inbounds: "入站管理",
     outbounds: "出站管理",
     services: "服务管理",

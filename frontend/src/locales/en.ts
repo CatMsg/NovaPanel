@@ -49,6 +49,7 @@ export default {
     ports: "Port Management",
     health: "Health & Diagnostics",
     fleet: "Server Fleet",
+    sessions: "Live Sessions",
     inbounds: "Inbounds",
     outbounds: "Outbounds",
     services: "Services",

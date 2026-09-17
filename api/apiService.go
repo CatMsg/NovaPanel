@@ -394,6 +394,27 @@ func (a *ApiService) GetFleetStatus(c *gin.Context) {
 	jsonObj(c, result, nil)
 }
 
+func (a *ApiService) GetSessions(c *gin.Context) {
+	jsonObj(c, service.GetLocalSessions(), nil)
+}
+
+func (a *ApiService) GetFleetSessions(c *gin.Context) {
+	result, err := a.FleetService.GetFleetSessions()
+	jsonObj(c, result, err)
+}
+
+func (a *ApiService) CloseSession(c *gin.Context) {
+	serverID := strings.TrimSpace(c.Request.FormValue("serverId"))
+	sessionID := strings.TrimSpace(c.Request.FormValue("id"))
+	err := a.FleetService.CloseFleetSession(serverID, sessionID)
+	jsonMsg(c, "close", err)
+}
+
+func (a *ApiService) CloseLocalSession(c *gin.Context) {
+	err := service.CloseLocalSession(strings.TrimSpace(c.Request.FormValue("id")))
+	jsonMsg(c, "close", err)
+}
+
 func (a *ApiService) GetMasqueStatus(c *gin.Context) {
 	tag := c.Query("tag")
 	masqueService := service.GetMasqueService()

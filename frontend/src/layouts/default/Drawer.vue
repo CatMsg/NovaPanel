@@ -56,6 +56,7 @@ const menu = [
   { title: 'pages.ports', icon: 'mdi-lan',  path: '/ports' },
   { title: 'pages.health', icon: 'mdi-heart-pulse',  path: '/health' },
   { title: 'pages.fleet', icon: 'mdi-server-network',  path: '/fleet' },
+  { title: 'pages.sessions', icon: 'mdi-lan', path: '/sessions' },
   { title: 'pages.inbounds', icon: 'mdi-cloud-download',  path: '/inbounds' },
   { title: 'pages.clients', icon: 'mdi-account-multiple',  path: '/clients' },
   { title: 'pages.outbounds', icon: 'mdi-cloud-upload',  path: '/outbounds' },

@@ -49,6 +49,7 @@ export default {
     ports: "Quản lý cổng",
     health: "Sức khỏe & Chẩn đoán",
     fleet: "Cụm máy chủ",
+    sessions: "Kết nối trực tiếp",
     inbounds: "Đầu Vào",
     outbounds: "Đầu ra",
     services: "Thiết bị",

@@ -41,6 +41,12 @@ const routes = [
         meta: { dataRefreshInterval: 0 },
       },
       {
+        path: '/sessions',
+        name: 'pages.sessions',
+        component: () => import('@/views/Sessions.vue'),
+        meta: { dataRefreshInterval: 0 },
+      },
+      {
         path: '/inbounds',
         name: 'pages.inbounds',
         component: () => import('@/views/Inbounds.vue'),

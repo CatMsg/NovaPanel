@@ -49,6 +49,7 @@ export default {
     ports: "Управление портами",
     health: "Состояние и диагностика",
     fleet: "Группа серверов",
+    sessions: "Активные подключения",
     inbounds: "Входящие",
     outbounds: "Исходящие",
     services: "Устройства",

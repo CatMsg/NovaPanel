@@ -35,6 +35,14 @@ const en = {
     queued: 'Queued', updating: 'Updating', completed: 'Completed', failed: 'Failed', never: 'Never run', unknown: 'Unknown',
     autoRefresh: 'Refreshes every 5 seconds while this page is visible',
   },
+  sessions: {
+    badge: 'Live traffic', title: 'Live sessions', subtitle: 'Inspect active connections across the server fleet without storing destination history.',
+    checkedAt: 'Checked: {time}', autoRefresh: 'Refreshes every 5 seconds while visible', active: 'Active sessions', users: 'Active users',
+    upload: 'Upload', download: 'Download', traffic: 'Traffic', server: 'Server', user: 'User', target: 'Destination', path: 'Route', duration: 'Duration',
+    search: 'Search users, destinations, inbounds, or outbounds', empty: 'No active connections match the current filters.', anonymous: 'Anonymous',
+    disconnect: 'Disconnect', disconnectConfirm: 'Disconnect the active session to {target}?', partialFailure: 'Some servers could not be read',
+    copySubscription: 'Copy Clash subscription', copiedSubscription: 'Subscription copied',
+  },
   ports: {
     subtitle: 'Inspect listening ports, NAT rules, and NovaPanel-managed ports. Rebuild managed rules when drift is detected.',
     updatedAt: 'Updated: {time}', errors: 'Errors: {count}', managed: 'Managed ports: {count}', repair: 'Repair port rules',
@@ -100,6 +108,14 @@ const zhHans = {
     queued: '排队中', updating: '更新中', completed: '已完成', failed: '失败', never: '未执行', unknown: '未知',
     autoRefresh: '页面可见时每 5 秒自动刷新',
   },
+  sessions: {
+    badge: '实时数据面', title: '实时连接', subtitle: '集中查看服务器集合中的活动连接，目标记录不会额外持久化保存。',
+    checkedAt: '检查时间：{time}', autoRefresh: '页面可见时每 5 秒刷新', active: '活动连接', users: '在线用户',
+    upload: '上传', download: '下载', traffic: '流量', server: '服务器', user: '用户', target: '目标地址', path: '入站 / 出站', duration: '持续时间',
+    search: '搜索用户、目标地址、入站或出站', empty: '当前筛选条件下没有活动连接。', anonymous: '未识别用户',
+    disconnect: '断开连接', disconnectConfirm: '确定断开到 {target} 的活动连接吗？', partialFailure: '部分服务器读取失败',
+    copySubscription: '复制 Clash 订阅', copiedSubscription: '订阅链接已复制',
+  },
   ports: {
     subtitle: '当前机器上的监听端口、NAT 规则和面板受管端口；发现漂移时可一键重建受管规则。', updatedAt: '更新时间：{time}',
     errors: '错误：{count}', managed: '受管端口：{count}', repair: '修复端口规则', listeners: '监听端口', backend: '后端',
@@ -133,6 +149,7 @@ const zhHant = {
   ...zhHans,
   common: { ...zhHans.common, online: '在線', offline: '離線', refresh: '重新整理', close: '關閉', update: '更新' },
   fleet: { ...zhHans.fleet, title: '伺服器集合', badge: '伺服器集合', manage: '管理伺服器', total: '伺服器總數' },
+  sessions: { ...zhHans.sessions, title: '即時連線', badge: '即時資料面', disconnect: '中斷連線' },
   ports: { ...zhHans.ports, listeners: '監聽連接埠', backend: '後端', listenerList: '監聽列表' },
   health: { ...zhHans.health, title: '健康與診斷', badge: '系統診斷', warning: '警告', error: '異常' },
 }
