@@ -1,6 +1,6 @@
 {
   "name": "novapanel-frontend",
-  "version": "1.6.115",
+  "version": "1.6.116",
   "private": true,
   "scripts": {
     "dev": "vite --host",

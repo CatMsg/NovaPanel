@@ -493,6 +493,68 @@ func (a *ApiService) FleetRefresh(c *gin.Context) {
 	jsonObj(c, server, err)
 }
 
+func (a *ApiService) GetFleetTemplates(c *gin.Context) {
+	templates, err := a.FleetService.GetFleetTemplateSummaries()
+	jsonObj(c, templates, err)
+}
+
+func (a *ApiService) CaptureFleetTemplate(c *gin.Context) {
+	var sections service.FleetTemplateSections
+	if err := json.Unmarshal([]byte(c.Request.FormValue("sections")), &sections); err != nil {
+		jsonMsg(c, "save", err)
+		return
+	}
+	template, err := a.FleetService.CaptureFleetTemplate(c.Request.FormValue("name"), sections, getHostname(c))
+	if err != nil {
+		jsonObj(c, nil, err)
+		return
+	}
+	jsonObj(c, template.Summary(), nil)
+}
+
+func (a *ApiService) DeleteFleetTemplate(c *gin.Context) {
+	jsonMsg(c, "del", a.FleetService.DeleteFleetTemplate(c.Request.FormValue("id")))
+}
+
+func (a *ApiService) PreviewFleetTemplateTargets(c *gin.Context) {
+	var targets []string
+	if err := json.Unmarshal([]byte(c.Request.FormValue("targets")), &targets); err != nil {
+		jsonMsg(c, "preview", err)
+		return
+	}
+	result, err := a.FleetService.PreviewFleetTemplateTargets(c.Request.FormValue("id"), targets)
+	jsonObj(c, result, err)
+}
+
+func (a *ApiService) DeployFleetTemplate(c *gin.Context) {
+	var targets []string
+	if err := json.Unmarshal([]byte(c.Request.FormValue("targets")), &targets); err != nil {
+		jsonMsg(c, "deploy", err)
+		return
+	}
+	result, err := a.FleetService.DeployFleetTemplate(c.Request.FormValue("id"), targets, c.Request.FormValue("canary"))
+	jsonObj(c, result, err)
+}
+
+func (a *ApiService) PreviewLocalFleetTemplate(c *gin.Context) {
+	var template service.FleetTemplate
+	if err := c.ShouldBindJSON(&template); err != nil {
+		jsonMsg(c, "preview", err)
+		return
+	}
+	result, err := a.ConfigService.PreviewFleetTemplate(template, getHostname(c))
+	jsonObj(c, result, err)
+}
+
+func (a *ApiService) ApplyLocalFleetTemplate(c *gin.Context) {
+	var template service.FleetTemplate
+	if err := c.ShouldBindJSON(&template); err != nil {
+		jsonMsg(c, "apply", err)
+		return
+	}
+	jsonMsg(c, "apply", a.ConfigService.ApplyFleetTemplate(template, getHostname(c)))
+}
+
 func (a *ApiService) GetUpdateStatus(c *gin.Context) {
 	status, err := service.GetUpdateStatus()
 	jsonObj(c, status, err)

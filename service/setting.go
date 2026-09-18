@@ -94,8 +94,6 @@ var defaultValueMap = map[string]string{
 	"subURI":                       "",
 	"subMode":                      "slave",
 	"subMasterSources":             "",
-	"endpointMode":                 "slave",
-	"endpointSources":              "",
 	"outboundFailover":             "[]",
 	"alertEnabled":                 "false",
 	"alertTelegramToken":           "",
@@ -166,6 +164,9 @@ func (s *SettingService) GetAllSetting() (*map[string]string, error) {
 	delete(allSetting, "alertLastFingerprint")
 	delete(allSetting, "alertLastSentAt")
 	delete(allSetting, "outboundFailover")
+	delete(allSetting, fleetSettingKey)
+	delete(allSetting, fleetTemplatesSettingKey)
+	delete(allSetting, fleetLastKnownSettingKey)
 	for _, key := range []string{
 		"trafficBudgetPeriodStart", "trafficBudgetAccumulatedRx", "trafficBudgetAccumulatedTx",
 		"trafficBudgetLastRx", "trafficBudgetLastTx", "trafficBudgetLastInterface",
@@ -492,10 +493,6 @@ func (s *SettingService) GetSubMode() (string, error) {
 	return s.getMode("subMode")
 }
 
-func (s *SettingService) GetEndpointMode() (string, error) {
-	return s.getMode("endpointMode")
-}
-
 func (s *SettingService) getMode(key string) (string, error) {
 	mode, err := s.getString(key)
 	if err != nil {
@@ -511,14 +508,6 @@ func (s *SettingService) getMode(key string) (string, error) {
 
 func (s *SettingService) GetSubMasterSources() ([]string, error) {
 	rawSources, err := s.getString("subMasterSources")
-	if err != nil {
-		return nil, err
-	}
-	return parseSettingSources(rawSources), nil
-}
-
-func (s *SettingService) GetEndpointSources() ([]string, error) {
-	rawSources, err := s.getString("endpointSources")
 	if err != nil {
 		return nil, err
 	}

@@ -72,6 +72,14 @@ func (a *APIHandler) postHandler(c *gin.Context) {
 		a.ApiService.FleetAction(c)
 	case "fleetRefresh":
 		a.ApiService.FleetRefresh(c)
+	case "fleetTemplateCapture":
+		a.ApiService.CaptureFleetTemplate(c)
+	case "fleetTemplateDelete":
+		a.ApiService.DeleteFleetTemplate(c)
+	case "fleetTemplatePreview":
+		a.ApiService.PreviewFleetTemplateTargets(c)
+	case "fleetTemplateDeploy":
+		a.ApiService.DeployFleetTemplate(c)
 	case "sessionClose":
 		a.ApiService.CloseSession(c)
 	case "alertSave":
@@ -153,6 +161,8 @@ func (a *APIHandler) getHandler(c *gin.Context) {
 		a.ApiService.GetCheckOutbound(c)
 	case "fleet":
 		a.ApiService.GetFleet(c)
+	case "fleetTemplates":
+		a.ApiService.GetFleetTemplates(c)
 	case "sessions":
 		a.ApiService.GetFleetSessions(c)
 	case "update-status":

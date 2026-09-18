@@ -24,7 +24,10 @@ import (
 	"gorm.io/gorm"
 )
 
-const fleetSettingKey = "fleetServers"
+const (
+	fleetSettingKey          = "fleetServers"
+	fleetLastKnownSettingKey = "fleetLastKnown"
+)
 
 type FleetServer struct {
 	ID       string `json:"id"`
@@ -126,6 +129,11 @@ var fleetLastKnown = struct {
 	views map[string]FleetServerView
 }{views: make(map[string]FleetServerView)}
 
+var fleetLastKnownPersistence = struct {
+	sync.Mutex
+	lastWrite time.Time
+}{}
+
 func (s *FleetService) GetFleetStatus() map[string]interface{} {
 	serverService := &ServerService{}
 	status := serverService.GetStatus("sys,sbd,db,cpu,mem,net")
@@ -189,6 +197,7 @@ func (s *FleetService) GetFleet() (*FleetSnapshot, error) {
 		}(index, config)
 	}
 	waitGroup.Wait()
+	s.persistFleetViews(remoteViews)
 	servers = append(servers, remoteViews...)
 	applyFleetConfigurationDrift(servers)
 
@@ -352,6 +361,9 @@ func (s *FleetService) fetchFleetServer(config FleetServer) FleetServerView {
 		fleetLastKnown.RLock()
 		previous, ok := fleetLastKnown.views[config.ID]
 		fleetLastKnown.RUnlock()
+		if !ok {
+			previous, ok = s.loadPersistedFleetView(config.ID)
+		}
 		if ok {
 			previous.ID = config.ID
 			previous.Name = config.Name
@@ -377,6 +389,50 @@ func (s *FleetService) fetchFleetServer(config FleetServer) FleetServerView {
 	fleetLastKnown.views[config.ID] = view
 	fleetLastKnown.Unlock()
 	return view
+}
+
+func (s *FleetService) loadPersistedFleetView(id string) (FleetServerView, bool) {
+	var setting model.Setting
+	if err := database.GetDB().Where("key = ?", fleetLastKnownSettingKey).First(&setting).Error; err != nil {
+		return FleetServerView{}, false
+	}
+	views := make(map[string]FleetServerView)
+	if err := json.Unmarshal([]byte(setting.Value), &views); err != nil {
+		return FleetServerView{}, false
+	}
+	view, ok := views[id]
+	return view, ok
+}
+
+func (s *FleetService) persistFleetViews(current []FleetServerView) {
+	fleetLastKnownPersistence.Lock()
+	defer fleetLastKnownPersistence.Unlock()
+	if time.Since(fleetLastKnownPersistence.lastWrite) < 30*time.Second {
+		return
+	}
+	views := make(map[string]FleetServerView)
+	var setting model.Setting
+	if err := database.GetDB().Where("key = ?", fleetLastKnownSettingKey).First(&setting).Error; err == nil {
+		_ = json.Unmarshal([]byte(setting.Value), &views)
+	}
+	for _, view := range current {
+		if !view.Reachable || view.ID == "" {
+			continue
+		}
+		view.LastKnown = false
+		views[view.ID] = view
+	}
+	raw, err := json.Marshal(views)
+	if err != nil {
+		return
+	}
+	if err := database.WithRetryTx(3, 100*time.Millisecond, func(tx *gorm.DB) error {
+		return tx.Where("key = ?", fleetLastKnownSettingKey).
+			Assign(model.Setting{Key: fleetLastKnownSettingKey, Value: string(raw)}).
+			FirstOrCreate(&model.Setting{}).Error
+	}); err == nil {
+		fleetLastKnownPersistence.lastWrite = time.Now()
+	}
 }
 
 // FleetAction executes a safe operational action for a local or configured

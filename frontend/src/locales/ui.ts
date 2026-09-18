@@ -34,6 +34,16 @@ const en = {
     batchDoneWithLocal: 'Remote servers finished first; the local server ran last', batchDoneRemote: 'Remote servers finished',
     queued: 'Queued', updating: 'Updating', completed: 'Completed', failed: 'Failed', never: 'Never run', unknown: 'Unknown',
     autoRefresh: 'Refreshes every 5 seconds while this page is visible',
+    orchestration: 'Configuration rollout', orchestrationTitle: 'Configuration templates and rollout',
+    orchestrationHint: 'Capture reusable configuration from this server, preview every target, then roll out through a canary and the remaining servers.',
+    captureTemplate: 'Capture local configuration', captureTemplateHint: 'Only selected sections are stored. Applying a template merges by name or tag and never deletes target data.',
+    templateName: 'Template name', saveTemplate: 'Save as template', deployTemplate: 'Preview and deploy',
+    deployTemplateHint: 'Select a template and target servers. A failed target stops the rollout and restores that server automatically.',
+    selectTemplate: 'Configuration template', targetServers: 'Target servers', canaryServer: 'Canary server (optional)',
+    deployOrderHint: 'Order: canary first, then the remaining remote servers, local server last.', previewChanges: 'Preview changes',
+    startDeploy: 'Start rollout', deployed: 'Applied', confirmDeleteTemplate: 'Delete this configuration template?',
+    confirmDeployTemplate: 'Apply this template to the selected servers? Each server will validate and snapshot its configuration first.',
+    previewSummary: 'Inbounds +{inboundAdd}/~{inboundUpdate}, users +{clientAdd}/~{clientUpdate}, TLS {tls}, sections {config}',
   },
   sessions: {
     badge: 'Live traffic', title: 'Live sessions', subtitle: 'Inspect active connections across the server fleet without storing destination history.',
@@ -42,6 +52,10 @@ const en = {
     search: 'Search users, destinations, inbounds, or outbounds', empty: 'No active connections match the current filters.', anonymous: 'Anonymous',
     disconnect: 'Disconnect', disconnectConfirm: 'Disconnect the active session to {target}?', partialFailure: 'Some servers could not be read',
     copySubscription: 'Copy Clash subscription', copiedSubscription: 'Subscription copied',
+  },
+  share: {
+    title: 'Share user', active: 'Active', paused: 'Paused', pause: 'Pause access', resume: 'Resume access',
+    revoke: 'Revoke old credentials', revokeConfirm: 'Rotate all protocol credentials for this user? Existing imported nodes will stop working.',
   },
   ports: {
     subtitle: 'Inspect listening ports, NAT rules, and NovaPanel-managed ports. Rebuild managed rules when drift is detected.',
@@ -107,6 +121,16 @@ const zhHans = {
     batchDoneWithLocal: '远端服务器已优先完成操作，本机已最后执行', batchDoneRemote: '远端服务器已完成操作',
     queued: '排队中', updating: '更新中', completed: '已完成', failed: '失败', never: '未执行', unknown: '未知',
     autoRefresh: '页面可见时每 5 秒自动刷新',
+    orchestration: '配置编排', orchestrationTitle: '配置模板与灰度下发',
+    orchestrationHint: '把本机配置保存成可复用模板，逐台预览差异后按灰度机、远端、本机的顺序下发。',
+    captureTemplate: '保存本机配置', captureTemplateHint: '只保存勾选的区块；下发时按名称或标签合并，不会删除目标机原有数据。',
+    templateName: '模板名称', saveTemplate: '保存为模板', deployTemplate: '预览并下发',
+    deployTemplateHint: '选择模板和目标服务器。任一目标失败会停止后续下发，并自动恢复该服务器旧配置。',
+    selectTemplate: '配置模板', targetServers: '目标服务器', canaryServer: '灰度服务器（可选）',
+    deployOrderHint: '执行顺序：灰度服务器优先，其余远端依次执行，本机最后执行。', previewChanges: '预览差异',
+    startDeploy: '开始下发', deployed: '应用成功', confirmDeleteTemplate: '确定删除这个配置模板吗？',
+    confirmDeployTemplate: '确定把模板应用到所选服务器吗？每台服务器都会先校验并创建配置快照。',
+    previewSummary: '入站 +{inboundAdd}/改{inboundUpdate}，用户 +{clientAdd}/改{clientUpdate}，TLS {tls}，区块 {config}',
   },
   sessions: {
     badge: '实时数据面', title: '实时连接', subtitle: '集中查看服务器集合中的活动连接，目标记录不会额外持久化保存。',
@@ -115,6 +139,10 @@ const zhHans = {
     search: '搜索用户、目标地址、入站或出站', empty: '当前筛选条件下没有活动连接。', anonymous: '未识别用户',
     disconnect: '断开连接', disconnectConfirm: '确定断开到 {target} 的活动连接吗？', partialFailure: '部分服务器读取失败',
     copySubscription: '复制 Clash 订阅', copiedSubscription: '订阅链接已复制',
+  },
+  share: {
+    title: '分享用户', active: '正常使用', paused: '已暂停', pause: '暂停访问', resume: '恢复访问',
+    revoke: '撤销旧凭据', revokeConfirm: '确定轮换该用户的全部协议凭据吗？客户端中已经导入的旧节点将立即失效。',
   },
   ports: {
     subtitle: '当前机器上的监听端口、NAT 规则和面板受管端口；发现漂移时可一键重建受管规则。', updatedAt: '更新时间：{time}',
@@ -150,6 +178,7 @@ const zhHant = {
   common: { ...zhHans.common, online: '在線', offline: '離線', refresh: '重新整理', close: '關閉', update: '更新' },
   fleet: { ...zhHans.fleet, title: '伺服器集合', badge: '伺服器集合', manage: '管理伺服器', total: '伺服器總數' },
   sessions: { ...zhHans.sessions, title: '即時連線', badge: '即時資料面', disconnect: '中斷連線' },
+  share: { ...zhHans.share, title: '分享使用者', pause: '暫停存取', resume: '恢復存取' },
   ports: { ...zhHans.ports, listeners: '監聽連接埠', backend: '後端', listenerList: '監聽列表' },
   health: { ...zhHans.health, title: '健康與診斷', badge: '系統診斷', warning: '警告', error: '異常' },
 }

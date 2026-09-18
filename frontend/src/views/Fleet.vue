@@ -54,6 +54,10 @@
               <v-icon icon="mdi-server-plus" start />
               {{ $t('ui.fleet.manage') }}
             </v-btn>
+            <v-btn variant="outlined" color="secondary" :disabled="loading" @click="openOrchestration">
+              <v-icon icon="mdi-layers-triple-outline" start />
+              {{ $t('ui.fleet.orchestration') }}
+            </v-btn>
             <v-btn color="primary" :loading="loading" @click="loadFleet">
               <v-icon icon="mdi-refresh" start />
               {{ $t('ui.fleet.refreshStatus') }}
@@ -275,6 +279,93 @@
       </v-card>
     </v-dialog>
 
+    <v-dialog v-model="showOrchestration" max-width="920" scrollable>
+      <v-card rounded="xl" class="fleet-dialog">
+        <v-card-title class="fleet-dialog__title">
+          <span>{{ $t('ui.fleet.orchestrationTitle') }}</span>
+          <v-btn icon="mdi-close" variant="text" :aria-label="$t('actions.close')" @click="showOrchestration = false" />
+        </v-card-title>
+        <v-card-subtitle>{{ $t('ui.fleet.orchestrationHint') }}</v-card-subtitle>
+        <v-card-text class="fleet-orchestration">
+          <section class="fleet-orchestration__section">
+            <div class="fleet-orchestration__head">
+              <div><strong>{{ $t('ui.fleet.captureTemplate') }}</strong><span>{{ $t('ui.fleet.captureTemplateHint') }}</span></div>
+            </div>
+            <v-text-field v-model="templateName" :label="$t('ui.fleet.templateName')" density="comfortable" hide-details />
+            <div class="fleet-orchestration__checks">
+              <v-checkbox v-model="templateSections.inbounds" :label="$t('pages.inbounds')" hide-details />
+              <v-checkbox v-model="templateSections.clients" :label="$t('pages.clients')" hide-details />
+              <v-checkbox v-model="templateSections.tls" :label="$t('pages.tls')" hide-details />
+              <v-checkbox v-model="templateSections.route" :label="$t('pages.rules')" hide-details />
+              <v-checkbox v-model="templateSections.dns" label="DNS" hide-details />
+            </div>
+            <v-btn color="primary" variant="tonal" :loading="orchestrationLoading === 'capture'" @click="captureTemplate">
+              <v-icon icon="mdi-content-save-plus-outline" start />{{ $t('ui.fleet.saveTemplate') }}
+            </v-btn>
+          </section>
+
+          <section class="fleet-orchestration__section">
+            <div class="fleet-orchestration__head">
+              <div><strong>{{ $t('ui.fleet.deployTemplate') }}</strong><span>{{ $t('ui.fleet.deployTemplateHint') }}</span></div>
+              <v-btn v-if="selectedTemplateId" size="small" color="error" variant="text" @click="deleteTemplate">
+                <v-icon icon="mdi-delete-outline" start />{{ $t('actions.del') }}
+              </v-btn>
+            </div>
+            <v-select
+              v-model="selectedTemplateId"
+              :items="templates.map(item => ({ title: item.name, value: item.id }))"
+              :label="$t('ui.fleet.selectTemplate')"
+              density="comfortable"
+              hide-details
+            />
+            <v-select
+              v-model="selectedTargets"
+              :items="deployableServers.map(item => ({ title: item.name, value: item.id }))"
+              :label="$t('ui.fleet.targetServers')"
+              multiple
+              chips
+              closable-chips
+              density="comfortable"
+              hide-details
+            />
+            <v-select
+              v-model="canaryTarget"
+              :items="selectedTargetItems"
+              :label="$t('ui.fleet.canaryServer')"
+              clearable
+              density="comfortable"
+              hide-details
+            />
+            <v-alert type="info" variant="tonal" density="compact">{{ $t('ui.fleet.deployOrderHint') }}</v-alert>
+            <div class="fleet-orchestration__actions">
+              <v-btn variant="outlined" :loading="orchestrationLoading === 'preview'" :disabled="!canRunTemplate" @click="previewTemplate">
+                <v-icon icon="mdi-file-compare-outline" start />{{ $t('ui.fleet.previewChanges') }}
+              </v-btn>
+              <v-btn color="primary" :loading="orchestrationLoading === 'deploy'" :disabled="!canDeployTemplate" @click="deployTemplate">
+                <v-icon icon="mdi-rocket-launch-outline" start />{{ $t('ui.fleet.startDeploy') }}
+              </v-btn>
+            </div>
+          </section>
+
+          <section v-if="templateResults.length" class="fleet-orchestration__results">
+            <div v-for="result in templateResults" :key="result.id" class="fleet-orchestration__result" :class="result.success ? 'is-success' : 'is-error'">
+              <div>
+                <strong>{{ result.name }}</strong>
+                <span v-if="result.preview">{{ previewSummary(result.preview) }}</span>
+                <span v-else-if="result.error">{{ result.error }}</span>
+                <span v-else>{{ $t('ui.fleet.deployed') }}</span>
+              </div>
+              <v-icon :icon="result.success ? 'mdi-check-circle' : 'mdi-alert-circle'" />
+            </div>
+          </section>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="showOrchestration = false">{{ $t('ui.common.close') }}</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <v-dialog v-model="showDetails" max-width="760" scrollable>
       <v-card rounded="xl" class="fleet-dialog" v-if="selectedServer">
         <v-card-title class="fleet-dialog__title">
@@ -434,12 +525,38 @@ type FleetConfig = {
   enabled: boolean
 }
 
+type FleetTemplate = {
+  id: string
+  name: string
+  createdAt: string
+  sections: Record<string, boolean>
+}
+
+type FleetTemplatePreview = {
+  tlsAdd: number
+  tlsUpdate: number
+  inboundAdd: number
+  inboundUpdate: number
+  clientAdd: number
+  clientUpdate: number
+  configUpdates?: string[]
+}
+
+type FleetTemplateResult = {
+  id: string
+  name: string
+  success: boolean
+  preview?: FleetTemplatePreview
+  error?: string
+}
+
 const t = i18n.global.t
 
 const loading = ref(true)
 const saving = ref(false)
 const showConfig = ref(false)
 const showDetails = ref(false)
+const showOrchestration = ref(false)
 const servers = ref<FleetServer[]>([])
 const configs = ref<FleetConfig[]>([])
 const checkedAt = ref('')
@@ -450,6 +567,14 @@ const actionLoading = ref(false)
 const batchAction = ref<'' | 'update' | 'restart'>('')
 const batchMessage = ref('')
 const batchMessageType = ref<'info' | 'success' | 'warning' | 'error'>('info')
+const templates = ref<FleetTemplate[]>([])
+const templateName = ref('')
+const templateSections = ref({ tls: false, inbounds: true, clients: true, route: true, dns: true })
+const selectedTemplateId = ref('')
+const selectedTargets = ref<string[]>([])
+const canaryTarget = ref<string | null>(null)
+const templateResults = ref<FleetTemplateResult[]>([])
+const orchestrationLoading = ref<'' | 'capture' | 'preview' | 'deploy'>('')
 const updateLoadingId = ref('')
 const refreshLoadingId = ref('')
 const updateStates = ref<Record<string, any>>({})
@@ -525,6 +650,12 @@ const onlineUsersTotal = computed(() => servers.value.reduce((total, server) => 
 const endpointTotal = computed(() => servers.value.reduce((total, server) => total + server.Endpoints, 0))
 const driftServerCount = computed(() => servers.value.filter((server) => server.driftCount > 0).length)
 const initialLoading = computed(() => loading.value && servers.value.length === 0)
+const deployableServers = computed(() => servers.value.filter(server => server.reachable && server.enabled))
+const selectedTargetItems = computed(() => deployableServers.value
+  .filter(server => selectedTargets.value.includes(server.id))
+  .map(server => ({ title: server.name, value: server.id })))
+const canRunTemplate = computed(() => Boolean(selectedTemplateId.value && selectedTargets.value.length))
+const canDeployTemplate = computed(() => canRunTemplate.value && templateResults.value.length > 0 && templateResults.value.every(result => result.success))
 const formattedCheckedAt = computed(() => {
   if (!checkedAt.value) return '-'
   const date = new Date(checkedAt.value)
@@ -624,6 +755,80 @@ const saveConfig = async () => {
   }
   saving.value = false
 }
+
+const loadTemplates = async () => {
+  const response = await HttpUtils.get('api/fleetTemplates')
+  if (response.success) {
+    templates.value = Array.isArray(response.obj) ? response.obj : []
+    if (selectedTemplateId.value && !templates.value.some(item => item.id === selectedTemplateId.value)) selectedTemplateId.value = ''
+  }
+}
+
+const openOrchestration = async () => {
+  templateResults.value = []
+  selectedTargets.value = deployableServers.value.filter(server => server.id !== 'local').map(server => server.id)
+  await loadTemplates()
+  showOrchestration.value = true
+}
+
+const captureTemplate = async () => {
+  orchestrationLoading.value = 'capture'
+  const response = await HttpUtils.post('api/fleetTemplateCapture', {
+    name: templateName.value,
+    sections: JSON.stringify(templateSections.value),
+  })
+  if (response.success) {
+    templateName.value = ''
+    await loadTemplates()
+    selectedTemplateId.value = response.obj?.id ?? ''
+  }
+  orchestrationLoading.value = ''
+}
+
+const deleteTemplate = async () => {
+  if (!selectedTemplateId.value || !window.confirm(t('ui.fleet.confirmDeleteTemplate'))) return
+  const response = await HttpUtils.post('api/fleetTemplateDelete', { id: selectedTemplateId.value })
+  if (response.success) {
+    selectedTemplateId.value = ''
+    templateResults.value = []
+    await loadTemplates()
+  }
+}
+
+const previewTemplate = async () => {
+  orchestrationLoading.value = 'preview'
+  templateResults.value = []
+  const response = await HttpUtils.post('api/fleetTemplatePreview', {
+    id: selectedTemplateId.value,
+    targets: JSON.stringify(selectedTargets.value),
+  })
+  if (response.success) templateResults.value = response.obj ?? []
+  orchestrationLoading.value = ''
+}
+
+const deployTemplate = async () => {
+  if (!window.confirm(t('ui.fleet.confirmDeployTemplate'))) return
+  orchestrationLoading.value = 'deploy'
+  const response = await HttpUtils.post('api/fleetTemplateDeploy', {
+    id: selectedTemplateId.value,
+    targets: JSON.stringify(selectedTargets.value),
+    canary: canaryTarget.value ?? '',
+  })
+  if (response.success) {
+    templateResults.value = response.obj ?? []
+    await loadFleet(true)
+  }
+  orchestrationLoading.value = ''
+}
+
+const previewSummary = (preview: FleetTemplatePreview) => t('ui.fleet.previewSummary', {
+  inboundAdd: preview.inboundAdd ?? 0,
+  inboundUpdate: preview.inboundUpdate ?? 0,
+  clientAdd: preview.clientAdd ?? 0,
+  clientUpdate: preview.clientUpdate ?? 0,
+  tls: (preview.tlsAdd ?? 0) + (preview.tlsUpdate ?? 0),
+  config: preview.configUpdates?.join(' / ') || '-',
+})
 
 const openDetails = (server: FleetServer) => {
   selectedServer.value = server
@@ -908,6 +1113,19 @@ onBeforeUnmount(() => {
 .fleet-dialog__title { display: flex; align-items: center; justify-content: space-between; }
 .fleet-config-row { display: grid; grid-template-columns: 0.8fr 1.5fr 1.3fr auto auto; align-items: center; gap: 10px; padding: 10px 0; }
 .fleet-dialog__add { margin-top: 8px; }
+.fleet-orchestration { display: grid; gap: 16px; }
+.fleet-orchestration__section { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--np-border); border-radius: 18px; background: var(--np-surface-muted); }
+.fleet-orchestration__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.fleet-orchestration__head > div { display: grid; gap: 4px; }
+.fleet-orchestration__head span { color: var(--np-text-muted); font-size: .8rem; line-height: 1.5; }
+.fleet-orchestration__checks { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.fleet-orchestration__actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.fleet-orchestration__results { display: grid; gap: 8px; }
+.fleet-orchestration__result { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--np-border); border-radius: 14px; }
+.fleet-orchestration__result > div { display: grid; gap: 3px; min-width: 0; }
+.fleet-orchestration__result span { color: var(--np-text-muted); font-size: .78rem; overflow-wrap: anywhere; }
+.fleet-orchestration__result.is-success { color: rgb(var(--v-theme-success)); background: rgba(34, 197, 94, .06); }
+.fleet-orchestration__result.is-error { color: rgb(var(--v-theme-error)); background: rgba(239, 68, 68, .06); }
 
 @media (max-width: 800px) {
   .fleet-hero { padding: 18px; }
@@ -915,6 +1133,7 @@ onBeforeUnmount(() => {
   .fleet-hero__actions .v-btn { width: 100%; min-width: 0; }
   .fleet-hero__meta { flex-wrap: wrap; }
   .fleet-config-row { grid-template-columns: 1fr; padding: 14px 0; border-bottom: 1px solid var(--np-border); }
+  .fleet-orchestration__checks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 1279px) {
