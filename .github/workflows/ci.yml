@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -76,6 +79,15 @@ jobs:
         run: |
           sh -n entrypoint.sh
           bash -n install.sh novas.sh runNovas.sh build.sh scripts/*.sh
+
+      - name: Go 格式检查
+        run: |
+          unformatted="$(git ls-files -z '*.go' | xargs -0 -r gofmt -l)"
+          if [ -n "$unformatted" ]; then
+            echo "以下 Go 文件未通过 gofmt："
+            echo "$unformatted"
+            exit 1
+          fi
 
       - name: Go Vet
         run: go vet ./...
