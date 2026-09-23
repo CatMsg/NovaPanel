@@ -51,8 +51,17 @@ jobs:
         run: |
           cd frontend
           npm audit
+          npm run test:unit
           npm run lint:check
           npm run typecheck
+
+      - name: 安装 Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: 浏览器 Smoke Test
+        working-directory: frontend
+        run: npm run test:e2e
 
   build-frontend:
     needs: test-frontend

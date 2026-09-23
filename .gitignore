@@ -29,6 +29,9 @@ tmp
 .idea
 .vscode
 .playwright-cli/
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
 
 # Local data, credentials and tooling output
 *.db

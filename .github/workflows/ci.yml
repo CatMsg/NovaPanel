@@ -23,7 +23,7 @@ jobs:
   frontend:
     name: 前端检查与构建
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: 检出仓库
         uses: actions/checkout@v6.0.2
@@ -49,6 +49,10 @@ jobs:
         working-directory: frontend
         run: npm audit
 
+      - name: 前端单元测试
+        working-directory: frontend
+        run: npm run test:unit
+
       - name: ESLint 检查
         working-directory: frontend
         run: npm run lint:check
@@ -60,6 +64,14 @@ jobs:
       - name: 构建前端
         working-directory: frontend
         run: npm run build:assets
+
+      - name: 安装 Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: 浏览器 Smoke Test
+        working-directory: frontend
+        run: npm run test:e2e
 
   backend:
     name: 后端检查与构建
@@ -84,26 +96,9 @@ jobs:
 
       - name: Go 格式检查
         run: |
-          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
-            base="${{ github.event.pull_request.base.sha }}"
-          else
-            base="${{ github.event.before }}"
-          fi
-          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
-            base="$(git rev-parse HEAD^ 2>/dev/null || true)"
-          fi
-          if [ -z "$base" ]; then
-            echo "没有可比较的父提交，跳过增量 gofmt 检查"
-            exit 0
-          fi
-          files="$(git diff --name-only --diff-filter=ACMR "$base" "$GITHUB_SHA" -- '*.go')"
-          if [ -z "$files" ]; then
-            echo "本次没有 Go 文件变更"
-            exit 0
-          fi
-          unformatted="$(printf '%s\n' "$files" | xargs -r gofmt -l)"
+          unformatted="$(git ls-files '*.go' | xargs -r gofmt -l)"
           if [ -n "$unformatted" ]; then
-            echo "以下本次变更的 Go 文件未通过 gofmt："
+            echo "以下 Go 文件未通过 gofmt："
             echo "$unformatted"
             exit 1
           fi
@@ -122,3 +117,19 @@ jobs:
 
       - name: 基础 Go 构建
         run: go build ./...
+
+  docker:
+    name: Docker 构建
+    needs:
+      - frontend
+      - backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v6.0.2
+        with:
+          submodules: recursive
+
+      - name: 构建 AMD64 镜像
+        run: docker build --platform linux/amd64 -t novapanel-ci .
