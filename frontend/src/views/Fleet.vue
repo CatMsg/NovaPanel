@@ -550,6 +550,8 @@ type FleetTrafficBudget = {
   enabled: boolean
   supported: boolean
   limitBytes: number
+  reserveBytes?: number
+  clientPoolBytes?: number
   usedBytes: number
   meteredRxBytes: number
   meteredTxBytes: number
@@ -813,13 +815,22 @@ const formatTrafficBytes = (value: number) => {
   return `${size.toFixed(digits)} ${units[unitIndex]}`
 }
 const trafficTitle = (server: FleetServer) => t(server.TrafficBudget?.enabled ? 'ui.fleet.cycleTraffic' : 'ui.fleet.bootTraffic')
+const trafficBudgetCap = (server: FleetServer) => {
+  const budget = server.TrafficBudget
+  if (!budget) return 0
+  const clientPool = Number(budget.clientPoolBytes)
+  if (Number.isFinite(clientPool) && clientPool > 0) return clientPool
+  const providerLimit = Number(budget.limitBytes)
+  return Number.isFinite(providerLimit) && providerLimit > 0 ? providerLimit : 0
+}
 const trafficBudgetReadable = (server: FleetServer) => {
   const budget = server.TrafficBudget
-  return Boolean(budget?.enabled && budget.supported && budget.level !== 'error' && !budget.error && Number(budget.limitBytes) > 0)
+  return Boolean(budget?.enabled && budget.supported && budget.level !== 'error' && !budget.error && trafficBudgetCap(server) > 0)
 }
 const trafficBudgetPercent = (server: FleetServer) => {
   const budget = server.TrafficBudget
-  return budget?.limitBytes ? clampPercent(Number(budget.usedBytes) / Number(budget.limitBytes) * 100) : 0
+  const cap = trafficBudgetCap(server)
+  return budget && cap > 0 ? clampPercent(Number(budget.usedBytes) / cap * 100) : 0
 }
 const trafficBudgetColor = (server: FleetServer) => {
   const budget = server.TrafficBudget
@@ -831,7 +842,7 @@ const trafficTotalLabel = (server: FleetServer) => {
   const budget = server.TrafficBudget
   if (budget?.enabled) {
     if (!trafficBudgetReadable(server)) return '-'
-    return `${formatTrafficBytes(Number(budget.usedBytes))} / ${formatTrafficBytes(Number(budget.limitBytes))}`
+    return `${formatTrafficBytes(Number(budget.usedBytes))} / ${formatTrafficBytes(trafficBudgetCap(server))}`
   }
   if (!server.NetworkTotalsReady) return '-'
   return formatTrafficBytes(server.NetworkSent + server.NetworkReceived)
