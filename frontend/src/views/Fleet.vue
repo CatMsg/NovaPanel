@@ -456,6 +456,12 @@
             <div><span>MASQUE</span><strong>{{ selectedServer.MasqueRunning }} / {{ selectedServer.MasqueTotal }}</strong></div>
             <div><span>Mieru</span><strong>{{ selectedServer.MieruRunning }} / {{ selectedServer.MieruTotal }}</strong></div>
           </div>
+          <FleetTrafficHistory
+            v-if="selectedServer.TrafficBudget?.enabled"
+            :history="trafficHistory"
+            :loading="trafficHistoryLoading"
+            :error="trafficHistoryError"
+          />
           <section v-if="selectedServer.configuration" class="fleet-config-compare">
             <div class="fleet-detail__log-head">
               <span>{{ $t('ui.fleet.configSnapshot') }}</span>
@@ -507,6 +513,14 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import HttpUtils from '@/plugins/httputil'
 import { i18n } from '@/locales'
+import FleetTrafficHistory from '@/components/FleetTrafficHistory.vue'
+import {
+  trafficBudgetCap as resolveTrafficBudgetCap,
+  trafficBudgetPercent as resolveTrafficBudgetPercent,
+  trafficBudgetReadable as isTrafficBudgetReadable,
+  type FleetTrafficBudget,
+  type TrafficBudgetHistory,
+} from '@/utils/trafficBudget'
 
 type FleetServer = {
   id: string
@@ -554,22 +568,6 @@ type FleetServer = {
   configuration?: FleetConfigProfile
   drift?: FleetConfigDrift[]
   driftCount: number
-}
-
-type FleetTrafficBudget = {
-  enabled: boolean
-  supported: boolean
-  limitBytes: number
-  reserveBytes?: number
-  clientPoolBytes?: number
-  usedBytes: number
-  meteredRxBytes: number
-  meteredTxBytes: number
-  offsetBytes: number
-  accountingMode: string
-  level: string
-  blocked: boolean
-  error?: string
 }
 
 type FleetConfigProfile = {
@@ -638,6 +636,9 @@ const servers = ref<FleetServer[]>([])
 const configs = ref<FleetConfig[]>([])
 const checkedAt = ref('')
 const selectedServer = ref<FleetServer | null>(null)
+const trafficHistory = ref<TrafficBudgetHistory | null>(null)
+const trafficHistoryLoading = ref(false)
+const trafficHistoryError = ref('')
 const logLines = ref<string[]>([])
 const logsLoading = ref(false)
 const actionLoading = ref(false)
@@ -825,23 +826,9 @@ const formatTrafficBytes = (value: number) => {
   return `${size.toFixed(digits)} ${units[unitIndex]}`
 }
 const trafficTitle = (server: FleetServer) => t(server.TrafficBudget?.enabled ? 'ui.fleet.cycleTraffic' : 'ui.fleet.bootTraffic')
-const trafficBudgetCap = (server: FleetServer) => {
-  const budget = server.TrafficBudget
-  if (!budget) return 0
-  const clientPool = Number(budget.clientPoolBytes)
-  if (Number.isFinite(clientPool) && clientPool > 0) return clientPool
-  const providerLimit = Number(budget.limitBytes)
-  return Number.isFinite(providerLimit) && providerLimit > 0 ? providerLimit : 0
-}
-const trafficBudgetReadable = (server: FleetServer) => {
-  const budget = server.TrafficBudget
-  return Boolean(budget?.enabled && budget.supported && budget.level !== 'error' && !budget.error && trafficBudgetCap(server) > 0)
-}
-const trafficBudgetPercent = (server: FleetServer) => {
-  const budget = server.TrafficBudget
-  const cap = trafficBudgetCap(server)
-  return budget && cap > 0 ? clampPercent(Number(budget.usedBytes) / cap * 100) : 0
-}
+const trafficBudgetCap = (server: FleetServer) => resolveTrafficBudgetCap(server.TrafficBudget)
+const trafficBudgetReadable = (server: FleetServer) => isTrafficBudgetReadable(server.TrafficBudget)
+const trafficBudgetPercent = (server: FleetServer) => resolveTrafficBudgetPercent(server.TrafficBudget)
 const trafficBudgetColor = (server: FleetServer) => {
   const budget = server.TrafficBudget
   if (budget?.blocked || budget?.level === 'error' || budget?.level === 'critical') return 'error'
@@ -1067,8 +1054,30 @@ const previewSummary = (preview: FleetTemplatePreview) => t('ui.fleet.previewSum
 const openDetails = (server: FleetServer) => {
   selectedServer.value = server
   logLines.value = []
+  trafficHistory.value = null
+  trafficHistoryError.value = ''
   showDetails.value = true
   void loadUpdateStatus(server)
+  if (server.TrafficBudget?.enabled) void loadTrafficHistory(server)
+}
+
+const loadTrafficHistory = async (server: FleetServer) => {
+  trafficHistoryLoading.value = true
+  trafficHistoryError.value = ''
+  try {
+    const response = await HttpUtils.get('api/fleetTrafficHistory', { id: server.id })
+    if (response.success && response.obj) {
+      trafficHistory.value = response.obj as TrafficBudgetHistory
+    } else {
+      trafficHistory.value = null
+      trafficHistoryError.value = response.msg || t('ui.fleet.trafficHistoryUnavailable')
+    }
+  } catch {
+    trafficHistory.value = null
+    trafficHistoryError.value = t('ui.fleet.trafficHistoryUnavailable')
+  } finally {
+    trafficHistoryLoading.value = false
+  }
 }
 
 const loadUpdateStatus = async (server: FleetServer) => {

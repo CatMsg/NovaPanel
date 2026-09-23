@@ -79,6 +79,12 @@ func CreateDBBackup(exclude string) (string, func(), error) {
 			closeAndCleanup()
 			return "", nil, err
 		}
+		if backupDb.Migrator().HasTable(&model.TrafficBudgetSample{}) {
+			if err := backupDb.Exec("DELETE FROM traffic_budget_samples").Error; err != nil {
+				closeAndCleanup()
+				return "", nil, err
+			}
+		}
 	}
 	if exclude_changes {
 		if err := backupDb.Exec("DELETE FROM changes").Error; err != nil {
@@ -392,7 +398,7 @@ func ValidateDB(file multipart.File) (map[string]interface{}, error) {
 	}
 	defer sqlDB.Close()
 	report := map[string]interface{}{"valid": true}
-	for _, table := range []string{"settings", "tls", "inbounds", "outbounds", "endpoints", "managed_port_entries", "services", "users", "tokens", "clients", "stats", "changes"} {
+	for _, table := range []string{"settings", "tls", "inbounds", "outbounds", "endpoints", "managed_port_entries", "services", "users", "tokens", "clients", "stats", "traffic_budget_samples", "changes"} {
 		var count int64
 		if err := conn.Table(table).Count(&count).Error; err != nil {
 			continue

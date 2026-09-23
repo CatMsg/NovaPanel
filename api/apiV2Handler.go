@@ -112,6 +112,8 @@ func (a *APIv2Handler) getHandler(c *gin.Context) {
 		a.ApiService.GetHealth(c)
 	case "traffic-budget":
 		a.ApiService.GetTrafficBudget(c)
+	case "traffic-budget-history":
+		a.ApiService.GetTrafficBudgetHistory(c)
 	case "alert-settings":
 		a.ApiService.GetAlertSettings(c)
 	case "login-security":

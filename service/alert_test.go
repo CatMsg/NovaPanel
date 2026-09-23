@@ -29,6 +29,7 @@ func TestSaveAlertSettingsRequiresTelegramAndPreservesToken(t *testing.T) {
 		TelegramToken:   "test-token",
 		TelegramChatID:  "123456",
 		IntervalMinutes: 5,
+		Language:        "en",
 		CooldownMinutes: 60,
 	}); err != nil {
 		t.Fatalf("save Telegram settings: %v", err)
@@ -47,7 +48,7 @@ func TestSaveAlertSettingsRequiresTelegramAndPreservesToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read Telegram settings: %v", err)
 	}
-	if !settings.Enabled || !settings.TelegramTokenSet || settings.TelegramChatID != "654321" {
+	if !settings.Enabled || !settings.TelegramTokenSet || settings.TelegramChatID != "654321" || settings.Language != "en" {
 		t.Fatalf("unexpected Telegram settings: %#v", settings)
 	}
 }
@@ -96,6 +97,18 @@ func TestFormatAlertProblemLabelsTrafficBudget(t *testing.T) {
 	generic := formatAlertProblem(HealthCheck{ID: "disk", Title: "系统磁盘", Status: "warning", Summary: "空间不足"})
 	if generic != "[warning] 系统磁盘: 空间不足" {
 		t.Fatalf("unexpected generic alert: %q", generic)
+	}
+}
+
+func TestFormatLocalizedAlertProblemUsesSelectedLanguage(t *testing.T) {
+	check := HealthCheck{ID: "disk", Title: "System disk", Status: "warning", Summary: "Used 91.2%"}
+	got := formatLocalizedAlertProblem(check, "ru")
+	if got != "[Требует внимания] System disk: Used 91.2%" {
+		t.Fatalf("unexpected localized problem: %q", got)
+	}
+	chinese := HealthCheck{ID: "disk", Title: "系统磁盘", Status: "error", Summary: "磁盘空间即将耗尽"}
+	if got := formatLocalizedAlertProblem(chinese, "zhHans"); got != "[异常] 系统磁盘: 磁盘空间即将耗尽" {
+		t.Fatalf("unexpected Simplified Chinese problem: %q", got)
 	}
 }
 

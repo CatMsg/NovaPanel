@@ -25,6 +25,7 @@ type AlertSettings struct {
 	TelegramChatID     string `json:"telegramChatId"`
 	IntervalMinutes    int    `json:"intervalMinutes"`
 	CooldownMinutes    int    `json:"cooldownMinutes"`
+	Language           string `json:"language"`
 	ClearTelegramToken bool   `json:"clearTelegramToken,omitempty"`
 }
 
@@ -51,6 +52,7 @@ func (s *AlertService) GetAlertSettings() (*AlertSettings, error) {
 		TelegramChatID:   values["alertTelegramChatID"],
 		IntervalMinutes:  interval,
 		CooldownMinutes:  cooldown,
+		Language:         normalizeAlertLanguage(values["alertLanguage"]),
 	}, nil
 }
 
@@ -68,6 +70,15 @@ func (s *AlertService) SaveAlertSettings(input AlertSettings) error {
 		if err != nil {
 			return err
 		}
+		storedLanguage, err := s.getStringTx(tx, "alertLanguage")
+		if err != nil {
+			return err
+		}
+		effectiveLanguage := strings.TrimSpace(input.Language)
+		if effectiveLanguage == "" {
+			effectiveLanguage = storedLanguage
+		}
+		effectiveLanguage = normalizeAlertLanguage(effectiveLanguage)
 		effectiveToken := storedToken
 		if input.ClearTelegramToken {
 			effectiveToken = ""
@@ -82,6 +93,7 @@ func (s *AlertService) SaveAlertSettings(input AlertSettings) error {
 			"alertTelegramChatID":  input.TelegramChatID,
 			"alertIntervalMinutes": strconv.Itoa(input.IntervalMinutes),
 			"alertCooldownMinutes": strconv.Itoa(input.CooldownMinutes),
+			"alertLanguage":        effectiveLanguage,
 		}
 		if input.ClearTelegramToken {
 			values["alertTelegramToken"] = ""
@@ -102,7 +114,7 @@ func (s *AlertService) TestAlert() error {
 	if err != nil {
 		return err
 	}
-	return s.sendAlert(values, "NovaPanel 告警测试\n通知通道配置正常。")
+	return s.sendAlert(values, localizedAlertText(values["alertLanguage"], "test"))
 }
 
 func (s *AlertService) NotifyLoginBan(remoteIP string) error {
@@ -110,7 +122,7 @@ func (s *AlertService) NotifyLoginBan(remoteIP string) error {
 	if err != nil || values["alertEnabled"] != "true" {
 		return err
 	}
-	return s.sendAlert(values, fmt.Sprintf("NovaPanel 登录安全告警\nIP %s 在 10 分钟内连续失败 10 次，Fail2ban 已按当前永久封禁与白名单策略处理。", remoteIP))
+	return s.sendAlert(values, localizedAlertText(values["alertLanguage"], "login", remoteIP))
 }
 
 func (s *AlertService) EvaluateAndNotify() error {
@@ -131,11 +143,19 @@ func (s *AlertService) EvaluateAndNotify() error {
 	lastSent, _ := strconv.ParseInt(values["alertLastSentAt"], 10, 64)
 
 	report := s.GetHealthReport(false)
+	now := time.Now()
+	if err := s.evaluateTrafficAlert(values, report, now); err != nil {
+		return err
+	}
+	localizedReport := LocalizeHealthReport(report, values["alertLanguage"])
 	problems := make([]string, 0)
 	problemStates := make([]string, 0)
-	for _, check := range report.Checks {
+	for _, check := range localizedReport.Checks {
+		if check.ID == "traffic-budget" {
+			continue
+		}
 		if check.Status == "error" || check.Status == "warning" {
-			problems = append(problems, formatAlertProblem(check))
+			problems = append(problems, formatLocalizedAlertProblem(check, values["alertLanguage"]))
 			problemStates = append(problemStates, alertProblemState(check, report.Diagnostics))
 		}
 	}
@@ -144,22 +164,22 @@ func (s *AlertService) EvaluateAndNotify() error {
 		if lastFingerprint == "" {
 			return nil
 		}
-		if err := s.sendAlert(values, "NovaPanel 恢复通知\n此前的健康异常已恢复，当前没有 warning/error。"); err != nil {
+		if err := s.sendAlert(values, localizedAlertText(values["alertLanguage"], "recovery")); err != nil {
 			return err
 		}
-		return s.persistAlertState("", time.Now())
+		return s.persistAlertState("", now)
 	}
 	fingerprintBytes := sha256.Sum256([]byte(strings.Join(problemStates, "\n")))
 	fingerprint := hex.EncodeToString(fingerprintBytes[:])
 	cooldown, _ := strconv.Atoi(values["alertCooldownMinutes"])
-	if fingerprint == lastFingerprint && cooldown > 0 && time.Since(time.Unix(lastSent, 0)) < time.Duration(cooldown)*time.Minute {
+	if fingerprint == lastFingerprint && cooldown > 0 && now.Sub(time.Unix(lastSent, 0)) < time.Duration(cooldown)*time.Minute {
 		return nil
 	}
-	message := "NovaPanel 健康告警\n" + strings.Join(problems, "\n")
+	message := localizedAlertText(values["alertLanguage"], "health", strings.Join(problems, "\n"))
 	if err := s.sendAlert(values, message); err != nil {
 		return err
 	}
-	return s.persistAlertState(fingerprint, time.Now())
+	return s.persistAlertState(fingerprint, now)
 }
 
 func formatAlertProblem(check HealthCheck) string {
@@ -171,6 +191,21 @@ func formatAlertProblem(check HealthCheck) string {
 		return fmt.Sprintf("[%s] %s", label, check.Summary)
 	}
 	return fmt.Sprintf("[%s] %s: %s", check.Status, check.Title, check.Summary)
+}
+
+func formatLocalizedAlertProblem(check HealthCheck, language string) string {
+	if normalizeAlertLanguage(language) == "zhHans" {
+		label := map[string]string{"warning": "预警", "error": "异常"}[check.Status]
+		if label == "" {
+			label = check.Status
+		}
+		return fmt.Sprintf("[%s] %s: %s", label, check.Title, check.Summary)
+	}
+	label := healthPhrase(language, check.Status)
+	if label == "" {
+		label = check.Status
+	}
+	return fmt.Sprintf("[%s] %s: %s", label, check.Title, check.Summary)
 }
 
 func alertProblemState(check HealthCheck, diagnostics map[string]interface{}) string {
@@ -192,7 +227,7 @@ func (s *AlertService) persistAlertState(fingerprint string, sentAt time.Time) e
 }
 
 func (s *AlertService) alertSettingValues() (map[string]string, error) {
-	keys := []string{"alertEnabled", "alertTelegramToken", "alertTelegramChatID", "alertIntervalMinutes", "alertCooldownMinutes", "alertLastFingerprint", "alertLastSentAt"}
+	keys := []string{"alertEnabled", "alertTelegramToken", "alertTelegramChatID", "alertIntervalMinutes", "alertCooldownMinutes", "alertLanguage", "alertLastFingerprint", "alertLastSentAt", "alertTrafficLastLevel", "alertTrafficLastSentAt"}
 	values := make(map[string]string, len(keys))
 	for _, key := range keys {
 		value, err := s.getString(key)

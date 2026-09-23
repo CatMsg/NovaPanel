@@ -199,6 +199,9 @@ func (s *TrafficBudgetService) CheckAndEnforce() error {
 	}
 	status.SampledAt = now.Format(time.RFC3339)
 	trafficBudgetMu.Unlock()
+	if err := s.recordTrafficBudgetSample(status, periodStart, now); err != nil {
+		logger.Warning("persist VPS traffic budget history failed: ", err)
+	}
 	return s.finishTrafficBudgetStatus(status, blocked)
 }
 

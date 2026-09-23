@@ -100,8 +100,11 @@ var defaultValueMap = map[string]string{
 	"alertTelegramChatID":          "",
 	"alertIntervalMinutes":         "5",
 	"alertCooldownMinutes":         "60",
+	"alertLanguage":                "zhHans",
 	"alertLastFingerprint":         "",
 	"alertLastSentAt":              "0",
+	"alertTrafficLastLevel":        "",
+	"alertTrafficLastSentAt":       "0",
 	"subJsonExt":                   "",
 	"subClashExt":                  "",
 	"config":                       defaultConfig,
@@ -163,6 +166,8 @@ func (s *SettingService) GetAllSetting() (*map[string]string, error) {
 	delete(allSetting, "alertWebhookURL")
 	delete(allSetting, "alertLastFingerprint")
 	delete(allSetting, "alertLastSentAt")
+	delete(allSetting, "alertTrafficLastLevel")
+	delete(allSetting, "alertTrafficLastSentAt")
 	delete(allSetting, "outboundFailover")
 	delete(allSetting, fleetSettingKey)
 	delete(allSetting, fleetTemplatesSettingKey)

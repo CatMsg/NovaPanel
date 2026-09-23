@@ -106,6 +106,7 @@ func InitDB(dbPath string) error {
 		&model.User{},
 		&model.Tokens{},
 		&model.Stats{},
+		&model.TrafficBudgetSample{},
 		&model.Client{},
 		&model.Changes{},
 	)
@@ -141,6 +142,8 @@ func ensureIndexes() error {
 		`CREATE INDEX IF NOT EXISTS idx_changes_date_time ON changes(date_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_changes_actor_key_date_time ON changes(actor, key, date_time)`,
 		`CREATE INDEX IF NOT EXISTS idx_stats_lookup ON stats(resource, tag, date_time)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_traffic_budget_samples_period_time ON traffic_budget_samples(period_start, date_time)`,
+		`CREATE INDEX IF NOT EXISTS idx_traffic_budget_samples_time ON traffic_budget_samples(date_time)`,
 	}
 
 	for _, stmt := range indexes {

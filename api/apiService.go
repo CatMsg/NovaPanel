@@ -337,11 +337,22 @@ func (a *ApiService) GetPublicIP(c *gin.Context) {
 
 func (a *ApiService) GetHealth(c *gin.Context) {
 	force := c.Query("force") == "1" || strings.EqualFold(c.Query("force"), "true")
-	jsonObj(c, a.HealthService.GetHealthReport(force), nil)
+	report := a.HealthService.GetHealthReport(force)
+	jsonObj(c, service.LocalizeHealthReport(report, c.Query("lang")), nil)
 }
 
 func (a *ApiService) GetTrafficBudget(c *gin.Context) {
 	jsonObj(c, a.TrafficBudgetService.GetStatus(), nil)
+}
+
+func (a *ApiService) GetTrafficBudgetHistory(c *gin.Context) {
+	history, err := a.TrafficBudgetService.GetHistory()
+	jsonObj(c, history, err)
+}
+
+func (a *ApiService) GetFleetTrafficBudgetHistory(c *gin.Context) {
+	history, err := a.FleetService.GetFleetTrafficBudgetHistory(c.Query("id"))
+	jsonObj(c, history, err)
 }
 
 func (a *ApiService) GetAlertSettings(c *gin.Context) {

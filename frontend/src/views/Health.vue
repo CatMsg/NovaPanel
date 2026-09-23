@@ -139,10 +139,13 @@
       <v-expand-transition>
       <v-row v-show="showAlertSettings" class="mt-2">
         <v-col cols="12" md="7">
-          <v-text-field v-model="alerts.telegramToken" :label="alerts.telegramTokenSet ? $t('ui.health.tokenSaved') : 'Telegram Bot Token'" prepend-inner-icon="mdi-send-check-outline" type="password" autocomplete="new-password" />
+          <v-text-field v-model="alerts.telegramToken" :label="alerts.telegramTokenSet ? $t('ui.health.tokenSaved') : $t('ui.health.telegramToken')" prepend-inner-icon="mdi-send-check-outline" type="password" autocomplete="new-password" />
         </v-col>
         <v-col cols="12" md="5">
-          <v-text-field v-model="alerts.telegramChatId" label="Telegram Chat ID" prepend-inner-icon="mdi-account-tie" />
+          <v-text-field v-model="alerts.telegramChatId" :label="$t('ui.health.telegramChatId')" prepend-inner-icon="mdi-account-tie" />
+        </v-col>
+        <v-col cols="12" md="3">
+          <v-select v-model="alerts.language" :items="languages" :label="$t('ui.health.alertLanguage')" hide-details />
         </v-col>
         <v-col cols="6" md="3">
           <v-number-input v-model="alerts.intervalMinutes" :label="$t('ui.health.interval')" :min="1" :max="1440" control-variant="stacked" />
@@ -150,7 +153,7 @@
         <v-col cols="6" md="3">
           <v-number-input v-model="alerts.cooldownMinutes" :label="$t('ui.health.cooldown')" :min="1" :max="10080" control-variant="stacked" />
         </v-col>
-        <v-col cols="12" md="6" class="alert-settings__actions">
+        <v-col cols="12" md="3" class="alert-settings__actions">
           <v-btn variant="tonal" prepend-icon="mdi-send-check-outline" :loading="testingAlert" @click="testAlert">{{ $t('ui.health.testAlert') }}</v-btn>
           <v-btn color="primary" prepend-icon="mdi-content-save-outline" :loading="savingAlerts" @click="saveAlerts">{{ $t('ui.health.saveAlerts') }}</v-btn>
         </v-col>
@@ -165,11 +168,11 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { push } from 'notivue'
 import HttpUtils from '@/plugins/httputil'
-import { i18n } from '@/locales'
+import { i18n, languages } from '@/locales'
 
 interface HealthCheck { id: string; title: string; status: string; summary: string; detail?: string; action?: string }
 interface HealthReport { status: string; checkedAt: string; durationMs: number; summary: Record<string, number>; checks: HealthCheck[]; diagnostics: Record<string, unknown> }
-interface AlertSettings { enabled: boolean; telegramToken: string; telegramTokenSet: boolean; telegramChatId: string; intervalMinutes: number; cooldownMinutes: number }
+interface AlertSettings { enabled: boolean; telegramToken: string; telegramTokenSet: boolean; telegramChatId: string; intervalMinutes: number; cooldownMinutes: number; language: string }
 interface PortDriftIssue { id: string; type: string; severity: string; scope?: string; family?: string; protocol?: string; port?: string; to_ports?: string; owner_tag?: string; detail: string; repairable: boolean }
 interface LoginProtectionStatus { supported: boolean; installed: boolean; active: boolean; jail: string; bannedIps: string[]; error?: string }
 
@@ -183,7 +186,7 @@ const savingAlerts = ref(false)
 const testingAlert = ref(false)
 const unbanningIp = ref('')
 const showAlertSettings = ref(false)
-const alerts = ref<AlertSettings>({ enabled: false, telegramToken: '', telegramTokenSet: false, telegramChatId: '', intervalMinutes: 5, cooldownMinutes: 60 })
+const alerts = ref<AlertSettings>({ enabled: false, telegramToken: '', telegramTokenSet: false, telegramChatId: '', intervalMinutes: 5, cooldownMinutes: 60, language: 'zhHans' })
 
 const statusLabel = computed(() => ({ healthy: t('ui.health.allHealthy'), warning: t('ui.health.needsAttention'), critical: t('ui.health.critical') } as Record<string, string>)[report.value?.status ?? ''] ?? t('ui.health.waiting'))
 const checkedAt = computed(() => report.value?.checkedAt ? new Date(report.value.checkedAt).toLocaleString() : '-')
@@ -203,7 +206,9 @@ const loginProtection = computed<LoginProtectionStatus | null>(() => {
 
 const loadHealth = async (force = false) => {
   loading.value = true
-  const msg = await HttpUtils.get('api/health', force ? { force: 1 } : {})
+  const params: Record<string, string | number> = { lang: String(i18n.global.locale.value) }
+  if (force) params.force = 1
+  const msg = await HttpUtils.get('api/health', params)
   loading.value = false
   if (msg.success) report.value = msg.obj as HealthReport
 }

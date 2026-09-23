@@ -108,6 +108,9 @@ func TestCreateDBBackupStreamsSnapshotAndAppliesExclusions(t *testing.T) {
 	if err := GetDB().Create(&model.Stats{DateTime: 1, Resource: "user", Tag: "alice", Traffic: 10}).Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := GetDB().Create(&model.TrafficBudgetSample{DateTime: 1, PeriodStart: 1, UsedBytes: 10}).Error; err != nil {
+		t.Fatal(err)
+	}
 	if err := GetDB().Create(&model.Changes{DateTime: 1, Actor: "test", Key: "clients", Action: "add", Obj: []byte(`{}`)}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +132,9 @@ func TestCreateDBBackupStreamsSnapshotAndAppliesExclusions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, value := range map[string]interface{}{"stats": &model.Stats{}, "changes": &model.Changes{}} {
+	for name, value := range map[string]interface{}{
+		"stats": &model.Stats{}, "traffic_budget_samples": &model.TrafficBudgetSample{}, "changes": &model.Changes{},
+	} {
 		var count int64
 		if err := backup.Model(value).Count(&count).Error; err != nil {
 			t.Fatalf("count %s: %v", name, err)
