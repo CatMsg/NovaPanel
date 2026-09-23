@@ -132,9 +132,11 @@ func (s *AlertService) EvaluateAndNotify() error {
 
 	report := s.GetHealthReport(false)
 	problems := make([]string, 0)
+	problemStates := make([]string, 0)
 	for _, check := range report.Checks {
 		if check.Status == "error" || check.Status == "warning" {
 			problems = append(problems, formatAlertProblem(check))
+			problemStates = append(problemStates, alertProblemState(check, report.Diagnostics))
 		}
 	}
 	lastFingerprint := strings.TrimSpace(values["alertLastFingerprint"])
@@ -147,7 +149,7 @@ func (s *AlertService) EvaluateAndNotify() error {
 		}
 		return s.persistAlertState("", time.Now())
 	}
-	fingerprintBytes := sha256.Sum256([]byte(strings.Join(problems, "\n")))
+	fingerprintBytes := sha256.Sum256([]byte(strings.Join(problemStates, "\n")))
 	fingerprint := hex.EncodeToString(fingerprintBytes[:])
 	cooldown, _ := strconv.Atoi(values["alertCooldownMinutes"])
 	if fingerprint == lastFingerprint && cooldown > 0 && time.Since(time.Unix(lastSent, 0)) < time.Duration(cooldown)*time.Minute {
@@ -169,6 +171,15 @@ func formatAlertProblem(check HealthCheck) string {
 		return fmt.Sprintf("[%s] %s", label, check.Summary)
 	}
 	return fmt.Sprintf("[%s] %s: %s", check.Status, check.Title, check.Summary)
+}
+
+func alertProblemState(check HealthCheck, diagnostics map[string]interface{}) string {
+	if check.ID == "traffic-budget" {
+		if status, ok := diagnostics["trafficBudget"].(TrafficBudgetStatus); ok && strings.TrimSpace(status.Level) != "" {
+			return check.ID + ":" + status.Level
+		}
+	}
+	return check.ID + ":" + check.Status
 }
 
 func (s *AlertService) persistAlertState(fingerprint string, sentAt time.Time) error {
