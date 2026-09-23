@@ -102,7 +102,8 @@ const en = {
     loginSecurityHint: '10 failed logins within 10 minutes trigger a permanent IP ban. Manage trusted sources in Settings.',
     protectionActive: 'Protection active', protectionInactive: 'Protection inactive', unban: 'Unban',
     noBannedIps: 'No source IP is currently banned.', unbanned: 'IP address unbanned',
-  },  settings: {
+  },
+  settings: {
     unsaved: 'Unsaved', synced: 'Synced',
     subtitle: 'Manage panel UI, subscription output, paths, and server-wide traffic protection from one page.',
     currentTab: 'Current tab: {tab}', unsavedChanges: 'Unsaved changes', configSynced: 'Configuration synced',
@@ -221,7 +222,8 @@ const zhHans = {
     loginSecurityHint: '10 分钟内登录失败 10 次即永久封禁来源 IP；可信管理地址在设置页维护。',
     protectionActive: '防护运行中', protectionInactive: '防护未运行', unban: '解除封禁',
     noBannedIps: '当前没有被封禁的来源 IP。', unbanned: '已解除 IP 封禁',
-  },  settings: {
+  },
+  settings: {
     unsaved: '未保存', synced: '已同步',
     subtitle: '集中管理面板界面、订阅输出、路径设置和服务器总流量保护，便于检查与回退。',
     currentTab: '当前标签：{tab}', unsavedChanges: '存在未保存更改', configSynced: '配置已同步',
