@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestNormalizeSingBoxConfigFor116(t *testing.T) {
+func TestNormalizeSingBoxConfigFor115Plus(t *testing.T) {
 	raw := []byte(`{
 		"dns":{
 			"servers":[

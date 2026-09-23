@@ -30,3 +30,40 @@ func TestSingBoxConfigPreservesExtendedTopLevelOptions(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeSingBoxConfigFor115RemovesTunStackAndPreservesEndpointOptions(t *testing.T) {
+	raw := []byte(`{
+		"inbounds":[{
+			"type":"tun",
+			"tag":"tun-in",
+			"address":["172.19.0.1/30"],
+			"stack":"system"
+		}],
+		"endpoints":[{
+			"type":"wireguard",
+			"tag":"wg-endpoint",
+			"on_demand":true
+		}],
+		"route":{}
+	}`)
+
+	normalized, err := NormalizeSingBoxConfig(raw)
+	if err != nil {
+		t.Fatalf("normalize 1.15 config: %v", err)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(normalized, &result); err != nil {
+		t.Fatalf("decode normalized config: %v", err)
+	}
+	inbounds := objectList(result["inbounds"])
+	if len(inbounds) != 1 {
+		t.Fatalf("unexpected inbounds: %#v", result["inbounds"])
+	}
+	if _, exists := inbounds[0]["stack"]; exists {
+		t.Fatalf("deprecated TUN stack was retained: %#v", inbounds[0])
+	}
+	endpoints := objectList(result["endpoints"])
+	if len(endpoints) != 1 || !boolValue(endpoints[0]["on_demand"]) {
+		t.Fatalf("1.15 endpoint options were not preserved: %#v", result["endpoints"])
+	}
+}

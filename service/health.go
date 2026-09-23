@@ -103,7 +103,7 @@ func (s *HealthService) checkSingBoxCompatibility() HealthCheck {
 		ID:      "sing-box-compatibility",
 		Title:   "Sing-Box 配置兼容性",
 		Status:  "ok",
-		Summary: "未检测到已知的 1.16 阻断配置",
+		Summary: "未检测到已知的 sing-box 1.15 兼容问题",
 	}
 }
 
