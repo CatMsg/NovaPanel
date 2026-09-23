@@ -65,8 +65,12 @@ func (c *HistoryTracker) record(inboundCtx adapter.InboundContext, outboundTag s
 	}
 
 	destination := inboundCtx.Destination.String()
+	sourceIP := ""
+	if inboundCtx.Source.IsIP() {
+		sourceIP = inboundCtx.Source.Unwrap().AddrString()
+	}
 	now := time.Now().Unix()
-	dedupeKey := strings.ToLower(user) + "|" + strings.ToLower(domain) + "|" + strings.ToLower(destination) + "|" + strings.ToLower(outboundTag) + "|" + strings.ToLower(networkType)
+	dedupeKey := strings.ToLower(user) + "|" + strings.ToLower(sourceIP) + "|" + strings.ToLower(domain) + "|" + strings.ToLower(destination) + "|" + strings.ToLower(outboundTag) + "|" + strings.ToLower(networkType)
 
 	c.access.Lock()
 	if lastSeen, ok := c.recent[dedupeKey]; ok && time.Duration(now-lastSeen)*time.Second < historyDedupeWindow {
@@ -87,6 +91,7 @@ func (c *HistoryTracker) record(inboundCtx adapter.InboundContext, outboundTag s
 		DateTime:    now,
 		Domain:      domain,
 		Destination: destination,
+		SourceIP:    sourceIP,
 		Inbound:     inboundCtx.Inbound,
 		Outbound:    outboundTag,
 		Network:     networkType,

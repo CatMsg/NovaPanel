@@ -10,6 +10,7 @@ export interface HistoryEntry {
   dateTime: number
   domain: string
   destination?: string
+  sourceIp?: string
   inbound?: string
   outbound?: string
   network?: string

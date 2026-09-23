@@ -63,6 +63,9 @@
         <template #item.serverName="{ item }">
           <v-chip size="small" variant="tonal" color="primary">{{ item.serverName }}</v-chip>
         </template>
+        <template #item.sourceIp="{ item }">
+          <span class="sessions-source-ip" dir="ltr">{{ item.sourceIp || '-' }}</span>
+        </template>
         <template #item.target="{ item }">
           <div class="sessions-target">
             <strong :title="item.domain || item.destination">{{ item.domain || item.destination || '-' }}</strong>
@@ -90,6 +93,7 @@
           <div class="sessions-mobile__target">{{ item.domain || item.destination || '-' }}</div>
           <div v-if="item.domain && item.destination && item.domain !== item.destination" class="sessions-mobile__destination">{{ item.destination }}</div>
           <div class="sessions-mobile__grid">
+            <div><span>{{ $t('ui.sessions.sourceIp') }}</span><strong dir="ltr">{{ item.sourceIp || '-' }}</strong></div>
             <div><span>{{ $t('network') }}</span><strong>{{ item.network }} · {{ item.protocol || item.kind }}</strong></div>
             <div><span>{{ $t('ui.sessions.duration') }}</span><strong>{{ elapsed(item.startedAt) }}</strong></div>
             <div><span>{{ $t('pages.inbounds') }}</span><strong>{{ item.inbound || '-' }}</strong></div>
@@ -128,6 +132,7 @@ interface SessionRow {
   user?: string
   network: string
   source?: string
+  sourceIp?: string
   destination?: string
   domain?: string
   protocol?: string
@@ -157,6 +162,7 @@ let stopVisibilityListener: (() => void) | undefined
 const headers = [
   { title: t('ui.sessions.server'), key: 'serverName' },
   { title: t('ui.sessions.user'), key: 'user' },
+  { title: t('ui.sessions.sourceIp'), key: 'sourceIp' },
   { title: t('ui.sessions.target'), key: 'target', sortable: false },
   { title: t('ui.sessions.path'), key: 'path', sortable: false },
   { title: t('network'), key: 'network' },
@@ -177,7 +183,7 @@ const filteredSessions = computed(() => {
     if (userFilter.value !== 'all' && item.user !== userFilter.value) return false
     if (networkFilter.value !== 'all' && item.network !== networkFilter.value) return false
     if (!needle) return true
-    return [item.serverName, item.user, item.domain, item.destination, item.inbound, item.outbound, item.protocol]
+    return [item.serverName, item.user, item.sourceIp, item.source, item.domain, item.destination, item.inbound, item.outbound, item.protocol]
       .some(value => String(value ?? '').toLowerCase().includes(needle))
   })
 })
@@ -271,6 +277,7 @@ onUnmounted(() => {
 .sessions-summary__icon--download { color: #0284c7; background: rgba(2, 132, 199, .12); }
 .sessions-content { padding: 20px; }
 .sessions-toolbar { display: grid; grid-template-columns: minmax(260px, 1fr) repeat(3, minmax(150px, .42fr)); gap: 12px; margin-bottom: 18px; }
+.sessions-source-ip { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: .8rem; white-space: nowrap; }
 .sessions-target { display: flex; flex-direction: column; min-width: 180px; max-width: 320px; }
 .sessions-target strong, .sessions-target span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sessions-target span { color: rgba(var(--v-theme-on-surface), .64); font-size: .74rem; }

@@ -67,6 +67,10 @@
               </div>
               <div class="history-dialog__mobile-grid">
                 <div>
+                  <span>{{ $t('ui.sessions.sourceIp') }}</span>
+                  <strong dir="ltr">{{ item.sourceIp || '-' }}</strong>
+                </div>
+                <div>
                   <span>{{ $t('pages.inbounds') }}</span>
                   <strong>{{ item.inbound || '-' }}</strong>
                 </div>
@@ -150,6 +154,9 @@
                 </span>
               </div>
             </template>
+            <template v-slot:item.sourceIp="{ value }">
+              <span class="history-dialog__source-ip" dir="ltr" :title="value || '-'">{{ value || '-' }}</span>
+            </template>
             <template v-slot:item.inbound="{ value }">
               <v-chip size="small" variant="tonal" color="primary" class="history-dialog__tag-chip" :title="value || '-'">
                 {{ value || '-' }}
@@ -207,6 +214,7 @@ const itemsPerPage = 10
 const headers = [
   { title: i18n.global.t('admin.date') + '-' + i18n.global.t('admin.time'), key: 'dateTime' },
   { title: i18n.global.t('rule.domain'), key: 'domain' },
+  { title: i18n.global.t('ui.sessions.sourceIp'), key: 'sourceIp' },
   { title: i18n.global.t('pages.inbounds'), key: 'inbound' },
   { title: i18n.global.t('pages.outbounds'), key: 'outbound' },
   { title: i18n.global.t('network'), key: 'network' },
@@ -255,6 +263,7 @@ const filteredHistory = computed(() => {
       formattedDate,
       item.domain,
       item.destination,
+      item.sourceIp,
       item.inbound,
       item.outbound,
       item.network,
@@ -295,11 +304,12 @@ const csvCell = (value: unknown) => `"${String(value ?? '').replaceAll('"', '""'
 const exportHistory = () => {
   if (filteredHistory.value.length === 0) return
   const rows = [
-    ['Date', 'Domain', 'Destination', 'Inbound', 'Outbound', 'Network', 'Protocol'],
+    ['Date', 'Domain', 'Destination', 'Source IP', 'Inbound', 'Outbound', 'Network', 'Protocol'],
     ...filteredHistory.value.map(item => [
       dateFormatted(item.dateTime),
       item.domain,
       item.destination,
+      item.sourceIp,
       item.inbound,
       item.outbound,
       item.network,
@@ -591,6 +601,12 @@ watch(
 
 .history-dialog__table-text--muted {
   color: rgba(var(--v-theme-on-surface), 0.62);
+}
+
+.history-dialog__source-ip {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  white-space: nowrap;
 }
 
 .history-dialog__tag-chip {

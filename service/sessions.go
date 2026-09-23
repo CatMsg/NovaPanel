@@ -3,7 +3,9 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"sort"
 	"strconv"
@@ -20,6 +22,22 @@ func remarshalFleetObject(value interface{}, target interface{}) error {
 	return json.Unmarshal(raw, target)
 }
 
+func sourceIPFromSessionSource(source string) string {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(source); err == nil {
+		if ip, err := netip.ParseAddr(strings.Trim(host, "[]")); err == nil {
+			return ip.Unmap().String()
+		}
+	}
+	if ip, err := netip.ParseAddr(strings.Trim(source, "[]")); err == nil {
+		return ip.Unmap().String()
+	}
+	return ""
+}
+
 // SessionView is the protocol-neutral view used by the local and fleet APIs.
 // It is generated from live trackers and is never persisted.
 type SessionView struct {
@@ -32,6 +50,7 @@ type SessionView struct {
 	User        string    `json:"user,omitempty"`
 	Network     string    `json:"network"`
 	Source      string    `json:"source,omitempty"`
+	SourceIP    string    `json:"sourceIp,omitempty"`
 	Destination string    `json:"destination,omitempty"`
 	Domain      string    `json:"domain,omitempty"`
 	Protocol    string    `json:"protocol,omitempty"`
@@ -56,7 +75,8 @@ func GetLocalSessions() []SessionView {
 				result = append(result, SessionView{
 					ID: "core:" + session.ID, Kind: "sing-box", Inbound: session.Inbound,
 					Outbound: session.Outbound, User: session.User, Network: session.Network,
-					Source: session.Source, Destination: session.Destination, Domain: session.Domain,
+					Source: session.Source, SourceIP: sourceIPFromSessionSource(session.Source),
+					Destination: session.Destination, Domain: session.Domain,
 					Protocol: session.Protocol, Rule: session.Rule, StartedAt: session.StartedAt,
 					Upload: session.Upload, Download: session.Download,
 				})
@@ -108,7 +128,7 @@ func (s *MasqueService) sessionViews() []SessionView {
 			result = append(result, SessionView{
 				ID:   "masque:" + runtime.tag + ":" + strconv.FormatUint(session.id, 10),
 				Kind: "masque", Inbound: runtime.tag, User: session.identity.Name,
-				Network: "ip", Source: session.remote, Destination: "CONNECT-IP",
+				Network: "ip", Source: session.remote, SourceIP: sourceIPFromSessionSource(session.remote), Destination: "CONNECT-IP",
 				Protocol: "http3-connect-ip", StartedAt: session.startedAt,
 				Upload: session.rxBytes.Load(), Download: session.txBytes.Load(),
 			})
@@ -188,6 +208,9 @@ func (s *FleetService) GetFleetSessions() (*FleetSessions, error) {
 			for index := range sessions {
 				sessions[index].ServerID = config.ID
 				sessions[index].ServerName = config.Name
+				if sessions[index].SourceIP == "" {
+					sessions[index].SourceIP = sourceIPFromSessionSource(sessions[index].Source)
+				}
 			}
 			mutex.Lock()
 			result.Sessions = append(result.Sessions, sessions...)
