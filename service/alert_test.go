@@ -98,3 +98,20 @@ func TestFormatAlertProblemLabelsTrafficBudget(t *testing.T) {
 		t.Fatalf("unexpected generic alert: %q", generic)
 	}
 }
+
+func TestAlertProblemStateUsesStableTrafficLevel(t *testing.T) {
+	diagnostics := map[string]interface{}{
+		"trafficBudget": TrafficBudgetStatus{Level: "warning", UsedPercent: 82.5},
+	}
+	warning := HealthCheck{ID: "traffic-budget", Status: "warning", Summary: "已使用 82.5%"}
+	if got := alertProblemState(warning, diagnostics); got != "traffic-budget:warning" {
+		t.Fatalf("unexpected traffic warning state: %q", got)
+	}
+	diagnostics["trafficBudget"] = TrafficBudgetStatus{Level: "blocked", UsedPercent: 100}
+	if got := alertProblemState(HealthCheck{ID: "traffic-budget", Status: "error"}, diagnostics); got != "traffic-budget:blocked" {
+		t.Fatalf("unexpected traffic blocked state: %q", got)
+	}
+	if got := alertProblemState(HealthCheck{ID: "disk", Status: "warning"}, diagnostics); got != "disk:warning" {
+		t.Fatalf("unexpected generic alert state: %q", got)
+	}
+}
