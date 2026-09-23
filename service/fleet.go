@@ -46,44 +46,46 @@ type FleetServerInput struct {
 }
 
 type FleetServerView struct {
-	ID              string                 `json:"id"`
-	Name            string                 `json:"name"`
-	URL             string                 `json:"url"`
-	Enabled         bool                   `json:"enabled"`
-	TokenSet        bool                   `json:"tokenSet"`
-	Reachable       bool                   `json:"reachable"`
-	LatencyMs       int64                  `json:"latencyMs"`
-	CheckedAt       time.Time              `json:"checkedAt"`
-	Error           string                 `json:"error,omitempty"`
-	LastKnown       bool                   `json:"lastKnown,omitempty"`
-	LastSuccessAt   string                 `json:"lastSuccessAt,omitempty"`
-	System          map[string]interface{} `json:"system,omitempty"`
-	Core            map[string]interface{} `json:"core,omitempty"`
-	PublicIP        string                 `json:"publicIp,omitempty"`
-	Uptime          int64                  `json:"uptime,omitempty"`
-	CPUPercent      float64                `json:"cpuPercent"`
-	MemoryUsed      int64                  `json:"memoryUsed"`
-	MemoryTotal     int64                  `json:"memoryTotal"`
-	NetworkSent     int64                  `json:"networkSent"`
-	NetworkReceived int64                  `json:"networkReceived"`
-	ResourcesReady  bool                   `json:"resourcesReady"`
-	OnlineUsers     int                    `json:"onlineUsers,omitempty"`
-	OnlineInbounds  int                    `json:"onlineInbounds,omitempty"`
-	OnlineOutbounds int                    `json:"onlineOutbounds,omitempty"`
-	Clients         int                    `json:"clients,omitempty"`
-	Inbounds        int                    `json:"inbounds,omitempty"`
-	Outbounds       int                    `json:"outbounds,omitempty"`
-	Endpoints       int                    `json:"endpoints,omitempty"`
-	MasqueTotal     int                    `json:"masqueTotal,omitempty"`
-	MasqueRunning   int                    `json:"masqueRunning,omitempty"`
-	MieruTotal      int                    `json:"mieruTotal,omitempty"`
-	MieruRunning    int                    `json:"mieruRunning,omitempty"`
-	PortBackend     string                 `json:"portBackend,omitempty"`
-	Listeners       int                    `json:"listeners,omitempty"`
-	NatRules        int                    `json:"natRules,omitempty"`
-	Configuration   *FleetConfigProfile    `json:"configuration,omitempty"`
-	Drift           []FleetConfigDrift     `json:"drift,omitempty"`
-	DriftCount      int                    `json:"driftCount,omitempty"`
+	ID                 string                 `json:"id"`
+	Name               string                 `json:"name"`
+	URL                string                 `json:"url"`
+	Enabled            bool                   `json:"enabled"`
+	TokenSet           bool                   `json:"tokenSet"`
+	Reachable          bool                   `json:"reachable"`
+	LatencyMs          int64                  `json:"latencyMs"`
+	CheckedAt          time.Time              `json:"checkedAt"`
+	Error              string                 `json:"error,omitempty"`
+	LastKnown          bool                   `json:"lastKnown,omitempty"`
+	LastSuccessAt      string                 `json:"lastSuccessAt,omitempty"`
+	System             map[string]interface{} `json:"system,omitempty"`
+	Core               map[string]interface{} `json:"core,omitempty"`
+	PublicIP           string                 `json:"publicIp,omitempty"`
+	Uptime             int64                  `json:"uptime,omitempty"`
+	CPUPercent         float64                `json:"cpuPercent"`
+	MemoryUsed         int64                  `json:"memoryUsed"`
+	MemoryTotal        int64                  `json:"memoryTotal"`
+	NetworkSent        int64                  `json:"networkSent"`
+	NetworkReceived    int64                  `json:"networkReceived"`
+	NetworkTotalsReady bool                   `json:"networkTotalsReady"`
+	ResourcesReady     bool                   `json:"resourcesReady"`
+	TrafficBudget      *TrafficBudgetStatus   `json:"trafficBudget,omitempty"`
+	OnlineUsers        int                    `json:"onlineUsers,omitempty"`
+	OnlineInbounds     int                    `json:"onlineInbounds,omitempty"`
+	OnlineOutbounds    int                    `json:"onlineOutbounds,omitempty"`
+	Clients            int                    `json:"clients,omitempty"`
+	Inbounds           int                    `json:"inbounds,omitempty"`
+	Outbounds          int                    `json:"outbounds,omitempty"`
+	Endpoints          int                    `json:"endpoints,omitempty"`
+	MasqueTotal        int                    `json:"masqueTotal,omitempty"`
+	MasqueRunning      int                    `json:"masqueRunning,omitempty"`
+	MieruTotal         int                    `json:"mieruTotal,omitempty"`
+	MieruRunning       int                    `json:"mieruRunning,omitempty"`
+	PortBackend        string                 `json:"portBackend,omitempty"`
+	Listeners          int                    `json:"listeners,omitempty"`
+	NatRules           int                    `json:"natRules,omitempty"`
+	Configuration      *FleetConfigProfile    `json:"configuration,omitempty"`
+	Drift              []FleetConfigDrift     `json:"drift,omitempty"`
+	DriftCount         int                    `json:"driftCount,omitempty"`
 }
 
 type FleetSnapshot struct {
@@ -149,6 +151,7 @@ func (s *FleetService) GetFleetStatus() map[string]interface{} {
 		"publicIp":      serverService.GetPublicIP(),
 		"ports":         serverService.GetPortStatus(),
 		"configuration": s.getFleetConfigProfile(),
+		"trafficBudget": GetTrafficBudgetService().GetStatusSnapshot(),
 	}
 
 	online, err := (&StatsService{}).GetOnlines()
@@ -524,6 +527,7 @@ func (s *FleetService) applyFleetStatus(view *FleetServerView, payload map[strin
 		view.PublicIP = publicIP
 	}
 	applyFleetResourceInfo(view, payload["resources"])
+	view.TrafficBudget = fleetTrafficBudgetFromValue(payload["trafficBudget"])
 	applyFleetDatabaseInfo(view, payload["database"])
 	if online, ok := payload["online"].(map[string]interface{}); ok {
 		view.OnlineUsers = fleetInt(online["users"])
@@ -558,8 +562,39 @@ func applyFleetResourceInfo(view *FleetServerView, value interface{}) {
 		view.MemoryTotal = fleetInt64(memory["total"])
 	}
 	if network, ok := resources["network"].(map[string]interface{}); ok {
-		view.NetworkSent = fleetInt64(network["sent"])
-		view.NetworkReceived = fleetInt64(network["recv"])
+		_, sentReady := network["sent"]
+		_, receivedReady := network["recv"]
+		view.NetworkTotalsReady = sentReady && receivedReady
+		if view.NetworkTotalsReady {
+			view.NetworkSent = fleetInt64(network["sent"])
+			view.NetworkReceived = fleetInt64(network["recv"])
+		}
+	}
+}
+
+func fleetTrafficBudgetFromValue(value interface{}) *TrafficBudgetStatus {
+	switch status := value.(type) {
+	case TrafficBudgetStatus:
+		copy := status
+		return &copy
+	case *TrafficBudgetStatus:
+		if status == nil {
+			return nil
+		}
+		copy := *status
+		return &copy
+	case map[string]interface{}:
+		raw, err := json.Marshal(status)
+		if err != nil {
+			return nil
+		}
+		var result TrafficBudgetStatus
+		if err := json.Unmarshal(raw, &result); err != nil {
+			return nil
+		}
+		return &result
+	default:
+		return nil
 	}
 }
 

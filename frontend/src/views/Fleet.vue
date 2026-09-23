@@ -166,6 +166,21 @@
               </div>
             </div>
 
+            <div class="fleet-traffic">
+              <div class="fleet-traffic__head">
+                <span>{{ trafficTitle(server) }}</span>
+                <strong>{{ trafficTotalLabel(server) }}</strong>
+              </div>
+              <v-progress-linear
+                v-if="trafficBudgetReadable(server) && (server.reachable || server.lastKnown)"
+                :model-value="trafficBudgetPercent(server)"
+                :color="trafficBudgetColor(server)"
+                height="6"
+                rounded
+              />
+              <small>{{ trafficDetailLabel(server) }}</small>
+            </div>
+
             <div class="fleet-card__metrics">
               <div class="fleet-metric">
                 <span>{{ $t('ui.common.version') }}</span>
@@ -417,6 +432,8 @@
             <div><span>{{ $t('ui.common.memory') }}</span><strong>{{ selectedServer.ResourcesReady ? formatMemory(selectedServer.MemoryUsed, selectedServer.MemoryTotal, true) : '-' }}</strong></div>
             <div><span>{{ $t('ui.common.uploadSpeed') }}</span><strong>{{ networkRateLabel(selectedServer, 'upload') }}</strong></div>
             <div><span>{{ $t('ui.common.downloadSpeed') }}</span><strong>{{ networkRateLabel(selectedServer, 'download') }}</strong></div>
+            <div><span>{{ trafficTitle(selectedServer) }}</span><strong>{{ trafficTotalLabel(selectedServer) }}</strong></div>
+            <div><span>{{ $t('ui.fleet.trafficBreakdown') }}</span><strong>{{ trafficDetailLabel(selectedServer) }}</strong></div>
             <div><span>{{ $t('ui.fleet.address') }}</span><strong>{{ selectedServer.url }}</strong></div>
             <div><span>{{ $t('ui.common.publicIp') }}</span><strong>{{ selectedServer.PublicIP || '-' }}</strong></div>
             <div><span>{{ $t('ui.common.version') }}</span><strong>{{ selectedServer.System?.appVersion || '-' }}</strong></div>
@@ -504,6 +521,8 @@ type FleetServer = {
   MemoryTotal: number
   NetworkSent: number
   NetworkReceived: number
+  NetworkTotalsReady: boolean
+  TrafficBudget?: FleetTrafficBudget
   UploadRate: number
   DownloadRate: number
   NetworkRateReady: boolean
@@ -525,6 +544,20 @@ type FleetServer = {
   configuration?: FleetConfigProfile
   drift?: FleetConfigDrift[]
   driftCount: number
+}
+
+type FleetTrafficBudget = {
+  enabled: boolean
+  supported: boolean
+  limitBytes: number
+  usedBytes: number
+  meteredRxBytes: number
+  meteredTxBytes: number
+  offsetBytes: number
+  accountingMode: string
+  level: string
+  blocked: boolean
+  error?: string
 }
 
 type FleetConfigProfile = {
@@ -631,13 +664,16 @@ const normalizeServer = (server: any): FleetServer => {
   let downloadRate = 0
   let rateReady = false
   const resourcesReady = Boolean(server.resourcesReady ?? server.ResourcesReady)
-  if (server.reachable && resourcesReady && previous && checkedAt > previous.checkedAt && sent >= previous.sent && received >= previous.received) {
+  const networkTotalsReady = Boolean(server.networkTotalsReady ?? server.NetworkTotalsReady ?? resourcesReady)
+  if (server.reachable && networkTotalsReady && previous && checkedAt > previous.checkedAt && sent >= previous.sent && received >= previous.received) {
     const elapsedSeconds = (checkedAt - previous.checkedAt) / 1000
     uploadRate = (sent - previous.sent) / elapsedSeconds
     downloadRate = (received - previous.received) / elapsedSeconds
     rateReady = true
   }
-  if (server.reachable && resourcesReady && Number.isFinite(checkedAt)) networkSamples.set(server.id, { sent, received, checkedAt })
+  if (server.reachable && networkTotalsReady && Number.isFinite(checkedAt)) networkSamples.set(server.id, { sent, received, checkedAt })
+
+  const budget = server.trafficBudget ?? server.TrafficBudget
 
   return {
     ...server,
@@ -650,6 +686,8 @@ const normalizeServer = (server: any): FleetServer => {
     MemoryTotal: Number(server.memoryTotal ?? server.MemoryTotal ?? 0),
     NetworkSent: sent,
     NetworkReceived: received,
+    NetworkTotalsReady: networkTotalsReady,
+    TrafficBudget: budget && typeof budget === 'object' ? budget : undefined,
     UploadRate: uploadRate,
     DownloadRate: downloadRate,
     NetworkRateReady: rateReady,
@@ -757,9 +795,62 @@ const formatMemory = (used: number, total: number, detailed = false) => {
   return detailed ? `${formatBytes(used)} / ${formatBytes(total)} · ${percent}` : percent
 }
 const networkRateLabel = (server: FleetServer, direction: 'upload' | 'download') => {
-  if (!server.reachable || !server.ResourcesReady) return '-'
+  if (!server.reachable || !server.NetworkTotalsReady) return '-'
   if (!server.NetworkRateReady) return t('ui.common.sampling')
   return formatBytes(direction === 'upload' ? server.UploadRate : server.DownloadRate, '/s')
+}
+
+const formatTrafficBytes = (value: number) => {
+  if (!Number.isFinite(value) || value < 0) return '-'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+  let size = value
+  let unitIndex = 0
+  while (size >= 1000 && unitIndex < units.length - 1) {
+    size /= 1000
+    unitIndex += 1
+  }
+  const digits = size >= 100 || unitIndex === 0 ? 0 : size >= 10 ? 1 : 2
+  return `${size.toFixed(digits)} ${units[unitIndex]}`
+}
+const trafficTitle = (server: FleetServer) => t(server.TrafficBudget?.enabled ? 'ui.fleet.cycleTraffic' : 'ui.fleet.bootTraffic')
+const trafficBudgetReadable = (server: FleetServer) => {
+  const budget = server.TrafficBudget
+  return Boolean(budget?.enabled && budget.supported && budget.level !== 'error' && !budget.error && Number(budget.limitBytes) > 0)
+}
+const trafficBudgetPercent = (server: FleetServer) => {
+  const budget = server.TrafficBudget
+  return budget?.limitBytes ? clampPercent(Number(budget.usedBytes) / Number(budget.limitBytes) * 100) : 0
+}
+const trafficBudgetColor = (server: FleetServer) => {
+  const budget = server.TrafficBudget
+  if (budget?.blocked || budget?.level === 'error' || budget?.level === 'critical') return 'error'
+  return budget?.level === 'warning' ? 'warning' : 'success'
+}
+const trafficTotalLabel = (server: FleetServer) => {
+  if (!server.reachable && !server.lastKnown) return '-'
+  const budget = server.TrafficBudget
+  if (budget?.enabled) {
+    if (!trafficBudgetReadable(server)) return '-'
+    return `${formatTrafficBytes(Number(budget.usedBytes))} / ${formatTrafficBytes(Number(budget.limitBytes))}`
+  }
+  if (!server.NetworkTotalsReady) return '-'
+  return formatTrafficBytes(server.NetworkSent + server.NetworkReceived)
+}
+const trafficDetailLabel = (server: FleetServer) => {
+  if (!server.reachable && !server.lastKnown) return t('ui.fleet.trafficUnavailable')
+  const budget = server.TrafficBudget
+  const lastSample = server.lastSuccessAt ? new Date(server.lastSuccessAt) : null
+  const lastKnown = server.lastKnown && lastSample && Number.isFinite(lastSample.getTime())
+    ? ` · ${t('ui.fleet.trafficLastSample', { time: lastSample.toLocaleString() })}`
+    : ''
+  if (budget?.enabled && (!budget.supported || budget.level === 'error' || budget.error)) return `${budget.error || t('ui.fleet.trafficUnavailable')}${lastKnown}`
+  if (budget?.enabled) {
+    const mode = t(`ui.fleet.trafficMode.${budget.accountingMode || 'tx'}`)
+    const baseline = Number(budget.offsetBytes) > 0 ? ` · ${t('ui.fleet.trafficBaseline')} ${formatTrafficBytes(Number(budget.offsetBytes))}` : ''
+    return `${mode} · TX ${formatTrafficBytes(Number(budget.meteredTxBytes))} · RX ${formatTrafficBytes(Number(budget.meteredRxBytes))}${baseline}${lastKnown}`
+  }
+  if (!server.NetworkTotalsReady) return t('ui.fleet.trafficUnavailable')
+  return `TX ${formatTrafficBytes(server.NetworkSent)} · RX ${formatTrafficBytes(server.NetworkReceived)}${lastKnown}`
 }
 
 const tlsLabel = (state: string) => ({ enabled: t('ui.fleet.tlsEnabled'), disabled: t('ui.fleet.tlsDisabled'), partial: t('ui.fleet.tlsPartial') } as Record<string, string>)[state] ?? state
@@ -1183,6 +1274,11 @@ onBeforeUnmount(() => {
 .fleet-monitor__head strong { font-size: 0.82rem; }
 .fleet-monitor__item--upload { box-shadow: inset 0 2px 0 rgba(245, 158, 11, .6); }
 .fleet-monitor__item--download { box-shadow: inset 0 2px 0 rgba(34, 197, 94, .6); }
+.fleet-traffic { display: grid; gap: 8px; margin-top: 12px; padding: 13px 14px; border: 1px solid var(--np-border); border-radius: 15px; background: var(--np-surface-muted); }
+.fleet-traffic__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-width: 0; }
+.fleet-traffic__head span, .fleet-traffic small { color: var(--np-text-muted); font-size: 0.72rem; }
+.fleet-traffic__head strong { overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; font-size: 0.95rem; }
+.fleet-traffic small { overflow-wrap: anywhere; line-height: 1.4; }
 .fleet-card__metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 18px 0; }
 .fleet-metric { display: grid; gap: 3px; }
 .fleet-metric span { color: var(--np-text-muted); font-size: 0.75rem; }
@@ -1196,7 +1292,7 @@ onBeforeUnmount(() => {
 .fleet-detail__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
 .fleet-detail__grid > div { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--np-border); border-radius: 14px; background: var(--np-surface-muted); }
 .fleet-detail__grid span, .fleet-detail__log-head { color: var(--np-text-muted); font-size: 0.76rem; }
-.fleet-detail__grid strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-detail__grid strong { overflow-wrap: anywhere; }
 .fleet-detail__log-head { display: flex; align-items: center; justify-content: space-between; margin-top: 18px; }
 .fleet-detail__logs { max-height: 260px; margin: 8px 0 0; padding: 14px; overflow: auto; border: 1px solid var(--np-border); border-radius: 14px; background: var(--np-surface-muted); color: var(--np-text); white-space: pre-wrap; word-break: break-word; font: 0.76rem/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .fleet-config-compare { margin-top: 18px; }
@@ -1213,6 +1309,8 @@ onBeforeUnmount(() => {
   .fleet-hero__actions { padding-top: 14px; }
   .fleet-hero__actions .v-btn { padding-inline: 7px; font-size: 0.78rem; }
   .fleet-monitor { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fleet-traffic__head { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .fleet-traffic__head strong { max-width: 100%; text-align: left; }
   .fleet-detail__grid, .fleet-config-snapshot { grid-template-columns: 1fr; }
   .fleet-drift-item { grid-template-columns: 1fr auto; }
   .fleet-drift-item span, .fleet-drift-item strong { grid-column: 1 / -1; }
