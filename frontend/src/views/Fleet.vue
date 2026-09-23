@@ -168,7 +168,17 @@
 
             <div class="fleet-traffic">
               <div class="fleet-traffic__head">
-                <span>{{ trafficTitle(server) }}</span>
+                <div class="fleet-traffic__title">
+                  <span>{{ trafficTitle(server) }}</span>
+                  <v-chip
+                    v-if="trafficBudgetReadable(server)"
+                    :color="trafficBudgetColor(server)"
+                    size="x-small"
+                    variant="tonal"
+                  >
+                    {{ trafficBudgetStatusLabel(server) }}
+                  </v-chip>
+                </div>
                 <strong>{{ trafficTotalLabel(server) }}</strong>
               </div>
               <v-progress-linear
@@ -837,6 +847,18 @@ const trafficBudgetColor = (server: FleetServer) => {
   if (budget?.blocked || budget?.level === 'error' || budget?.level === 'critical') return 'error'
   return budget?.level === 'warning' ? 'warning' : 'success'
 }
+const trafficBudgetStatusLabel = (server: FleetServer) => {
+  const budget = server.TrafficBudget
+  const percent = trafficBudgetPercent(server).toFixed(1)
+  const state = budget?.blocked
+    ? t('ui.trafficBudget.statusBlocked')
+    : budget?.level === 'critical'
+      ? t('ui.trafficBudget.statusCritical')
+      : budget?.level === 'warning'
+        ? t('ui.trafficBudget.statusWarning')
+        : t('ui.trafficBudget.statusNormal')
+  return `${percent}% · ${state}`
+}
 const trafficTotalLabel = (server: FleetServer) => {
   if (!server.reachable && !server.lastKnown) return '-'
   const budget = server.TrafficBudget
@@ -858,7 +880,8 @@ const trafficDetailLabel = (server: FleetServer) => {
   if (budget?.enabled) {
     const mode = t(`ui.fleet.trafficMode.${budget.accountingMode || 'tx'}`)
     const baseline = Number(budget.offsetBytes) > 0 ? ` · ${t('ui.fleet.trafficBaseline')} ${formatTrafficBytes(Number(budget.offsetBytes))}` : ''
-    return `${mode} · TX ${formatTrafficBytes(Number(budget.meteredTxBytes))} · RX ${formatTrafficBytes(Number(budget.meteredRxBytes))}${baseline}${lastKnown}`
+    const reserve = Number(budget.reserveBytes) > 0 ? ` · ${t('ui.trafficBudget.reserve')} ${formatTrafficBytes(Number(budget.reserveBytes))}` : ''
+    return `${mode} · TX ${formatTrafficBytes(Number(budget.meteredTxBytes))} · RX ${formatTrafficBytes(Number(budget.meteredRxBytes))}${reserve}${baseline}${lastKnown}`
   }
   if (!server.NetworkTotalsReady) return t('ui.fleet.trafficUnavailable')
   return `TX ${formatTrafficBytes(server.NetworkSent)} · RX ${formatTrafficBytes(server.NetworkReceived)}${lastKnown}`
@@ -1287,6 +1310,7 @@ onBeforeUnmount(() => {
 .fleet-monitor__item--download { box-shadow: inset 0 2px 0 rgba(34, 197, 94, .6); }
 .fleet-traffic { display: grid; gap: 8px; margin-top: 12px; padding: 13px 14px; border: 1px solid var(--np-border); border-radius: 15px; background: var(--np-surface-muted); }
 .fleet-traffic__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-width: 0; }
+.fleet-traffic__title { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .fleet-traffic__head span, .fleet-traffic small { color: var(--np-text-muted); font-size: 0.72rem; }
 .fleet-traffic__head strong { overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; font-size: 0.95rem; }
 .fleet-traffic small { overflow-wrap: anywhere; line-height: 1.4; }
