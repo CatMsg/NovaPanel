@@ -2,7 +2,7 @@
   <v-card class="settings-hero" rounded="xl" variant="flat">
     <div class="settings-hero__topline">
       <span class="settings-hero__badge">{{ $t('pages.settings') }}</span>
-      <span class="settings-hero__badge settings-hero__badge--soft">{{ stateChange ? '未保存' : '已同步' }}</span>
+      <span class="settings-hero__badge settings-hero__badge--soft">{{ stateChange ? $t('ui.settings.unsaved') : $t('ui.settings.synced') }}</span>
     </div>
     <v-row class="settings-hero__content" align="center">
       <v-col cols="12" lg="8">
@@ -13,14 +13,14 @@
           <div>
             <h1 class="settings-hero__title">{{ $t('pages.settings') }}</h1>
             <p class="settings-hero__subtitle">
-              管理面板界面、订阅输出和路径设置，所有配置集中在一页里，便于检查和回退。
+              {{ $t('ui.settings.subtitle') }}
             </p>
           </div>
         </div>
         <div class="settings-hero__meta">
-          <span>当前标签 {{ tabLabel }}</span>
+          <span>{{ $t('ui.settings.currentTab', { tab: tabLabel }) }}</span>
           <span>•</span>
-          <span>{{ stateChange ? '未保存更改' : '配置已同步' }}</span>
+          <span>{{ stateChange ? $t('ui.settings.unsavedChanges') : $t('ui.settings.configSynced') }}</span>
         </div>
       </v-col>
       <v-col cols="12" lg="4" class="settings-hero__actions">
@@ -59,7 +59,7 @@
       <v-tab value="t2">{{ $t('setting.sub') }}</v-tab>
       <v-tab value="t3">{{ $t('setting.jsonSub') }}</v-tab>
       <v-tab value="t4">{{ $t('setting.clashSub') }}</v-tab>
-      <v-tab value="t5">VPS 流量</v-tab>
+      <v-tab value="t5">{{ $t('ui.settings.trafficTab') }}</v-tab>
     </v-tabs>
     <v-card-text>
       <v-window v-model="tab">
@@ -254,7 +254,7 @@ const tabItems = computed(() => [
   { title: i18n.global.t('setting.sub'), value: 't2' },
   { title: i18n.global.t('setting.jsonSub'), value: 't3' },
   { title: i18n.global.t('setting.clashSub'), value: 't4' },
-  { title: 'VPS 流量', value: 't5' },
+  { title: i18n.global.t('ui.settings.trafficTab'), value: 't5' },
 ])
 const tabLabel = computed(() => tabItems.value.find((item) => item.value === tab.value)?.title ?? '')
 const loading:Ref = inject('loading')?? ref(false)

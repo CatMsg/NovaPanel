@@ -102,7 +102,28 @@ const en = {
     loginSecurityHint: '10 failed logins within 10 minutes trigger a permanent IP ban. Manage trusted sources in Settings.',
     protectionActive: 'Protection active', protectionInactive: 'Protection inactive', unban: 'Unban',
     noBannedIps: 'No source IP is currently banned.', unbanned: 'IP address unbanned',
+  },  settings: {
+    unsaved: 'Unsaved', synced: 'Synced',
+    subtitle: 'Manage panel UI, subscription output, paths, and server-wide traffic protection from one page.',
+    currentTab: 'Current tab: {tab}', unsavedChanges: 'Unsaved changes', configSynced: 'Configuration synced',
+    trafficTab: 'VPS traffic',
   },
+  trafficBudget: {
+    eyebrow: 'VPS TRAFFIC BUDGET', title: 'Server traffic protection',
+    intro: 'Meter traffic on the VPS public interface. When usage reaches the plan limit minus the safety reserve, only proxy data planes stop; the panel, subscriptions, and SSH remain available.',
+    cycleBilled: 'Billed this cycle', poolRemaining: 'User pool remaining', providerRemaining: 'Provider remaining', meteredInterface: 'Metered interface',
+    clientPool: 'User pool {value} GB', nextReset: 'Next reset {time}',
+    blocked: 'Hard protection is active: proxy data planes are stopped. Increase the plan, reduce the reserve, or wait for the next cycle to restore automatically.',
+    enable: 'Enable VPS traffic protection', providerLimit: 'Provider plan traffic', reserve: 'Safety reserve',
+    offset: 'Usage before protection was enabled', offsetHint: 'On first use, enter the usage already shown by your provider. It resets automatically at the next billing cycle.',
+    accountingMode: 'Provider accounting mode', publicInterface: 'Public interface', publicInterfaceHint: 'Use auto to detect the default-route interface, or enter eth0 / ens3.',
+    resetDay: 'Monthly reset day', resetHour: 'Reset hour', warningThreshold: 'Warning threshold', criticalThreshold: 'Critical threshold',
+    usablePool: 'Configured user traffic pool', poolHint: 'Hard protection triggers at 100% of the user pool; the safety reserve is never available to proxy traffic.',
+    statusBlocked: 'Hard protection', statusCritical: 'Critical', statusWarning: 'Warning', statusError: 'Metering error',
+    statusNormal: 'Normal', statusUnsupported: 'Linux only', statusDisabled: 'Disabled',
+    mode: { tx: 'TX only', rx_tx: 'RX + TX', max: 'Larger direction (MAX)' },
+  },
+
 }
 
 const zhHans = {
@@ -200,17 +221,137 @@ const zhHans = {
     loginSecurityHint: '10 分钟内登录失败 10 次即永久封禁来源 IP；可信管理地址在设置页维护。',
     protectionActive: '防护运行中', protectionInactive: '防护未运行', unban: '解除封禁',
     noBannedIps: '当前没有被封禁的来源 IP。', unbanned: '已解除 IP 封禁',
+  },  settings: {
+    unsaved: '未保存', synced: '已同步',
+    subtitle: '集中管理面板界面、订阅输出、路径设置和服务器总流量保护，便于检查与回退。',
+    currentTab: '当前标签：{tab}', unsavedChanges: '存在未保存更改', configSynced: '配置已同步',
+    trafficTab: 'VPS 流量',
   },
+  trafficBudget: {
+    eyebrow: 'VPS TRAFFIC BUDGET', title: '服务器总流量保护',
+    intro: '按 VPS 公网网卡总流量计量。达到“套餐总量 − 安全预留”时只停止代理数据面，面板、订阅和 SSH 保持可用。',
+    cycleBilled: '本周期已计费', poolRemaining: '用户池剩余', providerRemaining: '服务商剩余', meteredInterface: '计量网卡',
+    clientPool: '用户池 {value} GB', nextReset: '下次重置 {time}',
+    blocked: '已触发硬保护：代理数据面已停止。提高套餐、减少预留或等待新周期后会自动恢复。',
+    enable: '启用 VPS 总流量保护', providerLimit: '服务商套餐总流量', reserve: '安全预留',
+    offset: '本周期开启前已用', offsetHint: '首次启用时可填服务商后台当前已用量；新周期自动清零。',
+    accountingMode: '服务商计费方式', publicInterface: '公网网卡', publicInterfaceHint: 'auto 自动识别默认路由网卡，也可填写 eth0 / ens3。',
+    resetDay: '每月重置日', resetHour: '重置小时', warningThreshold: '预警阈值', criticalThreshold: '严重阈值',
+    usablePool: '当前配置的用户可用池', poolHint: '硬保护固定在用户池 100%；安全预留不会提供给代理流量。',
+    statusBlocked: '硬保护', statusCritical: '严重', statusWarning: '预警', statusError: '计量错误',
+    statusNormal: '正常', statusUnsupported: '仅 Linux 生效', statusDisabled: '未启用',
+    mode: { tx: '仅出站（TX）', rx_tx: '上行 + 下行（RX + TX）', max: '取较大方向（MAX）' },
+  },
+
 }
 
 const zhHant = {
   ...zhHans,
   common: { ...zhHans.common, online: '在線', offline: '離線', refresh: '重新整理', close: '關閉', update: '更新' },
-  fleet: { ...zhHans.fleet, title: '伺服器集合', badge: '伺服器集合', manage: '管理伺服器', total: '伺服器總數' },
+  fleet: {
+    ...zhHans.fleet, title: '伺服器集合', badge: '伺服器集合', manage: '管理伺服器', total: '伺服器總數',
+    cycleTraffic: '本週期總流量', bootTraffic: '本次開機累計 · 含虛擬網卡', trafficBreakdown: '流量明細',
+    trafficBaseline: '初始已用', trafficLastSample: '最後取樣 {time}', trafficUnavailable: '流量計數無法取得',
+    trafficMode: { tx: '僅 TX 計費', rx_tx: 'RX + TX 計費', max: '較大方向計費' },
+  },
   sessions: { ...zhHans.sessions, title: '即時連線', badge: '即時資料面', disconnect: '中斷連線' },
   share: { ...zhHans.share, title: '分享使用者', pause: '暫停存取', resume: '恢復存取' },
   ports: { ...zhHans.ports, listeners: '監聽連接埠', backend: '後端', listenerList: '監聽列表' },
   health: { ...zhHans.health, title: '健康與診斷', badge: '系統診斷', warning: '警告', error: '異常' },
+  settings: {
+    ...zhHans.settings, unsaved: '未儲存', synced: '已同步',
+    subtitle: '集中管理面板介面、訂閱輸出、路徑設定與伺服器總流量保護，方便檢查與回復。',
+    currentTab: '目前分頁：{tab}', unsavedChanges: '有未儲存的變更', configSynced: '設定已同步', trafficTab: 'VPS 流量',
+  },
+  trafficBudget: {
+    ...zhHans.trafficBudget, title: '伺服器總流量保護',
+    intro: '依 VPS 公網網卡總流量計量。達到「方案總量 − 安全預留」時只停止代理資料面，面板、訂閱與 SSH 仍可使用。',
+    cycleBilled: '本週期已計費', poolRemaining: '使用者池剩餘', providerRemaining: '服務商剩餘', meteredInterface: '計量網卡',
+    clientPool: '使用者池 {value} GB', nextReset: '下次重置 {time}',
+    blocked: '已觸發硬保護：代理資料面已停止。提高方案、減少預留或等待新週期後會自動恢復。',
+    enable: '啟用 VPS 總流量保護', providerLimit: '服務商方案總流量', reserve: '安全預留',
+    offset: '本週期啟用前已用', offsetHint: '首次啟用可填服務商後台目前已用量；新週期會自動歸零。',
+    accountingMode: '服務商計費方式', publicInterface: '公網網卡', publicInterfaceHint: 'auto 自動識別預設路由網卡，也可填寫 eth0 / ens3。',
+    resetDay: '每月重置日', resetHour: '重置小時', warningThreshold: '預警門檻', criticalThreshold: '嚴重門檻',
+    usablePool: '目前設定的使用者可用池', poolHint: '硬保護固定在使用者池 100%；安全預留不會提供給代理流量。',
+    statusBlocked: '硬保護', statusCritical: '嚴重', statusWarning: '預警', statusError: '計量錯誤',
+    statusNormal: '正常', statusUnsupported: '僅 Linux 生效', statusDisabled: '未啟用',
+  },
 }
 
-export const uiMessages = { en, fa: en, vi: en, zhHans, zhHant, ru: en }
+const ru = {
+  ...en,
+  fleet: {
+    ...en.fleet, cycleTraffic: 'Трафик за расчётный период', bootTraffic: 'С момента загрузки · все интерфейсы',
+    trafficBreakdown: 'Детали трафика', trafficBaseline: 'Начальное использование', trafficLastSample: 'Последний замер {time}',
+    trafficUnavailable: 'Счётчики трафика недоступны', trafficMode: { tx: 'Учитывается TX', rx_tx: 'Учитывается RX + TX', max: 'Учитывается большее направление' },
+  },
+  settings: {
+    ...en.settings, unsaved: 'Не сохранено', synced: 'Синхронизировано',
+    subtitle: 'Управление интерфейсом панели, подписками, путями и защитой общего трафика сервера на одной странице.',
+    currentTab: 'Текущая вкладка: {tab}', unsavedChanges: 'Есть несохранённые изменения', configSynced: 'Конфигурация синхронизирована', trafficTab: 'Трафик VPS',
+  },
+  trafficBudget: {
+    ...en.trafficBudget, title: 'Защита общего трафика сервера',
+    cycleBilled: 'Учтено за период', poolRemaining: 'Остаток пула пользователей', providerRemaining: 'Остаток у провайдера', meteredInterface: 'Интерфейс учёта',
+    clientPool: 'Пул пользователей {value} GB', nextReset: 'Следующий сброс {time}',
+    enable: 'Включить защиту трафика VPS', providerLimit: 'Лимит тарифа провайдера', reserve: 'Резерв безопасности',
+    accountingMode: 'Способ учёта провайдера', publicInterface: 'Публичный интерфейс',
+    resetDay: 'День ежемесячного сброса', resetHour: 'Час сброса', warningThreshold: 'Порог предупреждения', criticalThreshold: 'Критический порог',
+    usablePool: 'Доступный пул пользователей', statusBlocked: 'Жёсткая защита', statusCritical: 'Критично', statusWarning: 'Предупреждение',
+    statusError: 'Ошибка учёта', statusNormal: 'Норма', statusUnsupported: 'Только Linux', statusDisabled: 'Отключено',
+    mode: { tx: 'Только TX', rx_tx: 'RX + TX', max: 'Большее направление (MAX)' },
+  },
+}
+
+const vi = {
+  ...en,
+  fleet: {
+    ...en.fleet, cycleTraffic: 'Lưu lượng theo chu kỳ', bootTraffic: 'Từ lúc khởi động · mọi giao diện',
+    trafficBreakdown: 'Chi tiết lưu lượng', trafficBaseline: 'Mức sử dụng ban đầu', trafficLastSample: 'Lấy mẫu gần nhất {time}',
+    trafficUnavailable: 'Không thể đọc bộ đếm lưu lượng', trafficMode: { tx: 'Tính TX', rx_tx: 'Tính RX + TX', max: 'Tính chiều lớn hơn' },
+  },
+  settings: {
+    ...en.settings, unsaved: 'Chưa lưu', synced: 'Đã đồng bộ',
+    subtitle: 'Quản lý giao diện bảng điều khiển, đầu ra đăng ký, đường dẫn và bảo vệ tổng lưu lượng máy chủ trên một trang.',
+    currentTab: 'Thẻ hiện tại: {tab}', unsavedChanges: 'Có thay đổi chưa lưu', configSynced: 'Cấu hình đã đồng bộ', trafficTab: 'Lưu lượng VPS',
+  },
+  trafficBudget: {
+    ...en.trafficBudget, title: 'Bảo vệ tổng lưu lượng máy chủ',
+    cycleBilled: 'Đã tính trong chu kỳ', poolRemaining: 'Dung lượng người dùng còn lại', providerRemaining: 'Dung lượng nhà cung cấp còn lại', meteredInterface: 'Giao diện đo',
+    clientPool: 'Dung lượng người dùng {value} GB', nextReset: 'Đặt lại tiếp theo {time}',
+    enable: 'Bật bảo vệ lưu lượng VPS', providerLimit: 'Tổng lưu lượng gói nhà cung cấp', reserve: 'Dung lượng dự phòng',
+    accountingMode: 'Cách tính của nhà cung cấp', publicInterface: 'Giao diện Internet',
+    resetDay: 'Ngày đặt lại hàng tháng', resetHour: 'Giờ đặt lại', warningThreshold: 'Ngưỡng cảnh báo', criticalThreshold: 'Ngưỡng nghiêm trọng',
+    usablePool: 'Dung lượng người dùng khả dụng', statusBlocked: 'Bảo vệ cứng', statusCritical: 'Nghiêm trọng', statusWarning: 'Cảnh báo',
+    statusError: 'Lỗi đo lưu lượng', statusNormal: 'Bình thường', statusUnsupported: 'Chỉ Linux', statusDisabled: 'Đã tắt',
+    mode: { tx: 'Chỉ TX', rx_tx: 'RX + TX', max: 'Chiều lớn hơn (MAX)' },
+  },
+}
+
+const fa = {
+  ...en,
+  fleet: {
+    ...en.fleet, cycleTraffic: 'ترافیک دوره صورتحساب', bootTraffic: 'از زمان راه‌اندازی · همه رابط‌ها',
+    trafficBreakdown: 'جزئیات ترافیک', trafficBaseline: 'مصرف اولیه', trafficLastSample: 'آخرین نمونه‌برداری {time}',
+    trafficUnavailable: 'شمارنده‌های ترافیک در دسترس نیست', trafficMode: { tx: 'محاسبه TX', rx_tx: 'محاسبه RX + TX', max: 'محاسبه جهت بزرگ‌تر' },
+  },
+  settings: {
+    ...en.settings, unsaved: 'ذخیره‌نشده', synced: 'همگام‌شده',
+    subtitle: 'رابط پنل، خروجی اشتراک، مسیرها و حفاظت ترافیک کل سرور را در یک صفحه مدیریت کنید.',
+    currentTab: 'زبانه فعلی: {tab}', unsavedChanges: 'تغییرات ذخیره‌نشده وجود دارد', configSynced: 'پیکربندی همگام است', trafficTab: 'ترافیک VPS',
+  },
+  trafficBudget: {
+    ...en.trafficBudget, title: 'حفاظت ترافیک کل سرور',
+    cycleBilled: 'مصرف این دوره', poolRemaining: 'باقی‌مانده سهم کاربران', providerRemaining: 'باقی‌مانده سرویس‌دهنده', meteredInterface: 'رابط اندازه‌گیری',
+    clientPool: 'سهم کاربران {value} GB', nextReset: 'بازنشانی بعدی {time}',
+    enable: 'فعال‌سازی حفاظت ترافیک VPS', providerLimit: 'حجم کل پلن سرویس‌دهنده', reserve: 'ذخیره ایمنی',
+    accountingMode: 'روش محاسبه سرویس‌دهنده', publicInterface: 'رابط عمومی',
+    resetDay: 'روز بازنشانی ماهانه', resetHour: 'ساعت بازنشانی', warningThreshold: 'آستانه هشدار', criticalThreshold: 'آستانه بحرانی',
+    usablePool: 'سهم قابل استفاده کاربران', statusBlocked: 'حفاظت سخت', statusCritical: 'بحرانی', statusWarning: 'هشدار',
+    statusError: 'خطای اندازه‌گیری', statusNormal: 'عادی', statusUnsupported: 'فقط Linux', statusDisabled: 'غیرفعال',
+    mode: { tx: 'فقط TX', rx_tx: 'RX + TX', max: 'جهت بزرگ‌تر (MAX)' },
+  },
+}
+
+export const uiMessages = { en, fa, vi, zhHans, zhHant, ru }
