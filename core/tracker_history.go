@@ -66,7 +66,7 @@ func (c *HistoryTracker) record(inboundCtx adapter.InboundContext, outboundTag s
 
 	destination := inboundCtx.Destination.String()
 	sourceIP := ""
-	if inboundCtx.Source.IsIP() {
+	if inboundCtx.Source.IsIP() && normalizeTrackedSource(inboundCtx.Inbound, socksaddrString(inboundCtx.Source)) != "" {
 		sourceIP = inboundCtx.Source.Unwrap().AddrString()
 	}
 	now := time.Now().Unix()

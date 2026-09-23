@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/CatMsg/NovaPanel/config"
+	"github.com/CatMsg/NovaPanel/core"
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
 	"github.com/CatMsg/NovaPanel/logger"
@@ -189,6 +190,7 @@ func (s *MieruService) syncFromDBLocked() error {
 		return err
 	}
 	if inboundConfig == nil {
+		core.SetMieruBridgeInboundTag("")
 		s.mu.Lock()
 		oldRuntime := s.active
 		s.active = nil
@@ -208,6 +210,7 @@ func (s *MieruService) syncFromDBLocked() error {
 		removeMitaRuntimeFiles()
 		return nil
 	}
+	core.SetMieruBridgeInboundTag(inboundConfig.Tag)
 	if len(credentials) == 0 {
 		s.mu.Lock()
 		oldRuntime := s.active

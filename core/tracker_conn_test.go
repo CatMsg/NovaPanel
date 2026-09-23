@@ -77,3 +77,29 @@ func TestConnTrackerResetDoesNotDeadlock(t *testing.T) {
 		t.Fatal("tracker reset deadlocked")
 	}
 }
+
+func TestNormalizeTrackedSourceForMieruBridge(t *testing.T) {
+	SetMieruBridgeInboundTag("mieru-main")
+	t.Cleanup(func() { SetMieruBridgeInboundTag("") })
+
+	tests := []struct {
+		name    string
+		inbound string
+		source  string
+		want    string
+	}{
+		{name: "mieru ipv4 loopback", inbound: "mieru-main", source: "127.0.0.1:51000", want: ""},
+		{name: "mieru ipv6 loopback", inbound: "mieru-main", source: "[::1]:51000", want: ""},
+		{name: "mieru mapped loopback", inbound: "mieru-main", source: "[::ffff:127.0.0.1]:51000", want: ""},
+		{name: "mieru public source", inbound: "mieru-main", source: "203.0.113.8:51000", want: "203.0.113.8:51000"},
+		{name: "ordinary socks loopback", inbound: "socks-in", source: "127.0.0.1:51000", want: "127.0.0.1:51000"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeTrackedSource(tt.inbound, tt.source); got != tt.want {
+				t.Fatalf("normalizeTrackedSource(%q, %q) = %q, want %q", tt.inbound, tt.source, got, tt.want)
+			}
+		})
+	}
+}
