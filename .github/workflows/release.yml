@@ -305,15 +305,61 @@ jobs:
           fi
           echo "body_path=$BODY_PATH" >> "$GITHUB_OUTPUT"
 
-      - name: 发布到当前仓库 Release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ steps.vars.outputs.tag }}
-          name: NovaPanel ${{ steps.vars.outputs.tag }}
-          target_commitish: ${{ github.sha }}
-          fail_on_unmatched_files: true
-          body_path: ${{ steps.body.outputs.body_path }}
-          files: release-assets/*
+      - name: 创建或更新 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.vars.outputs.tag }}
+          BODY_PATH: ${{ steps.body.outputs.body_path }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "NovaPanel $TAG" \
+              --notes-file "$BODY_PATH"
+          else
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "NovaPanel $TAG" \
+              --notes-file "$BODY_PATH"
+          fi
+
+      - name: 上传 Release 资产
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.vars.outputs.tag }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          assets=(release-assets/*)
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "release-assets 中没有可上传文件" >&2
+            exit 1
+          fi
+
+          max_attempts=5
+          for attempt in $(seq 1 "$max_attempts"); do
+            if gh release upload "$TAG" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"; then
+              break
+            fi
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "Release 资产上传连续失败 $max_attempts 次" >&2
+              exit 1
+            fi
+            delay=$((attempt * 15))
+            echo "Release 资产上传失败（$attempt/$max_attempts），${delay} 秒后重试"
+            sleep "$delay"
+          done
+
+          uploaded="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+          for asset in "${assets[@]}"; do
+            name="$(basename "$asset")"
+            if ! grep -Fxq "$name" <<<"$uploaded"; then
+              echo "Release 缺少资产: $name" >&2
+              exit 1
+            fi
+          done
 
   cleanup-failed-runs:
     name: 清理失败的旧 Run
