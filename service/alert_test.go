@@ -83,3 +83,18 @@ func TestPostAlertJSONRejectsFailure(t *testing.T) {
 		t.Fatal("expected HTTP failure")
 	}
 }
+
+func TestFormatAlertProblemLabelsTrafficBudget(t *testing.T) {
+	warning := formatAlertProblem(HealthCheck{ID: "traffic-budget", Status: "warning", Summary: "已使用 80%"})
+	if warning != "[流量预警] 已使用 80%" {
+		t.Fatalf("unexpected traffic warning: %q", warning)
+	}
+	critical := formatAlertProblem(HealthCheck{ID: "traffic-budget", Status: "error", Summary: "已使用 95%"})
+	if critical != "[流量严重] 已使用 95%" {
+		t.Fatalf("unexpected traffic critical alert: %q", critical)
+	}
+	generic := formatAlertProblem(HealthCheck{ID: "disk", Title: "系统磁盘", Status: "warning", Summary: "空间不足"})
+	if generic != "[warning] 系统磁盘: 空间不足" {
+		t.Fatalf("unexpected generic alert: %q", generic)
+	}
+}

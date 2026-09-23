@@ -134,27 +134,49 @@ func (s *AlertService) EvaluateAndNotify() error {
 	problems := make([]string, 0)
 	for _, check := range report.Checks {
 		if check.Status == "error" || check.Status == "warning" {
-			problems = append(problems, fmt.Sprintf("[%s] %s: %s", check.Status, check.Title, check.Summary))
+			problems = append(problems, formatAlertProblem(check))
 		}
 	}
+	lastFingerprint := strings.TrimSpace(values["alertLastFingerprint"])
 	if len(problems) == 0 {
-		return nil
+		if lastFingerprint == "" {
+			return nil
+		}
+		if err := s.sendAlert(values, "NovaPanel 恢复通知\n此前的健康异常已恢复，当前没有 warning/error。"); err != nil {
+			return err
+		}
+		return s.persistAlertState("", time.Now())
 	}
 	fingerprintBytes := sha256.Sum256([]byte(strings.Join(problems, "\n")))
 	fingerprint := hex.EncodeToString(fingerprintBytes[:])
 	cooldown, _ := strconv.Atoi(values["alertCooldownMinutes"])
-	if fingerprint == values["alertLastFingerprint"] && cooldown > 0 && time.Since(time.Unix(lastSent, 0)) < time.Duration(cooldown)*time.Minute {
+	if fingerprint == lastFingerprint && cooldown > 0 && time.Since(time.Unix(lastSent, 0)) < time.Duration(cooldown)*time.Minute {
 		return nil
 	}
 	message := "NovaPanel 健康告警\n" + strings.Join(problems, "\n")
 	if err := s.sendAlert(values, message); err != nil {
 		return err
 	}
+	return s.persistAlertState(fingerprint, time.Now())
+}
+
+func formatAlertProblem(check HealthCheck) string {
+	if check.ID == "traffic-budget" {
+		label := "流量预警"
+		if check.Status == "error" {
+			label = "流量严重"
+		}
+		return fmt.Sprintf("[%s] %s", label, check.Summary)
+	}
+	return fmt.Sprintf("[%s] %s: %s", check.Status, check.Title, check.Summary)
+}
+
+func (s *AlertService) persistAlertState(fingerprint string, sentAt time.Time) error {
 	return retryWriteTx(func(tx *gorm.DB) error {
 		if err := s.saveSettingTx(tx, "alertLastFingerprint", fingerprint); err != nil {
 			return err
 		}
-		return s.saveSettingTx(tx, "alertLastSentAt", strconv.FormatInt(time.Now().Unix(), 10))
+		return s.saveSettingTx(tx, "alertLastSentAt", strconv.FormatInt(sentAt.Unix(), 10))
 	})
 }
 

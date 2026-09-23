@@ -157,14 +157,22 @@ func (s *HealthService) checkTrafficBudget(diagnostics map[string]interface{}) H
 	if !status.Supported {
 		return HealthCheck{ID: "traffic-budget", Title: "VPS 总流量", Status: "info", Summary: "当前系统不支持网卡总流量计量", Detail: status.Error, Action: "settings"}
 	}
-	summary := fmt.Sprintf("已使用 %.1f%%，剩余池 %.2f GB", status.UsedPercent, float64(status.PoolRemainingBytes)/1e9)
+	summary := fmt.Sprintf(
+		"已使用 %.1f%%（%.2f / %.2f GB），用户池剩余 %.2f GB",
+		status.UsedPercent,
+		float64(status.UsedBytes)/1e9,
+		float64(status.ClientPoolBytes)/1e9,
+		float64(status.PoolRemainingBytes)/1e9,
+	)
 	switch status.Level {
 	case "blocked":
-		return HealthCheck{ID: "traffic-budget", Title: "VPS 总流量", Status: "error", Summary: "已达到用户流量池上限，代理数据面已停止", Detail: summary, Action: "settings"}
-	case "critical", "error":
-		return HealthCheck{ID: "traffic-budget", Title: "VPS 总流量", Status: "error", Summary: summary, Detail: status.Error, Action: "settings"}
+		return HealthCheck{ID: "traffic-budget", Title: "VPS 总流量", Status: "error", Summary: "用户池已耗尽，代理数据面已停止；" + summary, Action: "settings"}
+	case "critical":
+		return HealthCheck{ID: "traffic-budget", Title: "VPS 总流量", Status: "error", Summary: "已达到严重阈值；" + summary, Action: "settings"}
+	case "error":
+		return HealthCheck{ID: "traffic-budget", Title: "VPS 总流量", Status: "error", Summary: "流量计量异常；" + summary, Detail: status.Error, Action: "settings"}
 	case "warning":
-		return HealthCheck{ID: "traffic-budget", Title: "VPS 总流量", Status: "warning", Summary: summary, Action: "settings"}
+		return HealthCheck{ID: "traffic-budget", Title: "VPS 总流量", Status: "warning", Summary: "已达到预警阈值；" + summary, Action: "settings"}
 	default:
 		return HealthCheck{ID: "traffic-budget", Title: "VPS 总流量", Status: "ok", Summary: summary, Action: "settings"}
 	}
