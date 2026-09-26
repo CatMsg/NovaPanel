@@ -16,17 +16,40 @@
 
     <v-divider></v-divider>
 
-    <v-list density="compact" nav>
-      <v-list-item link
-        v-for="item in menu"
-        :key="item.title"
-        class="app-drawer__item"
-        :to="item.path"
-        :active="router.currentRoute.value.path == item.path">
-        <template v-slot:prepend>
-          <v-icon :icon="item.icon"></v-icon>
-        </template>
-        <v-list-item-title v-text="$t(item.title)"></v-list-item-title>
+    <div class="app-drawer__search">
+      <v-text-field
+        v-model="search"
+        :placeholder="$t('ui.nav.search')"
+        :aria-label="$t('ui.nav.search')"
+        prepend-inner-icon="mdi-magnify"
+        density="compact"
+        variant="solo-filled"
+        rounded="lg"
+        hide-details
+        clearable
+        @keydown.enter.prevent="openFirstMatch"
+      />
+    </div>
+
+    <v-list density="compact" nav class="app-drawer__nav">
+      <template v-for="group in filteredGroups" :key="group.title">
+        <v-list-subheader class="app-drawer__group">{{ $t(group.title) }}</v-list-subheader>
+        <v-list-item
+          v-for="item in group.items"
+          :key="item.path"
+          link
+          class="app-drawer__item"
+          :to="item.path"
+          :active="router.currentRoute.value.path == item.path"
+        >
+          <template #prepend>
+            <v-icon :icon="item.icon" />
+          </template>
+          <v-list-item-title>{{ $t(item.title) }}</v-list-item-title>
+        </v-list-item>
+      </template>
+      <v-list-item v-if="filteredGroups.length === 0" class="app-drawer__no-results" disabled>
+        <v-list-item-title>{{ $t('ui.nav.noResults') }}</v-list-item-title>
       </v-list-item>
     </v-list>
     <template v-slot:append>
@@ -36,13 +59,32 @@
 </template>
 
 <script lang="ts" setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import router from '@/router'
 import { logout } from '@/plugins/httputil'
 import logoUrl from '@/assets/logo.png'
+import { navigationGroups } from '@/navigation'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps(['isMobile','displayDrawer'])
 const emit = defineEmits(['update:displayDrawer'])
+const { t } = useI18n()
+const search = ref('')
+
+const filteredGroups = computed(() => {
+  const query = search.value.trim().toLocaleLowerCase()
+  return navigationGroups.map(group => ({
+    ...group,
+    items: group.items.filter(item => !query || t(item.title).toLocaleLowerCase().includes(query)),
+  })).filter(group => group.items.length > 0)
+})
+
+const openFirstMatch = () => {
+  const first = filteredGroups.value[0]?.items[0]
+  if (!first) return
+  void router.push(first.path)
+  search.value = ''
+}
 
 const showDrawer = computed({
   get: () => props.displayDrawer,
@@ -51,26 +93,14 @@ const showDrawer = computed({
   },
 })
 
-const menu = [
-  { title: 'pages.home', icon: 'mdi-home',  path: '/' },
-  { title: 'pages.ports', icon: 'mdi-lan',  path: '/ports' },
-  { title: 'pages.health', icon: 'mdi-heart-pulse',  path: '/health' },
-  { title: 'pages.fleet', icon: 'mdi-server-network',  path: '/fleet' },
-  { title: 'pages.sessions', icon: 'mdi-lan', path: '/sessions' },
-  { title: 'pages.inbounds', icon: 'mdi-cloud-download',  path: '/inbounds' },
-  { title: 'pages.clients', icon: 'mdi-account-multiple',  path: '/clients' },
-  { title: 'pages.outbounds', icon: 'mdi-cloud-upload',  path: '/outbounds' },
-  { title: 'pages.endpoints', icon: 'mdi-cloud-tags',  path: '/endpoints' },
-  { title: 'pages.services', icon: 'mdi-server',  path: '/services' },
-  { title: 'pages.tls', icon: 'mdi-certificate',  path: '/tls' },
-  { title: 'pages.basics', icon: 'mdi-application-cog',  path: '/basics' },
-  { title: 'pages.rules', icon: 'mdi-routes',  path: '/rules' },
-  { title: 'pages.dns', icon: 'mdi-dns',  path: '/dns' },
-  { title: 'pages.admins', icon: 'mdi-account-tie',  path: '/admins' },
-  { title: 'pages.settings', icon: 'mdi-cog',  path: '/settings' },
-]
-
 const Logout = async () => {
   logout()
 }
 </script>
+
+<style scoped>
+.app-drawer__search { padding: 12px 14px 4px; }
+.app-drawer__nav { padding-top: 2px; }
+.app-drawer__group { min-height: 30px; padding-inline: 16px; color: var(--np-text-muted); font-size: .66rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.app-drawer__no-results { color: var(--np-text-muted); }
+</style>

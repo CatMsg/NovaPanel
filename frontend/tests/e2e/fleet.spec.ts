@@ -39,3 +39,23 @@ test('fleet loads status and renders billing-cycle traffic history', async ({ pa
   await expect(page.getByText('本周期流量趋势')).toBeVisible()
   await expect(page.getByText('2 个采样点')).toBeVisible()
 })
+
+test('configuration rollout separates using a saved template from creating one', async ({ page }) => {
+  await installBaseMocks(page, true)
+  await page.route('**/api/fleet**', route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: json({ servers: [{ id: 'local', name: '本机', url: '本机', enabled: true, reachable: true, core: { running: true } }] }),
+  }))
+  await page.route('**/api/fleetTemplates**', route => route.fulfill({ status: 200, contentType: 'application/json', body: json([]) }))
+
+  await page.goto('/app/fleet')
+  await page.getByRole('button', { name: '配置编排' }).click()
+
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByLabel('模板名称')).toBeVisible()
+  await dialog.getByRole('button', { name: '使用已有模板' }).click()
+  await expect(dialog.getByText('还没有保存的模板，请在下方创建第一个模板。')).toBeVisible()
+  await expect(dialog.getByLabel('模板名称')).toBeHidden()
+  await dialog.getByRole('button', { name: '新建模板' }).click()
+  await expect(dialog.getByLabel('模板名称')).toBeVisible()
+})

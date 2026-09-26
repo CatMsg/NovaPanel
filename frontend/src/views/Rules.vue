@@ -1,6 +1,5 @@
 <template>
   <RuleVue
-    v-model="ruleModal.visible"
     :visible="ruleModal.visible"
     :index="ruleModal.index"
     :data="ruleModal.data"

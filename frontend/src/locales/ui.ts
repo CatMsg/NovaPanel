@@ -1,9 +1,36 @@
 const en = {
+  nav: {
+    overview: 'Overview', proxy: 'Proxy', network: 'Network', system: 'System', search: 'Filter navigation',
+    noResults: 'No matching pages', commandTitle: 'Go to', commandHint: 'Search pages and open with Enter',
+  },
+  resource: {
+    inboundsSubtitle: 'Manage inbound protocols, listening ports, and user bindings in one searchable list.',
+    outboundsSubtitle: 'Manage proxy exits, health checks, and routing helpers from one searchable list.',
+    protocolCount: '{count} protocols', onlineCount: '{count} online', testedCount: '{count} tested',
+    noInbounds: 'No inbounds yet', noInboundsHint: 'Add an inbound to manage its protocol, listening port, and user bindings here.',
+    noOutbounds: 'No outbounds yet', noOutboundsHint: 'Add an outbound or import several at once, then run a connectivity test.',
+    noSearchResults: 'No matching items', noSearchResultsHint: 'Try another name, protocol, address, or port.', notApplicable: 'N/A',
+    proxyChain: 'Proxy chain', strategyGroup: 'Strategy group', automaticFailover: 'AUTOMATIC FAILOVER', failoverTitle: 'Ordered failover',
+    refreshFailover: 'Refresh failover status', needsCheck: 'Needs attention', running: 'Running',
+    currentOutbound: 'Current outbound', candidateOutbound: 'Next candidate', awaitingProbe: 'Waiting for first probe',
+    lastProbe: 'Last probe: {time}', notProbed: 'Not probed yet', stopFailover: 'Stop failover', regionPending: 'Region pending',
+    ipPending: 'IP pending', currentRole: 'Current', candidateRole: 'Candidate', memberRole: 'Member', probeFailed: 'Probe failed',
+    searchInbounds: 'Search tag, protocol, address, port, or user', searchOutbounds: 'Search tag, type, server, or port',
+  },
+  inboundForm: {
+    advanced: 'Advanced transport settings', advancedHint: 'Transport, TProxy, and multiplex options are optional; leave collapsed for the usual setup.',
+    singleMieru: 'Only one Mieru inbound can be created on each server.',
+  },
+  rules: {
+    matchConditions: 'Match conditions', combineConditions: 'Combine multiple conditions', result: 'When matched',
+    actionRoute: 'Route', actionRouteOptions: 'Route options', actionBypass: 'Bypass', actionReject: 'Reject',
+    actionHijackDns: 'Hijack DNS', actionSniff: 'Sniff', actionResolve: 'Resolve', rejectDefault: 'Default', drop: 'Drop',
+  },
   common: {
     online: 'Online', offline: 'Offline', local: 'Local', refresh: 'Refresh', close: 'Close', cancel: 'Cancel',
     update: 'Update', restart: 'Restart', details: 'Details', logs: 'Logs', version: 'Version', latency: 'Latency',
     publicIp: 'Public IP', uptime: 'Uptime', firewall: 'Firewall', endpoints: 'Endpoints', protocol: 'Protocol',
-    cpu: 'CPU', memory: 'Memory', uploadSpeed: 'Upload', downloadSpeed: 'Download', sampling: 'Sampling…',
+    cpu: 'CPU', memory: 'Memory', uploadSpeed: 'Upload', downloadSpeed: 'Download', sampling: 'Sampling…', more: 'More',
     port: 'Port', process: 'Process', target: 'Target', entry: 'Entry', unknownProcess: 'Unknown process',
   },
   fleet: {
@@ -49,12 +76,12 @@ const en = {
     deployOrderHint: 'Order: canary first, then the remaining remote servers, local server last.', previewChanges: 'Preview changes',
     startDeploy: 'Start rollout', deployed: 'Applied', confirmDeleteTemplate: 'Delete this configuration template?',
     confirmDeployTemplate: 'Apply this template to the selected servers? Each server will validate and snapshot its configuration first.',
-    previewSummary: 'Inbounds +{inboundAdd}/~{inboundUpdate}, users +{clientAdd}/~{clientUpdate}, TLS {tls}, sections {config}',
+    previewSummary: 'Inbounds +{inboundAdd}/~{inboundUpdate}, outbounds +{outboundAdd}/~{outboundUpdate}, users +{clientAdd}/~{clientUpdate}, TLS {tls}, sections {config}',
     safeRollout: 'Guided rollout', rolloutProgress: 'Rollout progress', rolloutStep1: 'Template', rolloutStep2: 'Servers', rolloutStep3: 'Review',
     chooseTemplate: 'Choose or create a template', chooseTemplateHint: 'A template is a snapshot of selected configuration sections on this server.',
     useTemplate: 'Use this template', noTemplates: 'No saved templates yet. Create the first one below.', orCreateTemplate: 'or create a new template',
     templateNameExample: 'For example: Streaming DNS and routes', saveAndContinue: 'Save and continue',
-    scopeInbounds: 'Protocols, ports and TLS references', scopeClients: 'Users, bindings, quota and rate limits', scopeTls: 'Certificates and domain settings',
+    scopeInbounds: 'Protocols, ports and TLS references', scopeOutbounds: 'Matching tags are overwritten; source addresses and credentials are copied unchanged', scopeClients: 'Users, bindings, quota and rate limits', scopeTls: 'Certificates and domain settings',
     scopeRoute: 'Rule sets and routing rules', scopeDns: 'DNS servers and resolution rules', chooseTargets: 'Choose target servers',
     chooseTargetsHint: 'Nothing is selected automatically. Only checked servers will be changed.', selectedTemplate: 'Selected template',
     selectTargetsFirst: 'Select at least one server before previewing changes.', canaryHint: 'Optional. This server is applied first; a failure stops the rollout.',
@@ -62,6 +89,7 @@ const en = {
     reviewChanges: 'Review the preview', reviewChangesHint: 'These are the exact changes calculated by each target. No configuration has been changed yet.',
     previewPassed: 'All targets passed validation. You can now confirm the rollout.', previewFailed: 'At least one target failed validation. Go back and adjust the selection or template.',
     previousStep: 'Back', confirmRollout: 'Confirm rollout', rolloutComplete: 'Rollout complete', rolloutCompleteHint: 'All selected servers applied the template successfully.',
+    templateModeSaved: 'Use saved template', templateModeCreate: 'Create new template',
   },
   sessions: {
     badge: 'Live traffic', title: 'Live sessions', subtitle: 'Inspect active connections across the server fleet without storing destination history.',
@@ -132,11 +160,38 @@ const en = {
 }
 
 const zhHans = {
+  nav: {
+    overview: '总览', proxy: '代理配置', network: '网络与规则', system: '系统设置', search: '筛选菜单',
+    noResults: '没有匹配的页面', commandTitle: '快速跳转', commandHint: '搜索页面，按 Enter 打开',
+  },
+  resource: {
+    inboundsSubtitle: '在同一列表中管理入站协议、监听端口和用户绑定，并可快速搜索。',
+    outboundsSubtitle: '在同一列表中管理代理出口、连通性检测和路由辅助功能。',
+    protocolCount: '{count} 种协议', onlineCount: '{count} 个在线', testedCount: '已检测 {count} 个',
+    noInbounds: '还没有入站', noInboundsHint: '添加入站后，可在此管理协议、监听端口和用户绑定。',
+    noOutbounds: '还没有出站', noOutboundsHint: '添加单个出站或批量导入，然后即可执行连通性检测。',
+    noSearchResults: '没有匹配项', noSearchResultsHint: '试试其他名称、协议、地址或端口。', notApplicable: '不适用',
+    proxyChain: '代理链', strategyGroup: '策略组', automaticFailover: '自动故障回退', failoverTitle: '有序故障回退',
+    refreshFailover: '刷新回退状态', needsCheck: '需要检查', running: '运行中',
+    currentOutbound: '当前出口', candidateOutbound: '下一候选', awaitingProbe: '等待首次探测',
+    lastProbe: '最近探测：{time}', notProbed: '尚未探测', stopFailover: '停止回退', regionPending: '地区待获取',
+    ipPending: 'IP 待获取', currentRole: '当前', candidateRole: '候选', memberRole: '成员', probeFailed: '本轮探测失败',
+    searchInbounds: '搜索标签、协议、地址、端口或用户', searchOutbounds: '搜索标签、类型、服务器或端口',
+  },
+  inboundForm: {
+    advanced: '高级传输设置', advancedHint: '传输、TProxy 和多路复用为可选项；常规配置可保持收起。',
+    singleMieru: '每台服务器只能创建一个 Mieru 入站。',
+  },
+  rules: {
+    matchConditions: '匹配条件', combineConditions: '组合多个匹配条件', result: '匹配后执行',
+    actionRoute: '路由', actionRouteOptions: '路由选项', actionBypass: '直连', actionReject: '拒绝',
+    actionHijackDns: '接管 DNS', actionSniff: '嗅探', actionResolve: '解析', rejectDefault: '默认', drop: '丢弃',
+  },
   common: {
     online: '在线', offline: '失联', local: '本机', refresh: '刷新', close: '关闭', cancel: '取消', update: '更新',
     restart: '重启', details: '详情', logs: '日志', version: '版本', latency: '延迟', publicIp: '公网 IP', uptime: '运行时间',
     firewall: '防火墙', endpoints: '节点', protocol: '协议', port: '端口', process: '进程', target: '目标', entry: '入口', unknownProcess: '未知进程',
-    cpu: 'CPU', memory: '内存', uploadSpeed: '上传速度', downloadSpeed: '下载速度', sampling: '采样中…',
+    cpu: 'CPU', memory: '内存', uploadSpeed: '上传速度', downloadSpeed: '下载速度', sampling: '采样中…', more: '更多',
   },
   fleet: {
     badge: '服务器集合', checking: '正在检查…', title: '服务器集合', subtitle: '从一个页面查看多台 NovaPanel 的运行状态、端口后端和核心健康情况。',
@@ -177,12 +232,12 @@ const zhHans = {
     deployOrderHint: '执行顺序：灰度服务器优先，其余远端依次执行，本机最后执行。', previewChanges: '预览差异',
     startDeploy: '开始下发', deployed: '应用成功', confirmDeleteTemplate: '确定删除这个配置模板吗？',
     confirmDeployTemplate: '确定把模板应用到所选服务器吗？每台服务器都会先校验并创建配置快照。',
-    previewSummary: '入站 +{inboundAdd}/改{inboundUpdate}，用户 +{clientAdd}/改{clientUpdate}，TLS {tls}，区块 {config}',
+    previewSummary: '入站 +{inboundAdd}/改{inboundUpdate}，出站 +{outboundAdd}/改{outboundUpdate}，用户 +{clientAdd}/改{clientUpdate}，TLS {tls}，区块 {config}',
     safeRollout: '引导式安全下发', rolloutProgress: '下发进度', rolloutStep1: '选择模板', rolloutStep2: '选择服务器', rolloutStep3: '核对执行',
     chooseTemplate: '选择或新建模板', chooseTemplateHint: '模板是本机指定配置区块的快照，保存模板不会修改任何服务器。',
     useTemplate: '使用这个模板', noTemplates: '还没有保存的模板，请在下方创建第一个模板。', orCreateTemplate: '或者新建模板',
     templateNameExample: '例如：流媒体 DNS 与路由', saveAndContinue: '保存并继续',
-    scopeInbounds: '协议、端口及 TLS 引用', scopeClients: '用户、绑定、配额与限速', scopeTls: '证书和域名设置',
+    scopeInbounds: '协议、端口及 TLS 引用', scopeOutbounds: '同名出站会覆盖；源机地址和凭据原样复制', scopeClients: '用户、绑定、配额与限速', scopeTls: '证书和域名设置',
     scopeRoute: '规则集和路由规则', scopeDns: 'DNS 服务器与解析规则', chooseTargets: '选择目标服务器',
     chooseTargetsHint: '系统不会默认勾选服务器，只有你明确选择的服务器才会发生变更。', selectedTemplate: '当前模板',
     selectTargetsFirst: '请至少选择一台服务器，再预览配置差异。', canaryHint: '可选。灰度服务器最先执行，失败后立即停止，不再修改其余服务器。',
@@ -190,6 +245,7 @@ const zhHans = {
     reviewChanges: '核对预览结果', reviewChangesHint: '下方是每台服务器计算出的实际变更，此时尚未修改任何配置。',
     previewPassed: '所有目标均已通过校验，现在可以确认下发。', previewFailed: '至少一台服务器校验失败，请返回调整目标或模板。',
     previousStep: '上一步', confirmRollout: '确认下发', rolloutComplete: '下发完成', rolloutCompleteHint: '所选服务器均已成功应用模板。',
+    templateModeSaved: '使用已有模板', templateModeCreate: '新建模板',
   },
   sessions: {
     badge: '实时数据面', title: '实时连接', subtitle: '集中查看服务器集合中的活动连接，目标记录不会额外持久化保存。',
@@ -293,6 +349,10 @@ const zhHant = {
 
 const ru = {
   ...en,
+  nav: {
+    overview: 'Обзор', proxy: 'Прокси', network: 'Сеть и правила', system: 'Система', search: 'Фильтр меню',
+    noResults: 'Страницы не найдены', commandTitle: 'Перейти', commandHint: 'Найдите страницу и нажмите Enter',
+  },
   fleet: {
     badge: 'Парк серверов', checking: 'Проверка…', title: 'Парк серверов',
     subtitle: 'Состояние NovaPanel, брандмауэр и ядро всех серверов на одной странице.',
@@ -334,12 +394,12 @@ const ru = {
     deployOrderHint: 'Порядок: сначала канарейка, затем остальные удалённые серверы, локальный — последним.',
     previewChanges: 'Предпросмотр изменений', startDeploy: 'Начать развёртывание', deployed: 'Применено',
     confirmDeleteTemplate: 'Удалить этот шаблон конфигурации?', confirmDeployTemplate: 'Применить шаблон к выбранным серверам? Каждый сервер сначала проверит и сохранит снимок конфигурации.',
-    previewSummary: 'Входящие +{inboundAdd}/~{inboundUpdate}, пользователи +{clientAdd}/~{clientUpdate}, TLS {tls}, разделы {config}',
+    previewSummary: 'Входящие +{inboundAdd}/~{inboundUpdate}, исходящие +{outboundAdd}/~{outboundUpdate}, пользователи +{clientAdd}/~{clientUpdate}, TLS {tls}, разделы {config}',
     safeRollout: 'Пошаговое развёртывание', rolloutProgress: 'Ход развёртывания', rolloutStep1: 'Шаблон', rolloutStep2: 'Серверы', rolloutStep3: 'Проверка',
     chooseTemplate: 'Выберите или создайте шаблон', chooseTemplateHint: 'Шаблон — снимок выбранных разделов конфигурации этого сервера.',
     useTemplate: 'Использовать шаблон', noTemplates: 'Сохранённых шаблонов нет. Создайте первый ниже.', orCreateTemplate: 'или создайте новый шаблон',
     templateNameExample: 'Например: DNS и маршруты для стриминга', saveAndContinue: 'Сохранить и продолжить',
-    scopeInbounds: 'Протоколы, порты и ссылки TLS', scopeClients: 'Пользователи, привязки, квоты и ограничения скорости',
+    scopeInbounds: 'Протоколы, порты и ссылки TLS', scopeOutbounds: 'Совпадающие теги перезаписываются; адреса и учётные данные источника копируются без изменений', scopeClients: 'Пользователи, привязки, квоты и ограничения скорости',
     scopeTls: 'Сертификаты и доменные настройки', scopeRoute: 'Наборы правил и маршрутизация', scopeDns: 'DNS-серверы и правила разрешения',
     chooseTargets: 'Выберите целевые серверы', chooseTargetsHint: 'Ничего не выбирается автоматически. Изменятся только отмеченные серверы.',
     selectedTemplate: 'Выбранный шаблон', selectTargetsFirst: 'Перед предпросмотром выберите хотя бы один сервер.',
@@ -350,6 +410,7 @@ const ru = {
     previewPassed: 'Все цели прошли проверку. Можно подтвердить развёртывание.', previewFailed: 'Хотя бы одна цель не прошла проверку. Вернитесь и измените выбор или шаблон.',
     previousStep: 'Назад', confirmRollout: 'Подтвердить развёртывание', rolloutComplete: 'Развёртывание завершено',
     rolloutCompleteHint: 'Все выбранные серверы успешно применили шаблон.',
+    templateModeSaved: 'Использовать сохранённый шаблон', templateModeCreate: 'Создать новый шаблон',
   },
   sessions: {
     badge: 'Активный трафик', title: 'Активные подключения', subtitle: 'Просматривайте активные соединения по всему парку серверов без хранения истории назначений.',
@@ -399,6 +460,10 @@ const ru = {
 
 const vi = {
   ...en,
+  nav: {
+    overview: 'Tổng quan', proxy: 'Proxy', network: 'Mạng và quy tắc', system: 'Hệ thống', search: 'Lọc menu',
+    noResults: 'Không tìm thấy trang phù hợp', commandTitle: 'Đi tới', commandHint: 'Tìm trang rồi nhấn Enter để mở',
+  },
   fleet: {
     badge: 'Cụm máy chủ', checking: 'Đang kiểm tra…', title: 'Cụm máy chủ',
     subtitle: 'Xem tình trạng NovaPanel, tường lửa và trạng thái lõi của mọi máy chủ trên một trang.',
@@ -440,12 +505,12 @@ const vi = {
     deployOrderHint: 'Thứ tự: canary trước, các máy từ xa còn lại tiếp theo, máy cục bộ cuối cùng.',
     previewChanges: 'Xem trước thay đổi', startDeploy: 'Bắt đầu triển khai', deployed: 'Đã áp dụng',
     confirmDeleteTemplate: 'Xóa mẫu cấu hình này?', confirmDeployTemplate: 'Áp dụng mẫu cho các máy đã chọn? Mỗi máy sẽ kiểm tra và tạo snapshot cấu hình trước.',
-    previewSummary: 'Inbound +{inboundAdd}/~{inboundUpdate}, người dùng +{clientAdd}/~{clientUpdate}, TLS {tls}, phần {config}',
+    previewSummary: 'Inbound +{inboundAdd}/~{inboundUpdate}, outbound +{outboundAdd}/~{outboundUpdate}, người dùng +{clientAdd}/~{clientUpdate}, TLS {tls}, phần {config}',
     safeRollout: 'Triển khai có hướng dẫn', rolloutProgress: 'Tiến độ triển khai', rolloutStep1: 'Mẫu', rolloutStep2: 'Máy chủ', rolloutStep3: 'Xem lại',
     chooseTemplate: 'Chọn hoặc tạo mẫu', chooseTemplateHint: 'Mẫu là ảnh chụp các phần cấu hình đã chọn trên máy này.',
     useTemplate: 'Dùng mẫu này', noTemplates: 'Chưa có mẫu đã lưu. Tạo mẫu đầu tiên bên dưới.', orCreateTemplate: 'hoặc tạo mẫu mới',
     templateNameExample: 'Ví dụ: DNS và tuyến cho streaming', saveAndContinue: 'Lưu và tiếp tục',
-    scopeInbounds: 'Giao thức, cổng và tham chiếu TLS', scopeClients: 'Người dùng, ràng buộc, hạn mức và giới hạn tốc độ',
+    scopeInbounds: 'Giao thức, cổng và tham chiếu TLS', scopeOutbounds: 'Tag trùng bị ghi đè; địa chỉ và thông tin xác thực từ máy nguồn được sao chép nguyên vẹn', scopeClients: 'Người dùng, ràng buộc, hạn mức và giới hạn tốc độ',
     scopeTls: 'Chứng chỉ và cấu hình tên miền', scopeRoute: 'Bộ quy tắc và quy tắc định tuyến', scopeDns: 'Máy chủ DNS và quy tắc phân giải',
     chooseTargets: 'Chọn máy chủ đích', chooseTargetsHint: 'Không có máy nào được chọn tự động. Chỉ máy đã đánh dấu mới thay đổi.',
     selectedTemplate: 'Mẫu đã chọn', selectTargetsFirst: 'Chọn ít nhất một máy trước khi xem trước thay đổi.',
@@ -456,6 +521,7 @@ const vi = {
     previewPassed: 'Tất cả đích đã qua kiểm tra. Có thể xác nhận triển khai.', previewFailed: 'Có ít nhất một đích không qua kiểm tra. Quay lại và điều chỉnh lựa chọn hoặc mẫu.',
     previousStep: 'Quay lại', confirmRollout: 'Xác nhận triển khai', rolloutComplete: 'Triển khai hoàn tất',
     rolloutCompleteHint: 'Tất cả máy đã chọn áp dụng mẫu thành công.',
+    templateModeSaved: 'Dùng mẫu đã lưu', templateModeCreate: 'Tạo mẫu mới',
   },
   sessions: {
     badge: 'Lưu lượng trực tiếp', title: 'Kết nối đang hoạt động', subtitle: 'Xem các kết nối đang hoạt động trên toàn cụm mà không lưu lịch sử đích.',
@@ -505,6 +571,10 @@ const vi = {
 
 const fa = {
   ...en,
+  nav: {
+    overview: 'نمای کلی', proxy: 'پروکسی', network: 'شبکه و قوانین', system: 'سیستم', search: 'فیلتر منو',
+    noResults: 'صفحه‌ای پیدا نشد', commandTitle: 'رفتن به', commandHint: 'صفحه را جستجو کنید و Enter را بزنید',
+  },
   fleet: {
     badge: 'مجموعه سرورها', checking: 'در حال بررسی…', title: 'مجموعه سرورها',
     subtitle: 'وضعیت NovaPanel، فایروال و هسته همه سرورها را در یک صفحه مشاهده کنید.',
@@ -546,12 +616,12 @@ const fa = {
     deployOrderHint: 'ترتیب: ابتدا canary، سپس بقیه سرورهای راه دور و در پایان سرور محلی.',
     previewChanges: 'پیش‌نمایش تغییرات', startDeploy: 'شروع استقرار', deployed: 'اعمال شد',
     confirmDeleteTemplate: 'این قالب پیکربندی حذف شود؟', confirmDeployTemplate: 'این قالب روی سرورهای انتخاب‌شده اعمال شود؟ هر سرور ابتدا اعتبارسنجی و snapshot می‌گیرد.',
-    previewSummary: 'ورودی‌ها +{inboundAdd}/~{inboundUpdate}، کاربران +{clientAdd}/~{clientUpdate}، TLS {tls}، بخش‌ها {config}',
+    previewSummary: 'ورودی‌ها +{inboundAdd}/~{inboundUpdate}، خروجی‌ها +{outboundAdd}/~{outboundUpdate}، کاربران +{clientAdd}/~{clientUpdate}، TLS {tls}، بخش‌ها {config}',
     safeRollout: 'استقرار هدایت‌شده', rolloutProgress: 'پیشرفت استقرار', rolloutStep1: 'قالب', rolloutStep2: 'سرورها', rolloutStep3: 'بازبینی',
     chooseTemplate: 'قالبی انتخاب یا ایجاد کنید', chooseTemplateHint: 'قالب یک snapshot از بخش‌های انتخاب‌شده پیکربندی این سرور است.',
     useTemplate: 'استفاده از این قالب', noTemplates: 'هنوز قالبی ذخیره نشده است. اولین قالب را در پایین ایجاد کنید.', orCreateTemplate: 'یا قالب جدیدی ایجاد کنید',
     templateNameExample: 'مثلاً: DNS و مسیرهای استریم', saveAndContinue: 'ذخیره و ادامه',
-    scopeInbounds: 'پروتکل‌ها، پورت‌ها و ارجاع‌های TLS', scopeClients: 'کاربران، اتصال‌ها، سهمیه و محدودیت سرعت',
+    scopeInbounds: 'پروتکل‌ها، پورت‌ها و ارجاع‌های TLS', scopeOutbounds: 'برچسب‌های یکسان بازنویسی می‌شوند؛ نشانی‌ها و اطلاعات ورود مبدا بدون تغییر کپی می‌شوند', scopeClients: 'کاربران، اتصال‌ها، سهمیه و محدودیت سرعت',
     scopeTls: 'گواهی‌ها و تنظیمات دامنه', scopeRoute: 'مجموعه قوانین و قوانین مسیریابی', scopeDns: 'سرورهای DNS و قوانین حل نام',
     chooseTargets: 'سرورهای مقصد را انتخاب کنید', chooseTargetsHint: 'هیچ سروری خودکار انتخاب نمی‌شود. فقط سرورهای علامت‌خورده تغییر می‌کنند.',
     selectedTemplate: 'قالب انتخاب‌شده', selectTargetsFirst: 'پیش از پیش‌نمایش حداقل یک سرور را انتخاب کنید.',
@@ -562,6 +632,7 @@ const fa = {
     previewPassed: 'همه مقصدها اعتبارسنجی را گذراندند. اکنون می‌توانید استقرار را تأیید کنید.', previewFailed: 'حداقل یک مقصد اعتبارسنجی را رد کرد. برگردید و انتخاب یا قالب را اصلاح کنید.',
     previousStep: 'بازگشت', confirmRollout: 'تأیید استقرار', rolloutComplete: 'استقرار کامل شد',
     rolloutCompleteHint: 'همه سرورهای انتخاب‌شده قالب را با موفقیت اعمال کردند.',
+    templateModeSaved: 'استفاده از الگوی ذخیره‌شده', templateModeCreate: 'ایجاد الگوی جدید',
   },
   sessions: {
     badge: 'ترافیک زنده', title: 'اتصال‌های فعال', subtitle: 'اتصال‌های فعال را در کل مجموعه سرورها بدون ذخیره تاریخچه مقصد مشاهده کنید.',

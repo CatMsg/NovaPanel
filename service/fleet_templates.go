@@ -20,11 +20,12 @@ import (
 const fleetTemplatesSettingKey = "fleetTemplates"
 
 type FleetTemplateSections struct {
-	TLS      bool `json:"tls"`
-	Inbounds bool `json:"inbounds"`
-	Clients  bool `json:"clients"`
-	Route    bool `json:"route"`
-	DNS      bool `json:"dns"`
+	TLS       bool `json:"tls"`
+	Inbounds  bool `json:"inbounds"`
+	Outbounds bool `json:"outbounds"`
+	Clients   bool `json:"clients"`
+	Route     bool `json:"route"`
+	DNS       bool `json:"dns"`
 }
 
 type FleetTemplateInbound struct {
@@ -36,6 +37,12 @@ type FleetTemplateInbound struct {
 	Options json.RawMessage `json:"options,omitempty"`
 }
 
+type FleetTemplateOutbound struct {
+	Type    string          `json:"type"`
+	Tag     string          `json:"tag"`
+	Options json.RawMessage `json:"options,omitempty"`
+}
+
 type FleetTemplate struct {
 	ID          string                     `json:"id"`
 	Name        string                     `json:"name"`
@@ -44,6 +51,7 @@ type FleetTemplate struct {
 	Sections    FleetTemplateSections      `json:"sections"`
 	TLS         []model.Tls                `json:"tls,omitempty"`
 	Inbounds    []FleetTemplateInbound     `json:"inbounds,omitempty"`
+	Outbounds   []FleetTemplateOutbound    `json:"outbounds,omitempty"`
 	TLSRefs     map[uint]string            `json:"tlsRefs,omitempty"`
 	InboundRefs map[uint]string            `json:"inboundRefs,omitempty"`
 	Clients     []model.Client             `json:"clients,omitempty"`
@@ -58,13 +66,15 @@ type FleetTemplateSummary struct {
 }
 
 type FleetTemplatePreview struct {
-	TLSAdd        int      `json:"tlsAdd"`
-	TLSUpdate     int      `json:"tlsUpdate"`
-	InboundAdd    int      `json:"inboundAdd"`
-	InboundUpdate int      `json:"inboundUpdate"`
-	ClientAdd     int      `json:"clientAdd"`
-	ClientUpdate  int      `json:"clientUpdate"`
-	ConfigUpdates []string `json:"configUpdates"`
+	TLSAdd         int      `json:"tlsAdd"`
+	TLSUpdate      int      `json:"tlsUpdate"`
+	InboundAdd     int      `json:"inboundAdd"`
+	InboundUpdate  int      `json:"inboundUpdate"`
+	OutboundAdd    int      `json:"outboundAdd"`
+	OutboundUpdate int      `json:"outboundUpdate"`
+	ClientAdd      int      `json:"clientAdd"`
+	ClientUpdate   int      `json:"clientUpdate"`
+	ConfigUpdates  []string `json:"configUpdates"`
 }
 
 type FleetTemplateTargetResult struct {
@@ -120,7 +130,7 @@ func (s *FleetService) CaptureFleetTemplate(name string, sections FleetTemplateS
 	if name == "" {
 		return nil, common.NewError("模板名称不能为空")
 	}
-	if !sections.TLS && !sections.Inbounds && !sections.Clients && !sections.Route && !sections.DNS {
+	if !sections.TLS && !sections.Inbounds && !sections.Outbounds && !sections.Clients && !sections.Route && !sections.DNS {
 		return nil, common.NewError("至少选择一项配置")
 	}
 
@@ -150,6 +160,17 @@ func (s *FleetService) CaptureFleetTemplate(name string, sections FleetTemplateS
 			template.Inbounds = append(template.Inbounds, FleetTemplateInbound{
 				ID: inbound.Id, Type: inbound.Type, Tag: inbound.Tag, TLSID: inbound.TlsId,
 				Addrs: append(json.RawMessage(nil), inbound.Addrs...), Options: append(json.RawMessage(nil), inbound.Options...),
+			})
+		}
+	}
+	if sections.Outbounds {
+		var outbounds []model.Outbound
+		if err := db.Find(&outbounds).Error; err != nil {
+			return nil, err
+		}
+		for _, outbound := range outbounds {
+			template.Outbounds = append(template.Outbounds, FleetTemplateOutbound{
+				Type: outbound.Type, Tag: outbound.Tag, Options: append(json.RawMessage(nil), outbound.Options...),
 			})
 		}
 	}
@@ -320,6 +341,9 @@ func (s *FleetService) runFleetTemplateTargets(template FleetTemplate, targetIDs
 						} else {
 							result.Preview = &FleetTemplatePreview{}
 							err = json.Unmarshal(raw, result.Preview)
+							if err == nil {
+								err = validateFleetTemplatePreviewSupport(template, result.Preview)
+							}
 						}
 					}
 				}
@@ -335,6 +359,13 @@ func (s *FleetService) runFleetTemplateTargets(template FleetTemplate, targetIDs
 		}
 	}
 	return results, nil
+}
+
+func validateFleetTemplatePreviewSupport(template FleetTemplate, preview *FleetTemplatePreview) error {
+	if len(template.Outbounds) > 0 && preview.OutboundAdd+preview.OutboundUpdate != len(template.Outbounds) {
+		return common.NewError("目标服务器版本不支持出站模板，请先更新目标服务器")
+	}
+	return nil
 }
 
 func (s *FleetService) fetchFleetJSON(baseURL, token, action string, payload interface{}) (fleetAPIResponse, error) {
@@ -409,6 +440,9 @@ func orderFleetTemplateTargets(targetIDs []string, canaryID string) []string {
 func (s *ConfigService) PreviewFleetTemplate(template FleetTemplate, hostname string) (*FleetTemplatePreview, error) {
 	preview := &FleetTemplatePreview{}
 	db := database.GetDB()
+	if err := validateFleetTemplateOutbounds(template.Outbounds); err != nil {
+		return nil, err
+	}
 	for _, item := range template.TLS {
 		var count int64
 		if err := db.Model(&model.Tls{}).Where("name = ?", item.Name).Count(&count).Error; err != nil {
@@ -429,6 +463,17 @@ func (s *ConfigService) PreviewFleetTemplate(template FleetTemplate, hostname st
 			preview.InboundAdd++
 		} else {
 			preview.InboundUpdate++
+		}
+	}
+	for _, item := range template.Outbounds {
+		var count int64
+		if err := db.Model(&model.Outbound{}).Where("tag = ?", item.Tag).Count(&count).Error; err != nil {
+			return nil, err
+		}
+		if count == 0 {
+			preview.OutboundAdd++
+		} else {
+			preview.OutboundUpdate++
 		}
 	}
 	for _, item := range template.Clients {
@@ -500,6 +545,9 @@ func (s *ConfigService) ApplyFleetTemplate(template FleetTemplate, hostname stri
 }
 
 func (s *ConfigService) applyFleetTemplateTx(tx *gorm.DB, template FleetTemplate, hostname string) error {
+	if err := validateFleetTemplateOutbounds(template.Outbounds); err != nil {
+		return err
+	}
 	tlsIDs := make(map[uint]uint)
 	for _, source := range template.TLS {
 		var target model.Tls
@@ -578,6 +626,22 @@ func (s *ConfigService) applyFleetTemplateTx(tx *gorm.DB, template FleetTemplate
 			return err
 		}
 		inboundIDs[source.ID] = target.Id
+	}
+
+	for _, source := range template.Outbounds {
+		var target model.Outbound
+		err := tx.Where("tag = ?", source.Tag).First(&target).Error
+		if err != nil && !database.IsNotFound(err) {
+			return err
+		}
+		if database.IsNotFound(err) {
+			target = model.Outbound{Tag: source.Tag}
+		}
+		target.Type = source.Type
+		target.Options = append(json.RawMessage(nil), source.Options...)
+		if err := tx.Save(&target).Error; err != nil {
+			return err
+		}
 	}
 
 	for _, source := range template.Clients {
@@ -664,6 +728,32 @@ func (s *ConfigService) applyFleetTemplateTx(tx *gorm.DB, template FleetTemplate
 	}
 	if err := validateRuntimeConfig(*rawConfig); err != nil {
 		return common.NewErrorf("模板生成的 Sing-Box 配置无效: %v", err)
+	}
+	return nil
+}
+
+func validateFleetTemplateOutbounds(outbounds []FleetTemplateOutbound) error {
+	seen := make(map[string]struct{}, len(outbounds))
+	for _, outbound := range outbounds {
+		if strings.TrimSpace(outbound.Tag) == "" || strings.TrimSpace(outbound.Type) == "" {
+			return common.NewError("出站模板的标签和类型不能为空")
+		}
+		if _, exists := seen[outbound.Tag]; exists {
+			return common.NewErrorf("出站模板标签重复: %s", outbound.Tag)
+		}
+		seen[outbound.Tag] = struct{}{}
+		if len(outbound.Options) == 0 {
+			continue
+		}
+		var options map[string]json.RawMessage
+		if err := json.Unmarshal(outbound.Options, &options); err != nil || options == nil {
+			return common.NewErrorf("出站 %s 的参数不是 JSON 对象", outbound.Tag)
+		}
+		for _, key := range []string{"id", "type", "tag"} {
+			if _, exists := options[key]; exists {
+				return common.NewErrorf("出站 %s 的参数不能覆盖 %s", outbound.Tag, key)
+			}
+		}
 	}
 	return nil
 }

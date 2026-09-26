@@ -59,11 +59,27 @@
               <AnyTls v-if="inbound.type == inTypes.AnyTls" :data="inbound" direction="in" />
               <Mieru v-if="inbound.type == inTypes.Mieru" :data="inbound" />
               <Masque v-if="inbound.type == inTypes.Masque" :data="inbound" />
-              <TProxy v-if="inbound.type == inTypes.TProxy" :inbound="inbound" />
-              <Transport v-if="!externalInbound && Object.hasOwn(inbound,'transport')" :data="inbound" />
               <Users v-if="hasUser" :clients="clients" :data="initUsers" />
               <InTls v-if="HasTls.includes(inbound.type)"  :inbound="inbound" :tlsConfigs="tlsConfigs" :tls_id="inbound.tls_id" />
-              <Multiplex v-if="MuxAvailable.includes(inbound.type)" direction="in" :data="inbound" />
+              <v-expansion-panels
+                v-if="inbound.type == inTypes.TProxy || (!externalInbound && Object.hasOwn(inbound, 'transport')) || MuxAvailable.includes(inbound.type)"
+                class="inbound-advanced"
+                variant="accordion"
+              >
+                <v-expansion-panel value="advanced">
+                  <v-expansion-panel-title>
+                    <div>
+                      <strong>{{ $t('ui.inboundForm.advanced') }}</strong>
+                      <div class="inbound-advanced__hint">{{ $t('ui.inboundForm.advancedHint') }}</div>
+                    </div>
+                  </v-expansion-panel-title>
+                  <v-expansion-panel-text>
+                    <TProxy v-if="inbound.type == inTypes.TProxy" :inbound="inbound" />
+                    <Transport v-if="!externalInbound && Object.hasOwn(inbound, 'transport')" :data="inbound" />
+                    <Multiplex v-if="MuxAvailable.includes(inbound.type)" direction="in" :data="inbound" />
+                  </v-expansion-panel-text>
+                </v-expansion-panel>
+              </v-expansion-panels>
             </v-window-item>
             <v-window-item v-if="!externalInbound" value="c">
               <OutJsonVue :inData="inbound" :type="inbound.type" />
@@ -250,7 +266,7 @@ export default {
       if (this.inbound.type == InTypes.Mieru) {
         const duplicate = Data().inbounds?.some((item: any) => item.type == InTypes.Mieru && item.id != this.inbound.id)
         if (duplicate) {
-          push.error({ message: '每台服务器只能创建一个 Mieru 入站' })
+          push.error({ message: this.$t('ui.inboundForm.singleMieru') as string })
           return
         }
       }
@@ -351,6 +367,9 @@ export default {
 .modal-shell__actions {
   padding: 16px 20px 20px;
 }
+
+.inbound-advanced { margin-top: 12px; }
+.inbound-advanced__hint { margin-top: 3px; color: rgba(var(--v-theme-on-surface), .62); font-size: .75rem; font-weight: 400; }
 
 .modal-shell.v-theme--dark {
   background: linear-gradient(180deg, rgba(18, 23, 37, 0.98), rgba(14, 17, 28, 0.96));

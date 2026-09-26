@@ -69,7 +69,7 @@
         </v-alert>
       </v-card>
 
-      <v-row class="fleet-summary" dense>
+      <v-row class="fleet-summary" density="comfortable">
         <v-col cols="6" class="fleet-summary__col">
           <v-card class="fleet-summary__card fleet-summary__card--one" rounded="xl" variant="flat">
             <div class="fleet-summary__label">{{ $t('ui.fleet.total') }}</div>
@@ -118,7 +118,7 @@
         {{ $t('ui.fleet.onlyLocal') }}
       </v-alert>
 
-      <v-row class="fleet-grid" dense>
+      <v-row class="fleet-grid" density="comfortable">
         <v-col v-for="server in servers" :key="server.id" cols="12" md="6" xl="4">
           <v-card class="fleet-card" rounded="xl" variant="flat" @click="openDetails(server)">
             <div class="fleet-card__header">
@@ -331,7 +331,16 @@
                   <div><h3>{{ $t('ui.fleet.chooseTemplate') }}</h3><p>{{ $t('ui.fleet.chooseTemplateHint') }}</p></div>
                 </div>
 
-                <div v-if="templates.length" class="fleet-template-list">
+                <div class="fleet-template-mode" role="group" :aria-label="$t('ui.fleet.chooseTemplate')">
+                  <button type="button" :aria-pressed="templateMode === 'saved'" :class="{ 'is-active': templateMode === 'saved' }" @click="templateMode = 'saved'">
+                    {{ $t('ui.fleet.templateModeSaved') }}
+                  </button>
+                  <button type="button" :aria-pressed="templateMode === 'create'" :class="{ 'is-active': templateMode === 'create' }" @click="templateMode = 'create'">
+                    {{ $t('ui.fleet.templateModeCreate') }}
+                  </button>
+                </div>
+
+                <div v-if="templateMode === 'saved' && templates.length" class="fleet-template-list">
                   <button v-for="item in templates" :key="item.id" type="button" class="fleet-template-card" :class="{ 'is-selected': selectedTemplateId === item.id }" @click="selectTemplate(item.id)">
                     <span class="fleet-template-card__icon"><v-icon icon="mdi-file-document-check-outline" /></span>
                     <span class="fleet-template-card__copy"><strong>{{ item.name }}</strong><small>{{ templateSectionLabels(item).join(' · ') }}</small></span>
@@ -342,11 +351,9 @@
                     <v-btn color="primary" @click="goToTargets"><v-icon icon="mdi-arrow-right" end />{{ $t('ui.fleet.useTemplate') }}</v-btn>
                   </div>
                 </div>
-                <div v-else class="fleet-rollout__empty"><v-icon icon="mdi-file-plus-outline" /><span>{{ $t('ui.fleet.noTemplates') }}</span></div>
+                <div v-else-if="templateMode === 'saved'" class="fleet-rollout__empty"><v-icon icon="mdi-file-plus-outline" /><span>{{ $t('ui.fleet.noTemplates') }}</span></div>
 
-                <div class="fleet-rollout__divider"><span>{{ $t('ui.fleet.orCreateTemplate') }}</span></div>
-
-                <div class="fleet-template-create">
+                <div v-else class="fleet-template-create">
                   <v-text-field v-model="templateName" :label="$t('ui.fleet.templateName')" :placeholder="$t('ui.fleet.templateNameExample')" variant="outlined" density="comfortable" hide-details />
                   <div class="fleet-template-scope">
                     <button v-for="option in templateSectionOptions" :key="option.key" type="button" :aria-pressed="templateSections[option.key]" :class="{ 'is-selected': templateSections[option.key] }" @click="toggleTemplateSection(option.key)">
@@ -482,7 +489,7 @@
                 <span>{{ item.label }}</span>
                 <strong>{{ formatDriftValue(item.actual) }}</strong>
                 <v-icon icon="mdi-arrow-left" size="16" />
-                <small>基线 {{ formatDriftValue(item.expected) }}</small>
+                <small>{{ $t('ui.fleet.baseline') }} {{ formatDriftValue(item.expected) }}</small>
               </div>
             </div>
           </section>
@@ -596,7 +603,7 @@ type FleetConfig = {
   enabled: boolean
 }
 
-type FleetTemplateSectionKey = 'tls' | 'inbounds' | 'clients' | 'route' | 'dns'
+type FleetTemplateSectionKey = 'tls' | 'inbounds' | 'outbounds' | 'clients' | 'route' | 'dns'
 
 type FleetTemplate = {
   id: string
@@ -610,6 +617,8 @@ type FleetTemplatePreview = {
   tlsUpdate: number
   inboundAdd: number
   inboundUpdate: number
+  outboundAdd: number
+  outboundUpdate: number
   clientAdd: number
   clientUpdate: number
   configUpdates?: string[]
@@ -646,8 +655,9 @@ const batchAction = ref<'' | 'update' | 'restart'>('')
 const batchMessage = ref('')
 const batchMessageType = ref<'info' | 'success' | 'warning' | 'error'>('info')
 const templates = ref<FleetTemplate[]>([])
+const templateMode = ref<'saved' | 'create'>('saved')
 const templateName = ref('')
-const templateSections = ref<Record<FleetTemplateSectionKey, boolean>>({ tls: false, inbounds: true, clients: true, route: true, dns: true })
+const templateSections = ref<Record<FleetTemplateSectionKey, boolean>>({ tls: false, inbounds: true, outbounds: false, clients: true, route: true, dns: true })
 const selectedTemplateId = ref('')
 const selectedTargets = ref<string[]>([])
 const canaryTarget = ref<string | null>(null)
@@ -741,6 +751,7 @@ const selectedTargetItems = computed(() => deployableServers.value
 const selectedTargetNames = computed(() => deployableServers.value.filter(server => selectedTargets.value.includes(server.id)).map(server => server.name))
 const templateSectionOptions = computed<Array<{ key: FleetTemplateSectionKey; label: string; hint: string; icon: string }>>(() => [
   { key: 'inbounds', label: t('pages.inbounds'), hint: t('ui.fleet.scopeInbounds'), icon: 'mdi-download-network-outline' },
+  { key: 'outbounds', label: t('pages.outbounds'), hint: t('ui.fleet.scopeOutbounds'), icon: 'mdi-upload-network-outline' },
   { key: 'clients', label: t('pages.clients'), hint: t('ui.fleet.scopeClients'), icon: 'mdi-account-multiple-outline' },
   { key: 'tls', label: t('pages.tls'), hint: t('ui.fleet.scopeTls'), icon: 'mdi-certificate-outline' },
   { key: 'route', label: t('pages.rules'), hint: t('ui.fleet.scopeRoute'), icon: 'mdi-routes' },
@@ -944,12 +955,13 @@ const openOrchestration = async () => {
   orchestrationStep.value = 1
   deploymentComplete.value = false
   templateName.value = ''
-  templateSections.value = { tls: false, inbounds: true, clients: true, route: true, dns: true }
+  templateSections.value = { tls: false, inbounds: true, outbounds: false, clients: true, route: true, dns: true }
   templateResults.value = []
   selectedTargets.value = []
   canaryTarget.value = null
   selectedTemplateId.value = ''
   await loadTemplates()
+  templateMode.value = templates.value.length ? 'saved' : 'create'
   showOrchestration.value = true
 }
 
@@ -1045,6 +1057,8 @@ const deployTemplate = async () => {
 const previewSummary = (preview: FleetTemplatePreview) => t('ui.fleet.previewSummary', {
   inboundAdd: preview.inboundAdd ?? 0,
   inboundUpdate: preview.inboundUpdate ?? 0,
+  outboundAdd: preview.outboundAdd ?? 0,
+  outboundUpdate: preview.outboundUpdate ?? 0,
   clientAdd: preview.clientAdd ?? 0,
   clientUpdate: preview.clientUpdate ?? 0,
   tls: (preview.tlsAdd ?? 0) + (preview.tlsUpdate ?? 0),
@@ -1385,6 +1399,9 @@ onBeforeUnmount(() => {
 .fleet-rollout__section-head h3 { margin: 0 0 3px; font-size: 1rem; }
 .fleet-rollout__section-head p { margin: 0; color: var(--np-text-muted); font-size: .78rem; line-height: 1.5; }
 .fleet-rollout__section-icon { display: grid; flex: 0 0 42px; width: 42px; height: 42px; place-items: center; border-radius: 14px; background: rgba(10, 132, 255, .11); color: rgb(var(--v-theme-primary)); }
+.fleet-template-mode { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; padding: 4px; border-radius: 13px; background: var(--np-surface-muted); }
+.fleet-template-mode button { min-width: 0; padding: 9px 12px; border: 1px solid transparent; border-radius: 10px; color: var(--np-text-muted); font-size: .8rem; font-weight: 650; }
+.fleet-template-mode button.is-active { border-color: var(--np-border); background: var(--np-surface); color: var(--np-text); box-shadow: 0 2px 6px rgba(15, 23, 42, .07); }
 .fleet-template-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .fleet-template-card { display: flex; align-items: center; gap: 11px; min-width: 0; padding: 13px; border: 1px solid var(--np-border); border-radius: 15px; background: var(--np-surface); color: var(--np-text); text-align: left; transition: border-color .18s ease, background .18s ease, transform .18s ease; }
 .fleet-template-card:hover { border-color: rgba(10, 132, 255, .34); transform: translateY(-1px); }

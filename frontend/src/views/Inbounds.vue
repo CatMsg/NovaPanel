@@ -26,6 +26,17 @@
     :data="masqueStatus.data"
     @close="closeMasqueStatus"
   />
+  <v-dialog v-model="deleteDialogOpen" max-width="420">
+    <v-card rounded="xl" class="resource-delete-dialog">
+      <v-card-title>{{ $t('actions.del') }} · {{ deleteTarget?.tag }}</v-card-title>
+      <v-card-text>{{ $t('confirm') }}</v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn variant="text" @click="deleteDialogOpen = false">{{ $t('no') }}</v-btn>
+        <v-btn color="error" variant="tonal" :loading="deleteLoading" @click="confirmDelete">{{ $t('yes') }}</v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
   <v-card class="resource-hero resource-hero--inbounds" rounded="xl" variant="flat">
     <div class="resource-hero__topline">
       <span class="resource-hero__badge">{{ $t('pages.inbounds') }}</span>
@@ -38,17 +49,15 @@
           </div>
           <div>
             <h1 class="resource-hero__title">{{ $t('pages.inbounds') }}</h1>
-            <p class="resource-hero__subtitle">
-              统一管理入站协议、监听端口和用户绑定，桌面端与移动端都更容易扫视。
-            </p>
+            <p class="resource-hero__subtitle">{{ $t('ui.resource.inboundsSubtitle') }}</p>
           </div>
         </div>
         <div class="resource-hero__meta">
-          <span>协议 {{ new Set(inbounds.map(i => i.type)).size }}</span>
+          <span>{{ $t('ui.resource.protocolCount', { count: new Set(inbounds.map(i => i.type)).size }) }}</span>
           <span>•</span>
-          <span>在线 {{ onlines.length }}</span>
+          <span>{{ $t('ui.resource.onlineCount', { count: onlines.length }) }}</span>
           <span>•</span>
-          <span>总数 {{ inbounds.length }}</span>
+          <span>{{ $t('itemCount', { count: inbounds.length }) }}</span>
         </div>
       </v-col>
       <v-col v-if="inbounds.length > 0" cols="12" lg="4" class="resource-hero__actions">
@@ -60,17 +69,72 @@
     </v-row>
   </v-card>
 
-  <v-row class="resource-grid">
-    <v-col v-if="inbounds.length === 0" cols="12">
+  <div v-if="inbounds.length > 0" class="resource-list-toolbar">
+    <v-text-field v-model="search" :placeholder="$t('ui.resource.searchInbounds')" prepend-inner-icon="mdi-magnify" clearable hide-details density="comfortable" variant="solo-filled" />
+    <span>{{ $t('itemCount', { count: filteredInbounds.length }) }}</span>
+  </div>
+
+  <v-row v-if="inbounds.length === 0" class="resource-grid">
+    <v-col cols="12">
       <EmptyState
         icon="mdi-cloud-download-outline"
-        title="暂无入站"
-        description="创建入站后，可在这里统一管理协议、监听端口和用户绑定。"
+        :title="$t('ui.resource.noInbounds')"
+        :description="$t('ui.resource.noInboundsHint')"
         :action="$t('actions.add')"
         @action="showModal(0)"
       />
     </v-col>
-    <v-col cols="12" sm="6" md="4" lg="3" v-for="(item, index) in <any[]>inbounds" :key="item.tag">
+  </v-row>
+
+  <v-data-table
+    v-else-if="!smAndDown"
+    class="resource-table"
+    :headers="tableHeaders"
+    :items="filteredInbounds"
+    item-value="id"
+    density="comfortable"
+    hover
+  >
+    <template #item.tag="{ item }">
+      <strong class="resource-table__primary">{{ item.tag }}</strong>
+    </template>
+    <template #item.address="{ item }">{{ item.listen || '0.0.0.0' }}</template>
+    <template #item.port="{ item }">{{ item.listen_port ?? '-' }}</template>
+    <template #item.tls="{ item }">
+      <v-chip size="small" :color="['mieru', 'masque'].includes(item.type) ? 'secondary' : item.tls_id > 0 ? 'success' : 'default'" variant="tonal">
+        {{ ['mieru', 'masque'].includes(item.type) ? $t('ui.resource.notApplicable') : item.tls_id > 0 ? $t('enable') : $t('disable') }}
+      </v-chip>
+    </template>
+    <template #item.usersCount="{ item }">{{ inboundUsers(item).length || '-' }}</template>
+    <template #item.online="{ item }">
+      <v-chip v-if="onlines.includes(item.tag)" size="small" color="success" variant="tonal">{{ $t('online') }}</v-chip>
+      <span v-else class="resource-table__muted">-</span>
+    </template>
+    <template #item.actions="{ item }">
+      <div class="resource-table__actions">
+        <v-btn icon="mdi-file-edit-outline" size="small" variant="text" :aria-label="$t('actions.edit')" :title="$t('actions.edit')" @click="showModal(item.id)" />
+        <v-menu location="bottom end">
+          <template #activator="{ props }"><v-btn v-bind="props" icon="mdi-dots-horizontal" size="small" variant="text" :aria-label="$t('ui.common.more')" /></template>
+          <v-list density="compact" nav>
+            <v-list-item v-if="!['mieru', 'masque'].includes(item.type)" prepend-icon="mdi-content-duplicate" :title="$t('actions.clone')" @click="clone(item.id)" />
+            <v-list-item v-if="item.type === 'mieru' || item.type === 'masque'" prepend-icon="mdi-information-outline" :title="$t('status')" @click="item.type === 'mieru' ? showMieruStatus(item) : showMasqueStatus(item)" />
+            <v-list-item v-if="Data().enableTraffic" prepend-icon="mdi-chart-line" :title="$t('stats.graphTitle')" @click="showStats(item.tag)" />
+            <v-divider />
+            <v-list-item prepend-icon="mdi-delete-outline" :title="$t('actions.del')" base-color="error" @click="askDelete(item)" />
+          </v-list>
+        </v-menu>
+      </div>
+    </template>
+    <template #no-data>
+      <EmptyState icon="mdi-magnify" :title="$t('ui.resource.noSearchResults')" :description="$t('ui.resource.noSearchResultsHint')" />
+    </template>
+  </v-data-table>
+
+  <v-row v-else class="resource-grid">
+    <v-col v-if="filteredInbounds.length === 0" cols="12">
+      <EmptyState icon="mdi-magnify" :title="$t('ui.resource.noSearchResults')" :description="$t('ui.resource.noSearchResultsHint')" />
+    </v-col>
+    <v-col cols="12" sm="6" md="4" lg="3" v-for="item in filteredInbounds" :key="item.tag">
       <v-card class="resource-card" rounded="xl" variant="flat" :title="item.tag">
         <v-card-subtitle style="margin-top: -15px;">
           <v-row>
@@ -93,17 +157,17 @@
           <v-row>
             <v-col>{{ $t('objects.tls') }}</v-col>
             <v-col>
-              {{ ['mieru', 'masque'].includes(item.type) ? '不适用' : (item.tls_id > 0 ? $t('enable') : $t('disable')) }}
+              {{ ['mieru', 'masque'].includes(item.type) ? $t('ui.resource.notApplicable') : (item.tls_id > 0 ? $t('enable') : $t('disable')) }}
             </v-col>
           </v-row>
           <v-row>
             <v-col>{{ $t('pages.clients') }}</v-col>
             <v-col>
-              <template v-if="item.users">
-                <v-tooltip activator="parent" dir="ltr" location="bottom" v-if="item.users.length > 0">
-                  <span v-for="u in item.users" :key="u">{{ u }}<br /></span>
+              <template v-if="inboundUsers(item).length">
+                <v-tooltip activator="parent" dir="ltr" location="bottom">
+                  <span v-for="u in inboundUsers(item)" :key="u">{{ u }}<br /></span>
                 </v-tooltip>
-                {{ item.users.length }}
+                {{ inboundUsers(item).length }}
               </template>
               <template v-else>-</template>
             </v-col>
@@ -124,35 +188,21 @@
             <v-icon icon="mdi-file-edit" /><span>{{ $t('actions.edit') }}</span>
             <v-tooltip activator="parent" location="top" :text="$t('actions.edit')"></v-tooltip>
           </v-btn>
-          <v-btn class="np-card-action" variant="text" style="margin-inline-start:0;" color="warning" @click="delOverlay[index] = true">
+          <v-btn class="np-card-action" variant="text" style="margin-inline-start:0;" color="warning" @click="askDelete(item)">
             <v-icon icon="mdi-file-remove" /><span>{{ $t('actions.del') }}</span>
             <v-tooltip activator="parent" location="top" :text="$t('actions.del')"></v-tooltip>
           </v-btn>
-          <v-overlay
-            v-model="delOverlay[index]"
-            contained
-            class="align-center justify-center"
-          >
-            <v-card :title="$t('actions.del')" rounded="lg">
-              <v-divider></v-divider>
-              <v-card-text>{{ $t('confirm') }}</v-card-text>
-              <v-card-actions>
-                <v-btn color="error" variant="outlined" @click="delInbound(item.id)">{{ $t('yes') }}</v-btn>
-                <v-btn color="success" variant="outlined" @click="delOverlay[index] = false">{{ $t('no') }}</v-btn>
-              </v-card-actions>
-            </v-card>
-          </v-overlay>
           <v-btn v-if="!['mieru', 'masque'].includes(item.type)" class="np-card-action" variant="text" :loading="cloneLoading" @click="clone(item.id)">
             <v-icon icon="mdi-content-duplicate" /><span>{{ $t('actions.clone') }}</span>
             <v-tooltip activator="parent" location="top" :text="$t('actions.clone')"></v-tooltip>
           </v-btn>
           <v-btn v-if="item.type == 'mieru'" class="np-card-action" variant="text" @click="showMieruStatus(item)">
             <v-icon icon="mdi-information-outline" /><span>{{ $t('status') }}</span>
-            <v-tooltip activator="parent" location="top" text="Mieru status"></v-tooltip>
+            <v-tooltip activator="parent" location="top" :text="$t('status')"></v-tooltip>
           </v-btn>
           <v-btn v-if="item.type == 'masque'" class="np-card-action" variant="text" @click="showMasqueStatus(item)">
             <v-icon icon="mdi-shield-account-outline" /><span>{{ $t('status') }}</span>
-            <v-tooltip activator="parent" location="top" text="MASQUE status"></v-tooltip>
+            <v-tooltip activator="parent" location="top" :text="$t('status')"></v-tooltip>
           </v-btn>
           <v-btn class="np-card-action" variant="text" @click="showStats(item.tag)" v-if="Data().enableTraffic">
             <v-icon icon="mdi-chart-line" /><span>{{ $t('stats.graphTitle') }}</span>
@@ -171,6 +221,8 @@ import { computed, defineAsyncComponent, ref } from 'vue'
 import { createInbound, Inbound } from '@/types/inbounds'
 import RandomUtil from '@/plugins/randomUtil'
 import EmptyState from '@/components/EmptyState.vue'
+import { useDisplay } from 'vuetify'
+import { useI18n } from 'vue-i18n'
 
 const InboundVue = defineAsyncComponent(() => import('@/layouts/modals/Inbound.vue'))
 const Stats = defineAsyncComponent(() => import('@/layouts/modals/Stats.vue'))
@@ -180,10 +232,33 @@ const MasqueStatus = defineAsyncComponent(() => import('@/layouts/modals/MasqueS
 const appConfig = computed((): Config => {
   return <Config> Data().config
 })
+const { smAndDown } = useDisplay()
+const { t } = useI18n()
+const search = ref('')
 
 const inbounds = computed((): Inbound[] => {
   return <Inbound[]> Data().inbounds
 })
+
+const filteredInbounds = computed(() => {
+  const query = search.value.trim().toLocaleLowerCase()
+  if (!query) return inbounds.value
+  return inbounds.value.filter(item => [item.tag, item.type, item.listen, item.listen_port, ...inboundUsers(item)]
+    .some(value => String(value ?? '').toLocaleLowerCase().includes(query)))
+})
+
+const inboundUsers = (item: Inbound): string[] => (item as any).users ?? []
+
+const tableHeaders = computed(() => [
+  { title: t('objects.tag'), key: 'tag' },
+  { title: t('protocol'), key: 'type' },
+  { title: t('in.addr'), key: 'address' },
+  { title: t('in.port'), key: 'port' },
+  { title: t('objects.tls'), key: 'tls', sortable: false },
+  { title: t('pages.clients'), key: 'usersCount' },
+  { title: t('online'), key: 'online', sortable: false },
+  { title: t('ui.common.more'), key: 'actions', sortable: false, align: 'end' as const },
+])
 
 const tlsConfigs = computed((): any[] => {
   return <any[]> Data().tlsConfigs
@@ -202,7 +277,25 @@ const modal = ref({
   id: 0,
 })
 
-let delOverlay = ref(new Array<boolean>)
+const deleteDialogOpen = ref(false)
+const deleteLoading = ref(false)
+const deleteTarget = ref<Inbound | null>(null)
+
+const askDelete = (item: Inbound) => {
+  deleteTarget.value = item
+  deleteDialogOpen.value = true
+}
+
+const confirmDelete = async () => {
+  if (!deleteTarget.value) return
+  deleteLoading.value = true
+  const success = await delInbound(deleteTarget.value.id)
+  deleteLoading.value = false
+  if (success) {
+    deleteDialogOpen.value = false
+    deleteTarget.value = null
+  }
+}
 
 const showModal = (id: number) => {
   modal.value.id = id
@@ -213,11 +306,9 @@ const closeModal = () => {
 }
 
 const delInbound = async (id: number) => {
-  const index = inbounds.value.findIndex(i => i.id == id)
-  const tag = inbounds.value[index].tag
-
-  const success = await Data().save("inbounds", "del", tag)
-  if (success) delOverlay.value[index] = false
+  const inbound = inbounds.value.find(i => i.id == id)
+  if (!inbound) return false
+  return await Data().save("inbounds", "del", inbound.tag)
 }
 
 let cloneLoading = ref(false)
@@ -290,6 +381,15 @@ const closeMasqueStatus = () => {
   margin-bottom: 18px;
   overflow: hidden;
 }
+
+.resource-list-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 12px; color: var(--np-text-muted); font-size: .78rem; }
+.resource-list-toolbar :deep(.v-input) { max-width: 420px; }
+.resource-table { overflow: hidden; border: 1px solid var(--np-border); border-radius: 18px; background: var(--np-surface); box-shadow: var(--np-shadow); backdrop-filter: blur(24px) saturate(1.08); }
+.resource-table__primary { overflow-wrap: anywhere; }
+.resource-table__muted { color: var(--np-text-muted); }
+.resource-table__actions { display: flex; align-items: center; justify-content: flex-end; gap: 2px; }
+.resource-table__empty { padding: 26px; color: var(--np-text-muted); text-align: center; }
+.resource-delete-dialog { border: 1px solid var(--np-border); background: var(--np-surface); }
 
 .resource-hero__topline {
   display: flex;

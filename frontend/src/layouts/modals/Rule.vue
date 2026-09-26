@@ -1,5 +1,10 @@
 <template>
-  <v-dialog transition="dialog-bottom-transition" width="800">
+  <v-dialog
+    :model-value="visible"
+    transition="dialog-bottom-transition"
+    width="800"
+    @update:model-value="onDialogUpdate"
+  >
     <v-card class="rounded-lg">
       <v-card-title>
         {{ $t('actions.' + title) + " " + $t('objects.rule') }}
@@ -8,7 +13,7 @@
       <v-card-text style="padding: 0 16px;">
         <v-row>
           <v-col cols="12" sm="6" md="4">
-            <v-switch color="primary" v-model="logical" :label="$t('rule.logical')" hide-details></v-switch>
+            <v-switch color="primary" v-model="logical" :label="$t('ui.rules.combineConditions')" hide-details></v-switch>
           </v-col>
           <v-spacer></v-spacer>
           <v-col cols="auto" v-if="logical" justify="center" align="center">
@@ -39,8 +44,8 @@
           <v-col cols="12" sm="6" md="4">
             <v-select
               v-model="ruleData.action"
-              :items="actions"
-              :label="$t('admin.action')"
+              :items="actionOptions"
+              :label="$t('ui.rules.result')"
               hide-details
             ></v-select>
           </v-col>
@@ -56,7 +61,7 @@
             <v-switch color="primary" v-model="ruleData.invert" :label="$t('rule.invert')" hide-details></v-switch>
           </v-col>
         </v-row>
-        <v-card subtitle="Route" v-if="ruleData.action == 'route'">
+        <v-card :subtitle="$t('ui.rules.actionRoute')" v-if="ruleData.action == 'route'">
           <v-row>
             <v-col cols="12" sm="6" md="4">
               <v-select
@@ -68,7 +73,7 @@
             </v-col>
           </v-row>
         </v-card>
-        <v-card subtitle="Route Option" v-if="ruleData.action == 'route-options'">
+        <v-card :subtitle="$t('ui.rules.actionRouteOptions')" v-if="ruleData.action == 'route-options'">
           <v-row>
             <v-col cols="12" sm="6" md="4">
               <v-text-field v-model="ruleData.override_address" :label="$t('types.direct.overrideAddr')" hide-details></v-text-field>
@@ -94,12 +99,12 @@
             </v-col>
           </v-row>
         </v-card>
-        <v-card subtitle="Reject" v-if="ruleData.action == 'reject'">
+        <v-card :subtitle="$t('ui.rules.actionReject')" v-if="ruleData.action == 'reject'">
           <v-row>
             <v-col cols="12" sm="6" md="4">
               <v-select
                 v-model="ruleData.method"
-                :items="[{ title: 'Default', value: 'default' },{ title: 'Drop', value: 'drop'}]"
+                :items="[{ title: $t('ui.rules.rejectDefault'), value: 'default' },{ title: $t('ui.rules.drop'), value: 'drop'}]"
                 :label="$t('rule.method')"
                 clearable
                 @click:clear="delete ruleData.method"
@@ -111,7 +116,7 @@
             </v-col>
           </v-row>
         </v-card>
-        <v-card subtitle="Sniff" v-if="ruleData.action == 'sniff'">
+        <v-card :subtitle="$t('ui.rules.actionSniff')" v-if="ruleData.action == 'sniff'">
           <v-row>
             <v-col cols="12" sm="6" md="4">
               <v-select
@@ -128,7 +133,7 @@
             </v-col>
           </v-row>
         </v-card>
-        <v-card subtitle="Resolve" v-if="ruleData.action == 'resolve'">
+        <v-card :subtitle="$t('ui.rules.actionResolve')" v-if="ruleData.action == 'resolve'">
           <v-row>
             <v-col cols="12" sm="6" md="4">
               <v-select
@@ -186,15 +191,6 @@ export default {
         action: 'route',
         outbound: 'direct',
       },
-      actions: [
-        { title: 'Route', value: 'route'},
-        { title: 'Route Options', value: 'route-options'},
-        { title: 'Bypass', value: 'bypass'},
-        { title: 'Reject', value: 'reject'},
-        { title: 'Hijack DNS', value: 'hijack-dns'},
-        { title: 'Sniff', value: 'sniff'},
-        { title: 'Resolve', value: 'resolve'}
-      ],
       sniffers: [
         { title: 'HTTP', value: 'http' },
         { title: 'TLS', value: 'tls' },
@@ -216,6 +212,9 @@ export default {
     }
   },
   methods: {
+    onDialogUpdate(value: boolean) {
+      if (!value) this.$emit('close')
+    },
     updateData() {
       if (this.$props.index != -1) {
         const newData = JSON.parse(this.$props.data)
@@ -304,6 +303,17 @@ export default {
     }
   },
   computed: {
+    actionOptions() {
+      return [
+        { title: this.$t('ui.rules.actionRoute'), value: 'route' },
+        { title: this.$t('ui.rules.actionRouteOptions'), value: 'route-options' },
+        { title: this.$t('ui.rules.actionBypass'), value: 'bypass' },
+        { title: this.$t('ui.rules.actionReject'), value: 'reject' },
+        { title: this.$t('ui.rules.actionHijackDns'), value: 'hijack-dns' },
+        { title: this.$t('ui.rules.actionSniff'), value: 'sniff' },
+        { title: this.$t('ui.rules.actionResolve'), value: 'resolve' },
+      ]
+    },
     logical: {
       get() { return this.ruleData.type == 'logical' },
       set(v:boolean) {

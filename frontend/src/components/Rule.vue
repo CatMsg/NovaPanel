@@ -8,6 +8,16 @@
     @close="closeExpTextarea"
   />
   <v-card style="background-color: inherit;">
+    <div class="rule-quick-conditions">
+      <span>{{ $t('ui.rules.matchConditions') }}</span>
+      <div class="rule-quick-conditions__buttons">
+        <v-btn size="small" :variant="optionDomain ? 'tonal' : 'outlined'" :color="optionDomain ? 'primary' : undefined" :aria-pressed="optionDomain" @click="!optionDomain && (optionDomain = true)">{{ $t('rule.domainRules') }}</v-btn>
+        <v-btn size="small" :variant="optionRuleSet ? 'tonal' : 'outlined'" :color="optionRuleSet ? 'primary' : undefined" :aria-pressed="optionRuleSet" @click="!optionRuleSet && (optionRuleSet = true)">{{ $t('rule.ruleset') }}</v-btn>
+        <v-btn size="small" :variant="optionInbound ? 'tonal' : 'outlined'" :color="optionInbound ? 'primary' : undefined" :aria-pressed="optionInbound" @click="!optionInbound && (optionInbound = true)">{{ $t('pages.inbounds') }}</v-btn>
+        <v-btn size="small" :variant="optionClient ? 'tonal' : 'outlined'" :color="optionClient ? 'primary' : undefined" :aria-pressed="optionClient" @click="!optionClient && (optionClient = true)">{{ $t('pages.clients') }}</v-btn>
+        <v-btn size="small" :variant="optionNetwork ? 'tonal' : 'outlined'" :color="optionNetwork ? 'primary' : undefined" :aria-pressed="optionNetwork" @click="!optionNetwork && (optionNetwork = true)">{{ $t('network') }}</v-btn>
+      </div>
+    </div>
     <v-row>
       <v-col cols="12" v-if="optionInbound">
         <v-combobox
@@ -637,4 +647,8 @@ export default {
   color: rgb(var(--v-theme-primary));
   font-weight: 600;
 }
+
+.rule-quick-conditions { display: grid; gap: 8px; margin: 2px 0 14px; }
+.rule-quick-conditions > span { color: rgba(var(--v-theme-on-surface), .65); font-size: .76rem; font-weight: 600; }
+.rule-quick-conditions__buttons { display: flex; flex-wrap: wrap; gap: 7px; }
 </style>

@@ -35,6 +35,17 @@
     @close="chainModal = false"
     @save="saveChain"
   />
+  <v-dialog v-model="deleteDialogOpen" max-width="420">
+    <v-card rounded="xl" class="resource-delete-dialog">
+      <v-card-title>{{ $t('actions.del') }} · {{ deleteTarget }}</v-card-title>
+      <v-card-text>{{ $t('confirm') }}</v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn variant="text" @click="deleteDialogOpen = false">{{ $t('no') }}</v-btn>
+        <v-btn color="error" variant="tonal" :loading="deleteLoading" @click="confirmDelete">{{ $t('yes') }}</v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
   <v-card class="resource-hero resource-hero--outbounds" rounded="xl" variant="flat">
     <div class="resource-hero__topline">
       <span class="resource-hero__badge">{{ $t('pages.outbounds') }}</span>
@@ -47,22 +58,20 @@
           </div>
           <div>
             <h1 class="resource-hero__title">{{ $t('pages.outbounds') }}</h1>
-            <p class="resource-hero__subtitle">
-              统一管理出口节点、批量新增和延迟测试，常用操作集中在同一处。
-            </p>
+            <p class="resource-hero__subtitle">{{ $t('ui.resource.outboundsSubtitle') }}</p>
           </div>
         </div>
         <div class="resource-hero__meta">
-          <span>在线 {{ onlines.length }}</span>
+          <span>{{ $t('ui.resource.onlineCount', { count: onlines.length }) }}</span>
           <span>•</span>
-          <span>总数 {{ outbounds.length }}</span>
+          <span>{{ $t('itemCount', { count: outbounds.length }) }}</span>
           <span>•</span>
-          <span>已测试 {{ Object.keys(checkResults).length }}</span>
+          <span>{{ $t('ui.resource.testedCount', { count: Object.keys(checkResults).length }) }}</span>
         </div>
       </v-col>
       <v-col cols="12" lg="5" class="resource-hero__actions">
         <v-btn color="primary" variant="tonal" size="large" @click="strategyModal = true">
-          <v-icon icon="mdi-call-split" start />策略组
+          <v-icon icon="mdi-call-split" start />{{ $t('ui.resource.strategyGroup') }}
         </v-btn>
         <v-btn v-if="outbounds.length > 0" color="primary" size="large" @click="showModal(0)">
           <v-icon icon="mdi-plus" start />
@@ -70,12 +79,12 @@
         </v-btn>
         <v-menu location="bottom end">
           <template #activator="{ props }">
-            <v-btn v-bind="props" variant="outlined" size="large" append-icon="mdi-chevron-down">更多</v-btn>
+            <v-btn v-bind="props" variant="outlined" size="large" append-icon="mdi-chevron-down">{{ $t('ui.common.more') }}</v-btn>
           </template>
           <v-list density="compact" nav min-width="210">
-            <v-list-item prepend-icon="mdi-link-variant" title="代理链" :disabled="outbounds.length === 0" @click="chainModal = true" />
+            <v-list-item prepend-icon="mdi-link-variant" :title="$t('ui.resource.proxyChain')" :disabled="outbounds.length === 0" @click="chainModal = true" />
             <v-list-item prepend-icon="mdi-playlist-plus" :title="$t('actions.addbulk')" @click="showBulkModal" />
-            <v-list-item prepend-icon="mdi-speedometer" :title="$t('actions.testAll') || 'Test all'" :disabled="testingAll || outbounds.length === 0" @click="checkAllOutbounds" />
+            <v-list-item prepend-icon="mdi-speedometer" :title="$t('actions.testAll')" :disabled="testingAll || outbounds.length === 0" @click="checkAllOutbounds" />
           </v-list>
         </v-menu>
       </v-col>
@@ -96,18 +105,18 @@
 
   <section v-if="failoverStatuses.length > 0" class="failover-panel">
     <div class="failover-panel__heading">
-      <div><span>AUTOMATIC FAILOVER</span><h2>有序故障回退</h2></div>
-      <v-btn icon="mdi-refresh" variant="text" :loading="failoverLoading" aria-label="刷新回退状态" @click="loadFailoverStatus" />
+      <div><span>{{ $t('ui.resource.automaticFailover') }}</span><h2>{{ $t('ui.resource.failoverTitle') }}</h2></div>
+      <v-btn icon="mdi-refresh" variant="text" :loading="failoverLoading" :aria-label="$t('ui.resource.refreshFailover')" @click="loadFailoverStatus" />
     </div>
     <div class="failover-grid">
       <article v-for="status in failoverStatuses" :key="status.policy.tag" class="failover-card">
         <div class="failover-card__top">
           <div><strong>{{ status.policy.tag }}</strong><small>{{ status.policy.members.join(' → ') }}</small></div>
-          <v-chip size="small" :color="status.error ? 'warning' : 'success'" variant="tonal">{{ status.error ? '需检查' : '运行中' }}</v-chip>
+          <v-chip size="small" :color="status.error ? 'warning' : 'success'" variant="tonal">{{ status.error ? $t('ui.resource.needsCheck') : $t('ui.resource.running') }}</v-chip>
         </div>
         <div class="failover-card__state">
-          <span>当前出口</span><strong>{{ status.current || '等待首次探测' }}</strong>
-          <span>候选出口</span><strong>{{ status.candidate || '-' }}</strong>
+          <span>{{ $t('ui.resource.currentOutbound') }}</span><strong>{{ status.current || $t('ui.resource.awaitingProbe') }}</strong>
+          <span>{{ $t('ui.resource.candidateOutbound') }}</span><strong>{{ status.candidate || '-' }}</strong>
         </div>
         <div class="failover-members">
           <div v-for="member in status.policy.members" :key="member" class="failover-member">
@@ -125,24 +134,82 @@
         </div>
         <p v-if="status.error">{{ status.error }}</p>
         <div class="failover-card__footer">
-          <small>{{ status.lastChecked ? `最近探测 ${formatStatusTime(status.lastChecked)}` : '尚未探测' }}</small>
-          <v-btn size="small" variant="text" color="warning" @click="deleteFailover(status.policy.tag)">停止回退</v-btn>
+          <small>{{ status.lastChecked ? $t('ui.resource.lastProbe', { time: formatStatusTime(status.lastChecked) }) : $t('ui.resource.notProbed') }}</small>
+          <v-btn size="small" variant="text" color="warning" @click="deleteFailover(status.policy.tag)">{{ $t('ui.resource.stopFailover') }}</v-btn>
         </div>
       </article>
     </div>
   </section>
 
-  <v-row class="resource-grid">
-    <v-col v-if="outbounds.length === 0" cols="12">
+  <div v-if="outbounds.length > 0" class="resource-list-toolbar">
+    <v-text-field v-model="search" :placeholder="$t('ui.resource.searchOutbounds')" prepend-inner-icon="mdi-magnify" clearable hide-details density="comfortable" variant="solo-filled" />
+    <span>{{ $t('itemCount', { count: filteredOutbounds.length }) }}</span>
+  </div>
+
+  <v-row v-if="outbounds.length === 0" class="resource-grid">
+    <v-col cols="12">
       <EmptyState
         icon="mdi-cloud-upload-outline"
-        title="暂无出站"
-        description="添加单个出站或使用批量新增，随后可直接执行延迟测试。"
+        :title="$t('ui.resource.noOutbounds')"
+        :description="$t('ui.resource.noOutboundsHint')"
         :action="$t('actions.add')"
         @action="showModal(0)"
       />
     </v-col>
-    <v-col cols="12" sm="6" md="4" lg="3" v-for="(item, index) in <any[]>outbounds" :key="item.tag">
+  </v-row>
+
+  <v-data-table
+    v-else-if="!smAndDown"
+    class="resource-table"
+    :headers="tableHeaders"
+    :items="filteredOutbounds"
+    item-value="id"
+    density="comfortable"
+    hover
+  >
+    <template #item.tag="{ item }"><strong class="resource-table__primary">{{ item.tag }}</strong></template>
+    <template #item.server="{ item }">{{ item.server ?? '-' }}</template>
+    <template #item.server_port="{ item }">{{ item.server_port ?? '-' }}</template>
+    <template #item.tls="{ item }">
+      <v-chip v-if="Object.hasOwn(item, 'tls')" size="small" :color="item.tls?.enabled ? 'success' : 'default'" variant="tonal">{{ $t(item.tls?.enabled ? 'enable' : 'disable') }}</v-chip>
+      <span v-else class="resource-table__muted">-</span>
+    </template>
+    <template #item.online="{ item }">
+      <v-chip v-if="onlines.includes(item.tag)" size="small" color="success" variant="tonal">{{ $t('online') }}</v-chip>
+      <span v-else class="resource-table__muted">-</span>
+    </template>
+    <template #item.delay="{ item }">
+      <v-progress-circular v-if="checkResults[item.tag]?.loading" indeterminate size="18" />
+      <v-chip v-else-if="checkResults[item.tag]?.success" size="small" color="success" variant="tonal">{{ checkResults[item.tag].data?.Delay }}{{ $t('date.ms') }}</v-chip>
+      <v-tooltip v-else-if="checkResults[item.tag]" :text="checkResults[item.tag].errorMessage || $t('failed')">
+        <template #activator="{ props }"><v-icon v-bind="props" size="small" color="error" icon="mdi-close-circle" /></template>
+      </v-tooltip>
+      <v-btn v-else icon="mdi-speedometer" size="small" variant="text" :aria-label="$t('actions.test')" :title="$t('actions.test')" @click="checkOutbound(item.tag)" />
+    </template>
+    <template #item.actions="{ item }">
+      <div class="resource-table__actions">
+        <v-btn icon="mdi-file-edit-outline" size="small" variant="text" :aria-label="$t('actions.edit')" :title="$t('actions.edit')" @click="showModal(item.id)" />
+        <v-menu location="bottom end">
+          <template #activator="{ props }"><v-btn v-bind="props" icon="mdi-dots-horizontal" size="small" variant="text" :aria-label="$t('ui.common.more')" /></template>
+          <v-list density="compact" nav>
+            <v-list-item prepend-icon="mdi-speedometer" :title="$t('actions.test')" :disabled="checkResults[item.tag]?.loading" @click="checkOutbound(item.tag)" />
+            <v-list-item v-if="Data().enableTraffic" prepend-icon="mdi-chart-line" :title="$t('stats.graphTitle')" @click="showStats(item.tag)" />
+            <v-divider />
+            <v-list-item prepend-icon="mdi-delete-outline" :title="$t('actions.del')" base-color="error" @click="askDelete(item.tag)" />
+          </v-list>
+        </v-menu>
+      </div>
+    </template>
+    <template #no-data>
+      <EmptyState icon="mdi-magnify" :title="$t('ui.resource.noSearchResults')" :description="$t('ui.resource.noSearchResultsHint')" />
+    </template>
+  </v-data-table>
+
+  <v-row v-else class="resource-grid">
+    <v-col v-if="filteredOutbounds.length === 0" cols="12">
+      <EmptyState icon="mdi-magnify" :title="$t('ui.resource.noSearchResults')" :description="$t('ui.resource.noSearchResultsHint')" />
+    </v-col>
+    <v-col cols="12" sm="6" md="4" lg="3" v-for="item in filteredOutbounds" :key="item.tag">
       <v-card class="resource-card" rounded="xl" variant="flat" :title="item.tag">
         <v-card-subtitle style="margin-top: -15px;">
           <v-row>
@@ -219,24 +286,10 @@
             <v-icon icon="mdi-file-edit" /><span>{{ $t('actions.edit') }}</span>
             <v-tooltip activator="parent" location="top" :text="$t('actions.edit')"></v-tooltip>
           </v-btn>
-          <v-btn class="np-card-action" variant="text" style="margin-inline-start:0;" color="warning" @click="delOverlay[index] = true">
+          <v-btn class="np-card-action" variant="text" style="margin-inline-start:0;" color="warning" @click="askDelete(item.tag)">
             <v-icon icon="mdi-file-remove" /><span>{{ $t('actions.del') }}</span>
             <v-tooltip activator="parent" location="top" :text="$t('actions.del')"></v-tooltip>
           </v-btn>
-          <v-overlay
-            v-model="delOverlay[index]"
-            contained
-            class="align-center justify-center"
-          >
-            <v-card :title="$t('actions.del')" rounded="lg">
-              <v-divider></v-divider>
-              <v-card-text>{{ $t('confirm') }}</v-card-text>
-              <v-card-actions>
-                <v-btn color="error" variant="outlined" @click="delOutbound(item.tag)">{{ $t('yes') }}</v-btn>
-                <v-btn color="success" variant="outlined" @click="delOverlay[index] = false">{{ $t('no') }}</v-btn>
-              </v-card-actions>
-            </v-card>
-          </v-overlay>
           <v-btn class="np-card-action" variant="text" @click="showStats(item.tag)" v-if="Data().enableTraffic">
             <v-icon icon="mdi-chart-line" /><span>{{ $t('stats.graphTitle') }}</span>
             <v-tooltip activator="parent" location="top" :text="$t('stats.graphTitle')"></v-tooltip>
@@ -261,6 +314,8 @@ import type {
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref } from 'vue'
 import EmptyState from '@/components/EmptyState.vue'
 import OutboundHealthDashboard from '@/components/outbounds/OutboundHealthDashboard.vue'
+import { useDisplay } from 'vuetify'
+import { useI18n } from 'vue-i18n'
 
 const OutboundVue = defineAsyncComponent(() => import('@/layouts/modals/Outbound.vue'))
 const OutboundBulk = defineAsyncComponent(() => import('@/layouts/modals/OutboundBulk.vue'))
@@ -358,6 +413,25 @@ const checkAllOutbounds = async () => {
 const outbounds = computed((): Outbound[] => {
   return <Outbound[]> Data().outbounds
 })
+const { smAndDown } = useDisplay()
+const { t } = useI18n()
+const search = ref('')
+const filteredOutbounds = computed(() => {
+  const query = search.value.trim().toLocaleLowerCase()
+  if (!query) return outbounds.value
+  return outbounds.value.filter(item => [item.tag, item.type, item.server, item.server_port]
+    .some(value => String(value ?? '').toLocaleLowerCase().includes(query)))
+})
+const tableHeaders = computed(() => [
+  { title: t('objects.tag'), key: 'tag' },
+  { title: t('protocol'), key: 'type' },
+  { title: t('in.addr'), key: 'server' },
+  { title: t('in.port'), key: 'server_port' },
+  { title: t('objects.tls'), key: 'tls', sortable: false },
+  { title: t('online'), key: 'online', sortable: false },
+  { title: t('out.delay'), key: 'delay', sortable: false },
+  { title: t('ui.common.more'), key: 'actions', sortable: false, align: 'end' as const },
+])
 
 const strategyModal = ref(false)
 const strategyLoading = ref(false)
@@ -453,26 +527,26 @@ function formatRegion(health: OutboundHealthSnapshot) {
     ? (regionNames?.of(health.countryCode) || health.countryCode)
     : ''
   if (country && health.colo) return `${country} · ${health.colo}`
-  return country || health.colo || '地区待获取'
+  return country || health.colo || t('ui.resource.regionPending')
 }
 
 function compactIdentity(health: OutboundHealthSnapshot) {
-  const ip = health.publicIp || 'IP 待获取'
+  const ip = health.publicIp || t('ui.resource.ipPending')
   const region = formatRegion(health)
-  return region === '地区待获取' ? ip : `${ip} · ${region}`
+  return region === t('ui.resource.regionPending') ? ip : `${ip} · ${region}`
 }
 
 function memberRoleLabel(status: FailoverStatus, member: string) {
   const roles: string[] = []
-  if (status.current === member) roles.push('当前')
-  if (status.candidate === member) roles.push('候选')
-  if (roles.length === 0) roles.push('成员')
+  if (status.current === member) roles.push(t('ui.resource.currentRole'))
+  if (status.candidate === member) roles.push(t('ui.resource.candidateRole'))
+  if (roles.length === 0) roles.push(t('ui.resource.memberRole'))
   return roles.join(' · ')
 }
 
 function formatMemberProbe(status: FailoverStatus, member: string) {
   const probe = status.probes.find((item) => item.tag === member)
-  if (probe) return probe.ok ? `${probe.delay} ms` : '本轮失败'
+  if (probe) return probe.ok ? `${probe.delay} ms` : t('ui.resource.probeFailed')
   const health = healthFor(member)
   return formatDelay(health.latestDelay, health.status)
 }
@@ -529,7 +603,25 @@ const modal = ref({
   data: "",
 })
 
-let delOverlay = ref(new Array<boolean>)
+const deleteDialogOpen = ref(false)
+const deleteLoading = ref(false)
+const deleteTarget = ref('')
+
+const askDelete = (tag: string) => {
+  deleteTarget.value = tag
+  deleteDialogOpen.value = true
+}
+
+const confirmDelete = async () => {
+  if (!deleteTarget.value) return
+  deleteLoading.value = true
+  const success = await delOutbound(deleteTarget.value)
+  deleteLoading.value = false
+  if (success) {
+    deleteDialogOpen.value = false
+    deleteTarget.value = ''
+  }
+}
 
 const showModal = (id: number) => {
   modal.value.id = id
@@ -558,15 +650,14 @@ const stats = ref({
 })
 
 const delOutbound = async (tag: string) => {
-  const index = outbounds.value.findIndex(i => i.tag == tag)
   const success = await Data().save("outbounds", "del", tag)
   if (success) {
-    delOverlay.value[index] = false
     await HttpUtils.post('api/failoverDelete', { tag }, {
       headers: { 'Content-Type': 'application/json' },
     })
     await refreshDashboard()
   }
+  return success
 }
 
 const showStats = (tag: string) => {
@@ -594,6 +685,14 @@ const closeStats = () => {
   margin-bottom: 18px;
   overflow: hidden;
 }
+
+.resource-list-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 12px; color: var(--np-text-muted); font-size: .78rem; }
+.resource-list-toolbar :deep(.v-input) { max-width: 420px; }
+.resource-table { overflow: hidden; border: 1px solid var(--np-border); border-radius: 18px; background: var(--np-surface); box-shadow: var(--np-shadow); backdrop-filter: blur(24px) saturate(1.08); }
+.resource-table__primary { overflow-wrap: anywhere; }
+.resource-table__muted { color: var(--np-text-muted); }
+.resource-table__actions { display: flex; align-items: center; justify-content: flex-end; gap: 2px; }
+.resource-delete-dialog { border: 1px solid var(--np-border); background: var(--np-surface); }
 
 .resource-hero__topline {
   display: flex;
@@ -728,6 +827,11 @@ const closeStats = () => {
 .failover-card__footer small,
 .failover-card p {
   color: var(--np-text-muted);
+}
+
+@media (max-width: 599px) {
+  .resource-list-toolbar { align-items: stretch; flex-direction: column; gap: 8px; }
+  .resource-list-toolbar :deep(.v-input) { max-width: none; }
 }
 
 .failover-card__top small {

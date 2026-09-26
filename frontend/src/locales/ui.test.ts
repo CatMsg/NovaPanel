@@ -52,3 +52,17 @@ describe('traffic UI translations', () => {
     }
   })
 })
+
+describe('navigation and resource UI translations', () => {
+  it('provides labels used by the new navigation and management flows in every locale', () => {
+    for (const [locale, messages] of Object.entries(uiMessages)) {
+      expect(messages.nav.commandTitle, `${locale}.nav.commandTitle`).toBeTruthy()
+      expect(messages.resource.inboundsSubtitle, `${locale}.resource.inboundsSubtitle`).toBeTruthy()
+      expect(messages.resource.noSearchResults, `${locale}.resource.noSearchResults`).toBeTruthy()
+      expect(messages.inboundForm.advanced, `${locale}.inboundForm.advanced`).toBeTruthy()
+      expect(messages.rules.matchConditions, `${locale}.rules.matchConditions`).toBeTruthy()
+      expect(messages.fleet.templateModeSaved, `${locale}.fleet.templateModeSaved`).toBeTruthy()
+      expect(messages.fleet.templateModeCreate, `${locale}.fleet.templateModeCreate`).toBeTruthy()
+    }
+  })
+})
