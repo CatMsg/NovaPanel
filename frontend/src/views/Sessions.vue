@@ -64,7 +64,7 @@
           <v-chip size="small" variant="tonal" color="primary">{{ item.serverName }}</v-chip>
         </template>
         <template #item.sourceIp="{ item }">
-          <span class="sessions-source-ip" dir="ltr">{{ item.sourceIp || '-' }}</span>
+          <span class="sessions-source-ip" dir="ltr" :title="sourceIpTitle(item)">{{ sourceIpText(item) }}</span>
         </template>
         <template #item.target="{ item }">
           <div class="sessions-target">
@@ -93,7 +93,7 @@
           <div class="sessions-mobile__target">{{ item.domain || item.destination || '-' }}</div>
           <div v-if="item.domain && item.destination && item.domain !== item.destination" class="sessions-mobile__destination">{{ item.destination }}</div>
           <div class="sessions-mobile__grid">
-            <div><span>{{ $t('ui.sessions.sourceIp') }}</span><strong dir="ltr">{{ item.sourceIp || '-' }}</strong></div>
+            <div><span>{{ $t('ui.sessions.sourceIp') }}</span><strong class="sessions-source-ip" dir="ltr" :title="sourceIpTitle(item)">{{ sourceIpText(item) }}</strong></div>
             <div><span>{{ $t('network') }}</span><strong>{{ item.network }} · {{ item.protocol || item.kind }}</strong></div>
             <div><span>{{ $t('ui.sessions.duration') }}</span><strong>{{ elapsed(item.startedAt) }}</strong></div>
             <div><span>{{ $t('pages.inbounds') }}</span><strong>{{ item.inbound || '-' }}</strong></div>
@@ -133,6 +133,8 @@ interface SessionRow {
   network: string
   source?: string
   sourceIp?: string
+  sourceIps?: string[]
+  sourceIpScope?: string
   destination?: string
   domain?: string
   protocol?: string
@@ -171,6 +173,9 @@ const headers = [
   { title: '', key: 'actions', sortable: false, align: 'end' as const },
 ]
 
+const sourceIpText = (item: SessionRow) => item.sourceIps?.length ? item.sourceIps.join(', ') : item.sourceIp || '-'
+const sourceIpTitle = (item: SessionRow) => item.sourceIpScope === 'user' ? `${sourceIpText(item)} — ${t('ui.sessions.mieruSourceIpHint')}` : sourceIpText(item)
+
 const withRowID = computed(() => sessions.value.map(item => ({ ...item, rowId: `${item.serverId}:${item.id}` })))
 const optionList = (values: string[]) => [{ title: t('all'), value: 'all' }, ...Array.from(new Set(values.filter(Boolean))).sort().map(value => ({ title: value, value }))]
 const serverOptions = computed(() => optionList(withRowID.value.map(item => item.serverName)))
@@ -183,7 +188,7 @@ const filteredSessions = computed(() => {
     if (userFilter.value !== 'all' && item.user !== userFilter.value) return false
     if (networkFilter.value !== 'all' && item.network !== networkFilter.value) return false
     if (!needle) return true
-    return [item.serverName, item.user, item.sourceIp, item.source, item.domain, item.destination, item.inbound, item.outbound, item.protocol]
+    return [item.serverName, item.user, item.sourceIp, ...(item.sourceIps ?? []), item.source, item.domain, item.destination, item.inbound, item.outbound, item.protocol]
       .some(value => String(value ?? '').toLowerCase().includes(needle))
   })
 })
@@ -294,6 +299,7 @@ onUnmounted(() => {
 .sessions-mobile__grid span, .sessions-mobile__grid strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sessions-mobile__grid span { color: rgba(var(--v-theme-on-surface), .64); font-size: .7rem; }
 .sessions-mobile__grid strong { margin-top: 3px; font-size: .86rem; }
+.sessions-mobile__grid strong.sessions-source-ip { overflow: visible; white-space: normal; overflow-wrap: anywhere; }
 @media (max-width: 959px) { .sessions-toolbar { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 599px) { .sessions-hero { align-items: flex-start; padding: 21px 18px; } .sessions-hero > .v-btn { min-width: 44px; padding-inline: 10px; } .sessions-hero__title-row p { font-size: .84rem; } .sessions-hero__meta { flex-wrap: wrap; } .sessions-content { padding: 13px; } .sessions-toolbar { grid-template-columns: 1fr; } }
 </style>

@@ -49,14 +49,16 @@ type Client struct {
 }
 
 type ClientHistoryEntry struct {
-	DateTime    int64  `json:"dateTime"`
-	Domain      string `json:"domain"`
-	Destination string `json:"destination,omitempty"`
-	SourceIP    string `json:"sourceIp,omitempty"`
-	Inbound     string `json:"inbound,omitempty"`
-	Outbound    string `json:"outbound,omitempty"`
-	Network     string `json:"network,omitempty"`
-	Protocol    string `json:"protocol,omitempty"`
+	DateTime      int64    `json:"dateTime"`
+	Domain        string   `json:"domain"`
+	Destination   string   `json:"destination,omitempty"`
+	SourceIP      string   `json:"sourceIp,omitempty"`
+	SourceIPs     []string `json:"sourceIps,omitempty"`
+	SourceIPScope string   `json:"sourceIpScope,omitempty"`
+	Inbound       string   `json:"inbound,omitempty"`
+	Outbound      string   `json:"outbound,omitempty"`
+	Network       string   `json:"network,omitempty"`
+	Protocol      string   `json:"protocol,omitempty"`
 }
 
 type Stats struct {

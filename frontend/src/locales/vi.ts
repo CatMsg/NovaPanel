@@ -510,6 +510,8 @@ export default {
     interfaceAddr: "Địa chỉ giao diện",
     options: "Tùy chọn Quy tắc",
     domainRules: "Tên miền/IP",
+    inboundMatch: "Nguồn inbound",
+    authUserMatch: "Người dùng đã xác thực",
     srcIpRules: "IP Nguồn",
     srcPortRules: "Cổng Nguồn",
     udpDisableDomainUnmapping: "Không màm mạng tiền lập tên miền",

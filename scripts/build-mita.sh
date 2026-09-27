@@ -16,10 +16,12 @@ git -C "$WORK_DIR" remote add origin "$MIERU_REPOSITORY"
 git -C "$WORK_DIR" fetch -q --depth=1 origin "$MIERU_COMMIT"
 git -C "$WORK_DIR" checkout -q --detach FETCH_HEAD
 git -C "$WORK_DIR" apply "$ROOT_DIR/patches/mieru-novapanel-bridge-auth.patch"
+git -C "$WORK_DIR" apply "$ROOT_DIR/patches/mieru-novapanel-source-ip.patch"
 
 (
   cd "$WORK_DIR"
   CGO_ENABLED=0 GOOS="$(go env GOHOSTOS)" GOARCH="$(go env GOHOSTARCH)" go test ./pkg/socks5
+  CGO_ENABLED=0 GOOS="$(go env GOHOSTOS)" GOARCH="$(go env GOHOSTARCH)" go test ./pkg/protocol ./pkg/cli
   CGO_ENABLED="${CGO_ENABLED:-0}" \
     GOOS="${GOOS:-$(go env GOOS)}" \
     GOARCH="${GOARCH:-$(go env GOARCH)}" \

@@ -8,6 +8,7 @@ import (
 )
 
 var mieruBridgeInboundTag atomic.Pointer[string]
+var mieruSourceIPsResolver atomic.Pointer[func(inboundTag, username string) []string]
 
 // SetMieruBridgeInboundTag identifies the SOCKS bridge used for Mieru traffic.
 func SetMieruBridgeInboundTag(tag string) {
@@ -17,6 +18,24 @@ func SetMieruBridgeInboundTag(tag string) {
 		return
 	}
 	mieruBridgeInboundTag.Store(&tag)
+}
+
+// SetMieruSourceIPsResolver provides the current remote client IPs for a Mieru
+// user without coupling core tracking to the Mieru service implementation.
+func SetMieruSourceIPsResolver(resolver func(inboundTag, username string) []string) {
+	if resolver == nil {
+		mieruSourceIPsResolver.Store(nil)
+		return
+	}
+	mieruSourceIPsResolver.Store(&resolver)
+}
+
+func mieruSourceIPs(inboundTag, username string) []string {
+	resolver := mieruSourceIPsResolver.Load()
+	if resolver == nil || strings.TrimSpace(username) == "" {
+		return nil
+	}
+	return (*resolver)(inboundTag, username)
 }
 
 func normalizeTrackedSource(inboundTag, source string) string {

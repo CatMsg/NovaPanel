@@ -59,6 +59,7 @@ func (a *APP) Init() error {
 	service.SetMasqueService(a.masqueService)
 	a.mieruService = service.NewMieruService()
 	service.SetMieruService(a.mieruService)
+	core.SetMieruSourceIPsResolver(a.mieruService.SourceIPsForUser)
 
 	a.cronJob = cronjob.NewCronJob()
 	a.webServer = web.NewServer()

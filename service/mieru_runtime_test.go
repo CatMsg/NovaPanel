@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -81,6 +82,58 @@ func TestRequiresMitaRestartOnlyForNonReloadableFields(t *testing.T) {
 	egressChanged := []byte(`{"portBindings":[{"port":20000,"protocol":"TCP"}],"users":[{"name":"one","hashedPassword":"abc"}],"loggingLevel":"INFO","mtu":1400,"dns":{"dualStack":"PREFER_IPv4"},"egress":{"proxies":[{"name":"novapanel","protocol":"SOCKS5_PROXY_PROTOCOL","host":"127.0.0.1","port":39000}],"rules":[{"ipRanges":["*"],"domainNames":["*"],"action":"PROXY","proxyNames":["novapanel"]}]}}`)
 	if !requiresMitaRestart(base, egressChanged) {
 		t.Fatal("Mieru egress bridge change should require restart")
+	}
+}
+
+func TestParseMieruConnectionSourceIPs(t *testing.T) {
+	payload := []byte(`{"items":[{"userName":"alice","remoteAddr":"203.0.113.8:41000","state":"ESTABLISHED"},{"userName":"alice","remoteAddr":"203.0.113.8:42000","state":"ESTABLISHED"},{"userName":"alice","remoteAddr":"[2001:db8::8]:43000","state":"ESTABLISHED"},{"userName":"alice","remoteAddr":"198.51.100.4:44000","state":"CLOSED"},{"userName":"Alice","remoteAddr":"192.0.2.6:46000","state":"ESTABLISHED"},{"userName":"bob","remoteAddr":"example.com:45000","state":"ESTABLISHED"}]}`)
+
+	got, err := parseMieruConnectionSourceIPs(payload)
+	if err != nil {
+		t.Fatalf("parse Mieru connections: %v", err)
+	}
+	want := []string{"2001:db8::8", "203.0.113.8"}
+	if !reflect.DeepEqual(got["alice"], want) {
+		t.Fatalf("alice source IPs = %#v, want %#v", got["alice"], want)
+	}
+	if !reflect.DeepEqual(got["Alice"], []string{"192.0.2.6"}) {
+		t.Fatalf("case-sensitive Alice source IPs = %#v", got["Alice"])
+	}
+	if _, exists := got["bob"]; exists {
+		t.Fatalf("invalid or unauthenticated source unexpectedly included: %#v", got["bob"])
+	}
+}
+
+func TestMieruSourceIPsForUserRequiresFreshMatchingRuntime(t *testing.T) {
+	service := NewMieruService()
+	runtimeState := &mieruRuntime{}
+	runtimeState.running.Store(true)
+	service.active = runtimeState
+	service.inboundTag = "mieru-in"
+	service.sourceIPs = map[string][]string{"Alice": {"203.0.113.8"}}
+	service.sourceIPsUpdated = time.Now()
+
+	got := service.SourceIPsForUser("mieru-in", "Alice")
+	if !reflect.DeepEqual(got, []string{"203.0.113.8"}) {
+		t.Fatalf("SourceIPsForUser() = %#v", got)
+	}
+	got[0] = "198.51.100.1"
+	if service.SourceIPsForUser("mieru-in", "Alice")[0] != "203.0.113.8" {
+		t.Fatal("caller mutated the cached IP list")
+	}
+	if service.SourceIPsForUser("other", "alice") != nil {
+		t.Fatal("source IPs were returned for a different inbound")
+	}
+	service.sourceIPsUpdated = time.Now().Add(-mieruSourceIPMaxAge - time.Second)
+	if service.SourceIPsForUser("mieru-in", "alice") != nil {
+		t.Fatal("stale source IPs were returned")
+	}
+}
+
+func TestMergeEnvironmentOverridesExistingKey(t *testing.T) {
+	got := mergeEnvironment([]string{"A=old", "KEEP=yes"}, []string{"A=new", "B=value"})
+	if !reflect.DeepEqual(got, []string{"KEEP=yes", "A=new", "B=value"}) {
+		t.Fatalf("mergeEnvironment() = %#v", got)
 	}
 }
 

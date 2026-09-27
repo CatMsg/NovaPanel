@@ -511,6 +511,8 @@ export default {
     interfaceAddr: "Адрес интерфейса",
     options: "Параметры правила",
     domainRules: "Домен/IP",
+    inboundMatch: "Источник входящего подключения",
+    authUserMatch: "Пользователь с авторизацией",
     srcIpRules: "Источник IP",
     srcPortRules: "Источник порта",
     udpDisableDomainUnmapping: "Отключить перенос доменных имен",

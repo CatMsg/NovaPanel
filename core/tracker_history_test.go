@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/netip"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/CatMsg/NovaPanel/database"
@@ -59,5 +60,53 @@ func TestHistoryTrackerStoresAndSeparatesSourceIP(t *testing.T) {
 	}
 	if history[0].SourceIP != "203.0.113.11" || history[1].SourceIP != "203.0.113.10" {
 		t.Fatalf("unexpected source IP history: %#v", history)
+	}
+}
+
+func TestHistoryTrackerResolvesMieruSourceIPsByUser(t *testing.T) {
+	if err := database.InitDB(filepath.Join(t.TempDir(), "mieru-history-source.db")); err != nil {
+		t.Fatal(err)
+	}
+	client := model.Client{
+		Enable: true, Name: "alice", Config: json.RawMessage("{}"),
+		Inbounds: json.RawMessage("[]"), Links: json.RawMessage("[]"), History: json.RawMessage("[]"),
+	}
+	if err := database.GetDB().Create(&client).Error; err != nil {
+		t.Fatal(err)
+	}
+	SetMieruBridgeInboundTag("mieru-in")
+	SetMieruSourceIPsResolver(func(inboundTag, username string) []string {
+		if inboundTag == "mieru-in" && username == "alice" {
+			return []string{"2001:db8::8", "203.0.113.8"}
+		}
+		return nil
+	})
+	t.Cleanup(func() {
+		SetMieruBridgeInboundTag("")
+		SetMieruSourceIPsResolver(nil)
+	})
+
+	tracker := NewHistoryTracker()
+	destination := M.SocksaddrFrom(netip.MustParseAddr("93.184.216.34"), 443)
+	metadata := adapter.InboundContext{
+		Inbound: "mieru-in", User: "alice", Domain: "example.com", Destination: destination,
+		Source: M.SocksaddrFrom(netip.MustParseAddr("127.0.0.1"), 50001),
+	}
+	tracker.record(metadata, "direct", "tcp")
+
+	var stored model.Client
+	if err := database.GetDB().First(&stored, client.Id).Error; err != nil {
+		t.Fatal(err)
+	}
+	var history []model.ClientHistoryEntry
+	if err := json.Unmarshal(stored.History, &history); err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history entries = %d, want 1", len(history))
+	}
+	entry := history[0]
+	if entry.SourceIP != "" || entry.SourceIPScope != "user" || !reflect.DeepEqual(entry.SourceIPs, []string{"2001:db8::8", "203.0.113.8"}) {
+		t.Fatalf("unexpected Mieru source history: %#v", entry)
 	}
 }

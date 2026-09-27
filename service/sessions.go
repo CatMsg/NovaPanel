@@ -41,23 +41,25 @@ func sourceIPFromSessionSource(source string) string {
 // SessionView is the protocol-neutral view used by the local and fleet APIs.
 // It is generated from live trackers and is never persisted.
 type SessionView struct {
-	ID          string    `json:"id"`
-	ServerID    string    `json:"serverId,omitempty"`
-	ServerName  string    `json:"serverName,omitempty"`
-	Kind        string    `json:"kind"`
-	Inbound     string    `json:"inbound,omitempty"`
-	Outbound    string    `json:"outbound,omitempty"`
-	User        string    `json:"user,omitempty"`
-	Network     string    `json:"network"`
-	Source      string    `json:"source,omitempty"`
-	SourceIP    string    `json:"sourceIp,omitempty"`
-	Destination string    `json:"destination,omitempty"`
-	Domain      string    `json:"domain,omitempty"`
-	Protocol    string    `json:"protocol,omitempty"`
-	Rule        string    `json:"rule,omitempty"`
-	StartedAt   time.Time `json:"startedAt"`
-	Upload      uint64    `json:"upload"`
-	Download    uint64    `json:"download"`
+	ID            string    `json:"id"`
+	ServerID      string    `json:"serverId,omitempty"`
+	ServerName    string    `json:"serverName,omitempty"`
+	Kind          string    `json:"kind"`
+	Inbound       string    `json:"inbound,omitempty"`
+	Outbound      string    `json:"outbound,omitempty"`
+	User          string    `json:"user,omitempty"`
+	Network       string    `json:"network"`
+	Source        string    `json:"source,omitempty"`
+	SourceIP      string    `json:"sourceIp,omitempty"`
+	SourceIPs     []string  `json:"sourceIps,omitempty"`
+	SourceIPScope string    `json:"sourceIpScope,omitempty"`
+	Destination   string    `json:"destination,omitempty"`
+	Domain        string    `json:"domain,omitempty"`
+	Protocol      string    `json:"protocol,omitempty"`
+	Rule          string    `json:"rule,omitempty"`
+	StartedAt     time.Time `json:"startedAt"`
+	Upload        uint64    `json:"upload"`
+	Download      uint64    `json:"download"`
 }
 
 type FleetSessions struct {
@@ -68,18 +70,21 @@ type FleetSessions struct {
 
 func GetLocalSessions() []SessionView {
 	result := make([]SessionView, 0)
+	mieru := GetMieruService()
 	if corePtr != nil && corePtr.IsRunning() {
 		box := corePtr.GetInstance()
 		if box != nil && box.ConnTracker() != nil {
 			for _, session := range box.ConnTracker().Sessions() {
-				result = append(result, SessionView{
+				view := SessionView{
 					ID: "core:" + session.ID, Kind: "sing-box", Inbound: session.Inbound,
 					Outbound: session.Outbound, User: session.User, Network: session.Network,
 					Source: session.Source, SourceIP: sourceIPFromSessionSource(session.Source),
 					Destination: session.Destination, Domain: session.Domain,
 					Protocol: session.Protocol, Rule: session.Rule, StartedAt: session.StartedAt,
 					Upload: session.Upload, Download: session.Download,
-				})
+				}
+				applyMieruSourceIPs(&view, mieru)
+				result = append(result, view)
 			}
 		}
 	}
@@ -88,6 +93,20 @@ func GetLocalSessions() []SessionView {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].StartedAt.After(result[j].StartedAt) })
 	return result
+}
+
+func applyMieruSourceIPs(view *SessionView, mieru *MieruService) {
+	if view == nil || mieru == nil || view.SourceIP != "" {
+		return
+	}
+	view.SourceIPs = mieru.SourceIPsForUser(view.Inbound, view.User)
+	if len(view.SourceIPs) == 0 {
+		return
+	}
+	view.SourceIPScope = "user"
+	if len(view.SourceIPs) == 1 {
+		view.SourceIP = view.SourceIPs[0]
+	}
 }
 
 func CloseLocalSession(id string) error {

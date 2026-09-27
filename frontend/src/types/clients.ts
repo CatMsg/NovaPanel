@@ -11,6 +11,8 @@ export interface HistoryEntry {
   domain: string
   destination?: string
   sourceIp?: string
+  sourceIps?: string[]
+  sourceIpScope?: string
   inbound?: string
   outbound?: string
   network?: string

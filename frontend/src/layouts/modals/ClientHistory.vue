@@ -68,7 +68,7 @@
               <div class="history-dialog__mobile-grid">
                 <div>
                   <span>{{ $t('ui.sessions.sourceIp') }}</span>
-                  <strong dir="ltr">{{ item.sourceIp || '-' }}</strong>
+                  <strong dir="ltr" :title="sourceIpTitle(item)">{{ sourceIpText(item) }}</strong>
                 </div>
                 <div>
                   <span>{{ $t('pages.inbounds') }}</span>
@@ -154,8 +154,8 @@
                 </span>
               </div>
             </template>
-            <template v-slot:item.sourceIp="{ value }">
-              <span class="history-dialog__source-ip" dir="ltr" :title="value || '-'">{{ value || '-' }}</span>
+            <template v-slot:item.sourceIp="{ item }">
+              <span class="history-dialog__source-ip" dir="ltr" :title="sourceIpTitle(item)">{{ sourceIpText(item) }}</span>
             </template>
             <template v-slot:item.inbound="{ value }">
               <v-chip size="small" variant="tonal" color="primary" class="history-dialog__tag-chip" :title="value || '-'">
@@ -221,6 +221,9 @@ const headers = [
   { title: i18n.global.t('protocol'), key: 'protocol' },
 ]
 
+const sourceIpText = (item: HistoryEntry) => item.sourceIps?.length ? item.sourceIps.join(', ') : item.sourceIp || '-'
+const sourceIpTitle = (item: HistoryEntry) => item.sourceIpScope === 'user' ? `${sourceIpText(item)} — ${i18n.global.t('ui.sessions.mieruSourceIpHint')}` : sourceIpText(item)
+
 const timeRangeItems = [
   { title: i18n.global.t('all'), value: 'all' },
   { title: i18n.global.t('client.lastDay'), value: 'day' },
@@ -264,6 +267,7 @@ const filteredHistory = computed(() => {
       item.domain,
       item.destination,
       item.sourceIp,
+      ...(item.sourceIps ?? []),
       item.inbound,
       item.outbound,
       item.network,
@@ -309,7 +313,7 @@ const exportHistory = () => {
       dateFormatted(item.dateTime),
       item.domain,
       item.destination,
-      item.sourceIp,
+      sourceIpText(item),
       item.inbound,
       item.outbound,
       item.network,

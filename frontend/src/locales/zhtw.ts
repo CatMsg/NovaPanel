@@ -510,6 +510,8 @@ export default {
     interfaceAddr: "介面地址",
     options: "規則選項",
     domainRules: "域名/IP",
+    inboundMatch: "入站來源",
+    authUserMatch: "驗證使用者",
     srcIpRules: "源 IP",
     srcPortRules: "源端口",
     udpDisableDomainUnmapping: "禁用域名解析映射",

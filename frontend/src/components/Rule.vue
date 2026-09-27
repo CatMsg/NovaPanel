@@ -13,8 +13,8 @@
       <div class="rule-quick-conditions__buttons">
         <v-btn size="small" :variant="optionDomain ? 'tonal' : 'outlined'" :color="optionDomain ? 'primary' : undefined" :aria-pressed="optionDomain" @click="!optionDomain && (optionDomain = true)">{{ $t('rule.domainRules') }}</v-btn>
         <v-btn size="small" :variant="optionRuleSet ? 'tonal' : 'outlined'" :color="optionRuleSet ? 'primary' : undefined" :aria-pressed="optionRuleSet" @click="!optionRuleSet && (optionRuleSet = true)">{{ $t('rule.ruleset') }}</v-btn>
-        <v-btn size="small" :variant="optionInbound ? 'tonal' : 'outlined'" :color="optionInbound ? 'primary' : undefined" :aria-pressed="optionInbound" @click="!optionInbound && (optionInbound = true)">{{ $t('pages.inbounds') }}</v-btn>
-        <v-btn size="small" :variant="optionClient ? 'tonal' : 'outlined'" :color="optionClient ? 'primary' : undefined" :aria-pressed="optionClient" @click="!optionClient && (optionClient = true)">{{ $t('pages.clients') }}</v-btn>
+        <v-btn size="small" :variant="optionInbound ? 'tonal' : 'outlined'" :color="optionInbound ? 'primary' : undefined" :aria-pressed="optionInbound" @click="!optionInbound && (optionInbound = true)">{{ $t('rule.inboundMatch') }}</v-btn>
+        <v-btn size="small" :variant="optionClient ? 'tonal' : 'outlined'" :color="optionClient ? 'primary' : undefined" :aria-pressed="optionClient" @click="!optionClient && (optionClient = true)">{{ $t('rule.authUserMatch') }}</v-btn>
         <v-btn size="small" :variant="optionNetwork ? 'tonal' : 'outlined'" :color="optionNetwork ? 'primary' : undefined" :aria-pressed="optionNetwork" @click="!optionNetwork && (optionNetwork = true)">{{ $t('network') }}</v-btn>
       </div>
     </div>
@@ -23,7 +23,7 @@
         <v-combobox
           v-model="rule.inbound"
           :items="inTags"
-          :label="$t('pages.inbounds')"
+          :label="$t('rule.inboundMatch')"
           multiple
           chips
           hide-details
@@ -33,7 +33,7 @@
         <v-combobox
           v-model="rule.auth_user"
           :items="clients"
-          :label="$t('pages.clients')"
+          :label="$t('rule.authUserMatch')"
           multiple
           chips
           hide-details
@@ -307,10 +307,10 @@
         <v-card>
           <v-list>
             <v-list-item>
-              <v-switch v-model="optionInbound" color="primary" :label="$t('pages.inbounds')" hide-details></v-switch>
+              <v-switch v-model="optionInbound" color="primary" :label="$t('rule.inboundMatch')" hide-details></v-switch>
             </v-list-item>
             <v-list-item>
-              <v-switch v-model="optionClient" color="primary" :label="$t('pages.clients')" hide-details></v-switch>
+              <v-switch v-model="optionClient" color="primary" :label="$t('rule.authUserMatch')" hide-details></v-switch>
             </v-list-item>
             <v-list-item>
               <v-switch v-model="optionIPver" color="primary" :label="$t('rule.ipVer')" hide-details></v-switch>

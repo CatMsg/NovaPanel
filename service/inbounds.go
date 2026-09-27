@@ -10,6 +10,7 @@ import (
 
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
+	"github.com/CatMsg/NovaPanel/logger"
 	"github.com/CatMsg/NovaPanel/util"
 	"github.com/CatMsg/NovaPanel/util/common"
 
@@ -463,9 +464,30 @@ func (s *InboundService) GetAllConfig(db *gorm.DB) ([]json.RawMessage, error) {
 		if err != nil {
 			return nil, err
 		}
+		skip, err := shouldSkipInboundWithoutUsers(inbound.Type, inboundJson)
+		if err != nil {
+			return nil, err
+		}
+		if skip {
+			logger.Warningf("skip naive inbound %q: no enabled users assigned", inbound.Tag)
+			continue
+		}
 		inboundsJson = append(inboundsJson, inboundJson)
 	}
 	return inboundsJson, nil
+}
+
+func shouldSkipInboundWithoutUsers(inboundType string, inboundJSON []byte) (bool, error) {
+	if inboundType != "naive" {
+		return false, nil
+	}
+	var config struct {
+		Users []json.RawMessage `json:"users"`
+	}
+	if err := json.Unmarshal(inboundJSON, &config); err != nil {
+		return false, err
+	}
+	return len(config.Users) == 0, nil
 }
 
 func (s *InboundService) hasUser(inboundType string) bool {

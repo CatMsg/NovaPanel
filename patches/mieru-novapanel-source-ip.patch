@@ -1,0 +1,138 @@
+diff --git a/pkg/appctl/appctlpb/misc.pb.go b/pkg/appctl/appctlpb/misc.pb.go
+index 67c64eb..7e731c5 100644
+--- a/pkg/appctl/appctlpb/misc.pb.go
++++ b/pkg/appctl/appctlpb/misc.pb.go
+@@ -241,6 +241,7 @@ type SessionInfo struct {
+ 	LastRecvSeq   *uint32                `protobuf:"varint,11,opt,name=lastRecvSeq,proto3,oneof" json:"lastRecvSeq,omitempty"`
+ 	LastSendTime  *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=lastSendTime,proto3,oneof" json:"lastSendTime,omitempty"`
+ 	LastSendSeq   *uint32                `protobuf:"varint,13,opt,name=lastSendSeq,proto3,oneof" json:"lastSendSeq,omitempty"`
++	UserName      *string                `protobuf:"bytes,14,opt,name=userName,proto3,oneof" json:"userName,omitempty"`
+ 	unknownFields protoimpl.UnknownFields
+ 	sizeCache     protoimpl.SizeCache
+ }
+@@ -366,6 +367,13 @@ func (x *SessionInfo) GetLastSendSeq() uint32 {
+ 	return 0
+ }
+ 
++func (x *SessionInfo) GetUserName() string {
++	if x != nil && x.UserName != nil {
++		return *x.UserName
++	}
++	return ""
++}
++
+ type SessionInfoList struct {
+ 	state         protoimpl.MessageState `protogen:"open.v1"`
+ 	Items         []*SessionInfo         `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+@@ -607,7 +615,7 @@ const file_appctl_proto_misc_proto_rawDesc = "" +
+ 	"\x05items\x18\x01 \x03(\v2\x1d.mieru.appctl.UserWithMetricsR\x05items\"?\n" +
+ 	"\x0fProfileSavePath\x12\x1f\n" +
+ 	"\bfilePath\x18\x01 \x01(\tH\x00R\bfilePath\x88\x01\x01B\v\n" +
+-	"\t_filePath\"\x9b\x05\n" +
++	"\t_filePath\"\xc9\x05\n" +
+ 	"\vSessionInfo\x12\x13\n" +
+ 	"\x02id\x18\x01 \x01(\tH\x00R\x02id\x88\x01\x01\x12\x1f\n" +
+ 	"\bprotocol\x18\x02 \x01(\tH\x01R\bprotocol\x88\x01\x01\x12!\n" +
+@@ -625,7 +633,8 @@ const file_appctl_proto_misc_proto_rawDesc = "" +
+ 	"\vlastRecvSeq\x18\v \x01(\rH\n" +
+ 	"R\vlastRecvSeq\x88\x01\x01\x12C\n" +
+ 	"\flastSendTime\x18\f \x01(\v2\x1a.google.protobuf.TimestampH\vR\flastSendTime\x88\x01\x01\x12%\n" +
+-	"\vlastSendSeq\x18\r \x01(\rH\fR\vlastSendSeq\x88\x01\x01B\x05\n" +
++	"\vlastSendSeq\x18\r \x01(\rH\fR\vlastSendSeq\x88\x01\x01\x12\x1f\n" +
++	"\buserName\x18\x0e \x01(\tH\rR\buserName\x88\x01\x01B\x05\n" +
+ 	"\x03_idB\v\n" +
+ 	"\t_protocolB\f\n" +
+ 	"\n" +
+@@ -641,7 +650,8 @@ const file_appctl_proto_misc_proto_rawDesc = "" +
+ 	"\r_lastRecvTimeB\x0e\n" +
+ 	"\f_lastRecvSeqB\x0f\n" +
+ 	"\r_lastSendTimeB\x0e\n" +
+-	"\f_lastSendSeq\"B\n" +
++	"\f_lastSendSeqB\v\n" +
++	"\t_userName\"B\n" +
+ 	"\x0fSessionInfoList\x12/\n" +
+ 	"\x05items\x18\x01 \x03(\v2\x19.mieru.appctl.SessionInfoR\x05items\"@\n" +
+ 	"\n" +
+diff --git a/pkg/appctl/proto/misc.proto b/pkg/appctl/proto/misc.proto
+index c1c334e..e7d91ff 100644
+--- a/pkg/appctl/proto/misc.proto
++++ b/pkg/appctl/proto/misc.proto
+@@ -59,6 +59,7 @@ message SessionInfo {
+     optional uint32 lastRecvSeq = 11;
+     optional google.protobuf.Timestamp lastSendTime = 12;
+     optional uint32 lastSendSeq = 13;
++    optional string userName = 14;
+ }
+ 
+ message SessionInfoList {
+diff --git a/pkg/cli/server.go b/pkg/cli/server.go
+index 2a34210..d1048ff 100644
+--- a/pkg/cli/server.go
++++ b/pkg/cli/server.go
+@@ -17,6 +17,7 @@ package cli
+ 
+ import (
+ 	"context"
++	"encoding/json"
+ 	"fmt"
+ 	"net"
+ 	"os"
+@@ -811,6 +812,9 @@ var serverGetConnectionsFunc = func(s []string) error {
+ 	if err != nil {
+ 		return fmt.Errorf(stderror.GetConnectionsFailedErr, err)
+ 	}
++	if os.Getenv("NOVAPANEL_MIERU_CONNECTIONS_JSON") == "1" {
++		return json.NewEncoder(os.Stdout).Encode(info)
++	}
+ 	printSessionInfoList(info)
+ 	return nil
+ }
+diff --git a/pkg/protocol/session.go b/pkg/protocol/session.go
+index 6360031..6b98a1c 100644
+--- a/pkg/protocol/session.go
++++ b/pkg/protocol/session.go
+@@ -426,6 +426,7 @@ func (s *Session) ToSessionInfo() *appctlpb.SessionInfo {
+ 		LocalAddr:  proto.String("-"),
+ 		RemoteAddr: proto.String("-"),
+ 		State:      proto.String(sessionState(s.state.Load()).String()),
++		UserName:   proto.String(s.UserName()),
+ 		RecvQ:      proto.Uint32(uint32(s.recvQueue.Len())),
+ 		RecvBuf:    proto.Uint32(uint32(s.recvBuf.Len())),
+ 		SendQ:      proto.Uint32(uint32(s.sendQueue.Len())),
+diff --git a/pkg/protocol/session_test.go b/pkg/protocol/session_test.go
+index 09b95b5..8fc3ed2 100644
+--- a/pkg/protocol/session_test.go
++++ b/pkg/protocol/session_test.go
+@@ -16,6 +16,8 @@
+ package protocol
+ 
+ import (
++	"encoding/json"
++	"strings"
+ 	"testing"
+ 	"time"
+ 
+@@ -46,6 +48,23 @@ func TestSessionReceiveWindowSize(t *testing.T) {
+ 	}
+ }
+ 
++func TestSessionInfoIncludesAuthenticatedUser(t *testing.T) {
++	session := NewSession(1, false, 1400, nil, nil)
++	username := "alice"
++	session.userName.Store(&username)
++	info := session.ToSessionInfo()
++	if got := info.GetUserName(); got != username {
++		t.Fatalf("SessionInfo userName = %q, want %q", got, username)
++	}
++	encoded, err := json.Marshal(info)
++	if err != nil {
++		t.Fatalf("marshal SessionInfo: %v", err)
++	}
++	if !strings.Contains(string(encoded), `"userName":"alice"`) {
++		t.Fatalf("JSON SessionInfo does not expose userName: %s", encoded)
++	}
++}
++
+ func TestDeliverSegmentToSessionUnblocksWhenSessionClosed(t *testing.T) {
+ 	underlay := newBaseUnderlay(false, 1400, nil)
+ 	session := NewSession(1, false, 1400, nil, nil)

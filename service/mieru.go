@@ -15,6 +15,7 @@ import (
 	"reflect"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -31,17 +32,20 @@ import (
 )
 
 const (
-	mieruStartupTimeout  = 6 * time.Second
-	mieruStopTimeout     = 4 * time.Second
-	mieruQueryTimeout    = 4 * time.Second
-	mieruLogLimit        = 80
-	mieruDebugDuration   = 10 * time.Minute
-	mieruWatchInterval   = 20 * time.Second
-	mieruWatchThreshold  = 3
-	mieruWatchQueryTime  = 3 * time.Second
-	mieruBridgeProbeTime = 2 * time.Second
-	mieruBridgeHost      = "127.0.0.1"
-	mieruBridgeProxyName = "novapanel"
+	mieruStartupTimeout   = 6 * time.Second
+	mieruStopTimeout      = 4 * time.Second
+	mieruQueryTimeout     = 4 * time.Second
+	mieruLogLimit         = 80
+	mieruDebugDuration    = 10 * time.Minute
+	mieruWatchInterval    = 20 * time.Second
+	mieruSourceIPInterval = 5 * time.Second
+	mieruSourceIPTimeout  = 2 * time.Second
+	mieruSourceIPMaxAge   = 15 * time.Second
+	mieruWatchThreshold   = 3
+	mieruWatchQueryTime   = 3 * time.Second
+	mieruBridgeProbeTime  = 2 * time.Second
+	mieruBridgeHost       = "127.0.0.1"
+	mieruBridgeProxyName  = "novapanel"
 )
 
 var mieruRestartDelays = []time.Duration{
@@ -93,6 +97,8 @@ type MieruService struct {
 	watchLastCheck   time.Time
 	watchLastError   string
 	watchLastRestart time.Time
+	sourceIPs        map[string][]string
+	sourceIPsUpdated time.Time
 }
 
 func NewMieruService() *MieruService {
@@ -100,7 +106,66 @@ func NewMieruService() *MieruService {
 		users:           make(map[string]struct{}),
 		trafficBaseline: make(map[string]mieruTrafficCounters),
 		recentUsers:     make(map[string]time.Time),
+		sourceIPs:       make(map[string][]string),
 	}
+}
+
+type mieruConnectionSnapshot struct {
+	Items []struct {
+		UserName   string `json:"userName"`
+		RemoteAddr string `json:"remoteAddr"`
+		State      string `json:"state"`
+	} `json:"items"`
+}
+
+func parseMieruConnectionSourceIPs(payload []byte) (map[string][]string, error) {
+	var snapshot mieruConnectionSnapshot
+	if err := json.Unmarshal(payload, &snapshot); err != nil {
+		return nil, fmt.Errorf("decode Mieru connection list: %w", err)
+	}
+
+	result := make(map[string][]string)
+	seen := make(map[string]map[string]struct{})
+	for _, item := range snapshot.Items {
+		username := strings.TrimSpace(item.UserName)
+		if username == "" || !strings.EqualFold(strings.TrimSpace(item.State), "ESTABLISHED") {
+			continue
+		}
+		ip := sourceIPFromSessionSource(item.RemoteAddr)
+		if ip == "" {
+			continue
+		}
+		if seen[username] == nil {
+			seen[username] = make(map[string]struct{})
+		}
+		if _, exists := seen[username][ip]; exists {
+			continue
+		}
+		seen[username][ip] = struct{}{}
+		result[username] = append(result[username], ip)
+	}
+	for username := range result {
+		sort.Strings(result[username])
+	}
+	return result, nil
+}
+
+// SourceIPsForUser returns current client addresses for an authenticated
+// Mieru user. The values are user-level because Mieru's SOCKS bridge does not
+// preserve a per-flow association with the underlying transport session.
+func (s *MieruService) SourceIPsForUser(inboundTag, username string) []string {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if strings.TrimSpace(inboundTag) == "" || inboundTag != s.inboundTag || s.sourceIPsUpdated.IsZero() || time.Since(s.sourceIPsUpdated) > mieruSourceIPMaxAge {
+		return nil
+	}
+	if s.active == nil || !s.active.running.Load() {
+		return nil
+	}
+	return append([]string(nil), s.sourceIPs[strings.TrimSpace(username)]...)
 }
 
 func SetMieruService(service *MieruService) {
@@ -199,6 +264,8 @@ func (s *MieruService) syncFromDBLocked() error {
 		s.users = make(map[string]struct{})
 		s.trafficBaseline = make(map[string]mieruTrafficCounters)
 		s.recentUsers = make(map[string]time.Time)
+		s.sourceIPs = make(map[string][]string)
+		s.sourceIPsUpdated = time.Now()
 		s.appliedHash = ""
 		s.appliedConfig = nil
 		s.restartScheduled = false
@@ -220,6 +287,8 @@ func (s *MieruService) syncFromDBLocked() error {
 		s.users = make(map[string]struct{})
 		s.trafficBaseline = make(map[string]mieruTrafficCounters)
 		s.recentUsers = make(map[string]time.Time)
+		s.sourceIPs = make(map[string][]string)
+		s.sourceIPsUpdated = time.Now()
 		s.appliedHash = ""
 		s.appliedConfig = nil
 		s.restartScheduled = false
@@ -253,6 +322,10 @@ func (s *MieruService) syncFromDBLocked() error {
 	appliedHash := s.appliedHash
 	oldPayload := append([]byte(nil), s.appliedConfig...)
 	s.total = 1
+	if s.inboundTag != inboundConfig.Tag || appliedHash != configHash {
+		s.sourceIPs = make(map[string][]string)
+		s.sourceIPsUpdated = time.Time{}
+	}
 	s.inboundTag = inboundConfig.Tag
 	s.users = make(map[string]struct{}, len(credentials))
 	for _, credential := range credentials {
@@ -434,14 +507,58 @@ func (s *MieruService) runWatchdog(ctx context.Context, done chan struct{}) {
 	defer close(done)
 	ticker := time.NewTicker(mieruWatchInterval)
 	defer ticker.Stop()
+	sourceIPTicker := time.NewTicker(mieruSourceIPInterval)
+	defer sourceIPTicker.Stop()
+	s.refreshMieruSourceIPs(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			s.runWatchdogCheck(ctx)
+		case <-sourceIPTicker.C:
+			s.refreshMieruSourceIPs(ctx)
 		}
 	}
+}
+
+func (s *MieruService) refreshMieruSourceIPs(ctx context.Context) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	runtimeState := s.active
+	inboundTag := s.inboundTag
+	total := s.total
+	s.mu.Unlock()
+	if total == 0 || runtimeState == nil || !runtimeState.running.Load() {
+		s.mu.Lock()
+		if s.active == runtimeState && s.inboundTag == inboundTag {
+			s.sourceIPs = make(map[string][]string)
+			s.sourceIPsUpdated = time.Now()
+		}
+		s.mu.Unlock()
+		return
+	}
+	binary, err := mieruBinaryPath()
+	if err != nil {
+		return
+	}
+	_, socketPath := mitaRuntimePaths()
+	payload, err := runMitaQueryWithContext(ctx, mieruSourceIPTimeout, binary, socketPath, []string{"NOVAPANEL_MIERU_CONNECTIONS_JSON=1"}, "get", "connections")
+	if err != nil {
+		return
+	}
+	sourceIPs, err := parseMieruConnectionSourceIPs(payload)
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	if s.active == runtimeState && s.inboundTag == inboundTag {
+		s.sourceIPs = sourceIPs
+		s.sourceIPsUpdated = time.Now()
+	}
+	s.mu.Unlock()
 }
 
 func (s *MieruService) runWatchdogCheck(ctx context.Context) {
@@ -701,6 +818,8 @@ func (s *MieruService) Stop() error {
 	s.appliedConfig = nil
 	s.restartScheduled = false
 	s.lastError = ""
+	s.sourceIPs = make(map[string][]string)
+	s.sourceIPsUpdated = time.Now()
 	s.mu.Unlock()
 	if runtimeState != nil {
 		stopMieruRuntime(runtimeState)
@@ -1161,15 +1280,19 @@ func runMitaQuery(binary, socketPath string, args ...string) ([]byte, error) {
 }
 
 func runMitaQueryWithTimeout(timeout time.Duration, binary, socketPath string, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	return runMitaQueryWithContext(context.Background(), timeout, binary, socketPath, nil, args...)
+}
+
+func runMitaQueryWithContext(parent context.Context, timeout time.Duration, binary, socketPath string, envOverrides []string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, binary, args...)
 	configPath, _ := mitaRuntimePaths()
-	command.Env = append(os.Environ(),
-		"MITA_CONFIG_JSON_FILE="+configPath,
-		"MITA_UDS_PATH="+socketPath,
+	command.Env = mergeEnvironment(os.Environ(), append([]string{
+		"MITA_CONFIG_JSON_FILE=" + configPath,
+		"MITA_UDS_PATH=" + socketPath,
 		"MITA_INSECURE_UDS=1",
-	)
+	}, envOverrides...))
 	output, err := command.CombinedOutput()
 	if ctx.Err() != nil {
 		return output, ctx.Err()
@@ -1178,6 +1301,25 @@ func runMitaQueryWithTimeout(timeout time.Duration, binary, socketPath string, a
 		return output, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return output, nil
+}
+
+func mergeEnvironment(base, overrides []string) []string {
+	keys := make(map[string]struct{}, len(overrides))
+	for _, override := range overrides {
+		key, _, ok := strings.Cut(override, "=")
+		if ok {
+			keys[key] = struct{}{}
+		}
+	}
+	merged := make([]string, 0, len(base)+len(overrides))
+	for _, entry := range base {
+		key, _, ok := strings.Cut(entry, "=")
+		if _, overridden := keys[key]; ok && overridden {
+			continue
+		}
+		merged = append(merged, entry)
+	}
+	return append(merged, overrides...)
 }
 
 func (s *MieruService) handleRuntimeExit(runtimeState *mieruRuntime, waitErr error) {

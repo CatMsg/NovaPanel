@@ -516,6 +516,8 @@ export default {
     interfaceAddr: "Interface Address",
     options: "Rule Options",
     domainRules: "Domain/IP",
+    inboundMatch: "Inbound source",
+    authUserMatch: "Authenticated user",
     srcIpRules: "Source IP",
     srcPortRules: "Source Port",
     udpDisableDomainUnmapping: "UDP Disable Domain Unmapping",

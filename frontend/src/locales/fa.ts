@@ -510,6 +510,8 @@ export default {
     interfaceAddr: "آدرس رابط شبکه",
     options: "گزینه‌های قوانین",
     domainRules: "دامنه/آدرس",
+    inboundMatch: "منبع ورودی",
+    authUserMatch: "کاربر احراز هویت‌شده",
     srcIpRules: "آدرس مبدا",
     srcPortRules: "پورت مبدا",
     udpDisableDomainUnmapping: "عدم تبدیل مسیریابی دامنه",

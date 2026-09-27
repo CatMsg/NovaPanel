@@ -66,11 +66,26 @@ func (c *HistoryTracker) record(inboundCtx adapter.InboundContext, outboundTag s
 
 	destination := inboundCtx.Destination.String()
 	sourceIP := ""
+	sourceIPScope := ""
+	var sourceIPs []string
 	if inboundCtx.Source.IsIP() && normalizeTrackedSource(inboundCtx.Inbound, socksaddrString(inboundCtx.Source)) != "" {
 		sourceIP = inboundCtx.Source.Unwrap().AddrString()
 	}
+	if sourceIP == "" {
+		sourceIPs = mieruSourceIPs(inboundCtx.Inbound, user)
+		if len(sourceIPs) > 0 {
+			sourceIPScope = "user"
+		}
+		if len(sourceIPs) == 1 {
+			sourceIP = sourceIPs[0]
+		}
+	}
 	now := time.Now().Unix()
-	dedupeKey := strings.ToLower(user) + "|" + strings.ToLower(sourceIP) + "|" + strings.ToLower(domain) + "|" + strings.ToLower(destination) + "|" + strings.ToLower(outboundTag) + "|" + strings.ToLower(networkType)
+	sourceKey := sourceIP
+	if len(sourceIPs) > 0 {
+		sourceKey = strings.Join(sourceIPs, ",")
+	}
+	dedupeKey := strings.ToLower(user) + "|" + strings.ToLower(sourceKey) + "|" + strings.ToLower(domain) + "|" + strings.ToLower(destination) + "|" + strings.ToLower(outboundTag) + "|" + strings.ToLower(networkType)
 
 	c.access.Lock()
 	if lastSeen, ok := c.recent[dedupeKey]; ok && time.Duration(now-lastSeen)*time.Second < historyDedupeWindow {
@@ -88,14 +103,16 @@ func (c *HistoryTracker) record(inboundCtx adapter.InboundContext, outboundTag s
 	c.access.Unlock()
 
 	entry := model.ClientHistoryEntry{
-		DateTime:    now,
-		Domain:      domain,
-		Destination: destination,
-		SourceIP:    sourceIP,
-		Inbound:     inboundCtx.Inbound,
-		Outbound:    outboundTag,
-		Network:     networkType,
-		Protocol:    inboundCtx.Protocol,
+		DateTime:      now,
+		Domain:        domain,
+		Destination:   destination,
+		SourceIP:      sourceIP,
+		SourceIPs:     sourceIPs,
+		SourceIPScope: sourceIPScope,
+		Inbound:       inboundCtx.Inbound,
+		Outbound:      outboundTag,
+		Network:       networkType,
+		Protocol:      inboundCtx.Protocol,
 	}
 
 	if err := appendClientHistory(user, entry); err != nil {

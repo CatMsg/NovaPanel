@@ -517,6 +517,8 @@ export default {
     interfaceAddr: "接口地址",
     options: "规则选项",
     domainRules: "域名/IP",
+    inboundMatch: "入站来源",
+    authUserMatch: "认证用户",
     srcIpRules: "源 IP",
     srcPortRules: "源端口",
     udpDisableDomainUnmapping: "禁用域名解析映射",
