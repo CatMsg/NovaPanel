@@ -269,7 +269,7 @@
                 <v-list-item prepend-icon="mdi-link-variant" :title="$t('ui.sessions.copySubscription')" @click="copySubscription(item.name)" />
                 <v-list-item prepend-icon="mdi-share-variant-outline" :title="$t('ui.share.title')" @click="showQrCode(item.id ?? 0)" />
                 <v-list-item v-if="Data().enableTraffic" prepend-icon="mdi-chart-line" :title="$t('stats.graphTitle')" @click="showStats(item.name)" />
-                <v-list-item v-if="Data().enableTraffic" prepend-icon="mdi-history" :title="$t('client.history')" @click="showHistory(item.id)" />
+                <v-list-item prepend-icon="mdi-history" :title="$t('client.history')" @click="showHistory(item.id)" />
                 <v-divider />
                 <v-list-item prepend-icon="mdi-delete" base-color="error" :title="$t('actions.del')" @click="requestDelete(item)" />
               </v-list>
@@ -314,7 +314,7 @@
               <v-list-item prepend-icon="mdi-link-variant" :title="$t('ui.sessions.copySubscription')" @click="copySubscription(item.name)" />
               <v-list-item prepend-icon="mdi-share-variant-outline" :title="$t('ui.share.title')" @click="showQrCode(item.id ?? 0)" />
               <v-list-item v-if="Data().enableTraffic" prepend-icon="mdi-chart-line" :title="$t('stats.graphTitle')" @click="showStats(item.name)" />
-              <v-list-item v-if="Data().enableTraffic" prepend-icon="mdi-history" :title="$t('client.history')" @click="showHistory(item.id)" />
+              <v-list-item prepend-icon="mdi-history" :title="$t('client.history')" @click="showHistory(item.id)" />
               <v-divider />
               <v-list-item prepend-icon="mdi-delete" base-color="error" :title="$t('actions.del')" @click="requestDelete(item)" />
             </v-list>
