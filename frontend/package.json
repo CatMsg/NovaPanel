@@ -1,6 +1,6 @@
 {
   "name": "novapanel-frontend",
-  "version": "1.6.122",
+  "version": "1.6.123",
   "private": true,
   "scripts": {
     "dev": "vite --host",
@@ -11,7 +11,7 @@
     "test:unit": "vitest run src",
     "test:e2e": "playwright test",
     "lint": "eslint . --fix --ignore-pattern dist --ignore-pattern node_modules",
-    "lint:check": "eslint . --max-warnings 0 --ignore-pattern dist --ignore-pattern node_modules"
+    "lint:check": "eslint . --max-warnings 0 --ignore-pattern dist --ignore-pattern node_modules && node ./check-mdi-icons.mjs"
   },
   "dependencies": {
     "@mdi/font": "7.4.47",

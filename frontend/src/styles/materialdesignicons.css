@@ -1,12 +1,7 @@
 /* MaterialDesignIcons.com */
 @font-face {
   font-family: "Material Design Icons";
-  src: url("@mdi/font/fonts/materialdesignicons-webfont.eot?v=7.4.47");
-  src:
-    url("@mdi/font/fonts/materialdesignicons-webfont.eot?#iefix&v=7.4.47") format("embedded-opentype"),
-    url("@mdi/font/fonts/materialdesignicons-webfont.woff2?v=7.4.47") format("woff2"),
-    url("@mdi/font/fonts/materialdesignicons-webfont.woff?v=7.4.47") format("woff"),
-    url("@mdi/font/fonts/materialdesignicons-webfont.ttf?v=7.4.47") format("truetype");
+  src: url("@mdi/font/fonts/materialdesignicons-webfont.woff2?v=7.4.47") format("woff2");
   font-weight: normal;
   font-style: normal;
 }
@@ -311,6 +306,10 @@
   content: "\F0322";
 }
 
+.mdi-link-variant::before {
+  content: "\F0339";
+}
+
 .mdi-list-box-outline::before {
   content: "\F1B7C";
 }
@@ -395,6 +394,10 @@
   content: "\F0778";
 }
 
+.mdi-share-variant-outline::before {
+  content: "\F1514";
+}
+
 .mdi-shield-lock-outline::before {
   content: "\F0CCC";
 }
@@ -446,3 +449,44 @@
 .mdi-white-balance-sunny::before {
   content: "\F05A8";
 }
+
+.mdi-alert-circle::before { content: "\F0028"; }
+.mdi-bookshelf::before { content: "\F125F"; }
+.mdi-bug-outline::before { content: "\F0A30"; }
+.mdi-call-split::before { content: "\F00FB"; }
+.mdi-check-decagram-outline::before { content: "\F1740"; }
+.mdi-circle-outline::before { content: "\F0766"; }
+.mdi-cloud-search-outline::before { content: "\F0957"; }
+.mdi-code-json::before { content: "\F0626"; }
+.mdi-content-save-plus-outline::before { content: "\F1B42"; }
+.mdi-creation-outline::before { content: "\F1C2B"; }
+.mdi-database-search-outline::before { content: "\F1636"; }
+.mdi-download-network-outline::before { content: "\F0C66"; }
+.mdi-file-compare::before { content: "\F08AA"; }
+.mdi-file-document-check-outline::before { content: "\F1A9A"; }
+.mdi-file-edit-outline::before { content: "\F11E8"; }
+.mdi-file-plus-outline::before { content: "\F0EED"; }
+.mdi-file-search-outline::before { content: "\F0C7D"; }
+.mdi-google::before { content: "\F02AD"; }
+.mdi-ip-network-outline::before { content: "\F0C90"; }
+.mdi-key-change::before { content: "\F0307"; }
+.mdi-key-plus::before { content: "\F0309"; }
+.mdi-layers-outline::before { content: "\F09FE"; }
+.mdi-layers-triple-outline::before { content: "\F0F59"; }
+.mdi-link-off::before { content: "\F0338"; }
+.mdi-magnify-close::before { content: "\F0980"; }
+.mdi-map-marker-radius-outline::before { content: "\F12FC"; }
+.mdi-movie-open-star-outline::before { content: "\F170E"; }
+.mdi-netflix::before { content: "\F0746"; }
+.mdi-pause-circle-outline::before { content: "\F03E6"; }
+.mdi-play::before { content: "\F040A"; }
+.mdi-play-circle-outline::before { content: "\F040D"; }
+.mdi-send::before { content: "\F048A"; }
+.mdi-shield-off-outline::before { content: "\F099C"; }
+.mdi-sort-ascending::before { content: "\F04BC"; }
+.mdi-star-four-points-outline::before { content: "\F0AE3"; }
+.mdi-text-search::before { content: "\F13B8"; }
+.mdi-tunnel-outline::before { content: "\F183E"; }
+.mdi-upload-network-outline::before { content: "\F0CD8"; }
+.mdi-web::before { content: "\F059F"; }
+.mdi-youtube::before { content: "\F05C3"; }

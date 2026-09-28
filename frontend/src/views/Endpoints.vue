@@ -55,7 +55,7 @@
   <v-row class="resource-grid">
     <v-col v-if="endpoints.length === 0" cols="12">
       <EmptyState
-        icon="mdi-cloud-tags-outline"
+        icon="mdi-cloud-tags"
         title="暂无节点"
         description="添加 WireGuard、Warp 或 Tailscale 节点后，可在这里查看状态和客户端配置。"
         :action="$t('actions.add')"
