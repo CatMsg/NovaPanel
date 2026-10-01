@@ -412,6 +412,23 @@ func (s *SettingService) GetTimeLocation() (*time.Location, error) {
 	return location, nil
 }
 
+func (s *SettingService) getTimeLocationTx(tx *gorm.DB) (*time.Location, error) {
+	l, err := s.getStringTx(tx, "timeLocation")
+	if err != nil {
+		return nil, err
+	}
+	if runtime.GOOS == "windows" {
+		l = "Local"
+	}
+	location, err := time.LoadLocation(l)
+	if err == nil {
+		return location, nil
+	}
+	defaultLocation := defaultValueMap["timeLocation"]
+	logger.Errorf("location <%v> not exist, using default location: %v", l, defaultLocation)
+	return time.LoadLocation(defaultLocation)
+}
+
 func (s *SettingService) GetSubListen() (string, error) {
 	return s.getString("subListen")
 }

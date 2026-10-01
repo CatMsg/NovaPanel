@@ -57,8 +57,11 @@
             <v-col cols="12" sm="6" md="4">
               <v-switch color="primary" v-model="bulkData.autoReset" :label="$t('client.autoReset')" hide-details></v-switch>
             </v-col>
-            <v-col cols="12" sm="6" md="4" v-if="bulkData.autoReset || bulkData.delayStart">
-              <v-text-field v-model.number="bulkData.resetDays" type="number" min="1" :label="$t('client.resetDays')" hide-details></v-text-field>
+            <v-col cols="12" sm="6" md="4" v-if="bulkData.delayStart && !bulkData.autoReset">
+              <v-text-field v-model.number="bulkData.resetDays" type="number" min="1" :label="$t('client.delayDays')" hide-details></v-text-field>
+            </v-col>
+            <v-col cols="12" sm="6" md="4" v-if="bulkData.autoReset">
+              <div class="text-medium-emphasis py-4">{{ $t('client.resetMonthly') }}</div>
             </v-col>
           </v-row>
           <v-row>

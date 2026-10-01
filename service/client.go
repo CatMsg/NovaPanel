@@ -162,7 +162,11 @@ func (s *ClientService) Save(tx *gorm.DB, act string, data json.RawMessage, host
 				return nil, err
 			}
 		}
-		if err = normalizeClientResetSchedule(&client, time.Now().Unix()); err != nil {
+		resetLocation, locationErr := (&SettingService{}).getTimeLocationTx(tx)
+		if locationErr != nil {
+			return nil, locationErr
+		}
+		if err = normalizeClientResetSchedule(&client, time.Now().Unix(), resetLocation); err != nil {
 			return nil, err
 		}
 		err = s.updateLinksWithFixedInbounds(tx, []*model.Client{&client}, hostname)
@@ -194,11 +198,15 @@ func (s *ClientService) Save(tx *gorm.DB, act string, data json.RawMessage, host
 		if len(clients) == 0 {
 			return nil, common.NewError("at least one client is required")
 		}
+		resetLocation, locationErr := (&SettingService{}).getTimeLocationTx(tx)
+		if locationErr != nil {
+			return nil, locationErr
+		}
 		for _, client := range clients {
 			if err = validateClientRateLimits(client); err != nil {
 				return nil, err
 			}
-			if err = normalizeClientResetSchedule(client, time.Now().Unix()); err != nil {
+			if err = normalizeClientResetSchedule(client, time.Now().Unix(), resetLocation); err != nil {
 				return nil, err
 			}
 		}
@@ -310,28 +318,56 @@ func validateClientRateLimits(client *model.Client) error {
 
 const maxClientResetDays = 36500
 
-func normalizeClientResetSchedule(client *model.Client, now int64) error {
+func normalizeClientResetSchedule(client *model.Client, now int64, location *time.Location) error {
 	if client == nil {
 		return nil
 	}
 	if !client.AutoReset {
 		client.NextReset = 0
+		if client.DelayStart {
+			if client.ResetDays < 1 {
+				client.ResetDays = 1
+			}
+			if client.ResetDays > maxClientResetDays {
+				return common.NewErrorf("首次使用后的有效天数不能超过 %d 天", maxClientResetDays)
+			}
+		}
 		return nil
-	}
-	if client.ResetDays < 1 {
-		client.ResetDays = 1
-	}
-	if client.ResetDays > maxClientResetDays {
-		return common.NewErrorf("周期重置天数不能超过 %d 天", maxClientResetDays)
 	}
 	if client.DelayStart {
 		client.NextReset = 0
 		return nil
 	}
-	if client.NextReset <= 0 {
-		client.NextReset = now + int64(client.ResetDays)*int64((24*time.Hour)/time.Second)
+	if location == nil {
+		location = time.UTC
+	}
+	if client.NextReset <= 0 || !isClientMonthlyReset(client.NextReset, location) {
+		client.NextReset = nextClientMonthlyReset(now, location)
 	}
 	return nil
+}
+
+func nextClientMonthlyReset(timestamp int64, location *time.Location) int64 {
+	if location == nil {
+		location = time.UTC
+	}
+	now := time.Unix(timestamp, 0).In(location)
+	next := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, location)
+	if !next.After(now) {
+		next = next.AddDate(0, 1, 0)
+	}
+	return next.Unix()
+}
+
+func isClientMonthlyReset(timestamp int64, location *time.Location) bool {
+	if timestamp <= 0 {
+		return false
+	}
+	if location == nil {
+		location = time.UTC
+	}
+	local := time.Unix(timestamp, 0).In(location)
+	return local.Day() == 1 && local.Hour() == 0 && local.Minute() == 0 && local.Second() == 0
 }
 
 func (s *ClientService) preserveClientTrafficState(tx *gorm.DB, client *model.Client) error {
@@ -673,6 +709,10 @@ func (s *ClientService) ResetClients(tx *gorm.DB, dt int64) ([]uint, bool, error
 	var resetClients, allClients []*model.Client
 	var changes []model.Changes
 	var inboundIds []uint
+	resetLocation, err := (&SettingService{}).getTimeLocationTx(tx)
+	if err != nil {
+		return nil, false, err
+	}
 	// Set delay start without periodic reset
 	err = tx.Model(model.Client{}).
 		Where("enable = true AND delay_start = true AND auto_reset = false AND (Up + Down) > 0").Find(&resetClients).Error
@@ -699,10 +739,7 @@ func (s *ClientService) ResetClients(tx *gorm.DB, dt int64) ([]uint, bool, error
 		return nil, false, err
 	}
 	for _, client := range resetClients {
-		if client.ResetDays < 1 || client.ResetDays > maxClientResetDays {
-			client.ResetDays = 1
-		}
-		client.NextReset = dt + (int64(client.ResetDays) * 86400)
+		client.NextReset = nextClientMonthlyReset(dt, resetLocation)
 		client.DelayStart = false
 		changes = append(changes, model.Changes{
 			DateTime: dt,
@@ -714,33 +751,24 @@ func (s *ClientService) ResetClients(tx *gorm.DB, dt int64) ([]uint, bool, error
 	}
 	allClients = append(allClients, resetClients...)
 
-	// Older and partially saved clients can have auto-reset enabled without a schedule.
-	// Establish their first cycle without clearing usage unexpectedly.
+	// Align legacy day-based schedules to the next calendar-month boundary without
+	// unexpectedly clearing usage during migration.
 	resetClients = nil
 	err = tx.Model(model.Client{}).
-		Where("delay_start = false AND auto_reset = true AND next_reset <= 0").Find(&resetClients).Error
+		Where("delay_start = false AND auto_reset = true").Find(&resetClients).Error
 	if err != nil {
 		return nil, false, err
 	}
 	for _, client := range resetClients {
-		if client.ResetDays < 1 || client.ResetDays > maxClientResetDays {
-			client.ResetDays = 1
+		if client.NextReset <= 0 || !isClientMonthlyReset(client.NextReset, resetLocation) {
+			client.NextReset = nextClientMonthlyReset(dt, resetLocation)
+			allClients = append(allClients, client)
+			continue
 		}
-		client.NextReset = dt + int64(client.ResetDays)*int64((24*time.Hour)/time.Second)
-	}
-	allClients = append(allClients, resetClients...)
-
-	// Set periodic reset
-	err = tx.Model(model.Client{}).
-		Where("delay_start = false AND auto_reset = true AND next_reset > 0 AND next_reset <= ?", dt).Find(&resetClients).Error
-	if err != nil {
-		return nil, false, err
-	}
-	for _, client := range resetClients {
-		if client.ResetDays < 1 || client.ResetDays > maxClientResetDays {
-			client.ResetDays = 1
+		if client.NextReset > dt {
+			continue
 		}
-		client.NextReset = dt + (int64(client.ResetDays) * 86400)
+		client.NextReset = nextClientMonthlyReset(dt, resetLocation)
 		client.TotalUp += client.Up
 		client.TotalDown += client.Down
 		client.Up = 0
@@ -753,8 +781,8 @@ func (s *ClientService) ResetClients(tx *gorm.DB, dt int64) ([]uint, bool, error
 			}
 			inboundIds = common.UnionUintArray(inboundIds, clientInboundIds)
 		}
+		allClients = append(allClients, client)
 	}
-	allClients = append(allClients, resetClients...)
 
 	// Save clients
 	if len(allClients) > 0 {

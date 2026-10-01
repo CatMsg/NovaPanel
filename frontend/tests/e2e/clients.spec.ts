@@ -71,7 +71,7 @@ test('browsing history remains available when traffic charts are disabled', asyn
   await expect(page.getByText('流量图表', { exact: true })).toHaveCount(0)
 })
 
-test('client traffic cycle start is editable and recalculates the next reset', async ({ page }) => {
+test('client auto-reset is fixed to the first of each month', async ({ page }) => {
   await installBaseMocks(page, true)
   const client = {
     ...pageData.clients[0],
@@ -117,21 +117,10 @@ test('client traffic cycle start is editable and recalculates the next reset', a
   await clientLoad
   await expect(page.getByText('编辑 客户端', { exact: true })).toBeVisible()
 
-  const cycleStart = page.getByTestId('client-reset-cycle-start').locator('input')
-  await expect(cycleStart).toBeVisible()
-  await expect(cycleStart).not.toHaveValue('')
-  const newStart = await page.evaluate(() => {
-    const date = new Date(Date.now() - 86400_000)
-    const pad = (value: number) => String(value).padStart(2, '0')
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
-  })
-  await cycleStart.fill(newStart)
-  await page.getByRole('button', { name: '重置', exact: true }).click()
-  const expectedNextReset = await cycleStart.evaluate((element) =>
-    Math.floor(new Date((element as HTMLInputElement).value).getTime() / 1000) + 30 * 86400,
-  )
+  await expect(page.getByTestId('client-reset-monthly')).toContainText('每月 1 日 00:00 按面板时区重置')
+  await expect(page.locator('input[type="datetime-local"]')).toHaveCount(0)
+  await expect(page.getByLabel('首次使用后有效天数')).toHaveCount(0)
   await page.getByRole('button', { name: '保存', exact: true }).last().click()
-  await expect.poll(() => savedClient?.nextReset).toBe(expectedNextReset)
-  expect(savedClient?.resetScheduleChanged).toBe(true)
-  expect(savedClient?.resetUsage).toBe(true)
+  await expect.poll(() => savedClient?.nextReset).toBe(client.nextReset)
+  expect(savedClient?.resetDays).toBe(30)
 })
