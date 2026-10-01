@@ -201,7 +201,6 @@ export default {
     sslCert: "Путь к SSL сертификату",
     webUri: "URI панели",
     sessionAge: "Максимальная длительность сессии",
-    trafficAge: "Максимальная длительность трафика",
     timeLoc: "Часовой пояс",
     loginTrustedProxies: "Trusted proxy IPs / CIDRs",
     loginTrustedProxiesHint: "Trust X-Forwarded-For only from these reverse proxies.",

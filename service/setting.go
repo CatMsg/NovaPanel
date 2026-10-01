@@ -64,7 +64,6 @@ var defaultValueMap = map[string]string{
 	"sessionMaxAge":                "0",
 	"loginTrustedProxies":          "",
 	"loginBanAllowlist":            "",
-	"trafficAge":                   "30",
 	"timeLocation":                 "Asia/Shanghai",
 	"trafficBudgetEnabled":         "false",
 	"trafficBudgetLimitBytes":      "0",
@@ -134,6 +133,14 @@ func (s *SettingService) GetAllSetting() (*map[string]string, error) {
 
 	for _, setting := range settings {
 		allSetting[setting.Key] = setting.Value
+	}
+	if _, exists := allSetting["trafficAge"]; exists {
+		if err := retryWriteTx(func(tx *gorm.DB) error {
+			return tx.Where("key = ?", "trafficAge").Delete(&model.Setting{}).Error
+		}); err != nil {
+			return nil, err
+		}
+		delete(allSetting, "trafficAge")
 	}
 
 	missingDefaults := make(map[string]string)
@@ -389,10 +396,6 @@ func (s *SettingService) GetSecret() ([]byte, error) {
 
 func (s *SettingService) GetSessionMaxAge() (int, error) {
 	return s.getInt("sessionMaxAge")
-}
-
-func (s *SettingService) GetTrafficAge() (int, error) {
-	return s.getInt("trafficAge")
 }
 
 func (s *SettingService) GetTimeLocation() (*time.Location, error) {
@@ -692,13 +695,6 @@ func (s *SettingService) validateSettingValue(key, value string) error {
 	return nil
 }
 
-func (s *SettingService) applySettingSideEffects(tx *gorm.DB, key, value string) error {
-	if key == "trafficAge" && value == "0" {
-		return tx.Where("id > 0").Delete(model.Stats{}).Error
-	}
-	return nil
-}
-
 func (s *SettingService) buildSavePostCommit(change settingPortChange, changedSettings map[string]string) func() error {
 	portsChanged := change.webPortChanged || change.subPortChanged
 	needsRestart := requiresSubServerRestart(changedSettings)
@@ -771,6 +767,7 @@ func (s *SettingService) Save(tx *gorm.DB, data json.RawMessage) (func() error, 
 	if err := json.Unmarshal(data, &settings); err != nil {
 		return nil, err
 	}
+	delete(settings, "trafficAge")
 	s.fillSubCertFiles(settings)
 
 	changedSettings := make(map[string]string, len(settings))
@@ -800,9 +797,6 @@ func (s *SettingService) Save(tx *gorm.DB, data json.RawMessage) (func() error, 
 	}
 
 	for key, value := range changedSettings {
-		if err := s.applySettingSideEffects(tx, key, value); err != nil {
-			return nil, err
-		}
 		if err := s.saveSettingTx(tx, key, value); err != nil {
 			return nil, err
 		}

@@ -57,7 +57,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.
 
 ### 登入暴力破解防護
 
-Linux systemd 主機的安裝腳本會自動安裝並設定 Fail2ban。網頁登入在 10 分鐘內連續失敗 10 次後，來源 IP 會被永久封鎖；規則只比對目前面板 TCP 連接埠，不會封鎖 SSH 連接埠。
+Linux systemd 主機的安裝腳本會自動安裝並設定 Fail2ban。網頁登入在 10 分鐘內失敗 3 次後，來源 IP 會被永久封鎖；規則只比對目前面板 TCP 連接埠，不會封鎖 SSH 連接埠。
 
 - 在「設定 -> 介面」維護可信任反向代理 IP/CIDR 和登入封鎖白名單。
 - 在「健康診斷 -> 登入防護」檢視狀態並解除單一 IP 的封鎖。

@@ -444,9 +444,9 @@ func TestSettingSaveNormalizesPaths(t *testing.T) {
 	}
 }
 
-func TestSettingSaveClearsStatsWhenTrafficAgeZero(t *testing.T) {
+func TestLegacyTrafficAgeSettingIsRemovedWithoutDeletingStats(t *testing.T) {
 	workDir := t.TempDir()
-	if err := database.InitDB(filepath.Join(workDir, "traffic-age-zero.db")); err != nil {
+	if err := database.InitDB(filepath.Join(workDir, "traffic-age-legacy.db")); err != nil {
 		t.Fatalf("init db: %v", err)
 	}
 
@@ -455,39 +455,45 @@ func TestSettingSaveClearsStatsWhenTrafficAgeZero(t *testing.T) {
 		t.Fatalf("init default settings: %v", err)
 	}
 
-	stats := []model.Stats{
-		{DateTime: 1, Resource: "client", Tag: "a", Direction: true, Traffic: 1},
-		{DateTime: 2, Resource: "inbound", Tag: "b", Direction: false, Traffic: 2},
+	if err := svc.saveSetting("trafficAge", "0"); err != nil {
+		t.Fatalf("seed legacy setting: %v", err)
 	}
-	if err := database.GetDB().Create(&stats).Error; err != nil {
+	stat := model.Stats{DateTime: 1, Resource: "client", Tag: "a", Direction: true, Traffic: 1}
+	if err := database.GetDB().Create(&stat).Error; err != nil {
 		t.Fatalf("seed stats: %v", err)
+	}
+
+	settings, err := svc.GetAllSetting()
+	if err != nil {
+		t.Fatalf("load settings: %v", err)
+	}
+	if _, exists := (*settings)["trafficAge"]; exists {
+		t.Fatal("legacy trafficAge setting is still exposed")
+	}
+	var settingCount int64
+	if err := database.GetDB().Model(model.Setting{}).Where("key = ?", "trafficAge").Count(&settingCount).Error; err != nil {
+		t.Fatalf("count legacy settings: %v", err)
+	}
+	if settingCount != 0 {
+		t.Fatalf("expected legacy setting to be deleted, got %d rows", settingCount)
 	}
 
 	tx := database.GetDB().Begin()
 	if tx.Error != nil {
 		t.Fatalf("begin tx: %v", tx.Error)
 	}
-
-	postCommit, err := svc.Save(tx, json.RawMessage(`{
-		"trafficAge":"0"
-	}`))
-	if err != nil {
+	if _, err := svc.Save(tx, json.RawMessage(`{"trafficAge":"0"}`)); err != ErrNoChanges {
 		tx.Rollback()
-		t.Fatalf("save settings: %v", err)
+		t.Fatalf("expected legacy setting payload to be ignored, got %v", err)
 	}
-	if err := tx.Commit().Error; err != nil {
-		t.Fatalf("commit tx: %v", err)
-	}
-	if postCommit != nil {
-		t.Fatal("did not expect post-commit action for trafficAge change")
-	}
+	tx.Rollback()
 
-	var count int64
-	if err := database.GetDB().Model(model.Stats{}).Count(&count).Error; err != nil {
+	var statsCount int64
+	if err := database.GetDB().Model(model.Stats{}).Count(&statsCount).Error; err != nil {
 		t.Fatalf("count stats: %v", err)
 	}
-	if count != 0 {
-		t.Fatalf("expected stats to be cleared, got %d rows", count)
+	if statsCount != 1 {
+		t.Fatalf("expected history to remain intact, got %d rows", statsCount)
 	}
 }
 

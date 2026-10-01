@@ -3,7 +3,7 @@ import { installBaseMocks, json } from './mockApi'
 
 const settings = {
   webListen: '', webDomain: '', webPort: '2095', webCertFile: '', webKeyFile: '', webPath: '/app/', webURI: '',
-  sessionMaxAge: '0', loginTrustedProxies: '', loginBanAllowlist: '', trafficAge: '30',
+  sessionMaxAge: '0', loginTrustedProxies: '', loginBanAllowlist: '',
   trafficBudgetEnabled: 'false', trafficBudgetLimitBytes: '0', trafficBudgetReserveBytes: '0', trafficBudgetOffsetBytes: '0',
   trafficBudgetAccountingMode: 'tx', trafficBudgetInterface: 'auto', trafficBudgetCycleDay: '1', trafficBudgetCycleHour: '0',
   trafficBudgetWarningPercent: '80', trafficBudgetCriticalPercent: '90', timeLocation: 'Asia/Shanghai',
@@ -23,6 +23,7 @@ test('settings can be edited and saved after preflight', async ({ page }) => {
 
   await page.goto('/app/settings')
   await expect(page.getByRole('heading', { name: '设置' })).toBeVisible()
+  await expect(page.getByText('流量过期时限')).toHaveCount(0)
   const port = page.getByLabel('端口').first()
   await port.fill('2995')
   await page.getByRole('button', { name: '保存' }).click()

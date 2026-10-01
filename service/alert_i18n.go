@@ -9,7 +9,7 @@ var supportedAlertLanguages = map[string]struct{}{
 var alertTexts = map[string]map[string]string{
 	"zhHans": {
 		"test":             "NovaPanel 告警测试\n通知通道配置正常。",
-		"login":            "NovaPanel 登录安全告警\nIP %s 在 10 分钟内连续失败 10 次，Fail2ban 已按当前永久封禁与白名单策略处理。",
+		"login":            "NovaPanel 登录安全告警\nIP %s 在 10 分钟内登录失败 3 次，Fail2ban 已按当前永久封禁与白名单策略处理。",
 		"health":           "NovaPanel 健康告警\n%s",
 		"recovery":         "NovaPanel 恢复通知\n此前的非流量健康异常已恢复，当前没有 warning/error。",
 		"traffic_warning":  "NovaPanel 流量预警\n%s",
@@ -20,7 +20,7 @@ var alertTexts = map[string]map[string]string{
 	},
 	"zhHant": {
 		"test":             "NovaPanel 告警測試\n通知通道設定正常。",
-		"login":            "NovaPanel 登入安全告警\nIP %s 在 10 分鐘內連續失敗 10 次，Fail2ban 已依目前永久封鎖與白名單策略處理。",
+		"login":            "NovaPanel 登入安全告警\nIP %s 在 10 分鐘內登入失敗 3 次，Fail2ban 已依目前永久封鎖與白名單策略處理。",
 		"health":           "NovaPanel 健康告警\n%s",
 		"recovery":         "NovaPanel 恢復通知\n先前的非流量健康異常已恢復，目前沒有 warning/error。",
 		"traffic_warning":  "NovaPanel 流量預警\n%s",
@@ -31,7 +31,7 @@ var alertTexts = map[string]map[string]string{
 	},
 	"en": {
 		"test":             "NovaPanel alert test\nThe notification channel is working.",
-		"login":            "NovaPanel login security alert\nIP %s failed 10 logins within 10 minutes. Fail2ban applied the current permanent-ban and allowlist policy.",
+		"login":            "NovaPanel login security alert\nIP %s failed 3 logins within 10 minutes. Fail2ban applied the current permanent-ban and allowlist policy.",
 		"health":           "NovaPanel health alert\n%s",
 		"recovery":         "NovaPanel recovery\nPrevious non-traffic health issues have recovered; there are no warning/error checks now.",
 		"traffic_warning":  "NovaPanel traffic warning\n%s",
@@ -42,7 +42,7 @@ var alertTexts = map[string]map[string]string{
 	},
 	"ru": {
 		"test":             "Тест уведомлений NovaPanel\nКанал уведомлений работает.",
-		"login":            "Предупреждение безопасности NovaPanel\nIP %s совершил 10 неудачных входов за 10 минут. Fail2ban применил текущие правила постоянной блокировки и белого списка.",
+		"login":            "Предупреждение безопасности NovaPanel\nIP %s совершил 3 неудачных входа за 10 минут. Fail2ban применил текущие правила постоянной блокировки и белого списка.",
 		"health":           "Предупреждение NovaPanel\n%s",
 		"recovery":         "Восстановление NovaPanel\nПредыдущие проблемы, не связанные с трафиком, устранены; warning/error отсутствуют.",
 		"traffic_warning":  "Предупреждение о трафике NovaPanel\n%s",
@@ -53,7 +53,7 @@ var alertTexts = map[string]map[string]string{
 	},
 	"vi": {
 		"test":             "Kiểm tra cảnh báo NovaPanel\nKênh thông báo hoạt động bình thường.",
-		"login":            "Cảnh báo bảo mật NovaPanel\nIP %s đăng nhập thất bại 10 lần trong 10 phút. Fail2ban đã áp dụng chính sách cấm vĩnh viễn và danh sách cho phép hiện tại.",
+		"login":            "Cảnh báo bảo mật NovaPanel\nIP %s đăng nhập thất bại 3 lần trong 10 phút. Fail2ban đã áp dụng chính sách cấm vĩnh viễn và danh sách cho phép hiện tại.",
 		"health":           "Cảnh báo sức khỏe NovaPanel\n%s",
 		"recovery":         "NovaPanel đã phục hồi\nCác lỗi sức khỏe không liên quan đến lưu lượng đã phục hồi; hiện không còn warning/error.",
 		"traffic_warning":  "Cảnh báo lưu lượng NovaPanel\n%s",
@@ -64,7 +64,7 @@ var alertTexts = map[string]map[string]string{
 	},
 	"fa": {
 		"test":             "آزمایش هشدار NovaPanel\nکانال اعلان به درستی کار می کند.",
-		"login":            "هشدار امنیت ورود NovaPanel\nIP %s طی ۱۰ دقیقه ۱۰ ورود ناموفق داشت. Fail2ban سیاست فعلی مسدودسازی دائمی و فهرست مجاز را اعمال کرد.",
+		"login":            "هشدار امنیت ورود NovaPanel\nIP %s طی ۱۰ دقیقه ۳ ورود ناموفق داشت. Fail2ban سیاست فعلی مسدودسازی دائمی و فهرست مجاز را اعمال کرد.",
 		"health":           "هشدار سلامت NovaPanel\n%s",
 		"recovery":         "بازیابی NovaPanel\nمشکلات سلامت غیرترافیکی قبلی برطرف شده اند و اکنون warning/error وجود ندارد.",
 		"traffic_warning":  "هشدار ترافیک NovaPanel\n%s",

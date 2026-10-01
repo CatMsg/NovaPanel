@@ -201,7 +201,6 @@ export default {
     sslCert: "SSL 证书 (cert) 路径",
     webUri: "面板 URI",
     sessionAge: "会话超时时限",
-    trafficAge: "流量过期时限",
     timeLoc: "时区",
     loginTrustedProxies: "可信代理 IP / CIDR",
     loginTrustedProxiesHint: "仅信任这些反向代理传入的 X-Forwarded-For；留空时只信任本机代理。",

@@ -7,6 +7,9 @@ import (
 
 func TestLoginFailureTrackerUsesRollingWindow(t *testing.T) {
 	const remoteIP = "192.0.2.10"
+	if loginFailureWindow != 10*time.Minute || loginFailureLimit != 3 {
+		t.Fatalf("login protection threshold = %d failures/%s, want 3 failures/10m", loginFailureLimit, loginFailureWindow)
+	}
 	loginFailures.Lock()
 	loginFailures.entries = map[string]loginFailureState{
 		remoteIP: {attempts: []time.Time{time.Now().Add(-loginFailureWindow - time.Second)}},

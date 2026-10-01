@@ -57,7 +57,7 @@ During installation you can configure the administrator account, panel path, and
 
 ### Login Brute-force Protection
 
-On Linux systemd hosts, the installer automatically installs and configures Fail2ban. After 10 consecutive failed web logins within 10 minutes, the source IP is permanently banned. The rule only matches the current panel TCP port and does not ban the SSH port.
+On Linux systemd hosts, the installer automatically installs and configures Fail2ban. After 3 failed web logins within 10 minutes, the source IP is permanently banned. The rule only matches the current panel TCP port and does not ban the SSH port.
 
 - Manage trusted reverse-proxy IP/CIDR ranges and the login-ban allowlist under **Settings -> Interface**.
 - View protection status and unban individual IP addresses under **Health Diagnostics -> Login Protection**.

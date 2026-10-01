@@ -12,7 +12,7 @@ import (
 
 const (
 	loginFailureWindow = 10 * time.Minute
-	loginFailureLimit  = 10
+	loginFailureLimit  = 3
 	loginFailureMapCap = 4096
 )
 

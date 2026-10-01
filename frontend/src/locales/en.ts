@@ -200,7 +200,6 @@ export default {
     sslCert: "SSL Certificate Path",
     webUri: "Panel URI",
     sessionAge: "Session Maximum Age",
-    trafficAge: "Traffic Maximum Age",
     timeLoc: "Timezone Location",
     loginTrustedProxies: "Trusted proxy IPs / CIDRs",
     loginTrustedProxiesHint: "Trust X-Forwarded-For only from these reverse proxies. Local proxies are always trusted.",

@@ -122,7 +122,7 @@ func (s *HealthService) checkLoginProtection(diagnostics map[string]interface{})
 	if len(status.BannedIPs) > 0 {
 		return HealthCheck{ID: "login-protection", Title: "登录防爆破", Status: "warning", Summary: fmt.Sprintf("已永久封禁 %d 个来源 IP", len(status.BannedIPs)), Action: "login-security"}
 	}
-	return HealthCheck{ID: "login-protection", Title: "登录防爆破", Status: "ok", Summary: "10 次失败/10 分钟后永久封禁"}
+	return HealthCheck{ID: "login-protection", Title: "登录防爆破", Status: "ok", Summary: "10 分钟内失败 3 次后永久封禁"}
 }
 
 func (r *HealthReport) add(check HealthCheck) {

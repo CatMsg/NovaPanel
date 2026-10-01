@@ -81,12 +81,7 @@ func (a *APP) Start() error {
 		return err
 	}
 
-	trafficAge, err := a.SettingService.GetTrafficAge()
-	if err != nil {
-		return err
-	}
-
-	err = a.cronJob.Start(loc, trafficAge)
+	err = a.cronJob.Start(loc)
 	if err != nil {
 		return err
 	}

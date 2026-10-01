@@ -97,16 +97,6 @@
               ></v-text-field>
           </v-col>
           <v-col cols="12" sm="6" md="4">
-            <v-text-field
-              type="number"
-              v-model.number="trafficAge"
-              min="0"
-              :label="$t('setting.trafficAge')"
-              :suffix="$t('date.d')"
-              hide-details
-              ></v-text-field>
-          </v-col>
-          <v-col cols="12" sm="6" md="4">
             <v-text-field v-model="settings.timeLocation" :label="$t('setting.timeLoc')" hide-details></v-text-field>
           </v-col>
           <v-col cols="12" md="6">
@@ -271,7 +261,6 @@ const settings = ref({
 	sessionMaxAge: "0",
   loginTrustedProxies: "",
   loginBanAllowlist: "",
-  trafficAge: "30",
   trafficBudgetEnabled: "false",
   trafficBudgetLimitBytes: "0",
   trafficBudgetReserveBytes: "0",
@@ -441,11 +430,6 @@ const webPort = computed({
 const sessionMaxAge = computed({
   get: () => { return settings.value.sessionMaxAge.length>0 ? parseInt(settings.value.sessionMaxAge) : 0 },
   set: (v:number) => { settings.value.sessionMaxAge = v>0 ? v.toString() : "0" }
-})
-
-const trafficAge = computed({
-  get: () => { return settings.value.trafficAge.length>0 ? parseInt(settings.value.trafficAge) : 0 },
-  set: (v:number) => { settings.value.trafficAge = v>0 ? v.toString() : "0" }
 })
 
 const subPort = computed({

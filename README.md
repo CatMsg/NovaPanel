@@ -57,7 +57,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.
 
 ### 登录防爆破
 
-Linux systemd 主机的安装脚本会自动安装并配置 Fail2ban。网页登录在 10 分钟内连续失败 10 次后，来源 IP 会被永久封禁；规则只匹配当前面板 TCP 端口，不会封禁 SSH 端口。
+Linux systemd 主机的安装脚本会自动安装并配置 Fail2ban。网页登录在 10 分钟内失败 3 次后，来源 IP 会被永久封禁；规则只匹配当前面板 TCP 端口，不会封禁 SSH 端口。
 
 - 在“设置 -> 界面”维护可信反向代理 IP/CIDR 和登录封禁白名单。
 - 在“健康诊断 -> 登录防爆破”查看状态并解除单个 IP 的封禁。

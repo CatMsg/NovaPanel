@@ -74,7 +74,7 @@ func TestLoginGuardScriptWritesIsolatedConfiguration(t *testing.T) {
 	if !strings.Contains(string(filter), "NOVAS_LOGIN_FAILED remote_ip=<HOST>") {
 		t.Fatalf("unexpected filter: %s", filter)
 	}
-	for _, expected := range []string{"port = 9999", "bantime = -1", "maxretry = 10", "usedns = no", "ignoreip = 127.0.0.1/8 ::1 192.0.2.1 2001:db8::/64", "banaction = nftables-multiport"} {
+	for _, expected := range []string{"port = 9999", "bantime = -1", "maxretry = 3", "findtime = 10m", "usedns = no", "ignoreip = 127.0.0.1/8 ::1 192.0.2.1 2001:db8::/64", "banaction = nftables-multiport"} {
 		if !strings.Contains(string(jail), expected) {
 			t.Fatalf("jail missing %q: %s", expected, jail)
 		}

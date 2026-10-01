@@ -199,10 +199,6 @@ func (a *ApiService) getData(c *gin.Context) (interface{}, error) {
 		if err != nil {
 			return "", err
 		}
-		trafficAge, err := a.SettingService.GetTrafficAge()
-		if err != nil {
-			return "", err
-		}
 		data["config"] = json.RawMessage(config)
 		data["clients"] = clients
 		data["tls"] = tlsConfigs
@@ -215,7 +211,7 @@ func (a *ApiService) getData(c *gin.Context) (interface{}, error) {
 		if subMode == "master" {
 			data["subAggregateURI"] = subURI + "aggregate"
 		}
-		data["enableTraffic"] = trafficAge > 0
+		data["enableTraffic"] = true
 		data["onlines"] = onlines
 		if err := storeCachedLoadData(cacheKey, data); err != nil {
 			logger.Warning("store load cache failed:", err)

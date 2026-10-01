@@ -200,7 +200,6 @@ export default {
     sslCert: "مسیر فایل گواهی",
     webUri: "آدرس نهایی پنل",
     sessionAge: "بیشینه زمان لاگین ماندن",
-    trafficAge: "بیشینه زمان ذخیره ترافیک",
     timeLoc: "منطقه زمانی",
     loginTrustedProxies: "Trusted proxy IPs / CIDRs",
     loginTrustedProxiesHint: "Trust X-Forwarded-For only from these reverse proxies.",

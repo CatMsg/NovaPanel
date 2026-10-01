@@ -200,7 +200,6 @@ export default {
     sslCert: "SSL 證書 (cert) 路徑",
     webUri: "面板 URI",
     sessionAge: "會話最大連接數",
-    trafficAge: "流量最大年齡",
     timeLoc: "時區",
     loginTrustedProxies: "可信代理 IP / CIDR",
     loginTrustedProxiesHint: "只信任這些反向代理傳入的 X-Forwarded-For；留空時只信任本機代理。",
