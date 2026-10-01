@@ -39,13 +39,15 @@ type Client struct {
 	Group         string          `json:"group" form:"group"`
 
 	// Delay start and periodic reset
-	DelayStart bool            `json:"delayStart" form:"delayStart" gorm:"default:false;not null"`
-	AutoReset  bool            `json:"autoReset" form:"autoReset" gorm:"default:false;not null"`
-	ResetDays  int             `json:"resetDays" form:"resetDays" gorm:"default:0;not null"`
-	NextReset  int64           `json:"nextReset" form:"nextReset" gorm:"default:0;not null"`
-	TotalUp    int64           `json:"totalUp" form:"totalUp" gorm:"default:0;not null"`
-	TotalDown  int64           `json:"totalDown" form:"totalDown" gorm:"default:0;not null"`
-	History    json.RawMessage `json:"history,omitempty" form:"history" gorm:"type:TEXT"`
+	DelayStart           bool            `json:"delayStart" form:"delayStart" gorm:"default:false;not null"`
+	AutoReset            bool            `json:"autoReset" form:"autoReset" gorm:"default:false;not null"`
+	ResetDays            int             `json:"resetDays" form:"resetDays" gorm:"default:0;not null"`
+	NextReset            int64           `json:"nextReset" form:"nextReset" gorm:"default:0;not null"`
+	TotalUp              int64           `json:"totalUp" form:"totalUp" gorm:"default:0;not null"`
+	TotalDown            int64           `json:"totalDown" form:"totalDown" gorm:"default:0;not null"`
+	History              json.RawMessage `json:"history,omitempty" form:"history" gorm:"type:TEXT"`
+	ResetScheduleChanged *bool           `json:"resetScheduleChanged,omitempty" gorm:"-"`
+	ResetUsage           bool            `json:"resetUsage,omitempty" gorm:"-"`
 }
 
 type ClientHistoryEntry struct {

@@ -254,6 +254,8 @@ export default {
     delayStart: "تأخیر شروع",
     autoReset: "بازنشانی خودکار",
     resetDays: "روزهای بازنشانی",
+    resetCycleStart: "شروع چرخه ترافیک",
+    resetCycleStartHint: "زمان محلی مرورگر استفاده می‌شود. بازنشانی بعدی از این زمان به‌علاوه مدت چرخه محاسبه می‌شود؛ برای شروع یک چرخه کامل، زمان فعلی را انتخاب کنید.",
     nextReset: "بازنشانی بعدی",
     uploadLimit: "Upload limit",
     downloadLimit: "Download limit",

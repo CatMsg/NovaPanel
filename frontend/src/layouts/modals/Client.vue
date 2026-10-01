@@ -51,7 +51,20 @@
                   <DatePick :expiry="expDate" @submit="setDate" />
                 </v-col>
                 <v-col cols="12" sm="6" md="4" v-if="client.autoReset || client.delayStart">
-                  <v-text-field v-model.number="resetDays" type="number" min="1" :label="$t('client.resetDays')" hide-details></v-text-field>
+                  <v-text-field v-model.number="resetDays" type="number" min="1" max="36500" :label="$t('client.resetDays')" hide-details></v-text-field>
+                </v-col>
+              </v-row>
+              <v-row v-if="client.autoReset && !client.delayStart">
+                <v-col cols="12" sm="6" md="4">
+                  <v-text-field
+                    v-model="resetCycleStart"
+                    data-testid="client-reset-cycle-start"
+                    type="datetime-local"
+                    :max="cycleStartMax()"
+                    :label="$t('client.resetCycleStart')"
+                    :hint="$t('client.resetCycleStartHint')"
+                    persistent-hint
+                  ></v-text-field>
                 </v-col>
               </v-row>
               <v-row>
@@ -262,6 +275,10 @@ export default {
         this.loading = true
         const newData = await Data().loadClients(id)
         this.client = createClient(newData)
+        if (this.client.autoReset && !this.client.delayStart && !this.client.nextReset) {
+          this.client.resetDays = Math.max(1, this.client.resetDays || 1)
+          this.client.nextReset = Math.floor(Date.now() / 1000) + this.client.resetDays * 86400
+        }
         this.title = "edit"
         this.clientConfig = this.client.config
         this.loading = false
@@ -314,6 +331,13 @@ export default {
       this.client.totalDown = (this.client.totalDown ?? 0) + this.client.down
       this.client.up = 0
       this.client.down = 0
+      this.client.resetUsage = true
+    },
+    cycleStartMax():string {
+      const now = new Date()
+      now.setSeconds(0, 0)
+      const pad = (value:number) => String(value).padStart(2, '0')
+      return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`
     }
   },
   computed: {
@@ -340,27 +364,60 @@ export default {
     delayStart: {
       get() { return this.client.delayStart?? false },
       set(v:boolean) {
+        if (v !== (this.client.delayStart ?? false)) this.client.resetScheduleChanged = true
+        const days = Math.max(1, this.client.resetDays || 1)
         this.client.delayStart = v
-        this.client.resetDays = v ? 1 : 0
+        this.client.resetDays = v || this.client.autoReset ? days : 0
         if (v && !this.autoReset) this.client.expiry = 0
+        if (this.client.autoReset) {
+          this.client.nextReset = v ? 0 : (this.client.nextReset || Math.floor(Date.now() / 1000) + days * 86400)
+        }
       }
     },
     autoReset: {
       get() { return this.client.autoReset?? false },
       set(v:boolean) {
+        if (v !== (this.client.autoReset ?? false)) this.client.resetScheduleChanged = true
+        const days = Math.max(1, this.client.resetDays || 1)
         this.client.autoReset = v
-        this.client.resetDays = v ? 1 : 0
-        if (!v) this.client.nextReset = 0
+        this.client.resetDays = v || this.client.delayStart ? days : 0
+        if (!v || this.client.delayStart) {
+          this.client.nextReset = 0
+        } else if (!this.client.nextReset) {
+          this.client.nextReset = Math.floor(Date.now() / 1000) + days * 86400
+        }
       }
     },
     resetDays: {
       get() { return this.client.resetDays?? 1 },
       set(v:number|null) {
         if (!v) v = 1
+        const previousDays = Math.max(1, this.client.resetDays || 1)
+        if (v !== previousDays) this.client.resetScheduleChanged = true
         if (this.client.nextReset && this.client.nextReset > 0) {
-          this.client.nextReset += (v-(this.client.resetDays?? 0))*24*60*60
+          this.client.nextReset += (v - previousDays) * 86400
+        } else if (this.client.autoReset && !this.client.delayStart) {
+          this.client.nextReset = Math.floor(Date.now() / 1000) + v * 86400
         }
         this.client.resetDays = v
+      }
+    },
+    resetCycleStart: {
+      get():string {
+        const nextReset = Number(this.client.nextReset || 0)
+        const resetDays = Math.max(1, Number(this.client.resetDays || 1))
+        if (!nextReset) return ''
+        const start = new Date((nextReset - resetDays * 86400) * 1000)
+        const pad = (value:number) => String(value).padStart(2, '0')
+        return `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}T${pad(start.getHours())}:${pad(start.getMinutes())}`
+      },
+      set(value:string) {
+        if (!value) return
+        const start = new Date(value).getTime()
+        if (!Number.isFinite(start)) return
+        this.client.resetScheduleChanged = true
+        const resetDays = Math.max(1, Number(this.client.resetDays || 1))
+        this.client.nextReset = Math.floor(start / 1000) + resetDays * 86400
       }
     },
     up() :string { return HumanReadable.sizeFormat(this.client.up) },
@@ -378,10 +435,13 @@ export default {
     percentColor() :string { return (this.client.up+this.client.down) >= this.client.volume ? 'error' : this.percent>90 ? 'warning' : 'success' },
   },
   watch: {
-    visible(newValue) {
-      if (newValue) {
-        this.updateData(this.$props.id)
-      }
+    visible: {
+      handler(newValue) {
+        if (newValue) {
+          this.updateData(this.$props.id)
+        }
+      },
+      immediate: true,
     },
   },
   components: { DatePick },

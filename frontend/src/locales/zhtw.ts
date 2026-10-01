@@ -254,6 +254,8 @@ export default {
     delayStart: "延遲啟動",
     autoReset: "自動重置",
     resetDays: "重置天數",
+    resetCycleStart: "流量週期開始時間",
+    resetCycleStartHint: "依目前瀏覽器本地時間設定；下次重置時間為此時間加上週期天數。設為目前時間即可重新開始完整週期。",
     nextReset: "下次重置",
     uploadLimit: "上傳限速",
     downloadLimit: "下載限速",

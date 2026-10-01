@@ -255,6 +255,8 @@ export default {
     delayStart: "Отложенный старт",
     autoReset: "Авто сброс",
     resetDays: "Дней до сброса",
+    resetCycleStart: "Начало периода трафика",
+    resetCycleStartHint: "Используется местное время браузера. Следующий сброс рассчитывается от этого времени с учётом длительности цикла. Укажите текущее время, чтобы начать новый полный цикл.",
     nextReset: "Следующий сброс",
     uploadLimit: "Upload limit",
     downloadLimit: "Download limit",

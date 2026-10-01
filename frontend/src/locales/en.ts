@@ -260,6 +260,8 @@ export default {
     delayStart: "Delay Start",
     autoReset: "Auto Reset",
     resetDays: "Reset Days",
+    resetCycleStart: "Traffic cycle start",
+    resetCycleStartHint: "Uses your browser's local time. The next reset is this time plus the cycle length; set it to now to start a full new cycle.",
     nextReset: "Next Reset",
     uploadLimit: "Upload limit",
     downloadLimit: "Download limit",

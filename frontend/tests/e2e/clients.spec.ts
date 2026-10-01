@@ -70,3 +70,68 @@ test('browsing history remains available when traffic charts are disabled', asyn
   await expect(page.getByText('浏览记录', { exact: true })).toBeVisible()
   await expect(page.getByText('流量图表', { exact: true })).toHaveCount(0)
 })
+
+test('client traffic cycle start is editable and recalculates the next reset', async ({ page }) => {
+  await installBaseMocks(page, true)
+  const client = {
+    ...pageData.clients[0],
+    config: {},
+    links: [],
+    history: [],
+    autoReset: true,
+    resetDays: 30,
+    nextReset: Math.floor(Date.now() / 1000) + 13 * 86400,
+    totalUp: 0,
+    totalDown: 0,
+  }
+  let savedClient: Record<string, unknown> | undefined
+  await page.route('**/api/load**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json({ ...pageData, clients: [client] }),
+  }))
+  await page.route('**/api/clients**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json({ clients: [client] }),
+  }))
+  await page.route('**/api/preflight**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json({ changed: true, warnings: [] }),
+  }))
+  await page.route('**/api/save**', async route => {
+    savedClient = JSON.parse(route.request().postDataJSON().data)
+    await route.fulfill({ status: 200, contentType: 'application/json', body: json({}) })
+  })
+
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('/app/clients')
+  const clientRow = page.getByRole('row', { name: /alice/ })
+  await expect(clientRow).toBeVisible()
+  const clientLoad = page.waitForRequest(request => {
+    const url = new URL(request.url())
+    return url.pathname.endsWith('/api/clients') && url.searchParams.get('id') === '17'
+  })
+  await clientRow.getByRole('button', { name: '编辑', exact: true }).click()
+  await clientLoad
+  await expect(page.getByText('编辑 客户端', { exact: true })).toBeVisible()
+
+  const cycleStart = page.getByTestId('client-reset-cycle-start').locator('input')
+  await expect(cycleStart).toBeVisible()
+  await expect(cycleStart).not.toHaveValue('')
+  const newStart = await page.evaluate(() => {
+    const date = new Date(Date.now() - 86400_000)
+    const pad = (value: number) => String(value).padStart(2, '0')
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+  })
+  await cycleStart.fill(newStart)
+  await page.getByRole('button', { name: '重置', exact: true }).click()
+  const expectedNextReset = await cycleStart.evaluate((element) =>
+    Math.floor(new Date((element as HTMLInputElement).value).getTime() / 1000) + 30 * 86400,
+  )
+  await page.getByRole('button', { name: '保存', exact: true }).last().click()
+  await expect.poll(() => savedClient?.nextReset).toBe(expectedNextReset)
+  expect(savedClient?.resetScheduleChanged).toBe(true)
+  expect(savedClient?.resetUsage).toBe(true)
+})

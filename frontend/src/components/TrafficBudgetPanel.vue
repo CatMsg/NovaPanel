@@ -35,10 +35,10 @@
       <v-col cols="12" sm="6" md="4"><v-text-field v-model.number="limitGB" type="number" min="0" step="1" :label="$t('ui.trafficBudget.providerLimit')" suffix="GB" hide-details /></v-col>
       <v-col cols="12" sm="6" md="4"><v-text-field v-model.number="reserveGB" type="number" min="0" step="1" :label="$t('ui.trafficBudget.reserve')" suffix="GB" hide-details /></v-col>
       <v-col cols="12" sm="6" md="4"><v-text-field v-model.number="offsetGB" type="number" min="0" step="0.1" :label="$t('ui.trafficBudget.offset')" suffix="GB" :hint="$t('ui.trafficBudget.offsetHint')" persistent-hint /></v-col>
-      <v-col cols="12" sm="6" md="4"><v-select v-model="settings.trafficBudgetAccountingMode" :items="accountingModes" :label="$t('ui.trafficBudget.accountingMode')" hide-details /></v-col>
+      <v-col cols="12" sm="6" md="4"><v-select v-model="settings.trafficBudgetAccountingMode" :items="accountingModes" :label="$t('ui.trafficBudget.accountingMode')" :hint="$t('ui.trafficBudget.accountingModeHint')" persistent-hint hide-details="auto" /></v-col>
       <v-col cols="12" sm="6" md="4"><v-text-field v-model.trim="settings.trafficBudgetInterface" :label="$t('ui.trafficBudget.publicInterface')" placeholder="auto" :hint="$t('ui.trafficBudget.publicInterfaceHint')" persistent-hint /></v-col>
       <v-col cols="6" sm="3"><v-text-field v-model.number="cycleDay" type="number" min="1" max="31" :label="$t('ui.trafficBudget.resetDay')" hide-details /></v-col>
-      <v-col cols="6" sm="3"><v-text-field v-model.number="cycleHour" type="number" min="0" max="23" :label="$t('ui.trafficBudget.resetHour')" suffix=":00" hide-details /></v-col>
+      <v-col cols="6" sm="3"><v-text-field v-model.number="cycleHour" type="number" min="0" max="23" :label="$t('ui.trafficBudget.resetHour')" :hint="$t('ui.trafficBudget.cycleTimezoneHint', { zone: settings.timeLocation || 'Asia/Shanghai' })" suffix=":00" persistent-hint hide-details="auto" /></v-col>
       <v-col cols="6" sm="3"><v-text-field v-model.number="warningPercent" type="number" min="1" max="98" :label="$t('ui.trafficBudget.warningThreshold')" suffix="%" hide-details /></v-col>
       <v-col cols="6" sm="3"><v-text-field v-model.number="criticalPercent" type="number" min="2" max="99" :label="$t('ui.trafficBudget.criticalThreshold')" suffix="%" hide-details /></v-col>
     </v-row>
@@ -87,7 +87,16 @@ const accountingModes = computed(() => [
 const statusColor = computed(() => status.value.blocked || status.value.level === 'critical' || status.value.level === 'error' ? 'error' : status.value.level === 'warning' ? 'warning' : status.value.enabled ? 'success' : 'default')
 const statusLabel = computed(() => status.value.blocked ? t('ui.trafficBudget.statusBlocked') : status.value.level === 'critical' ? t('ui.trafficBudget.statusCritical') : status.value.level === 'warning' ? t('ui.trafficBudget.statusWarning') : status.value.level === 'error' ? t('ui.trafficBudget.statusError') : status.value.enabled ? (status.value.supported ? t('ui.trafficBudget.statusNormal') : t('ui.trafficBudget.statusUnsupported')) : t('ui.trafficBudget.statusDisabled'))
 const formatGB = (value = 0) => (Number(value || 0) / GB).toFixed(value >= 100 * GB ? 1 : 2)
-const formatTime = (value: string) => new Date(value).toLocaleString()
+const formatTime = (value: string) => {
+  const date = new Date(value)
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: 'medium', timeStyle: 'short', timeZone: settings.value.timeLocation || undefined,
+    }).format(date)
+  } catch {
+    return date.toLocaleString()
+  }
+}
 const loadStatus = async () => { const msg = await HttpUtils.get('api/traffic-budget'); if (msg.success && msg.obj) status.value = msg.obj }
 onMounted(() => { void loadStatus(); timer = setInterval(loadStatus, 10_000) })
 onBeforeUnmount(() => { if (timer) clearInterval(timer) })

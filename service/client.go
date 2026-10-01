@@ -149,10 +149,21 @@ func (s *ClientService) Save(tx *gorm.DB, act string, data json.RawMessage, host
 			return nil, err
 		}
 		if act == "edit" {
+			if client.ResetScheduleChanged != nil && !*client.ResetScheduleChanged {
+				if err = s.preserveClientResetSchedule(tx, &client); err != nil {
+					return nil, err
+				}
+			}
+			if err = s.preserveClientTrafficCounters(tx, &client); err != nil {
+				return nil, err
+			}
 			err = s.preserveClientHistory(tx, &client)
 			if err != nil {
 				return nil, err
 			}
+		}
+		if err = normalizeClientResetSchedule(&client, time.Now().Unix()); err != nil {
+			return nil, err
 		}
 		err = s.updateLinksWithFixedInbounds(tx, []*model.Client{&client}, hostname)
 		if err != nil {
@@ -187,6 +198,9 @@ func (s *ClientService) Save(tx *gorm.DB, act string, data json.RawMessage, host
 			if err = validateClientRateLimits(client); err != nil {
 				return nil, err
 			}
+			if err = normalizeClientResetSchedule(client, time.Now().Unix()); err != nil {
+				return nil, err
+			}
 		}
 		err = json.Unmarshal(clients[0].Inbounds, &inboundIds)
 		if err != nil {
@@ -208,6 +222,9 @@ func (s *ClientService) Save(tx *gorm.DB, act string, data json.RawMessage, host
 		}
 		for _, client := range clients {
 			if err = validateClientRateLimits(client); err != nil {
+				return nil, err
+			}
+			if err = s.preserveClientTrafficState(tx, client); err != nil {
 				return nil, err
 			}
 			err = s.preserveClientHistory(tx, client)
@@ -288,6 +305,97 @@ func validateClientRateLimits(client *model.Client) error {
 	if client.UploadLimit < 0 || client.DownloadLimit < 0 {
 		return common.NewError("upload and download limits cannot be negative")
 	}
+	return nil
+}
+
+const maxClientResetDays = 36500
+
+func normalizeClientResetSchedule(client *model.Client, now int64) error {
+	if client == nil {
+		return nil
+	}
+	if !client.AutoReset {
+		client.NextReset = 0
+		return nil
+	}
+	if client.ResetDays < 1 {
+		client.ResetDays = 1
+	}
+	if client.ResetDays > maxClientResetDays {
+		return common.NewErrorf("周期重置天数不能超过 %d 天", maxClientResetDays)
+	}
+	if client.DelayStart {
+		client.NextReset = 0
+		return nil
+	}
+	if client.NextReset <= 0 {
+		client.NextReset = now + int64(client.ResetDays)*int64((24*time.Hour)/time.Second)
+	}
+	return nil
+}
+
+func (s *ClientService) preserveClientTrafficState(tx *gorm.DB, client *model.Client) error {
+	if client == nil || client.Id == 0 {
+		return nil
+	}
+	var current model.Client
+	if err := tx.Model(model.Client{}).
+		Select("up", "down", "total_up", "total_down", "delay_start", "auto_reset", "reset_days", "next_reset").
+		Where("id = ?", client.Id).
+		First(&current).Error; err != nil {
+		return err
+	}
+	client.Up = current.Up
+	client.Down = current.Down
+	client.TotalUp = current.TotalUp
+	client.TotalDown = current.TotalDown
+	client.DelayStart = current.DelayStart
+	client.AutoReset = current.AutoReset
+	client.ResetDays = current.ResetDays
+	client.NextReset = current.NextReset
+	return nil
+}
+
+func (s *ClientService) preserveClientResetSchedule(tx *gorm.DB, client *model.Client) error {
+	if client == nil || client.Id == 0 {
+		return nil
+	}
+	var current model.Client
+	if err := tx.Model(model.Client{}).
+		Select("delay_start", "auto_reset", "reset_days", "next_reset").
+		Where("id = ?", client.Id).
+		First(&current).Error; err != nil {
+		return err
+	}
+	client.DelayStart = current.DelayStart
+	client.AutoReset = current.AutoReset
+	client.ResetDays = current.ResetDays
+	client.NextReset = current.NextReset
+	return nil
+}
+
+func (s *ClientService) preserveClientTrafficCounters(tx *gorm.DB, client *model.Client) error {
+	if client == nil || client.Id == 0 {
+		return nil
+	}
+	var current model.Client
+	if err := tx.Model(model.Client{}).
+		Select("up", "down", "total_up", "total_down").
+		Where("id = ?", client.Id).
+		First(&current).Error; err != nil {
+		return err
+	}
+	if client.ResetUsage {
+		client.Up = 0
+		client.Down = 0
+		client.TotalUp = current.TotalUp + current.Up
+		client.TotalDown = current.TotalDown + current.Down
+		return nil
+	}
+	client.Up = current.Up
+	client.Down = current.Down
+	client.TotalUp = current.TotalUp
+	client.TotalDown = current.TotalDown
 	return nil
 }
 
@@ -591,6 +699,9 @@ func (s *ClientService) ResetClients(tx *gorm.DB, dt int64) ([]uint, bool, error
 		return nil, false, err
 	}
 	for _, client := range resetClients {
+		if client.ResetDays < 1 || client.ResetDays > maxClientResetDays {
+			client.ResetDays = 1
+		}
 		client.NextReset = dt + (int64(client.ResetDays) * 86400)
 		client.DelayStart = false
 		changes = append(changes, model.Changes{
@@ -603,13 +714,32 @@ func (s *ClientService) ResetClients(tx *gorm.DB, dt int64) ([]uint, bool, error
 	}
 	allClients = append(allClients, resetClients...)
 
-	// Set periodic reset
+	// Older and partially saved clients can have auto-reset enabled without a schedule.
+	// Establish their first cycle without clearing usage unexpectedly.
+	resetClients = nil
 	err = tx.Model(model.Client{}).
-		Where("delay_start = false AND auto_reset = true AND next_reset < ?", dt).Find(&resetClients).Error
+		Where("delay_start = false AND auto_reset = true AND next_reset <= 0").Find(&resetClients).Error
 	if err != nil {
 		return nil, false, err
 	}
 	for _, client := range resetClients {
+		if client.ResetDays < 1 || client.ResetDays > maxClientResetDays {
+			client.ResetDays = 1
+		}
+		client.NextReset = dt + int64(client.ResetDays)*int64((24*time.Hour)/time.Second)
+	}
+	allClients = append(allClients, resetClients...)
+
+	// Set periodic reset
+	err = tx.Model(model.Client{}).
+		Where("delay_start = false AND auto_reset = true AND next_reset > 0 AND next_reset <= ?", dt).Find(&resetClients).Error
+	if err != nil {
+		return nil, false, err
+	}
+	for _, client := range resetClients {
+		if client.ResetDays < 1 || client.ResetDays > maxClientResetDays {
+			client.ResetDays = 1
+		}
 		client.NextReset = dt + (int64(client.ResetDays) * 86400)
 		client.TotalUp += client.Up
 		client.TotalDown += client.Down

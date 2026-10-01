@@ -28,3 +28,18 @@ test('settings can be edited and saved after preflight', async ({ page }) => {
   await page.getByRole('button', { name: '保存' }).click()
   await expect.poll(() => saveCalled).toBe(true)
 })
+
+test('VPS traffic settings explain accounting mode and billing timezone', async ({ page }) => {
+  await installBaseMocks(page, true)
+  await page.route('**/api/settings**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json(settings),
+  }))
+
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('/app/settings')
+  await page.getByRole('tab', { name: 'VPS 流量' }).click()
+  await expect(page.getByText(/TX 只计本机发出的流量/)).toBeVisible()
+  await expect(page.getByText(/月度周期使用 Asia\/Shanghai 时区/)).toBeVisible()
+})

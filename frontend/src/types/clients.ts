@@ -41,6 +41,8 @@ export interface Client {
   nextReset?: number
   totalUp?: number
   totalDown?: number
+  resetScheduleChanged?: boolean
+  resetUsage?: boolean
 }
 
 const defaultClient: Client = {
@@ -64,6 +66,8 @@ const defaultClient: Client = {
   nextReset: 0,
   totalUp: 0,
   totalDown: 0,
+  resetScheduleChanged: false,
+  resetUsage: false,
 }
 
 type Config = {
