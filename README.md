@@ -114,6 +114,8 @@ docker run -d \
 
 ## 相关文档
 
+- [常用操作指南](docs/WORKFLOWS.md)
+- [NovaPanel、s-ui、3x-ui 源码对比与取舍](docs/PANEL_COMPARISON.md)
 - [命名规范](NAMING.md)
 - [版本发布](https://github.com/CatMsg/NovaPanel/releases)
 - [问题反馈](https://github.com/CatMsg/NovaPanel/issues)

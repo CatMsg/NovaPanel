@@ -1,4 +1,4 @@
-import api from './api'
+import api, { readApi } from './api'
 import { i18n } from '@/locales'
 import router from '@/router'
 import { push } from 'notivue'
@@ -64,7 +64,7 @@ const HttpUtils = {
   async get(url: string, data: object = {}, options: any[] = []): Promise<Msg> {
     let msg: Msg
     try {
-        const resp = await api.get(url, { params: data, ...options })
+        const resp = await readApi(url, { params: data, ...options })
         msg = _respToMsg(resp)
     } catch (e: any) {
         msg = { success: false, msg: e.toString(), obj: null }

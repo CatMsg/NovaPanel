@@ -612,6 +612,8 @@ func (a *ApiService) GetDb(c *gin.Context) {
 		return
 	}
 	defer cleanup()
+	c.Header("Cache-Control", "private, no-store")
+	c.Header("X-Content-Type-Options", "nosniff")
 	c.Header("Content-Type", "application/octet-stream")
 	c.FileAttachment(dbPath, "novas_"+time.Now().Format("20060102-150405")+".db")
 }

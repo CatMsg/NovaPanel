@@ -103,6 +103,12 @@ const en = {
   share: {
     title: 'Share user', active: 'Active', paused: 'Paused', pause: 'Pause access', resume: 'Resume access',
     revoke: 'Revoke old credentials', revokeConfirm: 'Rotate all protocol credentials for this user? Existing imported nodes will stop working.',
+    format: 'Share format', formatHint: 'Select the format supported by the receiving app. Only the selected link is shown.',
+    autoFormat: 'Auto', chooseNode: 'Choose a node', copySelected: 'Copy selected link',
+    subscriptionHint: 'Scan or copy this subscription into your proxy app.', singboxHint: 'Scan this import link with sing-box; it imports the JSON subscription.',
+    nodeHint: 'This shares one node, not the entire subscription.', noSubscription: 'No subscription address is configured. Set it in Settings first.',
+    noLinks: 'No node links are available for this user.', loadFailed: 'Could not load this user. Retry before sharing.',
+    qrTooLong: 'This link is too long for a reliable QR code. Copy the link instead.',
   },
   ports: {
     subtitle: 'Inspect listening ports, NAT rules, and NovaPanel-managed ports. Rebuild managed rules when drift is detected.',
@@ -261,6 +267,12 @@ const zhHans = {
   share: {
     title: '分享用户', active: '正常使用', paused: '已暂停', pause: '暂停访问', resume: '恢复访问',
     revoke: '撤销旧凭据', revokeConfirm: '确定轮换该用户的全部协议凭据吗？客户端中已经导入的旧节点将立即失效。',
+    format: '分享格式', formatHint: '选择接收端支持的格式；下方只显示当前选中的链接。',
+    autoFormat: '自动识别', chooseNode: '选择节点', copySelected: '复制当前链接',
+    subscriptionHint: '在代理客户端中扫描或粘贴此订阅链接。', singboxHint: '使用 sing-box 扫描此导入链接，导入的是 JSON 订阅。',
+    nodeHint: '这里只分享一个节点，不是整个订阅。', noSubscription: '未配置订阅地址，请先在设置中配置。',
+    noLinks: '该用户没有可分享的节点链接。', loadFailed: '用户加载失败，请重新加载后再分享。',
+    qrTooLong: '链接过长，无法可靠生成二维码，请复制链接导入。',
   },
   ports: {
     subtitle: '当前机器上的监听端口、NAT 规则和面板受管端口；发现漂移时可一键重建受管规则。', updatedAt: '更新时间：{time}',
@@ -327,7 +339,15 @@ const zhHant = {
     trafficMode: { tx: '僅 TX 計費', rx_tx: 'RX + TX 計費', max: '較大方向計費' },
   },
   sessions: { ...zhHans.sessions, title: '即時連線', badge: '即時資料面', sourceIp: '來源 IP', search: '搜尋使用者、來源 IP、目標位址、入站或出站', disconnect: '中斷連線' },
-  share: { ...zhHans.share, title: '分享使用者', pause: '暫停存取', resume: '恢復存取' },
+  share: {
+    ...zhHans.share, title: '分享使用者', pause: '暫停存取', resume: '恢復存取',
+    format: '分享格式', formatHint: '選擇接收端支援的格式；下方只顯示目前選取的連結。',
+    autoFormat: '自動辨識', chooseNode: '選擇節點', copySelected: '複製目前連結',
+    subscriptionHint: '在代理用戶端中掃描或貼上此訂閱連結。', singboxHint: '使用 sing-box 掃描此匯入連結，匯入的是 JSON 訂閱。',
+    nodeHint: '這裡只分享一個節點，不是整個訂閱。', noSubscription: '未設定訂閱位址，請先在設定中配置。',
+    noLinks: '此使用者沒有可分享的節點連結。', loadFailed: '使用者載入失敗，請重新載入後再分享。',
+    qrTooLong: '連結過長，無法可靠產生二維碼，請複製連結匯入。',
+  },
   ports: { ...zhHans.ports, listeners: '監聽連接埠', backend: '後端', listenerList: '監聽列表' },
   health: { ...zhHans.health, title: '健康與診斷', badge: '系統診斷', warning: '警告', error: '異常', alertLanguage: '通知語言' },
   settings: {
@@ -354,6 +374,16 @@ const zhHant = {
 
 const ru = {
   ...en,
+  share: {
+    ...en.share, title: 'Поделиться пользователем', active: 'Активен', paused: 'Приостановлен', pause: 'Приостановить доступ', resume: 'Возобновить доступ',
+    revoke: 'Отозвать старые данные', revokeConfirm: 'Заменить все данные доступа? Ранее импортированные узлы перестанут работать.',
+    format: 'Формат', formatHint: 'Выберите формат для приложения получателя. Показана только выбранная ссылка.',
+    autoFormat: 'Авто', chooseNode: 'Выберите узел', copySelected: 'Копировать ссылку',
+    subscriptionHint: 'Отсканируйте или вставьте ссылку в приложение прокси.', singboxHint: 'Отсканируйте ссылку в sing-box для импорта JSON-подписки.',
+    nodeHint: 'Эта ссылка передаёт один узел, а не всю подписку.', noSubscription: 'Адрес подписки не задан. Укажите его в настройках.',
+    noLinks: 'Для этого пользователя нет ссылок на узлы.', loadFailed: 'Не удалось загрузить пользователя. Повторите загрузку.',
+    qrTooLong: 'Ссылка слишком длинная для QR-кода. Скопируйте её.',
+  },
   nav: {
     overview: 'Обзор', proxy: 'Прокси', network: 'Сеть и правила', system: 'Система', search: 'Фильтр меню',
     noResults: 'Страницы не найдены', commandTitle: 'Перейти', commandHint: 'Найдите страницу и нажмите Enter',
@@ -466,6 +496,16 @@ const ru = {
 
 const vi = {
   ...en,
+  share: {
+    ...en.share, title: 'Chia sẻ người dùng', active: 'Đang hoạt động', paused: 'Đã tạm dừng', pause: 'Tạm dừng truy cập', resume: 'Khôi phục truy cập',
+    revoke: 'Thu hồi thông tin cũ', revokeConfirm: 'Đổi toàn bộ thông tin truy cập? Các nút đã nhập sẽ ngừng hoạt động.',
+    format: 'Định dạng', formatHint: 'Chọn định dạng ứng dụng nhận hỗ trợ. Chỉ hiển thị liên kết đã chọn.',
+    autoFormat: 'Tự động', chooseNode: 'Chọn nút', copySelected: 'Sao chép liên kết',
+    subscriptionHint: 'Quét hoặc dán liên kết đăng ký vào ứng dụng proxy.', singboxHint: 'Quét bằng sing-box để nhập đăng ký JSON.',
+    nodeHint: 'Liên kết này chỉ chia sẻ một nút, không phải toàn bộ đăng ký.', noSubscription: 'Chưa có địa chỉ đăng ký. Hãy cấu hình trong Cài đặt.',
+    noLinks: 'Người dùng này chưa có liên kết nút.', loadFailed: 'Không tải được người dùng. Hãy thử lại.',
+    qrTooLong: 'Liên kết quá dài để tạo mã QR tin cậy. Hãy sao chép liên kết.',
+  },
   nav: {
     overview: 'Tổng quan', proxy: 'Proxy', network: 'Mạng và quy tắc', system: 'Hệ thống', search: 'Lọc menu',
     noResults: 'Không tìm thấy trang phù hợp', commandTitle: 'Đi tới', commandHint: 'Tìm trang rồi nhấn Enter để mở',
@@ -578,6 +618,16 @@ const vi = {
 
 const fa = {
   ...en,
+  share: {
+    ...en.share, title: 'اشتراک کاربر', active: 'فعال', paused: 'متوقف', pause: 'توقف دسترسی', resume: 'ادامه دسترسی',
+    revoke: 'لغو اطلاعات قدیمی', revokeConfirm: 'همه اطلاعات دسترسی تغییر کنند؟ گره‌های قبلاً واردشده از کار می‌افتند.',
+    format: 'قالب اشتراک', formatHint: 'قالب سازگار با برنامه گیرنده را انتخاب کنید. فقط پیوند انتخاب‌شده نمایش داده می‌شود.',
+    autoFormat: 'خودکار', chooseNode: 'انتخاب گره', copySelected: 'کپی پیوند',
+    subscriptionHint: 'پیوند اشتراک را در برنامه پروکسی اسکن یا جای‌گذاری کنید.', singboxHint: 'برای وارد کردن اشتراک JSON، پیوند را با sing-box اسکن کنید.',
+    nodeHint: 'این پیوند فقط یک گره را به اشتراک می‌گذارد، نه کل اشتراک.', noSubscription: 'نشانی اشتراک تنظیم نشده است. ابتدا آن را در تنظیمات وارد کنید.',
+    noLinks: 'این کاربر پیوند گره‌ای ندارد.', loadFailed: 'بارگیری کاربر ناموفق بود. دوباره تلاش کنید.',
+    qrTooLong: 'پیوند برای کد QR بسیار طولانی است. پیوند را کپی کنید.',
+  },
   nav: {
     overview: 'نمای کلی', proxy: 'پروکسی', network: 'شبکه و قوانین', system: 'سیستم', search: 'فیلتر منو',
     noResults: 'صفحه‌ای پیدا نشد', commandTitle: 'رفتن به', commandHint: 'صفحه را جستجو کنید و Enter را بزنید',

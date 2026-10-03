@@ -1,74 +1,34 @@
-import axios from 'axios'
+import axios, { type AxiosRequestConfig, type AxiosResponse } from 'axios'
 
-const api = axios.create()
-const pendingRequests = new Map()
-
-const clearPendingRequest = (config: any) => {
-    const requestKey = getRequestKey(config)
-    const current = pendingRequests.get(requestKey)
-    if (current?.token === config?.cancelToken) {
-        pendingRequests.delete(requestKey)
-    }
-}
-
-const stringifyRequestPart = (value: unknown) => {
-    if (value instanceof FormData) {
-        return '[form-data]'
-    }
-    try {
-        return JSON.stringify(value ?? {})
-    } catch {
-        return String(value ?? '')
-    }
-}
-
-const getRequestKey = (config: any) => {
-    return [
-        config?.method ?? 'get',
-        config?.url ?? '',
-        stringifyRequestPart(config?.params),
-        stringifyRequestPart(config?.data),
-    ].join(':')
-}
+const api = axios.create({ baseURL: './' })
+const pendingReads = new Map<string, Promise<AxiosResponse>>()
+const sharedReadPaths = new Set(['api/load', 'api/clients', 'api/inbounds'])
 
 api.defaults.headers.post['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8'
 api.defaults.headers.common['X-Requested-With'] = 'XMLHttpRequest'
-api.defaults.baseURL = './'
 
-api.interceptors.request.use(
-    (config) => {
-        const requestKey = getRequestKey(config)
+api.interceptors.request.use(config => {
+    // A write must neither cancel another write nor reuse a read started before it.
+    if (!['get', 'head'].includes(config.method ?? 'get')) pendingReads.clear()
+    if (config.data instanceof FormData) config.headers['Content-Type'] = 'multipart/form-data'
+    return config
+}, undefined, { synchronous: true })
 
-        if (pendingRequests.has(requestKey)) {
-            const cancelSource = pendingRequests.get(requestKey)
-            cancelSource.cancel('Duplicate request cancelled')
-        }
-
-        const cancelSource = axios.CancelToken.source()
-        config.cancelToken = cancelSource.token
-
-        pendingRequests.set(requestKey, cancelSource)
-
-        if (config.data instanceof FormData) {
-            config.headers['Content-Type'] = 'multipart/form-data'
-        }
-        return config
-    },
-    (error) => Promise.reject(error),
-)
-
-api.interceptors.response.use(
-    (response) => {
-        clearPendingRequest(response.config)
-        return response
-    },
-    (error) => {
-        if (error?.config) clearPendingRequest(error.config)
-        if (axios.isCancel(error)) {
-            console.warn(error.message)
-        }
-        return Promise.reject(error)
+export function readApi(url: string, config: AxiosRequestConfig = {}): Promise<AxiosResponse> {
+    // Only ordinary data reads share an in-flight response. Caller-specific cancellation,
+    // headers, adapters and action-like GET endpoints keep independent request lifetimes.
+    if (!sharedReadPaths.has(url) || Object.keys(config).some(key => key !== 'params')) {
+        return api.get(url, config)
     }
-)
+    const key = api.getUri({ ...config, url })
+    const existing = pendingReads.get(key)
+    if (existing) return existing
+
+    const request = api.get(url, config).finally(() => {
+        if (pendingReads.get(key) === request) pendingReads.delete(key)
+    })
+    pendingReads.set(key, request)
+    return request
+}
 
 export default api
