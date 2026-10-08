@@ -41,10 +41,10 @@ if errorlevel 1 (
 
 cd ..
 
-echo Applying sing-box Windows compatibility patch...
-go run .\scripts\patch-sing-box-windows.go
+echo Verifying sing-box Windows compatibility (read-only)...
+go run -mod=readonly .\scripts\patch-sing-box-windows.go
 if errorlevel 1 (
-    echo Error: Failed to patch sing-box compatibility
+    echo Error: Failed to verify sing-box compatibility
     pause
     exit /b 1
 )
@@ -83,6 +83,14 @@ if errorlevel 4 (
     pause
     exit /b 1
 )
+
+copy /y "LICENSE" "NovaPanel-windows\" >nul
+if errorlevel 1 exit /b 1
+copy /y "THIRD_PARTY_NOTICES.md" "NovaPanel-windows\" >nul
+if errorlevel 1 exit /b 1
+mkdir "NovaPanel-windows\licenses"
+copy /y "third_party\sing-box\LICENSE" "NovaPanel-windows\licenses\sing-box-LICENSE" >nul
+if errorlevel 1 exit /b 1
 
 echo Build completed successfully!
 echo Output: NovaPanel-windows\

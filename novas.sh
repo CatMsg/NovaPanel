@@ -630,17 +630,368 @@ enable_bbr() {
     fi
 }
 
-install_acme() {
-    cd ~
+install_cron_package() {
+    local package_manager="$1"
+    local package_name="$2"
+
+    case "${package_manager}" in
+        apt-get)
+            apt-get install -y --no-install-recommends "${package_name}"
+            ;;
+        yum | dnf)
+            "${package_manager}" install -y "${package_name}"
+            ;;
+        pacman)
+            pacman -S --noconfirm "${package_name}"
+            ;;
+        *)
+            LOGE "不支持的 cron 包管理器：${package_manager}"
+            return 1
+            ;;
+    esac
+}
+
+verify_sysv_cron_boot_links() {
+    local service_name="$1"
+    local runlevel_dir="$2"
+    local link=""
+    local init_script="${runlevel_dir%/*}/init.d/${service_name}"
+
+    [[ -x "${init_script}" ]] || return 1
+    for link in "${runlevel_dir}"/S[0-9][0-9]"${service_name}"; do
+        if [[ -L "${link}" && "${link}" -ef "${init_script}" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+enable_sysv_cron() {
+    local service_name="$1"
+    local runlevel=""
+
+    case "${release}" in
+        ubuntu | debian | armbian)
+            if ! command -v update-rc.d >/dev/null 2>&1 || \
+                ! update-rc.d "${service_name}" defaults || ! update-rc.d "${service_name}" enable; then
+                LOGE "无法通过 update-rc.d 持久启用 cron，已停止自动续签配置"
+                return 1
+            fi
+            ;;
+        centos | almalinux | rocky | oracle | fedora)
+            if ! command -v chkconfig >/dev/null 2>&1 || \
+                ! chkconfig --add "${service_name}" || ! chkconfig --level 2345 "${service_name}" on; then
+                LOGE "无法通过 chkconfig 持久启用 cron，已停止自动续签配置"
+                return 1
+            fi
+            ;;
+        *)
+            LOGE "无法验证 ${release} 的 SysV cron 开机启动，请先配置受支持的初始化系统"
+            return 1
+            ;;
+    esac
+    for runlevel in 2 3 4 5; do
+        if ! verify_sysv_cron_boot_links "${service_name}" "/etc/rc${runlevel}.d"; then
+            LOGE "无法验证 cron 开机启动链接 /etc/rc${runlevel}.d，请检查初始化配置后重试"
+            return 1
+        fi
+    done
+}
+
+start_cron_service() {
+    local service_name="$1"
+    local backend="${2:-}"
+
+    if [[ -z "${backend}" ]]; then
+        backend=$(cron_service_backend) || {
+            LOGE "未检测到可用的初始化系统，无法启用 cron"
+            return 1
+        }
+    fi
+
+    case "${backend}" in
+        systemd)
+            if ! systemctl enable --now "${service_name}" >/dev/null || ! systemctl is-active --quiet "${service_name}"; then
+                LOGE "cron 服务 ${service_name} 未能通过 systemd 启动并保持运行"
+                return 1
+            fi
+            ;;
+        openrc)
+            if ! rc-update add "${service_name}" default >/dev/null 2>&1 || ! rc-service "${service_name}" start || ! rc-service "${service_name}" status >/dev/null 2>&1; then
+                LOGE "cron 服务 ${service_name} 未能通过 OpenRC 启动并保持运行"
+                return 1
+            fi
+            ;;
+        service)
+            enable_sysv_cron "${service_name}" || return 1
+            if ! service "${service_name}" start || ! service "${service_name}" status >/dev/null 2>&1; then
+                LOGE "cron 服务 ${service_name} 未能通过 service 启动并保持运行"
+                return 1
+            fi
+            ;;
+        *)
+            LOGE "未检测到可用的 systemd、OpenRC 或 service 初始化系统，无法启用 cron"
+            return 1
+            ;;
+    esac
+    return 0
+}
+
+cron_service_backend() {
+    local systemd_runtime_dir="${NOVAS_SYSTEMD_RUNTIME_DIR:-/run/systemd/system}"
+
+    if command -v systemctl >/dev/null 2>&1 && [[ -d "${systemd_runtime_dir}" ]]; then
+        printf '%s\n' systemd
+    elif command -v rc-service >/dev/null 2>&1 && command -v rc-update >/dev/null 2>&1; then
+        printf '%s\n' openrc
+    elif command -v service >/dev/null 2>&1; then
+        printf '%s\n' service
+    else
+        return 1
+    fi
+}
+
+cron_service_is_active() {
+    local backend="$1"
+    local service_name="$2"
+
+    case "${backend}" in
+        systemd) systemctl is-active --quiet "${service_name}" ;;
+        openrc) rc-service "${service_name}" status >/dev/null 2>&1 ;;
+        service) service "${service_name}" status >/dev/null 2>&1 ;;
+        *) return 1 ;;
+    esac
+}
+
+is_exact_no_crontab_error() {
+    [[ "$1" =~ ^no[[:space:]]crontab[[:space:]]for[[:space:]][A-Za-z0-9_.-]+$ ]]
+}
+
+verify_crontab_usable() {
+    local quiet="${1:-0}"
+    local temp_dir=""
+    local crontab_error=""
+    local status=0
+
+    if ! command -v crontab >/dev/null 2>&1; then
+        [[ "${quiet}" == "1" ]] || LOGE "cron 已启动，但未找到可用的 crontab 命令"
+        return 1
+    fi
+    temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/novas-crontab-check.XXXXXX") || {
+        [[ "${quiet}" == "1" ]] || LOGE "无法安全检查当前 crontab"
+        return 1
+    }
+
+    if LC_ALL=C crontab -l >"${temp_dir}/listing" 2>"${temp_dir}/error"; then
+        status=0
+    else
+        status=$?
+    fi
+    crontab_error=$(<"${temp_dir}/error")
+    rm -rf "${temp_dir}"
+
+    if [[ ${status} -eq 0 ]] || is_exact_no_crontab_error "${crontab_error}"; then
+        return 0
+    fi
+    [[ "${quiet}" == "1" ]] || LOGE "无法安全读取当前 crontab，拒绝继续安装自动续签"
+    return 1
+}
+
+ensure_acme_cron() {
+    local package_manager=""
+    local package_name=""
+    local service_name=""
+    local service_backend=""
+    local crontab_usable=0
+
+    case "${release}" in
+        ubuntu | debian | armbian)
+            package_manager="apt-get"
+            package_name="cron"
+            service_name="cron"
+            ;;
+        centos | almalinux | rocky | oracle)
+            if command -v dnf >/dev/null 2>&1; then
+                package_manager="dnf"
+            else
+                package_manager="yum"
+            fi
+            package_name="cronie"
+            service_name="crond"
+            ;;
+        fedora)
+            package_manager="dnf"
+            package_name="cronie"
+            service_name="crond"
+            ;;
+        arch | manjaro | parch)
+            package_manager="pacman"
+            package_name="cronie"
+            service_name="cronie"
+            ;;
+        *)
+            LOGE "暂不支持为 ${release} 自动安装 cron，请先配置可用的 cron 服务"
+            return 1
+            ;;
+    esac
+
+    service_backend=$(cron_service_backend) || {
+        LOGE "未检测到可用的 systemd、OpenRC 或 service 初始化系统，无法启用 cron"
+        return 1
+    }
+    if verify_crontab_usable 1; then
+        crontab_usable=1
+    elif command -v crontab >/dev/null 2>&1; then
+        LOGE "crontab 命令存在但无法安全读取，拒绝覆盖或重装现有计划任务"
+        return 1
+    fi
+    if [[ "${crontab_usable}" == "1" ]] && cron_service_is_active "${service_backend}" "${service_name}"; then
+        if ! start_cron_service "${service_name}" "${service_backend}"; then
+            return 1
+        fi
+        verify_crontab_usable
+        return $?
+    fi
+
+    if ! command -v "${package_manager}" >/dev/null 2>&1; then
+        LOGE "未找到包管理器 ${package_manager}，无法安装 cron"
+        return 1
+    fi
+    if ! install_cron_package "${package_manager}" "${package_name}"; then
+        LOGE "安装 cron 软件包 ${package_name} 失败"
+        return 1
+    fi
+    if ! start_cron_service "${service_name}" "${service_backend}"; then
+        return 1
+    fi
+    verify_crontab_usable
+}
+
+verify_acme_renewal_cron() {
+    local quiet="${1:-0}"
+    local temp_dir=""
+    local acme_home="${HOME}/.acme.sh"
+
+    if ! command -v crontab >/dev/null 2>&1; then
+        [[ "${quiet}" == "1" ]] || LOGE "未找到 crontab，无法验证 acme.sh 自动续签任务"
+        return 1
+    fi
+    temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/novas-acme-cron-check.XXXXXX") || {
+        [[ "${quiet}" == "1" ]] || LOGE "无法安全验证 acme.sh 自动续签任务"
+        return 1
+    }
+    if ! LC_ALL=C crontab -l >"${temp_dir}/listing" 2>"${temp_dir}/error"; then
+        rm -rf "${temp_dir}"
+        [[ "${quiet}" == "1" ]] || LOGE "无法读取 crontab，不能确认 acme.sh 自动续签任务"
+        return 1
+    fi
+    if awk -v acme_home="${acme_home}" '
+        function has_exact_home_argument(tail, quoted_home, plain_home, after) {
+            sub(/^[[:space:]]+/, "", tail)
+            if (substr(tail, 1, 6) != "--home") {
+                return 0
+            }
+            tail = substr(tail, 7)
+            if (tail !~ /^[[:space:]]/) {
+                return 0
+            }
+            sub(/^[[:space:]]+/, "", tail)
+            if (substr(tail, 1, length(quoted_home)) == quoted_home) {
+                after = substr(tail, length(quoted_home) + 1, 1)
+                return after == "" || after ~ /[[:space:]]/
+            }
+            if (substr(tail, 1, length(plain_home)) == plain_home) {
+                after = substr(tail, length(plain_home) + 1, 1)
+                return after == "" || after ~ /[[:space:]]/
+            }
+            return 0
+        }
+        /^[[:space:]]*#/ { next }
+        {
+            command = $0
+            sub(/^[[:space:]]+/, "", command)
+            for (field = 1; field <= 5; field++) {
+                if (command !~ /^[^[:space:]]+[[:space:]]+/) {
+                    command = ""
+                    break
+                }
+                sub(/^[^[:space:]]+[[:space:]]+/, "", command)
+            }
+            quoted_script = "\"" acme_home "\"/acme.sh --cron"
+            plain_script = acme_home "/acme.sh --cron"
+            quoted_home = "\"" acme_home "\""
+            plain_home = acme_home
+            if (substr(command, 1, length(quoted_script)) == quoted_script) {
+                tail = substr(command, length(quoted_script) + 1)
+                if (has_exact_home_argument(tail, quoted_home, plain_home)) {
+                    found = 1
+                }
+            } else if (substr(command, 1, length(plain_script)) == plain_script) {
+                tail = substr(command, length(plain_script) + 1)
+                if (has_exact_home_argument(tail, quoted_home, plain_home)) {
+                    found = 1
+                }
+            }
+        }
+        END { exit !found }
+    ' "${temp_dir}/listing"; then
+        rm -rf "${temp_dir}"
+        return 0
+    fi
+    rm -rf "${temp_dir}"
+    [[ "${quiet}" == "1" ]] || LOGE "crontab 中未找到有效的 acme.sh --cron 续签任务"
+    return 1
+}
+
+prepare_cloudflare_acme() {
+    local acme_bin="${HOME}/.acme.sh/acme.sh"
+
+    if ! ensure_acme_cron; then
+        return 1
+    fi
+    if [[ ! -x "${acme_bin}" ]]; then
+        if ! ( unset CF_Token CF_Account_ID CF_Key CF_Email CF_Zone_ID; install_acme_payload ); then
+            return 1
+        fi
+    fi
+    if [[ ! -x "${acme_bin}" ]]; then
+        LOGE "acme.sh 安装后仍不可执行，已停止证书签发"
+        return 1
+    fi
+    if ! verify_acme_renewal_cron 1; then
+        if ! ( unset CF_Token CF_Account_ID CF_Key CF_Email CF_Zone_ID; "${acme_bin}" --install-cronjob ); then
+            LOGE "acme.sh 自动续签任务安装失败，已停止证书签发"
+            return 1
+        fi
+    fi
+    verify_acme_renewal_cron
+}
+
+install_acme_payload() {
+    local installer_path=""
+
+    installer_path=$(mktemp "${TMPDIR:-/tmp}/novas-acme-install.XXXXXX") || {
+        LOGE "创建 acme.sh 安装临时文件失败"
+        return 1
+    }
     LOGI "正在安装 acme..."
-    curl https://get.acme.sh | sh
-    if [ $? -ne 0 ]; then
+    if ! curl -fsSL --max-time 120 "https://get.acme.sh" -o "${installer_path}"; then
+        rm -f "${installer_path}"
         LOGE "安装 acme 失败"
         return 1
-    else
-        LOGI "安装 acme 成功"
     fi
-    return 0
+    if ! (cd "${HOME}" && unset CF_Token CF_Account_ID CF_Key CF_Email CF_Zone_ID && sh "${installer_path}"); then
+        rm -f "${installer_path}"
+        LOGE "安装 acme 失败"
+        return 1
+    fi
+    rm -f "${installer_path}"
+    LOGI "安装 acme 成功"
+}
+
+install_acme() {
+    ensure_acme_cron || return 1
+    install_acme_payload
 }
 
 ssl_cert_issue_main() {
@@ -784,11 +1135,169 @@ resolve_acme_cert_files() {
     return 1
 }
 
+validate_cf_domain() {
+    local domain="$1"
+    local -a labels=()
+    local label=""
+
+    [[ -n "${domain}" && ${#domain} -le 253 ]] || return 1
+    IFS='.' read -r -a labels <<< "${domain}"
+    ((${#labels[@]} >= 2)) || return 1
+    for label in "${labels[@]}"; do
+        [[ ${#label} -le 63 && "${label}" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] || return 1
+    done
+}
+
+validate_cf_account_id() {
+    [[ "$1" =~ ^[A-Fa-f0-9]{32}$ ]]
+}
+
+validate_cf_token() {
+    [[ -n "$1" && "$1" != *[[:space:][:cntrl:]]* ]]
+}
+
+issue_cloudflare_certificate() {
+    local acme_bin="$1"
+    local domain="$2"
+    local token="$3"
+    local account_id="$4"
+    local force_renew="$5"
+    local -a args=(--issue --dns dns_cf -d "${domain}" -d "*.${domain}")
+
+    if [[ "${force_renew}" == "1" ]]; then
+        args+=(--force)
+    fi
+    (
+        unset CF_Key CF_Email CF_Zone_ID
+        CF_Token="${token}" CF_Account_ID="${account_id}" "${acme_bin}" "${args[@]}" --log
+    )
+}
+
+run_cloudflare_acme_issue() {
+    local domain="$1"
+    local token="$2"
+    local account_id="$3"
+    local force_renew="$4"
+    local acme_bin="${HOME}/.acme.sh/acme.sh"
+
+    if ! ( unset CF_Token CF_Account_ID CF_Key CF_Email CF_Zone_ID; "${acme_bin}" --set-default-ca --server letsencrypt ); then
+        LOGE "设置默认 CA Let's Encrypt 失败，证书签发已停止"
+        return 1
+    fi
+    issue_cloudflare_certificate "${acme_bin}" "${domain}" "${token}" "${account_id}" "${force_renew}"
+}
+
+restore_cloudflare_certificate_backup() {
+    local backup_dir="$1"
+    local cert_dir="$2"
+
+    if [[ -e "${cert_dir}" || -L "${cert_dir}" ]] || ! mv -T -- "${backup_dir}" "${cert_dir}"; then
+        LOGE "无法恢复旧证书；备份保留在 ${backup_dir}，请清理 ${cert_dir} 后手动恢复备份"
+        return 1
+    fi
+}
+
+install_cloudflare_certificate() {
+    local acme_bin="$1"
+    local domain="$2"
+    local cert_root="$3"
+    local cert_dir="${cert_root}/${domain}"
+    local staging_dir=""
+    local backup_dir=""
+    local had_backup=0
+    local issued_files=""
+    local issued_cert=""
+    local issued_key=""
+
+    if ! mkdir -p "${cert_root}"; then
+        LOGE "创建证书目录失败：${cert_root}"
+        return 1
+    fi
+    issued_files=$(resolve_acme_cert_files "${domain}") || {
+        LOGE "未找到 acme.sh 生成的证书文件，保留已有证书"
+        return 1
+    }
+    issued_cert="${issued_files%%$'\n'*}"
+    issued_key="${issued_files#*$'\n'}"
+    if [[ -z "${issued_cert}" || -z "${issued_key}" || "${issued_key}" == *$'\n'* ]]; then
+        LOGE "acme.sh 证书文件列表无效，保留已有证书"
+        return 1
+    fi
+    staging_dir=$(mktemp -d "${cert_root}/.${domain}.new.XXXXXX") || {
+        LOGE "创建临时证书目录失败"
+        return 1
+    }
+    if ! cp "${issued_cert}" "${staging_dir}/fullchain.pem" || ! cp "${issued_key}" "${staging_dir}/privkey.pem"; then
+        rm -rf "${staging_dir}"
+        LOGE "无法暂存 acme.sh 证书文件，保留已有证书"
+        return 1
+    fi
+    if [[ ! -s "${staging_dir}/fullchain.pem" || ! -s "${staging_dir}/privkey.pem" ]] || \
+        ! chmod 644 "${staging_dir}/fullchain.pem" || \
+        ! chmod 600 "${staging_dir}/privkey.pem" || \
+        ! chmod 700 "${staging_dir}"; then
+        rm -rf "${staging_dir}"
+        LOGE "临时证书文件不完整或权限设置失败，保留已有证书"
+        return 1
+    fi
+
+    if [[ -e "${cert_dir}" || -L "${cert_dir}" ]]; then
+        backup_dir=$(mktemp -d "${cert_root}/.${domain}.old.XXXXXX") || {
+            rm -rf "${staging_dir}"
+            LOGE "无法为现有证书创建安全回滚目录"
+            return 1
+        }
+        if ! rmdir "${backup_dir}" || ! mv -T -- "${cert_dir}" "${backup_dir}"; then
+            rm -rf "${staging_dir}"
+            LOGE "无法暂存现有证书，保留原证书"
+            return 1
+        fi
+        had_backup=1
+    fi
+
+    if ! mv -T -- "${staging_dir}" "${cert_dir}"; then
+        LOGE "证书发布失败"
+        if [[ "${had_backup}" == "1" ]]; then
+            restore_cloudflare_certificate_backup "${backup_dir}" "${cert_dir}" || return 1
+        fi
+        rm -rf "${staging_dir}"
+        return 1
+    fi
+
+    if ! "${acme_bin}" --installcert -d "${domain}" -d "*.${domain}" \
+        --fullchain-file "${cert_dir}/fullchain.pem" \
+        --key-file "${cert_dir}/privkey.pem" || \
+        ! chmod 644 "${cert_dir}/fullchain.pem" || \
+        ! chmod 600 "${cert_dir}/privkey.pem" || \
+        ! chmod 700 "${cert_dir}" || \
+        [[ ! -s "${cert_dir}/fullchain.pem" || ! -s "${cert_dir}/privkey.pem" ]]; then
+        if ! rm -rf "${cert_dir}" || [[ -e "${cert_dir}" || -L "${cert_dir}" ]]; then
+            LOGE "证书安装失败，无法清理 ${cert_dir}；旧证书备份保留在 ${backup_dir:-无旧备份}，请手动检查并恢复"
+            return 1
+        fi
+        if [[ "${had_backup}" == "1" ]]; then
+            restore_cloudflare_certificate_backup "${backup_dir}" "${cert_dir}" || return 1
+            LOGE "证书安装失败，已恢复旧证书"
+        else
+            LOGE "证书安装失败，未有旧证书可恢复"
+        fi
+        return 1
+    fi
+
+    if [[ "${had_backup}" == "1" ]] && ! rm -rf "${backup_dir}"; then
+        LOGE "新证书已安装，但旧证书备份未能清理：${backup_dir}"
+    fi
+    return 0
+}
+
 get_current_sub_domain() {
     /usr/local/novas/novas setting -show 2>/dev/null | sed -n 's/^[[:space:]]*Sub Domain:[[:space:]]*//p' | head -n 1 | tr -d '\r'
 }
 
 ssl_cert_issue_CF() {
+    local choice=""
+    local certPath="/root/cert-CF"
+
     echo -E ""
     LOGD "******使用说明******"
     echo "1) 从 Cloudflare 申请新证书"
@@ -797,154 +1306,117 @@ ssl_cert_issue_CF() {
     echo "4) 返回菜单"
     read -p "请输入你的选择 [1-4]： " choice
 
-    certPath="/root/cert-CF"
-
-    case $choice in
+    case "${choice}" in
         1|2)
-            force_flag=""
-            if [ "$choice" -eq 2 ]; then
-                force_flag="--force"
+            local force_renew="0"
+            if [[ "${choice}" == "2" ]]; then
+                force_renew="1"
                 echo "正在强制重新签发 SSL 证书..."
             else
                 echo "开始签发 SSL 证书..."
             fi
 
-            LOGD "******使用说明******"
-            LOGI "此 Acme 脚本需要以下数据："
-            LOGI "1.Cloudflare 注册邮箱"
-            LOGI "2.Cloudflare 全局 API Key"
-            LOGI "3.已通过 Cloudflare 将 DNS 解析到当前服务器的域名"
-            LOGI "4.脚本将申请证书，默认安装路径为 /root/cert"
             confirm "是否确认？[y/n]" "y"
-            if [ $? -eq 0 ]; then
-                if ! command -v ~/.acme.sh/acme.sh &>/dev/null; then
-                    echo "未找到 acme.sh。正在安装..."
-                    install_acme
-                    if [ $? -ne 0 ]; then
-                        LOGE "安装 acme 失败，请检查日志"
-                        exit 1
+            if [[ $? -ne 0 ]]; then
+                show_menu
+                return 0
+            fi
+
+            if ! prepare_cloudflare_acme; then
+                LOGE "自动续签预检失败，未提示 Cloudflare 凭据且未签发证书"
+                return 1
+            fi
+
+            local cf_domain=""
+            local cf_account_id=""
+            local cf_token=""
+            LOGD "请设置域名："
+            read -r -p "请在此输入域名： " cf_domain
+            if ! validate_cf_domain "${cf_domain}"; then
+                LOGE "域名格式无效，证书签发已停止"
+                return 1
+            fi
+
+            read -r -p "请输入 Cloudflare Account ID（32 位十六进制）： " cf_account_id
+            if ! validate_cf_account_id "${cf_account_id}"; then
+                LOGE "Cloudflare Account ID 格式无效，证书签发已停止"
+                return 1
+            fi
+
+            LOGI "API Token 仅授权目标 Zone，并赋予 Zone > DNS > Edit、Zone > Zone > Read 权限。"
+            read -r -s -p "请输入 Cloudflare API Token： " cf_token
+            printf '\n'
+            if ! validate_cf_token "${cf_token}"; then
+                LOGE "Cloudflare API Token 为空或包含无效空白字符，证书签发已停止"
+                return 1
+            fi
+
+            if ! run_cloudflare_acme_issue "${cf_domain}" "${cf_token}" "${cf_account_id}" "${force_renew}"; then
+                LOGE "证书签发失败，保留已有证书"
+                return 1
+            fi
+            local acme_bin="${HOME}/.acme.sh/acme.sh"
+            if ! ( unset CF_Token CF_Account_ID CF_Key CF_Email CF_Zone_ID; "${acme_bin}" --upgrade --auto-upgrade ); then
+                LOGE "自动更新设置失败，保留已有证书"
+                return 1
+            fi
+            if ! install_cloudflare_certificate "${acme_bin}" "${cf_domain}" "${certPath}"; then
+                return 1
+            fi
+
+            LOGI "证书已安装，并已开启自动续签。"
+            ls -lah "${certPath}/${cf_domain}"
+
+            local panelCertFile=""
+            local panelKeyFile=""
+            local subCertFile=""
+            local subKeyFile=""
+            local certFiles=()
+            local subCertFiles=()
+            local currentSubDomain=""
+
+            if mapfile -t certFiles < <(resolve_acme_cert_files "${cf_domain}"); then
+                panelCertFile="${certFiles[0]}"
+                panelKeyFile="${certFiles[1]}"
+            fi
+
+            currentSubDomain="$(get_current_sub_domain)"
+            if [[ -n "${currentSubDomain}" ]]; then
+                if [[ "${currentSubDomain}" == "${cf_domain}" ]]; then
+                    subCertFile="${panelCertFile}"
+                    subKeyFile="${panelKeyFile}"
+                elif mapfile -t subCertFiles < <(resolve_acme_cert_files "${currentSubDomain}"); then
+                    subCertFile="${subCertFiles[0]}"
+                    subKeyFile="${subCertFiles[1]}"
+                fi
+            fi
+
+            if [[ -n "${panelCertFile}" && -n "${panelKeyFile}" ]]; then
+                LOGI "正在自动回填面板 HTTPS 路径..."
+                local settingArgs=(/usr/local/novas/novas setting -webCertFile "${panelCertFile}" -webKeyFile "${panelKeyFile}")
+                if [[ -n "${subCertFile}" && -n "${subKeyFile}" ]]; then
+                    settingArgs+=(-subCertFile "${subCertFile}" -subKeyFile "${subKeyFile}")
+                fi
+                "${settingArgs[@]}"
+                if [[ $? -ne 0 ]]; then
+                    LOGE "自动回填面板路径失败，请稍后手动检查设置-界面"
+                else
+                    LOGI "面板 HTTPS 路径已自动回填："
+                    echo -e "${green}${panelCertFile}${plain}"
+                    echo -e "${green}${panelKeyFile}${plain}"
+                    if [[ -n "${subCertFile}" && -n "${subKeyFile}" ]]; then
+                        LOGI "Sub HTTPS 路径已自动回填："
+                        echo -e "${green}${subCertFile}${plain}"
+                        echo -e "${green}${subKeyFile}${plain}"
+                    fi
+                    LOGI "正在重启面板以应用新证书..."
+                    restart novas 0
+                    if [[ $? -ne 0 ]]; then
+                        LOGE "面板重启失败，请手动重启服务"
                     fi
                 fi
-
-                CF_Domain=""
-                if [ ! -d "$certPath" ]; then
-                    mkdir -p $certPath
-                else
-                    rm -rf $certPath
-                    mkdir -p $certPath
-                fi
-
-                LOGD "请设置域名："
-                read -p "请在此输入域名： " CF_Domain
-                LOGD "你的域名已设置为：${CF_Domain}"
-
-                CF_GlobalKey=""
-                CF_AccountEmail=""
-                LOGD "请设置 API key："
-                read -p "请在此输入 key： " CF_GlobalKey
-                LOGD "你的 API key 为：${CF_GlobalKey}"
-
-                LOGD "请设置注册邮箱："
-                read -p "请在此输入邮箱： " CF_AccountEmail
-                LOGD "你的注册邮箱为：${CF_AccountEmail}"
-
-                ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt
-                if [ $? -ne 0 ]; then
-                    LOGE "设置默认 CA Let's Encrypt 失败，脚本退出..."
-                    exit 1
-                fi
-
-                export CF_Key="${CF_GlobalKey}"
-                export CF_Email="${CF_AccountEmail}"
-
-                ~/.acme.sh/acme.sh --issue --dns dns_cf -d ${CF_Domain} -d *.${CF_Domain} $force_flag --log
-                if [ $? -ne 0 ]; then
-                    LOGE "证书签发失败，脚本退出..."
-                    exit 1
-                else
-                    LOGI "证书签发成功，正在安装..."
-                fi
-
-                mkdir -p ${certPath}/${CF_Domain}
-                if [ $? -ne 0 ]; then
-                    LOGE "创建目录失败：${certPath}/${CF_Domain}"
-                    exit 1
-                fi
-
-                ~/.acme.sh/acme.sh --installcert -d ${CF_Domain} -d *.${CF_Domain} \
-                    --fullchain-file ${certPath}/${CF_Domain}/fullchain.pem \
-                    --key-file ${certPath}/${CF_Domain}/privkey.pem
-
-                if [ $? -ne 0 ]; then
-                    LOGE "证书安装失败，脚本退出..."
-                    exit 1
-                else
-                    LOGI "证书安装成功，正在开启自动更新..."
-                fi
-
-                ~/.acme.sh/acme.sh --upgrade --auto-upgrade
-                if [ $? -ne 0 ]; then
-                    LOGE "自动更新设置失败，脚本退出..."
-                    exit 1
-                else
-                    LOGI "证书已安装，并已开启自动续签。"
-                    ls -lah ${certPath}/${CF_Domain}
-                    chmod 755 ${certPath}/${CF_Domain}
-
-                    local panelCertFile=""
-                    local panelKeyFile=""
-                    local subCertFile=""
-                    local subKeyFile=""
-                    local certFiles=()
-                    local subCertFiles=()
-                    local currentSubDomain=""
-
-                    if mapfile -t certFiles < <(resolve_acme_cert_files "${CF_Domain}"); then
-                        panelCertFile="${certFiles[0]}"
-                        panelKeyFile="${certFiles[1]}"
-                    fi
-
-                    currentSubDomain="$(get_current_sub_domain)"
-                    if [ -n "${currentSubDomain}" ]; then
-                        if [ "${currentSubDomain}" = "${CF_Domain}" ]; then
-                            subCertFile="${panelCertFile}"
-                            subKeyFile="${panelKeyFile}"
-                        else
-                            if mapfile -t subCertFiles < <(resolve_acme_cert_files "${currentSubDomain}"); then
-                                subCertFile="${subCertFiles[0]}"
-                                subKeyFile="${subCertFiles[1]}"
-                            fi
-                        fi
-                    fi
-
-                    if [ -n "${panelCertFile}" ] && [ -n "${panelKeyFile}" ]; then
-                        LOGI "正在自动回填面板 HTTPS 路径..."
-                        local settingArgs=(/usr/local/novas/novas setting -webCertFile "${panelCertFile}" -webKeyFile "${panelKeyFile}")
-                        if [ -n "${subCertFile}" ] && [ -n "${subKeyFile}" ]; then
-                            settingArgs+=(-subCertFile "${subCertFile}" -subKeyFile "${subKeyFile}")
-                        fi
-                        "${settingArgs[@]}"
-                        if [ $? -ne 0 ]; then
-                            LOGE "自动回填面板路径失败，请稍后手动检查设置-界面"
-                        else
-                            LOGI "面板 HTTPS 路径已自动回填："
-                            echo -e "${green}${panelCertFile}${plain}"
-                            echo -e "${green}${panelKeyFile}${plain}"
-                            if [ -n "${subCertFile}" ] && [ -n "${subKeyFile}" ]; then
-                                LOGI "Sub HTTPS 路径已自动回填："
-                                echo -e "${green}${subCertFile}${plain}"
-                                echo -e "${green}${subKeyFile}${plain}"
-                            fi
-                            LOGI "正在重启面板以应用新证书..."
-                            restart novas 0
-                            if [ $? -ne 0 ]; then
-                                LOGE "面板重启失败，请手动重启服务"
-                            fi
-                        fi
-                    else
-                        LOGE "未找到可回填的证书文件，请检查 acme.sh 生成目录"
-                    fi
-                fi
+            else
+                LOGE "未找到可回填的证书文件，请检查 acme.sh 生成目录"
             fi
             show_menu
             ;;

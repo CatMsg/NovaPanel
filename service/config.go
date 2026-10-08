@@ -331,7 +331,7 @@ func (s *ConfigService) Save(obj string, act string, data json.RawMessage, initU
 			return err
 		}
 		changeID = change.Id
-		return nil
+		return snapshot.captureAfterImage(tx)
 	})
 	if errors.Is(err, ErrNoChanges) {
 		return objs, false, nil
@@ -397,6 +397,14 @@ func runPostCommitActions(actions []postCommitAction) error {
 	return nil
 }
 
+// ReadDataSnapshot excludes Save's commit, post-commit apply and compensation.
+// The callback must not call Save or recursively acquire this gate.
+func (s *ConfigService) ReadDataSnapshot(read func() (interface{}, error)) (interface{}, error) {
+	saveConfigMu.Lock()
+	defer saveConfigMu.Unlock()
+	return read()
+}
+
 func (s *ConfigService) CheckChanges(lu string) (bool, error) {
 	if lu == "" {
 		return true, nil
@@ -405,7 +413,7 @@ func (s *ConfigService) CheckChanges(lu string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return CurrentDataVersion() > intLu, nil
+	return CurrentDataVersion() != intLu, nil
 }
 
 func (s *ConfigService) GetChanges(actor string, chngKey string, count string) []model.Changes {

@@ -21,44 +21,19 @@ type InboundService struct {
 	ClientService
 }
 
-func (s *InboundService) rollbackInboundCoreState(act string, oldInbound, newInbound *model.Inbound) error {
+func (s *InboundService) rollbackInboundCoreState(act string, oldInbound, newInbound *model.Inbound, oldConfig []byte) error {
 	if corePtr == nil || !corePtr.IsRunning() {
 		return nil
 	}
-	switch act {
-	case "new":
-		if newInbound == nil {
-			return nil
-		}
-		if newInbound.Type == "masque" {
-			return nil
-		}
+	// Remove the replacement too: an edited inbound may have a different tag.
+	if (act == "new" || act == "edit") && newInbound != nil && newInbound.Type != "masque" {
 		if err := corePtr.RemoveInbound(newInbound.Tag); err != nil && !errors.Is(err, os.ErrInvalid) {
 			return err
 		}
-	case "edit", "del":
-		if oldInbound == nil {
-			return nil
-		}
-		if oldInbound.Type == "masque" {
-			return nil
-		}
-		var configData []byte
-		var err error
-		if oldInbound.Type == "mieru" {
-			configData, err = buildMieruBridgeInboundFromDB(database.GetDB(), oldInbound)
-		} else {
-			configData, err = oldInbound.MarshalJSON()
-			if err == nil {
-				configData, err = s.addUsers(database.GetDB(), configData, oldInbound.Id, oldInbound.Type)
-			}
-		}
-		if err != nil {
-			return err
-		}
-		if err := corePtr.AddInbound(configData); err != nil {
-			return err
-		}
+	}
+	// Use the before-image, not users/links from the already committed database.
+	if (act == "edit" || act == "del") && oldInbound != nil && len(oldConfig) > 0 {
+		return corePtr.AddInbound(oldConfig)
 	}
 	return nil
 }
@@ -137,7 +112,7 @@ func (s *InboundService) GetAll() (*[]map[string]interface{}, error) {
 		if s.hasUser(inbound.Type) &&
 			!(inbound.Type == "shadowtls" && shadowtls_version < 3) &&
 			!(inbound.Type == "shadowsocks" && ss_managed) {
-			inbData["users"] = append([]string(nil), inboundUsers[inbound.Id]...)
+			inbData["users"] = append([]string{}, inboundUsers[inbound.Id]...)
 		}
 
 		data = append(data, inbData)
@@ -198,11 +173,18 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			}
 		}
 		var oldInbound *model.Inbound
+		var oldConfig []byte
 		if act == "edit" {
 			oldInbound = &model.Inbound{}
-			err = tx.Model(model.Inbound{}).Where("id = ?", inbound.Id).First(oldInbound).Error
+			err = tx.Model(model.Inbound{}).Preload("Tls").Where("id = ?", inbound.Id).First(oldInbound).Error
 			if err != nil {
 				return nil, err
+			}
+			if corePtr != nil && corePtr.IsRunning() {
+				oldConfig, err = s.buildInboundCoreConfig(tx, oldInbound)
+				if err != nil {
+					return nil, err
+				}
 			}
 		}
 		if inbound.Type == "masque" {
@@ -287,6 +269,10 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			if err != nil {
 				return nil, err
 			}
+			inboundConfig, err = filterInboundCoreConfig(&inbound, inboundConfig)
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		inboundSnapshot := inbound
@@ -304,7 +290,7 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 
 				if len(inboundConfigSnapshot) > 0 {
 					if err := corePtr.AddInbound(inboundConfigSnapshot); err != nil {
-						rollbackErr := s.rollbackInboundCoreState(act, oldSnapshot, &inboundSnapshot)
+						rollbackErr := s.rollbackInboundCoreState(act, oldSnapshot, &inboundSnapshot, oldConfig)
 						return errors.Join(err, rollbackErr)
 					}
 					coreChanged = true
@@ -312,7 +298,7 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			}
 			if err := s.syncInboundPortForwarding(oldSnapshot, &inboundSnapshot); err != nil {
 				if coreChanged {
-					return errors.Join(err, s.rollbackInboundCoreState(act, oldSnapshot, &inboundSnapshot))
+					return errors.Join(err, s.rollbackInboundCoreState(act, oldSnapshot, &inboundSnapshot, oldConfig))
 				}
 				return err
 			}
@@ -335,9 +321,16 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			return nil, err
 		}
 		oldInbound := &model.Inbound{}
-		err = tx.Model(model.Inbound{}).Where("tag = ?", tag).First(oldInbound).Error
+		err = tx.Model(model.Inbound{}).Preload("Tls").Where("tag = ?", tag).First(oldInbound).Error
 		if err != nil {
 			return nil, err
+		}
+		var oldConfig []byte
+		if corePtr != nil && corePtr.IsRunning() {
+			oldConfig, err = s.buildInboundCoreConfig(tx, oldInbound)
+			if err != nil {
+				return nil, err
+			}
 		}
 		var id uint
 		err = tx.Model(model.Inbound{}).Select("id").Where("tag = ?", tag).Scan(&id).Error
@@ -366,7 +359,7 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			}
 			if err := s.syncInboundPortForwarding(oldSnapshot, nil); err != nil {
 				if coreChanged {
-					return errors.Join(err, s.rollbackInboundCoreState(act, oldSnapshot, nil))
+					return errors.Join(err, s.rollbackInboundCoreState(act, oldSnapshot, nil, oldConfig))
 				}
 				return err
 			}
@@ -445,36 +438,47 @@ func (s *InboundService) GetAllConfig(db *gorm.DB) ([]json.RawMessage, error) {
 		return nil, err
 	}
 	for _, inbound := range inbounds {
-		if inbound.Type == "masque" {
-			continue
-		}
-		if inbound.Type == "mieru" {
-			inboundJson, err := buildMieruBridgeInboundFromDB(db, inbound)
-			if err != nil {
-				return nil, err
-			}
-			inboundsJson = append(inboundsJson, inboundJson)
-			continue
-		}
-		inboundJson, err := inbound.MarshalJSON()
+		inboundJson, err := s.buildInboundCoreConfig(db, inbound)
 		if err != nil {
 			return nil, err
 		}
-		inboundJson, err = s.addUsers(db, inboundJson, inbound.Id, inbound.Type)
-		if err != nil {
-			return nil, err
-		}
-		skip, err := shouldSkipInboundWithoutUsers(inbound.Type, inboundJson)
-		if err != nil {
-			return nil, err
-		}
-		if skip {
-			logger.Warningf("skip naive inbound %q: no enabled users assigned", inbound.Tag)
+		if len(inboundJson) == 0 {
 			continue
 		}
 		inboundsJson = append(inboundsJson, inboundJson)
 	}
 	return inboundsJson, nil
+}
+
+func (s *InboundService) buildInboundCoreConfig(db *gorm.DB, inbound *model.Inbound) ([]byte, error) {
+	if inbound.Type == "masque" {
+		return nil, nil
+	}
+	if inbound.Type == "mieru" {
+		return buildMieruBridgeInboundFromDB(db, inbound)
+	}
+	config, err := inbound.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	config, err = s.addUsers(db, config, inbound.Id, inbound.Type)
+	if err != nil {
+		return nil, err
+	}
+	return filterInboundCoreConfig(inbound, config)
+}
+
+// An empty config means runtime absence, not deletion of the stored inbound.
+func filterInboundCoreConfig(inbound *model.Inbound, config []byte) ([]byte, error) {
+	skip, err := shouldSkipInboundWithoutUsers(inbound.Type, config)
+	if err != nil {
+		return nil, err
+	}
+	if skip {
+		logger.Warningf("skip naive inbound %q: no enabled users assigned", inbound.Tag)
+		return nil, nil
+	}
+	return config, nil
 }
 
 func shouldSkipInboundWithoutUsers(inboundType string, inboundJSON []byte) (bool, error) {
@@ -620,11 +624,7 @@ func (s *InboundService) BuildRestartInboundsAction(tx *gorm.DB, ids []uint) (fu
 		if corePtr == nil || !corePtr.IsRunning() {
 			continue
 		}
-		inboundConfig, err := inbound.MarshalJSON()
-		if err != nil {
-			return nil, err
-		}
-		inboundConfig, err = s.addUsers(tx, inboundConfig, inbound.Id, inbound.Type)
+		inboundConfig, err := s.buildInboundCoreConfig(tx, inbound)
 		if err != nil {
 			return nil, err
 		}

@@ -1,17 +1,309 @@
 package service
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/CatMsg/NovaPanel/core"
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
+	"github.com/CatMsg/NovaPanel/internal/testutil"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
+
+func TestApplyFleetTemplateFailurePreservesPostCommitOperations(t *testing.T) {
+	commands := testutil.NewManagedPortSandbox(t)
+	if err := database.InitDB(filepath.Join(t.TempDir(), "fleet-compensation.db")); err != nil {
+		t.Fatal(err)
+	}
+	db := database.GetDB()
+	previousCore, previousMasque, previousMieru := corePtr, masquePtr, mieruPtr
+	corePtr, masquePtr, mieruPtr = nil, NewMasqueService(), nil
+	t.Cleanup(func() {
+		corePtr, masquePtr, mieruPtr = previousCore, previousMasque, previousMieru
+	})
+	config := model.Setting{Key: "config", Value: `{"log":{"disabled":true},"route":{"final":"direct"}}`}
+	if err := db.Create(&config).Error; err != nil {
+		t.Fatal(err)
+	}
+	client := model.Client{Name: "fleet-user", Enable: true, Config: json.RawMessage(`{}`),
+		Inbounds: json.RawMessage(`[]`), Links: json.RawMessage(`[]`), Desc: "before", Group: "keep",
+		Up: 100, Down: 200, TotalUp: 300, TotalDown: 400,
+		History: json.RawMessage(`[{"dateTime":1,"domain":"old","future":9007199254740993}]`)}
+	if err := db.Create(&client).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&client, client.Id).Error; err != nil {
+		t.Fatal(err)
+	}
+	oldStat := model.Stats{DateTime: 1, Resource: "user", Tag: client.Name, Traffic: 100}
+	if err := db.Create(&oldStat).Error; err != nil {
+		t.Fatal(err)
+	}
+	liveStat := model.Stats{DateTime: 2, Resource: "user", Tag: client.Name, Traffic: 7}
+	liveHistory := json.RawMessage(`[{"dateTime":2,"domain":"live","sourceIps":["192.0.2.1"],"future":{"keep":true}},{"dateTime":1,"domain":"old","future":9007199254740993}]`)
+	injected := errors.New("injected fleet post-commit runtime failure")
+	injectedOnce := false
+	runtimeReads := 0
+	const callback = "test:fleet_post_commit_failure"
+	if err := db.Callback().Query().Before("gorm:query").Register(callback, func(tx *gorm.DB) {
+		_, inTransaction := tx.Statement.ConnPool.(*sql.Tx)
+		// Linux's managed-port rebuild also reads inbounds before MASQUE. Only
+		// inject into the MASQUE type-filtered query, on both operating systems.
+		masqueWhere := clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "type = ?", Vars: []interface{}{"masque"}}}}
+		if inTransaction || tx.Statement.Table != "inbounds" || !reflect.DeepEqual(tx.Statement.Clauses["WHERE"].Expression, masqueWhere) {
+			return
+		}
+		runtimeReads++
+		if injectedOnce {
+			return
+		}
+		injectedOnce = true
+		var wantCalls [][]string
+		if runtime.GOOS == "linux" {
+			wantCalls = testutil.ManagedPortRebuildCalls()
+		}
+		commands.AssertCalls(t, wantCalls)
+		// MASQUE's first SyncFromDB is after template commit and port rebuild.
+		// No MASQUE inbound or listener is started.
+		writeErr := db.Transaction(func(writeTx *gorm.DB) error {
+			var committed model.Client
+			if err := writeTx.First(&committed, client.Id).Error; err != nil {
+				return err
+			}
+			if committed.Desc != "template intent" {
+				return errors.New("fixture did not reach the committed template")
+			}
+			if err := writeTx.Model(&model.Client{}).Where("id = ?", client.Id).Updates(map[string]interface{}{
+				"up": gorm.Expr("up + 7"), "down": gorm.Expr("down + 11"), "history": liveHistory,
+			}).Error; err != nil {
+				return err
+			}
+			return writeTx.Create(&liveStat).Error
+		})
+		if writeErr != nil {
+			tx.AddError(writeErr)
+			return
+		}
+		tx.AddError(injected)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Callback().Query().Remove(callback) })
+	template := FleetTemplate{
+		Sections: FleetTemplateSections{Clients: true, Outbounds: true},
+		Clients: []model.Client{
+			{Name: client.Name, Enable: false, Config: json.RawMessage(`{}`), Inbounds: json.RawMessage(`[]`), Desc: "template intent"},
+			{Name: "failed-new-user", Enable: true, Config: json.RawMessage(`{}`), Inbounds: json.RawMessage(`[]`)},
+		},
+		Outbounds: []FleetTemplateOutbound{{Type: "direct", Tag: "failed-new-outbound", Options: json.RawMessage(`{}`)}},
+	}
+	err := (&ConfigService{}).ApplyFleetTemplate(template, "localhost")
+	if !injectedOnce || err == nil || !strings.Contains(err.Error(), injected.Error()) || !strings.Contains(err.Error(), "目标服务器已恢复旧配置") {
+		t.Fatalf("expected runtime failure with successful compensation: injected=%v err=%v", injectedOnce, err)
+	}
+	var restored []model.Client
+	if err := db.Order("id").Find(&restored).Error; err != nil {
+		t.Fatal(err)
+	}
+	expected := client
+	expected.Up += 7
+	expected.Down += 11
+	expected.History = liveHistory
+	if len(restored) != 1 || !reflect.DeepEqual(restored[0], expected) {
+		t.Fatalf("template compensation lost operations or retained failed intent:\n got: %+v\nwant: %+v", restored, expected)
+	}
+	var stats []model.Stats
+	if err := db.Order("id").Find(&stats).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(stats, []model.Stats{oldStat, liveStat}) {
+		t.Fatalf("template compensation lost live stats/IDs: %+v", stats)
+	}
+	var failedOutbounds int64
+	if err := db.Model(&model.Outbound{}).Where("tag = ?", "failed-new-outbound").Count(&failedOutbounds).Error; err != nil || failedOutbounds != 0 {
+		t.Fatalf("template compensation retained failed outbound: count=%d err=%v", failedOutbounds, err)
+	}
+	if runtimeReads != 2 {
+		t.Fatalf("expected runtime apply failure followed by successful compensation sync, reads=%d", runtimeReads)
+	}
+	var wantCalls [][]string
+	if runtime.GOOS == "linux" {
+		wantCalls = testutil.ManagedPortRebuildCalls()
+		wantCalls = append(wantCalls, testutil.ManagedPortRebuildCalls()...)
+	}
+	commands.AssertCalls(t, wantCalls)
+}
+
+func TestApplyFleetTemplateCoreStartFailureRestoresRealCoreAndPostCommitOperations(t *testing.T) {
+	commands := testutil.NewManagedPortSandbox(t)
+	dir := t.TempDir()
+	if err := database.InitDB(filepath.Join(dir, "fleet-core-compensation.db")); err != nil {
+		t.Fatal(err)
+	}
+	db := database.GetDB()
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
+	previousCore, previousMasque, previousMieru := corePtr, masquePtr, mieruPtr
+	testCore := core.NewCore()
+	corePtr, masquePtr, mieruPtr = testCore, nil, nil
+	t.Cleanup(func() {
+		if err := testCore.Stop(); err != nil {
+			t.Errorf("stop restored test core: %v", err)
+		}
+		corePtr, masquePtr, mieruPtr = previousCore, previousMasque, previousMieru
+	})
+	config := model.Setting{Key: "config", Value: `{"log":{"disabled":true},"route":{"final":"stable-direct"}}`}
+	stableOutbound := model.Outbound{Type: "direct", Tag: "stable-direct", Options: json.RawMessage(`{}`)}
+	client := model.Client{Name: "fleet-core-user", Enable: true, Config: json.RawMessage(`{}`),
+		Inbounds: json.RawMessage(`[]`), Links: json.RawMessage(`[]`), Desc: "before", Group: "keep",
+		Up: 100, Down: 200, TotalUp: 300, TotalDown: 400,
+		History: json.RawMessage(`[{"dateTime":1,"domain":"old","future":9007199254740993}]`)}
+	for _, row := range []interface{}{&config, &stableOutbound, &client} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.First(&client, client.Id).Error; err != nil {
+		t.Fatal(err)
+	}
+	oldStat := model.Stats{DateTime: 1, Resource: "user", Tag: client.Name, Traffic: 100}
+	if err := db.Create(&oldStat).Error; err != nil {
+		t.Fatal(err)
+	}
+	s := &ConfigService{}
+	if err := s.StartCore(); err != nil {
+		t.Fatalf("start real baseline core: %v", err)
+	}
+	baseline := testCore.GetInstance()
+	if !testCore.IsRunning() || baseline == nil {
+		t.Fatal("baseline core is not running")
+	}
+	if _, ok := baseline.Outbound().Outbound(stableOutbound.Tag); !ok {
+		t.Fatal("baseline core did not install stable outbound")
+	}
+	initialVersion := CurrentDataVersion()
+	liveStat := model.Stats{DateTime: 2, Resource: "user", Tag: client.Name, Traffic: 7}
+	liveHistory := json.RawMessage(`[{"dateTime":2,"domain":"live","sourceIps":["192.0.2.1"],"future":{"keep":true}},{"dateTime":1,"domain":"old","future":9007199254740993}]`)
+	runtimeReads := 0
+	const callback = "test:fleet_core_post_commit_operations"
+	if err := db.Callback().Query().Before("gorm:query").Register(callback, func(tx *gorm.DB) {
+		_, inTransaction := tx.Statement.ConnPool.(*sql.Tx)
+		configWhere := clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "key = ?", Vars: []interface{}{"config"}}}}
+		if inTransaction || tx.Statement.Table != "settings" || !reflect.DeepEqual(tx.Statement.Clauses["WHERE"].Expression, configWhere) {
+			return
+		}
+		runtimeReads++
+		if runtimeReads == 2 {
+			// Compensation must cold-start the old core after RestartCore stopped
+			// its baseline and the real Core.Start rejected the template.
+			if testCore.IsRunning() || testCore.GetInstance() != nil {
+				t.Error("compensation did not follow a real stopped/failed core")
+			}
+			return
+		}
+		if runtimeReads != 1 {
+			return
+		}
+		if !testCore.IsRunning() || testCore.GetInstance() != baseline {
+			t.Error("template did not reach real RestartCore with the baseline running")
+		}
+		// This callback only records post-commit operations. The failure comes
+		// from Core.Start opening a missing temporary TLS certificate, not a hook.
+		tx.AddError(db.Transaction(func(writeTx *gorm.DB) error {
+			var committed model.Client
+			if err := writeTx.First(&committed, client.Id).Error; err != nil {
+				return err
+			}
+			if committed.Desc != "template intent" {
+				return errors.New("fixture did not reach the committed template")
+			}
+			if err := writeTx.Model(&model.Client{}).Where("id = ?", client.Id).Updates(map[string]interface{}{
+				"up": gorm.Expr("up + 7"), "down": gorm.Expr("down + 11"), "history": liveHistory,
+			}).Error; err != nil {
+				return err
+			}
+			return writeTx.Create(&liveStat).Error
+		}))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Callback().Query().Remove(callback) })
+	missingCertificate := filepath.Join(dir, "missing-test-certificate.pem")
+	failedOptions, err := json.Marshal(map[string]interface{}{
+		"server": "127.0.0.1", "server_port": 1,
+		"tls": map[string]interface{}{"enabled": true, "certificate_path": missingCertificate},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No inbound, listener, or TUN device is configured. Typed parsing accepts
+	// these options; outbound construction fails before any connection attempt.
+	template := FleetTemplate{
+		Sections: FleetTemplateSections{Clients: true, Outbounds: true},
+		Clients: []model.Client{
+			{Name: client.Name, Enable: false, Config: json.RawMessage(`{}`), Inbounds: json.RawMessage(`[]`), Desc: "template intent"},
+			{Name: "failed-new-core-user", Enable: true, Config: json.RawMessage(`{}`), Inbounds: json.RawMessage(`[]`)},
+		},
+		Outbounds: []FleetTemplateOutbound{{Type: "http", Tag: "failed-core-outbound", Options: failedOptions}},
+	}
+	err = s.ApplyFleetTemplate(template, "localhost")
+	if err == nil || !strings.Contains(err.Error(), "initialize outbound") || !strings.Contains(err.Error(), "read certificate") || !strings.Contains(err.Error(), missingCertificate) || !strings.Contains(err.Error(), "目标服务器已恢复旧配置") || runtimeReads != 2 {
+		t.Fatalf("expected actual Core.Start failure followed by successful compensation: reads=%d err=%v", runtimeReads, err)
+	}
+	restoredCore := testCore.GetInstance()
+	if !testCore.IsRunning() || restoredCore == nil || restoredCore == baseline {
+		t.Fatal("compensation did not start a new real core instance")
+	}
+	if _, ok := restoredCore.Outbound().Outbound(stableOutbound.Tag); !ok {
+		t.Fatal("restored core lost stable outbound")
+	}
+	if _, ok := restoredCore.Outbound().Outbound("failed-core-outbound"); ok {
+		t.Fatal("restored core retained failed template outbound")
+	}
+	var restoredClients []model.Client
+	if err := db.Order("id").Find(&restoredClients).Error; err != nil {
+		t.Fatal(err)
+	}
+	expected := client
+	expected.Up += 7
+	expected.Down += 11
+	expected.History = liveHistory
+	if !reflect.DeepEqual(restoredClients, []model.Client{expected}) {
+		t.Fatalf("core compensation lost operations or retained failed intent: got %+v, want %+v", restoredClients, expected)
+	}
+	var stats []model.Stats
+	if err := db.Order("id").Find(&stats).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(stats, []model.Stats{oldStat, liveStat}) {
+		t.Fatalf("core compensation lost live stats/IDs: %+v", stats)
+	}
+	var outbounds []model.Outbound
+	if err := db.Where("tag != ?", "direct").Order("id").Find(&outbounds).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(outbounds, []model.Outbound{stableOutbound}) || CurrentDataVersion() != initialVersion {
+		t.Fatalf("failed core template changed outbounds/version: outbounds=%+v version=%d want=%d", outbounds, CurrentDataVersion(), initialVersion)
+	}
+	var wantCalls [][]string
+	if runtime.GOOS == "linux" {
+		wantCalls = testutil.ManagedPortRebuildCalls()
+		wantCalls = append(wantCalls, testutil.ManagedPortRebuildCalls()...)
+	}
+	commands.AssertCalls(t, wantCalls)
+}
 
 func TestOrderFleetTemplateTargetsCanaryRemoteAndLocalLast(t *testing.T) {
 	got := orderFleetTemplateTargets([]string{"local", "b", "a", "b"}, "a")

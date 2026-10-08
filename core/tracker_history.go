@@ -15,6 +15,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common/network"
+	"gorm.io/gorm"
 )
 
 const (
@@ -126,28 +127,32 @@ func appendClientHistory(username string, entry model.ClientHistoryEntry) error 
 		return nil
 	}
 
-	var client model.Client
-	err := db.Model(model.Client{}).Select("id, history").Where("name = ?", username).First(&client).Error
-	if err != nil {
-		return err
-	}
-
-	var history []model.ClientHistoryEntry
-	if len(client.History) > 0 {
-		if err := json.Unmarshal(client.History, &history); err != nil {
-			history = []model.ClientHistoryEntry{}
+	return database.WithRetryTx(8, 10*time.Millisecond, func(tx *gorm.DB) error {
+		var client struct {
+			Id      uint
+			History []byte
 		}
-	}
+		if err := tx.Model(model.Client{}).Select("id, history").Where("name = ?", username).Order("id ASC").First(&client).Error; err != nil {
+			return err
+		}
 
-	history = append([]model.ClientHistoryEntry{entry}, history...)
-	if len(history) > maxClientHistoryEntries {
-		history = history[:maxClientHistoryEntries]
-	}
+		var history []model.ClientHistoryEntry
+		if len(client.History) > 0 {
+			if err := json.Unmarshal(client.History, &history); err != nil {
+				history = []model.ClientHistoryEntry{}
+			}
+		}
 
-	rawHistory, err := json.Marshal(history)
-	if err != nil {
-		return err
-	}
+		history = append([]model.ClientHistoryEntry{entry}, history...)
+		if len(history) > maxClientHistoryEntries {
+			history = history[:maxClientHistoryEntries]
+		}
 
-	return db.Model(&model.Client{}).Where("id = ?", client.Id).Update("history", rawHistory).Error
+		rawHistory, err := json.Marshal(history)
+		if err != nil {
+			return err
+		}
+
+		return tx.Model(&model.Client{}).Where("id = ?", client.Id).Update("history", rawHistory).Error
+	})
 }

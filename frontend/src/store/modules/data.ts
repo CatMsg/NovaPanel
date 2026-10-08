@@ -58,6 +58,22 @@ const normalizeReloadItems = (items: string[]) => Array.from(new Set([
   ...items,
 ]))
 
+interface LoadLifecycle {
+  requestVersion: number
+  fullLoadRequired: boolean
+}
+
+const loadLifecycles = new WeakMap<object, LoadLifecycle>()
+
+const getLoadLifecycle = (store: object): LoadLifecycle => {
+  let lifecycle = loadLifecycles.get(store)
+  if (!lifecycle) {
+    lifecycle = { requestVersion: 0, fullLoadRequired: false }
+    loadLifecycles.set(store, lifecycle)
+  }
+  return lifecycle
+}
+
 const storedReloadItems = parseReloadItems(
   localStorage.getItem(reloadItemsStorageKey)
 )
@@ -84,27 +100,43 @@ const Data = defineStore('Data', {
   }),
   actions: {
     async loadData() {
-      const msg = await HttpUtils.get('api/load', this.lastLoad >0 ? {lu: this.lastLoad} : {} )
+      const lifecycle = getLoadLifecycle(this)
+      const requestVersion = ++lifecycle.requestVersion
+      const options = this.lastLoad > 0 && !lifecycle.fullLoadRequired ? {lu: this.lastLoad} : {}
+      const msg = await HttpUtils.get('api/load', options)
+      if (requestVersion !== lifecycle.requestVersion) return
       if(msg.success) {
-        const serverVersion = Number(msg.obj?.lastUpdate ?? 0)
-        if (serverVersion > 0) this.lastLoad = serverVersion
-        this.onlines = msg.obj.onlines
-        if (msg.obj.lastLog) {
+        const payload = msg.obj
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return
+        if (payload.onlines) this.onlines = payload.onlines
+        if (payload.lastLog) {
           push.error({
             title: i18n.global.t('error.core'),
             duration: 5000,
-            message: msg.obj.lastLog
+            message: payload.lastLog
           })
         }
 
-        if (msg.obj.config) {
-          this.setNewData(msg.obj)
+        if (payload.config) {
+          this.setNewData(payload, true)
         }
       }
     },
-    setNewData(data: LoadDataPayload) {
-      if (!data.lastUpdate) this.lastLoad = Math.floor((new Date()).getTime()/1000)
-      if (data.subURI) this.subURI = data.subURI
+    setNewData(data: LoadDataPayload, isFullLoad = false) {
+      const lifecycle = getLoadLifecycle(this)
+      lifecycle.requestVersion++
+      if (isFullLoad) {
+        if (typeof data.lastUpdate === 'number' && Number.isFinite(data.lastUpdate)) {
+          // The request generation rejects stale reads; server versions may reset across process restarts.
+          this.lastLoad = data.lastUpdate
+          lifecycle.fullLoadRequired = false
+        } else {
+          lifecycle.fullLoadRequired = true
+        }
+      } else {
+        lifecycle.fullLoadRequired = true
+      }
+      if (Object.hasOwn(data, 'subURI')) this.subURI = data.subURI ?? ''
       if (data.subMode) this.subMode = data.subMode
       if (Object.hasOwn(data, 'subAggregateURI')) this.subAggregateURI = data.subAggregateURI ?? ''
       else if (data.subMode == 'slave') this.subAggregateURI = ''

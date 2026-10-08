@@ -43,3 +43,7 @@ node_modules/
 .git/
 .github/
 .playwright-cli/
+
+# Keep the entire pinned replacement source and its embedded/platform assets.
+!third_party/sing-box/
+!third_party/sing-box/**

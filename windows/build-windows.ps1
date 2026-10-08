@@ -68,11 +68,11 @@ try {
 
 Pop-Location
 
-# Apply sing-box Windows compatibility patch before building the backend.
-Write-Host "Applying sing-box Windows compatibility patch..." -ForegroundColor Yellow
-go run .\scripts\patch-sing-box-windows.go
+# Verify the pinned dependency without changing source or the module cache.
+Write-Host "Verifying sing-box Windows compatibility (read-only)..." -ForegroundColor Yellow
+go run -mod=readonly .\scripts\patch-sing-box-windows.go
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "Error: Failed to patch sing-box compatibility" -ForegroundColor Red
+    Write-Host "Error: Failed to verify sing-box compatibility" -ForegroundColor Red
     Read-Host "Press Enter to exit"
     exit 1
 }
@@ -118,6 +118,9 @@ New-Item -ItemType Directory -Path "NovaPanel-windows" -Force | Out-Null
 try {
     Copy-Item "novas.exe" "NovaPanel-windows\" -Force -ErrorAction Stop
     Copy-Item "windows\*" "NovaPanel-windows\" -Recurse -Force -ErrorAction Stop
+    Copy-Item "LICENSE", "THIRD_PARTY_NOTICES.md" "NovaPanel-windows\" -Force -ErrorAction Stop
+    New-Item -ItemType Directory -Path "NovaPanel-windows\licenses" -Force -ErrorAction Stop | Out-Null
+    Copy-Item "third_party\sing-box\LICENSE" "NovaPanel-windows\licenses\sing-box-LICENSE" -Force -ErrorAction Stop
 } catch {
     Write-Host "Error: Failed to assemble Windows output directory" -ForegroundColor Red
     Write-Host $_ -ForegroundColor Red

@@ -221,3 +221,5 @@ require (
 )
 
 replace github.com/quic-go/quic-go => github.com/quic-go/quic-go v0.59.1
+
+replace github.com/sagernet/sing-box => ./third_party/sing-box

@@ -49,6 +49,7 @@ RUN set -ex && apk add --no-cache --upgrade bash tzdata ca-certificates nftables
 COPY --from=backend-builder /app/novas /app/libcronet.so /app/
 COPY --from=backend-builder /app/mita /app/bin/mita
 COPY LICENSE THIRD_PARTY_NOTICES.md /app/
+COPY third_party/sing-box/LICENSE /app/licenses/sing-box-LICENSE
 COPY entrypoint.sh /app/
 COPY scripts/hy2-forward.sh /app/scripts/hy2-forward.sh
 ENTRYPOINT [ "./entrypoint.sh" ]

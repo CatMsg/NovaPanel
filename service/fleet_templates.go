@@ -513,7 +513,10 @@ func (s *ConfigService) ApplyFleetTemplate(template FleetTemplate, hostname stri
 		if err != nil {
 			return err
 		}
-		return s.applyFleetTemplateTx(tx, template, hostname)
+		if err := s.applyFleetTemplateTx(tx, template, hostname); err != nil {
+			return err
+		}
+		return snapshot.captureAfterImage(tx)
 	})
 	if err != nil {
 		return err

@@ -3,6 +3,8 @@ package api
 import (
 	"fmt"
 	"testing"
+
+	"github.com/CatMsg/NovaPanel/service"
 )
 
 func TestLoadDataCacheIsBounded(t *testing.T) {
@@ -16,7 +18,7 @@ func TestLoadDataCacheIsBounded(t *testing.T) {
 	})
 
 	for index := 0; index < loadDataCacheMaxEntries*2; index++ {
-		if err := storeCachedLoadData(fmt.Sprintf("host-%d", index), map[string]interface{}{"index": index}); err != nil {
+		if err := storeCachedLoadData(fmt.Sprintf("host-%d", index), map[string]interface{}{"index": index}, service.CurrentDataVersion()); err != nil {
 			t.Fatalf("store cache entry: %v", err)
 		}
 	}

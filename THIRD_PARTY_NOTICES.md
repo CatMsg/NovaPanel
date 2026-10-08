@@ -1,5 +1,20 @@
 # Third-Party Notices
 
+## Sing-Box
+
+NovaPanel includes `github.com/sagernet/sing-box v1.15.0-alpha.4`, official
+commit `4566ef0890e0cde8448000e8aa3223fb286daa94`, with a local atomic
+start-state synchronization patch in `third_party/sing-box/route/network.go`.
+The complete corresponding source, original license, patch provenance, checksums,
+and verification instructions are included in the NovaPanel source repository
+under `third_party/sing-box` and `third_party/SING_BOX_PATCH.md`.
+
+Copyright (C) 2022 by nekohasekai. Sing-Box is licensed under GPL-3.0-or-later,
+without warranty. Its license additionally prohibits using the application's
+name or implying association in derivative works without prior consent.
+The original notice is included in `licenses/sing-box-LICENSE`; the full GPL v3
+text is provided in the accompanying `LICENSE` file.
+
 ## Mieru
 
 NovaPanel Linux release packages include the `mita` server from

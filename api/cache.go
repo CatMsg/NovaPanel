@@ -49,23 +49,35 @@ func getCachedLoadData(key string) (map[string]interface{}, bool) {
 	if err := json.Unmarshal(entry.payload, &result); err != nil {
 		return nil, false
 	}
+	if service.CurrentDataVersion() != entry.version {
+		return nil, false
+	}
+	result["lastUpdate"] = entry.version
 	return result, true
 }
 
-func storeCachedLoadData(key string, value map[string]interface{}) error {
+func storeCachedLoadData(key string, value map[string]interface{}, readVersion int64) error {
+	if service.CurrentDataVersion() != readVersion {
+		return nil
+	}
 	payload, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
 
 	loadDataCache.mu.Lock()
+	defer loadDataCache.mu.Unlock()
+	// Marshal can overlap a write too. Never relabel the payload with a later
+	// version; a write after this check will invalidate the entry on lookup.
+	if service.CurrentDataVersion() != readVersion {
+		return nil
+	}
 	pruneLoadDataCache(time.Now())
 	loadDataCache.entries[key] = apiCacheEntry{
 		expiresAt: time.Now().Add(loadDataCacheTTL),
-		version:   service.CurrentDataVersion(),
+		version:   readVersion,
 		payload:   payload,
 	}
-	loadDataCache.mu.Unlock()
 	return nil
 }
 

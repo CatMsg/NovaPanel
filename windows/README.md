@@ -22,7 +22,9 @@ To build from source:
 - With CMD: `build-windows.bat`
 - With PowerShell: `.\build-windows.ps1`
 
-Both build scripts automatically patch the current sing-box Windows interface compatibility issue before compiling.
+Both build scripts verify the pinned local Sing-Box source and its upstream Windows
+`MyInterfaces()` implementation before compiling. The legacy checker filename is
+retained, but it never modifies source or the global module cache.
 They then mirror the release workflow by building with `CGO_ENABLED=0`, the same backend tags, and `-ldflags="-w -s -checklinkname=0"`.
 
 The output is a `NovaPanel-windows\` directory that contains `novas.exe` plus the contents of `windows\`, matching the release package layout.

@@ -133,7 +133,15 @@ func (a *ApiService) LoadData(c *gin.Context) {
 }
 
 func (a *ApiService) getData(c *gin.Context) (interface{}, error) {
-	data := make(map[string]interface{}, 0)
+	return a.ConfigService.ReadDataSnapshot(func() (interface{}, error) {
+		return a.getDataSnapshot(c)
+	})
+}
+
+func (a *ApiService) getDataSnapshot(c *gin.Context) (interface{}, error) {
+	// Keep the cursor conservative if the data version advances during this read.
+	readVersion := service.CurrentDataVersion()
+	data := map[string]interface{}{"lastUpdate": readVersion}
 	lu := c.Query("lu")
 	isUpdated, err := a.ConfigService.CheckChanges(lu)
 	if err != nil {
@@ -156,7 +164,6 @@ func (a *ApiService) getData(c *gin.Context) (interface{}, error) {
 		cacheKey := "load:" + getHostname(c)
 		if cached, ok := getCachedLoadData(cacheKey); ok {
 			cached["onlines"] = onlines
-			cached["lastUpdate"] = service.CurrentDataVersion()
 			if _, ok := data["lastLog"]; ok {
 				cached["lastLog"] = data["lastLog"]
 			}
@@ -213,18 +220,28 @@ func (a *ApiService) getData(c *gin.Context) (interface{}, error) {
 		}
 		data["enableTraffic"] = true
 		data["onlines"] = onlines
-		if err := storeCachedLoadData(cacheKey, data); err != nil {
+		if err := storeCachedLoadData(cacheKey, data, readVersion); err != nil {
 			logger.Warning("store load cache failed:", err)
 		}
 	} else {
 		data["onlines"] = onlines
 	}
-	data["lastUpdate"] = service.CurrentDataVersion()
-
 	return data, nil
 }
 
 func (a *ApiService) LoadPartialData(c *gin.Context, objs []string) error {
+	data, err := a.ConfigService.ReadDataSnapshot(func() (interface{}, error) {
+		return a.getPartialDataSnapshot(c, objs)
+	})
+	if err != nil {
+		return err
+	}
+	jsonObj(c, data, nil)
+	return nil
+}
+
+func (a *ApiService) getPartialDataSnapshot(c *gin.Context, objs []string) (interface{}, error) {
+	// Partial objects must not certify or advance the full-load cursor.
 	data := make(map[string]interface{}, 0)
 	id := c.Query("id")
 
@@ -233,56 +250,55 @@ func (a *ApiService) LoadPartialData(c *gin.Context, objs []string) error {
 		case "inbounds":
 			inbounds, err := a.InboundService.Get(id)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			data[obj] = inbounds
 		case "outbounds":
 			outbounds, err := a.OutboundService.GetAll()
 			if err != nil {
-				return err
+				return nil, err
 			}
 			data[obj] = outbounds
 		case "endpoints":
 			endpoints, err := a.EndpointService.GetAll()
 			if err != nil {
-				return err
+				return nil, err
 			}
 			data[obj] = endpoints
 		case "services":
 			services, err := a.ServicesService.GetAll()
 			if err != nil {
-				return err
+				return nil, err
 			}
 			data[obj] = services
 		case "tls":
 			tlsConfigs, err := a.TlsService.GetAll()
 			if err != nil {
-				return err
+				return nil, err
 			}
 			data[obj] = tlsConfigs
 		case "clients":
 			clients, err := a.ClientService.Get(id)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			data[obj] = clients
 		case "config":
 			config, err := a.SettingService.GetConfig()
 			if err != nil {
-				return err
+				return nil, err
 			}
 			data[obj] = json.RawMessage(config)
 		case "settings":
 			settings, err := a.SettingService.GetAllSetting()
 			if err != nil {
-				return err
+				return nil, err
 			}
 			data[obj] = settings
 		}
 	}
 
-	jsonObj(c, data, nil)
-	return nil
+	return data, nil
 }
 
 func (a *ApiService) GetUsers(c *gin.Context) {

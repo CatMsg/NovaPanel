@@ -47,3 +47,7 @@ cert/
 *.pid
 output/
 node_modules/
+
+# Complete pinned upstream dependency, including public certificates/resources.
+!third_party/sing-box/
+!third_party/sing-box/**

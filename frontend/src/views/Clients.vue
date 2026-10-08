@@ -831,6 +831,7 @@ import { i18n } from '@/locales'
 import { useDisplay } from 'vuetify'
 import Clipboard from 'clipboard'
 import { push } from 'notivue'
+import { getClientInboundOptions } from '@/utils/clientInboundOptions'
 
 const ClientModal = defineAsyncComponent(() => import('@/layouts/modals/Client.vue'))
 const ClientAddBulk = defineAsyncComponent(() => import('@/layouts/modals/ClientAddBulk.vue'))
@@ -879,8 +880,7 @@ const inbounds = computed((): any[] => {
 })
 
 const inboundTags = computed((): any[] => {
-  if (!inbounds.value) return []
-  return inbounds.value?.filter(i => i.tag != "" && i.users).map(i => { return { title: i.tag, value: i.id } })
+  return getClientInboundOptions(inbounds.value)
 })
 
 const groups = computed((): string[] => {

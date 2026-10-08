@@ -115,6 +115,9 @@ jobs:
       - name: 运行 Go 测试
         run: bash ./scripts/go-test-packages.sh
 
+      - name: Verify Sing-Box Source And Core Race Regression
+        run: bash ./scripts/test-sing-box-race.sh
+
       - name: 基础 Go 构建
         run: go build ./...
 

@@ -123,11 +123,70 @@ jobs:
       - name: 运行 Go 测试
         run: bash ./scripts/go-test-packages.sh
 
+      - name: Verify Sing-Box Source And Core Race Regression
+        run: bash ./scripts/test-sing-box-race.sh
+
+  test-fresh-ufw-linux:
+    name: Native fresh-UFW acceptance
+    needs:
+      - test-backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v6.0.2
+
+      - name: 设置 Go
+        uses: actions/setup-go@v6
+        with:
+          cache: false
+          go-version-file: go.mod
+
+      - name: 构建原生验收用 novas
+        run: go build -o "$RUNNER_TEMP/novas-fresh-ufw-test" main.go
+
+      - name: 运行真实 UFW 与 ACME cron 验收
+        env:
+          NOVAS_FRESH_UFW_OPT_IN: "1"
+          NOVAS_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          NOVAS_GITHUB_JOB: ${{ github.job }}
+          NOVAS_GITHUB_WORKFLOW: ${{ github.workflow }}
+          NOVAS_GITHUB_EVENT_NAME: ${{ github.event_name }}
+          NOVAS_GITHUB_SERVER_URL: ${{ github.server_url }}
+          NOVAS_GITHUB_REPOSITORY: ${{ github.repository }}
+          NOVAS_GITHUB_RUN_ID: ${{ github.run_id }}
+          NOVAS_GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          NOVAS_RUNNER_OS: ${{ runner.os }}
+          NOVAS_RUNNER_NAME: ${{ runner.name }}
+          NOVAS_RUNNER_TEMP: ${{ runner.temp }}
+          NOVAS_WORKSPACE: ${{ github.workspace }}
+        run: |
+          sudo env \
+            NOVAS_FRESH_UFW_OPT_IN="$NOVAS_FRESH_UFW_OPT_IN" \
+            NOVAS_GITHUB_ACTIONS="$GITHUB_ACTIONS" \
+            NOVAS_RUNNER_ENVIRONMENT="$NOVAS_RUNNER_ENVIRONMENT" \
+            NOVAS_GITHUB_JOB="$NOVAS_GITHUB_JOB" \
+            NOVAS_GITHUB_WORKFLOW="$NOVAS_GITHUB_WORKFLOW" \
+            NOVAS_GITHUB_EVENT_NAME="$NOVAS_GITHUB_EVENT_NAME" \
+            NOVAS_GITHUB_SERVER_URL="$NOVAS_GITHUB_SERVER_URL" \
+            NOVAS_GITHUB_REPOSITORY="$NOVAS_GITHUB_REPOSITORY" \
+            NOVAS_GITHUB_RUN_ID="$NOVAS_GITHUB_RUN_ID" \
+            NOVAS_GITHUB_RUN_ATTEMPT="$NOVAS_GITHUB_RUN_ATTEMPT" \
+            NOVAS_RUNNER_OS="$NOVAS_RUNNER_OS" \
+            NOVAS_RUNNER_NAME="$NOVAS_RUNNER_NAME" \
+            NOVAS_RUNNER_TEMP="$NOVAS_RUNNER_TEMP" \
+            NOVAS_WORKSPACE="$NOVAS_WORKSPACE" \
+            bash "$GITHUB_WORKSPACE/scripts/test-fresh-ufw-linux.sh" \
+              "$RUNNER_TEMP/novas-fresh-ufw-test"
+
   build-linux:
     name: 构建-${{ matrix.platform }}
     needs:
       - build-frontend
       - test-backend
+      - test-fresh-ufw-linux
     strategy:
       fail-fast: false
       matrix:
@@ -241,6 +300,8 @@ jobs:
 
           mkdir -p release/novas/bin release/novas/scripts
           cp novas novas.service novas.sh LICENSE THIRD_PARTY_NOTICES.md release/novas/
+          mkdir -p release/novas/licenses
+          cp third_party/sing-box/LICENSE release/novas/licenses/sing-box-LICENSE
           cp scripts/hy2-forward.sh scripts/login-guard.sh scripts/install-runtime.sh release/novas/scripts/
 
       - name: 构建 Mieru 服务端
