@@ -220,7 +220,7 @@ owned_ssh_listeners_match() {
                 count, endpoint, endpoint_ok, ownership ~ expected)
             remaining = ownership
             owners = 0
-            while (match(remaining, /"[^\"]+",pid=[0-9]+,fd=[0-9]+/)) {
+            while (match(remaining, /"[^"]+",pid=[0-9]+,fd=[0-9]+/)) {
                 owner = substr(remaining, RSTART, RLENGTH)
                 name = owner
                 sub(/",pid=.*/, "", name); sub(/^"/, "", name)
@@ -732,7 +732,7 @@ NOVAS_DB_FOLDER="$WORK_DIR/panel-home/db" "$WORK_DIR/panel-home/novas" setting -
 
 release=ubuntu
 DENY_RULE_OWNED=1
-ufw --force deny from "$DENY_SOURCE" to any port "$DENY_PORT" proto tcp
+ufw deny from "$DENY_SOURCE" to any port "$DENY_PORT" proto tcp
 grep -Fxq "ufw deny from $DENY_SOURCE to any port $DENY_PORT proto tcp" <(ufw_user_rules) || die "could not establish the unrelated deny-rule fixture"
 
 readarray -t EXPECTED_ALLOW_PORTS < <(printf '%s\n' "$EXPECTED_SSH_PORTS" "$PANEL_PORT" "$SUB_PORT" | sort -nu)

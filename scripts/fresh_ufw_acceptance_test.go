@@ -748,6 +748,33 @@ cleanup
 	}
 }
 
+func TestFreshUFWDenyFixtureUsesCanonicalUnforcedAddRule(t *testing.T) {
+	contents := freshUFWScript(t)
+	fixtureCommand := `ufw deny from "$DENY_SOURCE" to any port "$DENY_PORT" proto tcp`
+	if !strings.Contains(contents, "\n"+fixtureCommand+"\n") {
+		t.Fatalf("missing unforced deny fixture command: %s", fixtureCommand)
+	}
+
+	canonicalAddedRule := `ufw deny from $DENY_SOURCE to any port $DENY_PORT proto tcp`
+	if !strings.Contains(contents, `grep -Fxq "`+canonicalAddedRule+`" <(ufw_user_rules)`) {
+		t.Fatalf("deny fixture must match UFW's canonical show added syntax: %s", canonicalAddedRule)
+	}
+
+	for lineNumber, line := range strings.Split(contents, "\n") {
+		fields := strings.Fields(line)
+		for i, field := range fields {
+			if field != "ufw" || i+2 >= len(fields) ||
+				(fields[i+1] != "--force" && fields[i+1] != "-f") {
+				continue
+			}
+			switch fields[i+2] {
+			case "allow", "deny", "reject", "limit", "insert", "prepend", "route":
+				t.Errorf("line %d uses --force for a rule-add command: %s", lineNumber+1, line)
+			}
+		}
+	}
+}
+
 func TestFreshUFWHarnessPreservesNativeSafetyBoundaries(t *testing.T) {
 	contents := freshUFWScript(t)
 	for _, required := range []string{
