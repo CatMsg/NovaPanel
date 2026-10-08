@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 readonly EXPECTED_JOB="test-fresh-ufw-linux"
 readonly EXPECTED_WORKFLOW="发布 NovaPanel"
+readonly DIAGNOSTICS_WORKFLOW="NovaPanel 安装验收"
 readonly SSH_PORT=2222
 readonly PANEL_PORT=39095
 readonly SUB_PORT=39096
@@ -21,7 +22,10 @@ require_github_hosted_release_job() {
     [[ "${NOVAS_GITHUB_ACTIONS:-}" == "true" ]] || die "GitHub Actions identity is missing"
     [[ "${NOVAS_RUNNER_ENVIRONMENT:-}" == "github-hosted" ]] || die "refusing non-hosted runners"
     [[ "${NOVAS_GITHUB_JOB:-}" == "$EXPECTED_JOB" ]] || die "refusing a non-dedicated workflow job"
-    [[ "${NOVAS_GITHUB_WORKFLOW:-}" == "$EXPECTED_WORKFLOW" ]] || die "refusing a different workflow"
+    case "${NOVAS_GITHUB_WORKFLOW:-}" in
+        "$EXPECTED_WORKFLOW" | "$DIAGNOSTICS_WORKFLOW") ;;
+        *) die "refusing a different workflow" ;;
+    esac
     [[ "${NOVAS_GITHUB_EVENT_NAME:-}" == "workflow_dispatch" ]] || die "refusing a non-release workflow event"
     [[ "${NOVAS_GITHUB_SERVER_URL:-}" == "https://github.com" ]] || die "refusing a non-GitHub server"
     [[ "${NOVAS_GITHUB_REPOSITORY:-}" == "CatMsg/NovaPanel" ]] || die "refusing a different repository"
@@ -295,6 +299,26 @@ count_owned_acme_jobs() {
     filter_owned_acme_jobs count "$1"
 }
 
+cleanup_sshd_run_directory() {
+    [[ "${SSHD_RUN_DIR_CREATED:-0}" == "1" ]] || return 0
+    if [[ -d /run/sshd && ! -L /run/sshd && -n "${SSHD_RUN_DIR_IDENTITY:-}" ]] &&
+        [[ "$(stat -c '%d:%i' /run/sshd)" == "$SSHD_RUN_DIR_IDENTITY" ]]; then
+        rmdir /run/sshd || return 1
+    else
+        printf 'FAIL: temporary sshd runtime directory ownership changed; refusing removal\n' >&2
+        return 1
+    fi
+}
+
+cleanup_ssh_preflight() {
+    local original_status=$?
+    trap - EXIT INT TERM
+    if ! cleanup_sshd_run_directory; then
+        [[ "$original_status" -ne 0 ]] || original_status=1
+    fi
+    exit "$original_status"
+}
+
 cleanup() {
     local original_status=$? status current_rules port rule
     local cleanup_failed=0 firewall_inactive=0
@@ -403,9 +427,7 @@ cleanup() {
     if [[ "${SSH_BASELINE_READY:-0}" == "1" ]]; then
         verify_ssh_baseline_unchanged || cleanup_failed=1
     fi
-    if [[ "${SSHD_RUN_DIR_CREATED:-0}" == "1" ]]; then
-        rmdir /run/sshd || cleanup_failed=1
-    fi
+    cleanup_sshd_run_directory || cleanup_failed=1
     if [[ "$cleanup_failed" == 0 && -n "${WORK_DIR:-}" && -d "$WORK_DIR" ]]; then
         rm -rf "$WORK_DIR" || cleanup_failed=1
     fi
@@ -432,6 +454,19 @@ command -v ss >/dev/null 2>&1 || die "ss must already exist for the listener pre
 command -v systemctl >/dev/null 2>&1 || die "systemctl is required for the native cron acceptance"
 SSHD_BIN=$(command -v sshd) || die "OpenSSH daemon executable is unavailable"
 [[ "$SSHD_BIN" == /* && -x "$SSHD_BIN" ]] || die "resolved sshd path must be absolute and executable"
+# Even read-only sshd -T needs this directory. Own only an exclusive creation;
+# the early trap remains active until the full cleanup takes over below.
+SSHD_RUN_DIR_CREATED=0
+SSHD_RUN_DIR_IDENTITY=""
+trap cleanup_ssh_preflight EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+[[ ! -L /run/sshd && ( ! -e /run/sshd || -d /run/sshd ) ]] || die "sshd runtime path is linked or not a directory"
+if [[ ! -d /run/sshd ]]; then
+    mkdir -m 0755 /run/sshd || die "cannot exclusively create sshd runtime directory"
+    SSHD_RUN_DIR_CREATED=1
+    SSHD_RUN_DIR_IDENTITY=$(stat -c '%d:%i' /run/sshd) || die "cannot identify owned sshd runtime directory"
+fi
 source "${NOVAS_WORKSPACE}/install.sh"
 INITIAL_SSH_EFFECTIVE=$(LC_ALL=C "$SSHD_BIN" -T) || die "cannot inspect the host effective SSH configuration"
 INITIAL_SSH_PORTS=$(installer_ssh_ports) || die "host SSH configuration/listeners failed the production read-only precheck"
@@ -462,7 +497,6 @@ fi
 
 WORK_DIR=$(mktemp -d "$NOVAS_RUNNER_TEMP/novas-fresh-ufw.XXXXXX") || die "cannot create a runner-local temporary directory"
 SSHD_PID=""
-SSHD_RUN_DIR_CREATED=0
 POLICY_RC_CREATED=0
 SSHD_CONFIG_CREATED=0
 DENY_RULE_OWNED=0
@@ -497,11 +531,6 @@ command -v crontab >/dev/null 2>&1 || die "the guarded cron package installation
 verify_ssh_baseline_unchanged || die "package installation changed host SSH configuration, ownership or listeners"
 printf 'INFO: package stage complete; host SSH baseline unchanged; no daemon reload requested\n'
 [[ "$(LC_ALL=C ufw status | sed -n '1p')" == "Status: inactive" ]] || die "UFW is not inactive after package installation"
-if [[ ! -d /run/sshd ]]; then
-    mkdir -p /run/sshd
-    SSHD_RUN_DIR_CREATED=1
-fi
-
 ufw_user_rules >"$WORK_DIR/ufw-rules-before-test" || die "cannot read the initial UFW user rules"
 if [[ "${INITIAL_UFW_RULES+x}" == x ]]; then
     [[ "$(<"$WORK_DIR/ufw-rules-before-test")" == "$INITIAL_UFW_RULES" ]] || die "package installation changed original UFW rules"

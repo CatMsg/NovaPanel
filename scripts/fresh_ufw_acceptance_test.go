@@ -59,6 +59,178 @@ func TestFreshUFWAcceptanceUsesValidatedAbsoluteSSHD(t *testing.T) {
 	}
 }
 
+func TestFreshUFWWorkflowWhitelist(t *testing.T) {
+	contents := freshUFWScript(t)
+	start := strings.Index(contents, `    case "${NOVAS_GITHUB_WORKFLOW:-}" in`)
+	if start < 0 {
+		t.Fatal("missing fixed workflow whitelist in hosted-runner guard")
+	}
+	end := strings.Index(contents[start:], "    esac\n")
+	guardEnd := strings.Index(contents, "\nufw_user_rules()")
+	if end < 0 || guardEnd < 0 || start+end >= guardEnd {
+		t.Fatal("workflow whitelist must remain inside the hosted-runner guard")
+	}
+	for _, workflow := range []string{
+		"发布 NovaPanel", "NovaPanel 安装验收", "", "arbitrary workflow",
+		"发布 NovaPanel copy", "NovaPanel 安装验收 copy", " NovaPanel 安装验收", "NovaPanel 安装验收\n",
+	} {
+		t.Run(workflow, func(t *testing.T) {
+			output, err := runFreshUFWHelper(t, contents[start:start+end+len("    esac\n")],
+				"NOVAS_GITHUB_WORKFLOW="+workflow)
+			wantOK := workflow == "发布 NovaPanel" || workflow == "NovaPanel 安装验收"
+			if (err == nil) != wantOK {
+				t.Fatalf("workflow=%q allowed=%v, want %v: %s", workflow, err == nil, wantOK, output)
+			}
+			if !wantOK && !strings.Contains(output, "refusing a different workflow") {
+				t.Fatalf("missing refusal diagnostic: %s", output)
+			}
+		})
+	}
+}
+
+func TestFreshUFWRuntimeDirectoryOrdering(t *testing.T) {
+	contents := freshUFWScript(t)
+	previous := -1
+	for _, step := range []string{
+		"\nrequire_github_hosted_release_job\n",
+		`[[ "${ID:-}" == "ubuntu" ]]`,
+		`[[ "$SSHD_BIN" == /* && -x "$SSHD_BIN" ]]`,
+		"\nSSHD_RUN_DIR_CREATED=0\n",
+		"\ntrap cleanup_ssh_preflight EXIT\n",
+		"\n    mkdir -m 0755 /run/sshd",
+		"\n    SSHD_RUN_DIR_CREATED=1\n",
+		`INITIAL_SSH_EFFECTIVE=$(LC_ALL=C "$SSHD_BIN" -T)`,
+		"INITIAL_SSH_FINGERPRINT=$(ssh_config_fingerprint)",
+		"\nWORK_DIR=$(mktemp",
+		"\nSSH_BASELINE_READY=1\n",
+		"\ntrap cleanup EXIT\n",
+	} {
+		position := strings.Index(contents, step)
+		if position <= previous {
+			t.Fatalf("missing or out-of-order runtime-directory step: %s", step)
+		}
+		previous = position
+	}
+	if strings.Count(contents, "\nSSHD_RUN_DIR_CREATED=0\n") != 1 ||
+		strings.Count(contents, "\n    SSHD_RUN_DIR_CREATED=1\n") != 1 {
+		t.Fatal("runtime-directory ownership must not be reset during cleanup handoff")
+	}
+}
+
+func TestFreshUFWRuntimeDirectoryCleanup(t *testing.T) {
+	contents := freshUFWScript(t)
+	main := strings.Index(contents, "\nrequire_github_hosted_release_job\n")
+	prepare := strings.Index(contents, "\nSSHD_RUN_DIR_CREATED=0\n")
+	preflight := strings.Index(contents, `source "${NOVAS_WORKSPACE}/install.sh"`)
+	handoff := strings.Index(contents, "\nWORK_DIR=$(mktemp")
+	handoffEnd := strings.Index(contents, "\nchmod 0755 \"$WORK_DIR\"")
+	if main < 0 || prepare < main || preflight <= prepare || handoff <= preflight || handoffEnd <= handoff {
+		t.Fatal("cannot isolate definitions, guarded preparation, and cleanup handoff")
+	}
+	for _, tt := range []struct {
+		name, initial, stage string
+		status               int
+		remains              bool
+	}{
+		{"first sshd T fails", "missing", "sshd", 1, false},
+		{"later baseline fails", "missing", "baseline", 1, false},
+		{"full cleanup succeeds", "missing", "full", 0, false},
+		{"full cleanup preserves failure", "missing", "fullfail", 23, false},
+		{"existing directory early failure", "directory", "sshd", 1, true},
+		{"existing directory full cleanup", "directory", "full", 0, true},
+		{"linked directory refused", "symlink", "full", 1, true},
+		{"dangling link refused", "dangling", "full", 1, true},
+		{"unknown file refused", "file", "full", 1, true},
+		{"changed identity retained", "missing", "changed", 1, true},
+		{"changed link retained", "missing", "linked", 1, true},
+		{"nonempty owned directory retained", "missing", "nonempty", 1, true},
+		{"identity inspection fails safely", "missing", "statfail", 1, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			runtimeDir := filepath.Join(dir, "sshd")
+			target := filepath.Join(dir, "target")
+			if err := os.Mkdir(target, 0700); err != nil {
+				t.Fatal(err)
+			}
+			var setupErr error
+			switch tt.initial {
+			case "directory":
+				setupErr = os.Mkdir(runtimeDir, 0700)
+			case "symlink":
+				setupErr = os.Symlink(target, runtimeDir)
+			case "dangling":
+				setupErr = os.Symlink(filepath.Join(dir, "absent"), runtimeDir)
+			case "file":
+				setupErr = os.WriteFile(runtimeDir, []byte("preserve me"), 0600)
+			}
+			if setupErr != nil {
+				t.Fatal(setupErr)
+			}
+			// Execute only the real preparation and trap handoff, against temp paths.
+			// GNU stat and host/service inspection are fixtures for portability.
+			body := contents[:main] + `
+stat() {
+    [[ "$*" == "-c %d:%i $FIXTURE_RUN_DIR" ]] || return 1
+    [[ "$FIXTURE_STAGE" != statfail ]] || return 1
+    if [[ -e "$FIXTURE_ROOT/changed" ]]; then printf '1:124\n'; else printf '1:123\n'; fi
+}
+ufw() { [[ "$*" == status ]] || return 1; printf 'Status: inactive\n'; }
+verify_ssh_baseline_unchanged() { [[ -d "$FIXTURE_RUN_DIR" && "$SSH_BASELINE_READY" == 1 ]]; }
+fixture_sshd() {
+    [[ "$*" == -T && -d "$FIXTURE_RUN_DIR" && ! -L "$FIXTURE_RUN_DIR" ]] || return 1
+    [[ "$FIXTURE_STAGE" != sshd ]] || return 37
+    printf 'port 22\n'
+}
+` + contents[prepare:preflight] + `
+SSHD_BIN=fixture_sshd
+INITIAL_SSH_EFFECTIVE=$(LC_ALL=C "$SSHD_BIN" -T) || die "fixture initial sshd inspection failed"
+[[ "$FIXTURE_STAGE" != baseline ]] || die "fixture baseline inspection failed"
+` + contents[handoff:handoffEnd] + `
+case "$FIXTURE_STAGE" in
+    changed) touch "$FIXTURE_ROOT/changed" ;;
+    linked) rmdir "$FIXTURE_RUN_DIR"; ln -s "$FIXTURE_ROOT/target" "$FIXTURE_RUN_DIR" ;;
+    nonempty) touch "$FIXTURE_RUN_DIR/unowned" ;;
+    fullfail) exit 23 ;;
+esac
+`
+			body = strings.ReplaceAll(body, "/run/sshd", runtimeDir)
+			cmd := exec.Command("bash", "-c", body)
+			cmd.Env = append(os.Environ(), "FIXTURE_ROOT="+dir, "FIXTURE_RUN_DIR="+runtimeDir,
+				"FIXTURE_STAGE="+tt.stage, "NOVAS_RUNNER_TEMP="+dir)
+			output, err := cmd.CombinedOutput()
+			status := 0
+			if err != nil {
+				exitErr, ok := err.(*exec.ExitError)
+				if !ok {
+					t.Fatal(err)
+				}
+				status = exitErr.ExitCode()
+			}
+			if status != tt.status {
+				t.Fatalf("exit=%d, want %d: %s", status, tt.status, output)
+			}
+			if tt.stage == "sshd" && !strings.Contains(string(output), "fixture initial sshd inspection failed") {
+				t.Fatalf("failure did not reach the initial sshd preflight: %s", output)
+			}
+			if tt.stage == "baseline" && !strings.Contains(string(output), "fixture baseline inspection failed") {
+				t.Fatalf("failure did not reach the later baseline preflight: %s", output)
+			}
+			info, statErr := os.Lstat(runtimeDir)
+			if tt.remains {
+				if statErr != nil {
+					t.Fatalf("unowned/unknown runtime path was removed: %v\n%s", statErr, output)
+				}
+				if tt.initial == "directory" && info.Mode().Perm() != 0700 {
+					t.Fatalf("existing directory permissions changed: %v", info.Mode())
+				}
+			} else if !os.IsNotExist(statErr) {
+				t.Fatalf("owned runtime directory leaked: %v\n%s", statErr, output)
+			}
+		})
+	}
+}
+
 func TestFreshUFWBaselineOwnership(t *testing.T) {
 	v4 := `LISTEN 0 128 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=411,fd=3))`
 	v6 := `LISTEN 0 128 [::]:22 [::]:* users:(("sshd",pid=411,fd=4))`
@@ -387,6 +559,6 @@ func TestFreshUFWHarnessPreservesNativeSafetyBoundaries(t *testing.T) {
 	preflight := strings.Index(contents, "INITIAL_SSH_LISTENERS=$(inspect_baseline_ssh")
 	mutation := strings.Index(contents, "WORK_DIR=$(mktemp")
 	if preflight < 0 || mutation <= preflight {
-		t.Fatal("read-only SSH ownership preflight must precede every host mutation")
+		t.Fatal("read-only SSH ownership preflight must precede package/firewall mutations")
 	}
 }
