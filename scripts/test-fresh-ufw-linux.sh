@@ -78,8 +78,15 @@ ssh_unit_state() {
 }
 
 ssh_config_fingerprint() {
+    local -a find_args=(/etc/ssh -type f)
+    if [[ "${SSHD_CONFIG_CREATED:-0}" == 1 ]]; then
+        [[ -f "$SSH_DROP_IN" && ! -L "$SSH_DROP_IN" ]] &&
+            [[ "$(stat -Lc '%d:%i' "$SSH_DROP_IN")" == "$SSH_DROP_IN_IDENTITY" ]] &&
+            cmp -s "$WORK_DIR/ssh-global-drop-in" "$SSH_DROP_IN" || return 1
+        find_args+=(! -path "$SSH_DROP_IN")
+    fi
     # Hash locally only; never print configuration or host keys to CI logs.
-    find /etc/ssh -type f ! -path "$SSH_DROP_IN" -print0 | sort -z | xargs -0 -r sha256sum || return 1
+    find "${find_args[@]}" -print0 | sort -z | xargs -0 -r sha256sum || return 1
     if [[ -f /etc/default/ssh ]]; then sha256sum /etc/default/ssh || return 1; fi
     sha256sum "$SSHD_BIN"
 }
@@ -198,29 +205,124 @@ verify_ssh_baseline_unchanged() {
 owned_ssh_listeners_match() {
     awk -v pid="$SSHD_PID" -v port="$SSH_PORT" '
         $4 ~ (":" port "$") {
+            endpoint_ok = ($4 == "127.0.0.1:" port || $4 == "[::1]:" port)
             if ($4 == "127.0.0.1:" port) v4++
             else if ($4 == "[::1]:" port) v6++
             else bad = 1
             ownership = substr($0, index($0, "users:"))
+            sub(/[[:space:]]+$/, "", ownership)
             expected = "^users:\\(\\(\"sshd\",pid=" pid ",fd=[0-9]+\\)\\)$"
             if (ownership !~ expected) bad = 1
             count++
+            # Never copy raw ss rows, peer addresses, or arbitrary process names.
+            endpoint = ($4 ~ /^[0-9a-fA-F:.\[\]*]+$/) ? $4 : "redacted"
+            diagnostic = diagnostic sprintf("DIAG: owned-ssh row=%d endpoint=%s endpoint_allowed=%d ownership_match=%d\n",
+                count, endpoint, endpoint_ok, ownership ~ expected)
+            remaining = ownership
+            owners = 0
+            while (match(remaining, /"[^\"]+",pid=[0-9]+,fd=[0-9]+/)) {
+                owner = substr(remaining, RSTART, RLENGTH)
+                name = owner
+                sub(/",pid=.*/, "", name); sub(/^"/, "", name)
+                if (name != "sshd" && name != "sshd-session" && name != "systemd") name = "other"
+                owner_pid = owner; sub(/^.*pid=/, "", owner_pid); sub(/,.*/, "", owner_pid)
+                fd = owner; sub(/^.*fd=/, "", fd)
+                diagnostic = diagnostic sprintf("DIAG: owned-ssh row=%d owner=%s pid=%s fd=%s\n", count, name, owner_pid, fd)
+                remaining = substr(remaining, RSTART + RLENGTH)
+                owners++
+            }
+            if (!owners) diagnostic = diagnostic sprintf("DIAG: owned-ssh row=%d owner_metadata=unavailable\n", count)
         }
-        END { exit (bad || count != 2 || v4 != 1 || v6 != 1) }
+        END {
+            failed = (bad || count != 2 || v4 != 1 || v6 != 1)
+            if (failed) {
+                printf "%s", diagnostic > "/dev/stderr"
+                printf "DIAG: owned-ssh result=mismatch rows=%d ipv4=%d ipv6=%d required_rows=2 required_ipv4=1 required_ipv6=1\n", count, v4, v6 > "/dev/stderr"
+            }
+            exit failed
+        }
     '
 }
 
+ssh_baseline_comparison_diagnostic() {
+    local expected_endpoints observed_endpoints endpoint_match=0 row_match=0
+    expected_endpoints=$(awk 'NF { print $1 }' <<<"$INITIAL_SSH_LISTENERS" | sort)
+    observed_endpoints=$(awk 'NF { print $1 }' <<<"$1" | sort)
+    [[ "$expected_endpoints" == "$observed_endpoints" ]] && endpoint_match=1
+    [[ "$INITIAL_SSH_LISTENERS" == "$1" ]] && row_match=1
+    # Compare host metadata without publishing host endpoints or owners.
+    printf 'DIAG: owned-ssh stage=baseline_compare endpoint_set_match=%s endpoint_owner_rows_match=%s\n' "$endpoint_match" "$row_match" >&2
+}
+
+ssh_unit_comparison_diagnostic() {
+    printf 'expected\n%s\nobserved\n%s\n' "$INITIAL_SSH_UNITS" "$1" | awk '
+        $0 == "expected" || $0 == "observed" { side = $0; unit = ""; next }
+        /^(ssh|sshd)\.(service|socket)$/ { unit = $0; next }
+        unit != "" && /^[A-Za-z]+=/ {
+            field = substr($0, 1, index($0, "=") - 1)
+            if (field !~ /^(Id|LoadState|ActiveState|SubState|MainPID|UnitFileState|ExecStart|Listen|Triggers|ControlGroup)$/) next
+            key = unit " " field
+            keys[key] = 1
+            present[side, key] = 1
+            value[side, key] = substr($0, index($0, "=") + 1)
+        }
+        END {
+            for (key in keys) {
+                split(key, labels, " ")
+                same = (present["expected", key] == present["observed", key] && value["expected", key] == value["observed", key])
+                printf "DIAG: owned-ssh stage=unit_compare unit=%s property=%s match=%d expected_present=%d observed_present=%d\n",
+                    labels[1], labels[2], same,
+                    present["expected", key], present["observed", key]
+            }
+        }
+    ' >&2
+}
+
 verify_owned_ssh_listeners() {
-    local listeners baseline
-    [[ "$(process_identity "$SSHD_PID")" == "$SSHD_IDENTITY" ]] || return 1
-    listeners=$(LC_ALL=C ss -H -ltnp) || return 1
+    local listeners baseline identity units fingerprint status
+    if identity=$(process_identity "$SSHD_PID" 2>/dev/null); then
+        [[ "$identity" == "$SSHD_IDENTITY" ]] || {
+            printf 'DIAG: owned-ssh stage=identity result=mismatch\n' >&2
+            return 1
+        }
+    else
+        status=$?
+        printf 'DIAG: owned-ssh stage=identity result=query_failed status=%s\n' "$status" >&2
+        return 1
+    fi
+    listeners=$(LC_ALL=C ss -H -ltnp 2>/dev/null) || {
+        status=$?
+        printf 'DIAG: owned-ssh stage=listeners result=query_failed status=%s\n' "$status" >&2
+        return 1
+    }
     owned_ssh_listeners_match <<<"$listeners" || return 1
     # Remove only our reserved listener rows before rechecking the host baseline.
     listeners=$(awk -v port="$SSH_PORT" '$4 !~ (":" port "$")' <<<"$listeners")
-    baseline=$(inspect_baseline_ssh "$listeners" "$INITIAL_SSH_EFFECTIVE" "$INITIAL_SSH_PORTS") || return 1
-    [[ "$baseline" == "$INITIAL_SSH_LISTENERS" ]] || return 1
-    [[ "$(ssh_unit_state)" == "$INITIAL_SSH_UNITS" ]] || return 1
-    [[ "$(ssh_config_fingerprint)" == "$INITIAL_SSH_FINGERPRINT" ]] || return 1
+    baseline=$(inspect_baseline_ssh "$listeners" "$INITIAL_SSH_EFFECTIVE" "$INITIAL_SSH_PORTS") || {
+        status=$?
+        printf 'DIAG: owned-ssh stage=baseline_inspection result=query_failed status=%s\n' "$status" >&2
+        return 1
+    }
+    [[ "$baseline" == "$INITIAL_SSH_LISTENERS" ]] || { ssh_baseline_comparison_diagnostic "$baseline"; return 1; }
+    units=$(ssh_unit_state 2>/dev/null) || {
+        status=$?
+        printf 'DIAG: owned-ssh stage=units result=query_failed status=%s\n' "$status" >&2
+        return 1
+    }
+    [[ "$units" == "$INITIAL_SSH_UNITS" ]] || {
+        printf 'DIAG: owned-ssh stage=units result=mismatch\n' >&2
+        ssh_unit_comparison_diagnostic "$units"
+        return 1
+    }
+    fingerprint=$(ssh_config_fingerprint 2>/dev/null) || {
+        status=$?
+        printf 'DIAG: owned-ssh stage=fingerprint result=query_failed status=%s\n' "$status" >&2
+        return 1
+    }
+    [[ "$fingerprint" == "$INITIAL_SSH_FINGERPRINT" ]] || {
+        printf 'DIAG: owned-ssh stage=fingerprint result=mismatch\n' >&2
+        return 1
+    }
 }
 
 read_runner_crontab() {
@@ -418,7 +520,11 @@ cleanup() {
     if [[ "${SSHD_CONFIG_CREATED:-0}" == "1" ]]; then
         if [[ "$(stat -Lc '%d:%i' "$SSH_DROP_IN")" == "$SSH_DROP_IN_IDENTITY" ]] &&
             [[ ! -L "$SSH_DROP_IN" ]] && cmp -s "$WORK_DIR/ssh-global-drop-in" "$SSH_DROP_IN"; then
-            rm -f "$SSH_DROP_IN" || cleanup_failed=1
+            if rm -f "$SSH_DROP_IN"; then
+                SSHD_CONFIG_CREATED=0
+            else
+                cleanup_failed=1
+            fi
         else
             printf 'FAIL: temporary SSH drop-in ownership changed; refusing removal\n' >&2
             cleanup_failed=1
@@ -594,7 +700,7 @@ for attempt in {1..50}; do
     if [[ -z "$SSHD_IDENTITY" ]]; then
         SSHD_IDENTITY=$(process_identity "$SSHD_PID") || SSHD_IDENTITY=""
     fi
-    if [[ -n "$SSHD_IDENTITY" ]] && verify_owned_ssh_listeners; then
+    if [[ -n "$SSHD_IDENTITY" ]] && verify_owned_ssh_listeners 2>/dev/null; then
         break
     fi
     sleep 0.1

@@ -20,7 +20,11 @@ func freshUFWScript(t *testing.T) string {
 // Load definitions only. None of the privileged native acceptance body runs.
 func runFreshUFWHelper(t *testing.T, body string, env ...string) (string, error) {
 	t.Helper()
-	contents := freshUFWScript(t)
+	return runFreshUFWHelperContents(t, freshUFWScript(t), body, env...)
+}
+
+func runFreshUFWHelperContents(t *testing.T, contents, body string, env ...string) (string, error) {
+	t.Helper()
 	main := strings.Index(contents, "\nrequire_github_hosted_release_job\n")
 	if main < 0 {
 		t.Fatal("cannot locate guarded acceptance entry point")
@@ -384,13 +388,23 @@ func TestFreshUFWOwnedListenerMatching(t *testing.T) {
 		ok              bool
 	}{
 		{"owned dualstack", v4 + "\n" + v6, true},
+		{"ss outer whitespace", "  " + v4 + " \t\n" + v6 + " \t", true},
+		{"changed queues accepted", strings.Replace(v4, "0 128", "3 256", 1) + "\n" + v6, true},
+		{"unrelated private row ignored", v4 + "\n" + v6 + "\nLISTEN 0 128 PRIVATE_HOST:8080 PRIVATE_PEER:* users:((\"PRIVATE_PROCESS\",pid=555,fd=9))", true},
+		{"empty", "", false},
 		{"missing v6", v4, false},
+		{"missing v4", v6, false},
 		{"duplicate v4", v4 + "\n" + v4, false},
+		{"duplicate v6", v6 + "\n" + v6, false},
 		{"wrong PID", v4 + "\n" + strings.ReplaceAll(v6, "999999", "123"), false},
 		{"public bind", strings.ReplaceAll(v4, "127.0.0.1", "0.0.0.0") + "\n" + v6, false},
 		{"mixed owners", strings.Replace(v4, "fd=3))", `fd=3),("node",pid=555,fd=9))`, 1) + "\n" + v6, false},
 		{"extra listener", v4 + "\n" + v6 + "\n" + strings.ReplaceAll(v4, "127.0.0.1", "127.0.0.2"), false},
 		{"unknown owner", strings.ReplaceAll(v4, `"sshd"`, `"sshd-session"`) + "\n" + v6, false},
+		{"missing owner", `LISTEN 0 128 127.0.0.1:2222 0.0.0.0:*` + "\n" + v6, false},
+		{"nonwhitespace suffix", v4 + " suffix \t\n" + v6, false},
+		{"invalid fd", strings.Replace(v4, "fd=3", "fd=bad", 1) + "\n" + v6, false},
+		{"unbracketed IPv6", v4 + "\n" + strings.Replace(v6, "[::1]:2222", "::1:2222", 1), false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			output, err := runFreshUFWHelper(t, `SSHD_PID=999999; owned_ssh_listeners_match <<<"$FIXTURE_LISTENERS"`, "FIXTURE_LISTENERS="+tt.listeners)
@@ -398,6 +412,211 @@ func TestFreshUFWOwnedListenerMatching(t *testing.T) {
 				t.Fatalf("success=%v, want %v: %v\n%s", err == nil, tt.ok, err, output)
 			}
 		})
+	}
+}
+
+func TestFreshUFWOwnedListenerDiagnosticsAreBounded(t *testing.T) {
+	v4 := `LISTEN 0 128 127.0.0.1:2222 PRIVATE_PEER:* users:(("sshd",pid=999999,fd=3))`
+	v6 := `LISTEN 0 128 [::1]:2222 PRIVATE_PEER:* users:(("sshd",pid=123,fd=4))`
+	for _, tt := range []struct {
+		name, listeners string
+		want            []string
+	}{
+		{"wrong PID", v4 + "\n" + v6, []string{"row=2 endpoint=[::1]:2222 endpoint_allowed=1 ownership_match=0", "row=2 owner=sshd pid=123 fd=4", "rows=2 ipv4=1 ipv6=1"}},
+		{"mixed owner", strings.Replace(v4, "fd=3))", `fd=3),("PRIVATE_PROCESS",pid=555,fd=9))`, 1) + "\n" + v6, []string{"row=1 owner=other pid=555 fd=9", "ownership_match=0"}},
+		{"missing owner", `LISTEN 0 128 127.0.0.1:2222 PRIVATE_PEER:*`, []string{"owner_metadata=unavailable", "rows=1 ipv4=1 ipv6=0"}},
+		{"unsafe endpoint", strings.Replace(v4, "127.0.0.1:2222", "PRIVATE_ENDPOINT:2222", 1), []string{"endpoint=redacted endpoint_allowed=0", "rows=1 ipv4=0 ipv6=0"}},
+		{"empty", "", []string{"rows=0 ipv4=0 ipv6=0"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			output, err := runFreshUFWHelper(t, `SSHD_PID=999999; owned_ssh_listeners_match <<<"$FIXTURE_LISTENERS"`,
+				"FIXTURE_LISTENERS="+tt.listeners+"\nLISTEN 0 128 PRIVATE_HOST:8080 PRIVATE_PEER:* users:((\"PRIVATE_PROCESS\",pid=777,fd=8))")
+			if err == nil {
+				t.Fatal("invalid owned listeners accepted")
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(output, want) {
+					t.Errorf("missing diagnostic %q: %s", want, output)
+				}
+			}
+			if strings.Contains(output, "PRIVATE_") || strings.Contains(output, "pid=777") || strings.Contains(output, "LISTEN") {
+				t.Fatalf("raw/private listener metadata leaked: %s", output)
+			}
+		})
+	}
+}
+
+func TestFreshUFWOwnedVerificationDiagnostics(t *testing.T) {
+	for _, tt := range []struct {
+		changed string
+		want    []string
+	}{
+		{"none", nil},
+		{"identity", []string{"stage=identity result=mismatch"}},
+		{"identity-query", []string{"stage=identity result=query_failed status=7"}},
+		{"listeners-query", []string{"stage=listeners result=query_failed status=8"}},
+		{"listeners", []string{"rows=1 ipv4=1 ipv6=0"}},
+		{"baseline-query", []string{"stage=baseline_inspection result=query_failed status=9"}},
+		{"baseline-endpoint", []string{"endpoint_set_match=0 endpoint_owner_rows_match=0"}},
+		{"baseline-owner", []string{"endpoint_set_match=1 endpoint_owner_rows_match=0"}},
+		{"units-query", []string{"stage=units result=query_failed status=10"}},
+		{"units", []string{"stage=units result=mismatch", "unit=ssh.service property=MainPID match=0", "unit=ssh.service property=ExecStart match=0", "unit=ssh.service property=ActiveState match=1"}},
+		{"fingerprint-query", []string{"stage=fingerprint result=query_failed status=11"}},
+		{"fingerprint", []string{"stage=fingerprint result=mismatch"}},
+	} {
+		t.Run(tt.changed, func(t *testing.T) {
+			output, err := runFreshUFWHelper(t, `
+SSHD_PID=999999
+SSHD_IDENTITY=1234
+INITIAL_SSH_EFFECTIVE='PRIVATE_CONFIG'
+INITIAL_SSH_PORTS=22
+INITIAL_SSH_LISTENERS='PRIVATE_HOST:22 sshd,pid=411,fd=3 '
+INITIAL_SSH_UNITS=$'ssh.service\nActiveState=active\nMainPID=411\nExecStart=PRIVATE_COMMAND'
+INITIAL_SSH_FINGERPRINT='PRIVATE_FINGERPRINT'
+process_identity() {
+    [[ "$FIXTURE_CHANGED" != identity-query ]] || { printf 'PRIVATE_ERROR\n' >&2; return 7; }
+    if [[ "$FIXTURE_CHANGED" == identity ]]; then printf '5678\n'; else printf '1234\n'; fi
+}
+ss() {
+    [[ "$*" == '-H -ltnp' ]] || return 99
+    [[ "$FIXTURE_CHANGED" != listeners-query ]] || { printf 'PRIVATE_ERROR\n' >&2; return 8; }
+    printf '%s\n' 'LISTEN 0 128 127.0.0.1:2222 0.0.0.0:* users:(("sshd",pid=999999,fd=3))'
+    if [[ "$FIXTURE_CHANGED" != listeners ]]; then
+        printf '%s\n' 'LISTEN 0 128 [::1]:2222 [::]:* users:(("sshd",pid=999999,fd=4))'
+    fi
+    printf '%s\n' 'LISTEN 0 128 PRIVATE_HOST:22 PRIVATE_PEER:* users:(("sshd",pid=411,fd=3))'
+}
+inspect_baseline_ssh() {
+    [[ "$1" != *':2222 '* && "$1" == *'PRIVATE_HOST:22 '* && "$2" == "$INITIAL_SSH_EFFECTIVE" && "$3" == 22 ]] || return 99
+    case "$FIXTURE_CHANGED" in
+        baseline-query) return 9 ;;
+        baseline-endpoint) printf 'PRIVATE_CHANGED_HOST:22 sshd,pid=411,fd=3 \n' ;;
+        baseline-owner) printf 'PRIVATE_HOST:22 sshd,pid=411,fd=4 \n' ;;
+        *) printf '%s\n' "$INITIAL_SSH_LISTENERS" ;;
+    esac
+}
+ssh_unit_state() {
+    case "$FIXTURE_CHANGED" in
+        units-query) printf 'PRIVATE_ERROR\n' >&2; return 10 ;;
+        units) printf '%s\n' $'ssh.service\nActiveState=active\nMainPID=412\nExecStart=PRIVATE_CHANGED_COMMAND' ;;
+        *) printf '%s\n' "$INITIAL_SSH_UNITS" ;;
+    esac
+}
+ssh_config_fingerprint() {
+    case "$FIXTURE_CHANGED" in
+        fingerprint-query) printf 'PRIVATE_ERROR\n' >&2; return 11 ;;
+        fingerprint) printf 'PRIVATE_CHANGED_FINGERPRINT\n' ;;
+        *) printf '%s\n' "$INITIAL_SSH_FINGERPRINT" ;;
+    esac
+}
+verify_owned_ssh_listeners
+`, "FIXTURE_CHANGED="+tt.changed)
+			if (err == nil) != (tt.changed == "none") {
+				t.Fatalf("changed=%s: %v\n%s", tt.changed, err, output)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(output, want) {
+					t.Errorf("missing %q: %s", want, output)
+				}
+			}
+			if strings.Contains(output, "PRIVATE_") || strings.Contains(output, "pid=411") {
+				t.Fatalf("host/config/private metadata leaked: %s", output)
+			}
+			if tt.changed == "none" && output != "" {
+				t.Fatalf("successful verification must stay silent: %s", output)
+			}
+		})
+	}
+}
+
+func TestFreshUFWFingerprintExcludesOnlyValidatedOwnedDropIn(t *testing.T) {
+	for _, changed := range []string{"none", "unowned", "inode", "content", "symlink", "missing", "host", "binary", "cleanup"} {
+		t.Run(changed, func(t *testing.T) {
+			dir := t.TempDir()
+			sshDir := filepath.Join(dir, "ssh")
+			if err := os.MkdirAll(filepath.Join(sshDir, "sshd_config.d"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			contents := strings.ReplaceAll(freshUFWScript(t), "/etc/ssh", sshDir)
+			contents = strings.ReplaceAll(contents, "/etc/default/ssh", filepath.Join(dir, "default-ssh"))
+			output, err := runFreshUFWHelperContents(t, contents, `
+WORK_DIR="$FIXTURE_DIR"
+SSHD_BIN="$WORK_DIR/sshd-binary"
+printf 'test binary\n' >"$SSHD_BIN"
+printf 'test host config\n' >"$FIXTURE_SSH_DIR/sshd_config"
+printf 'Port 22\nPort 2222\n' >"$WORK_DIR/ssh-global-drop-in"
+SSHD_CONFIG_CREATED=0
+SSH_DROP_IN_IDENTITY=1:1234
+stat() {
+    [[ "$*" == "-Lc %d:%i $SSH_DROP_IN" ]] || return 99
+    if [[ "$FIXTURE_CHANGED" == inode ]]; then printf '1:5678\n'; else printf '1:1234\n'; fi
+}
+if ! command -v sha256sum >/dev/null; then sha256sum() { shasum -a 256 "$@"; }; fi
+INITIAL_SSH_FINGERPRINT=$(ssh_config_fingerprint)
+cp "$WORK_DIR/ssh-global-drop-in" "$SSH_DROP_IN"
+SSHD_CONFIG_CREATED=1
+case "$FIXTURE_CHANGED" in
+    unowned) SSHD_CONFIG_CREATED=0 ;;
+    content) printf 'Port 2200\n' >>"$SSH_DROP_IN" ;;
+    symlink) rm "$SSH_DROP_IN"; ln -s "$WORK_DIR/ssh-global-drop-in" "$SSH_DROP_IN" ;;
+    missing) rm "$SSH_DROP_IN" ;;
+    host) printf 'changed host config\n' >>"$FIXTURE_SSH_DIR/sshd_config" ;;
+    binary) printf 'changed binary\n' >>"$SSHD_BIN" ;;
+    cleanup)
+        SSHD_PID=''
+        ALLOW_RULES_OWNED=0
+        DENY_RULE_OWNED=0
+        SSH_BASELINE_READY=1
+        ufw() { printf 'Status: inactive\n'; }
+        cleanup_sshd_run_directory() { return 0; }
+        verify_ssh_baseline_unchanged() {
+            [[ "$SSHD_CONFIG_CREATED" == 0 && ! -e "$SSH_DROP_IN" ]] &&
+                [[ "$(ssh_config_fingerprint)" == "$INITIAL_SSH_FINGERPRINT" ]]
+        }
+        cleanup ;;
+esac
+fingerprint=$(ssh_config_fingerprint)
+[[ "$fingerprint" == "$INITIAL_SSH_FINGERPRINT" ]]
+`, "FIXTURE_DIR="+dir, "FIXTURE_SSH_DIR="+sshDir, "FIXTURE_CHANGED="+changed)
+			wantOK := changed == "none" || changed == "cleanup"
+			if (err == nil) != wantOK {
+				t.Fatalf("changed=%s success=%v want=%v: %v\n%s", changed, err == nil, wantOK, err, output)
+			}
+			if strings.Contains(output, "Port ") || strings.Contains(output, "test host config") || strings.Contains(output, "test binary") {
+				t.Fatalf("fingerprint operation leaked contents: %s", output)
+			}
+		})
+	}
+}
+
+func TestFreshUFWOwnedListenerRetryBounds(t *testing.T) {
+	contents := freshUFWScript(t)
+	start := strings.Index(contents, "for attempt in {1..50}; do\n")
+	if start < 0 {
+		t.Fatal("missing exact 50-attempt startup loop")
+	}
+	end := strings.Index(contents[start:], "\ndone\n")
+	if end < 0 {
+		t.Fatal("missing exact 50-attempt startup loop")
+	}
+	loop := contents[start : start+end+len("\ndone\n")]
+	if strings.Count(loop, "sleep 0.1\n") != 1 || !strings.Contains(loop, "verify_owned_ssh_listeners 2>/dev/null") ||
+		!strings.HasPrefix(contents[start+end+len("\ndone\n"):], "verify_owned_ssh_listeners ||") {
+		t.Fatal("retry delay or final diagnostic verification changed")
+	}
+	output, err := runFreshUFWHelper(t, `
+SSHD_PID=999999
+SSHD_IDENTITY=1234
+checks=0
+sleeps=0
+kill() { [[ "$*" == '-0 999999' ]]; }
+verify_owned_ssh_listeners() { checks=$((checks + 1)); printf 'suppressed polling diagnostic\n' >&2; return 1; }
+sleep() { [[ "$1" == 0.1 ]] || return 99; sleeps=$((sleeps + 1)); }
+`+loop+`
+[[ "$checks" == 50 && "$sleeps" == 50 ]]
+`)
+	if err != nil || output != "" {
+		t.Fatalf("retry bounds/quiet polling failed: %v\n%s", err, output)
 	}
 }
 
