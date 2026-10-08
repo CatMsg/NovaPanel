@@ -1,11 +1,14 @@
 package service
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -13,13 +16,29 @@ import (
 	"github.com/CatMsg/NovaPanel/core"
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
+	"github.com/CatMsg/NovaPanel/internal/testutil"
 	"github.com/CatMsg/NovaPanel/logger"
 	"github.com/op/go-logging"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
-func setupInboundRuntimeTest(t *testing.T) (*gorm.DB, *InboundService) {
+func setupInboundRuntimeTest(t *testing.T, hostCalls ...[]string) (*gorm.DB, *InboundService) {
 	t.Helper()
+	var bashCalls [][]string
+	for _, call := range hostCalls {
+		if call[0] == "bash" {
+			bashCalls = append(bashCalls, call[1:])
+		}
+	}
+	commands := testutil.NewHostCommandSandbox(t, bashCalls...)
+	t.Cleanup(func() {
+		var wantCalls [][]string
+		if runtime.GOOS == "linux" {
+			wantCalls = hostCalls
+		}
+		commands.AssertCalls(t, wantCalls)
+	})
 	logger.InitLogger(logging.ERROR)
 	if err := database.InitDB(filepath.Join(t.TempDir(), "inbound-runtime.db")); err != nil {
 		t.Fatal(err)
@@ -37,6 +56,22 @@ func setupInboundRuntimeTest(t *testing.T) (*gorm.DB, *InboundService) {
 		t.Fatalf("start test core: %v", err)
 	}
 	return database.GetDB(), &InboundService{}
+}
+
+func inboundRuntimeForwardCall(t *testing.T, action string, inbound model.Inbound) []string {
+	t.Helper()
+	var options struct {
+		ListenPort int `json:"listen_port"`
+	}
+	if err := json.Unmarshal(inbound.Options, &options); err != nil {
+		t.Fatal(err)
+	}
+	port := strconv.Itoa(options.ListenPort)
+	protocols := "tcp"
+	if action == "remove" {
+		protocols = "tcp,udp"
+	}
+	return []string{"bash", "scripts/hy2-forward.sh", action, inbound.Tag, port, port, protocols}
 }
 
 func inboundTestOptions(t *testing.T, protocol ...string) json.RawMessage {
@@ -88,8 +123,8 @@ func TestInboundRuntimeRestartWithoutNaiveUsers(t *testing.T) {
 }
 
 func TestInboundRuntimeSaveWithoutNaiveUsers(t *testing.T) {
-	db, svc := setupInboundRuntimeTest(t)
 	inbound := model.Inbound{Type: "naive", Tag: "empty-naive", Options: inboundTestOptions(t)}
+	db, svc := setupInboundRuntimeTest(t, inboundRuntimeForwardCall(t, "apply", inbound))
 	payload, err := inbound.MarshalFull()
 	if err != nil {
 		t.Fatal(err)
@@ -263,9 +298,15 @@ func TestInboundRuntimeSaveInitialUsersAndRename(t *testing.T) {
 	for _, protocol := range []string{"naive", "mixed"} {
 		for _, enabled := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/enabled=%v", protocol, enabled), func(t *testing.T) {
-				db, svc := setupInboundRuntimeTest(t)
-				client := seedInboundRuntimeClient(t, db, 999, enabled)
 				inbound := model.Inbound{Type: protocol, Tag: "original", Options: inboundTestOptions(t, protocol)}
+				renamed := inbound
+				renamed.Tag = "renamed"
+				db, svc := setupInboundRuntimeTest(t,
+					inboundRuntimeForwardCall(t, "apply", inbound),
+					inboundRuntimeForwardCall(t, "remove", inbound),
+					inboundRuntimeForwardCall(t, "apply", renamed),
+				)
+				client := seedInboundRuntimeClient(t, db, 999, enabled)
 				if err := applyInboundRuntimeSave(t, db, svc, "new", inboundRuntimePayload(t, inbound), strconv.Itoa(int(client.Id))); err != nil {
 					t.Fatal(err)
 				}
@@ -311,8 +352,8 @@ func TestInboundRuntimeRestartMixedWithoutUsers(t *testing.T) {
 func TestInboundRuntimeSaveFailureRestoresBeforeImage(t *testing.T) {
 	for _, enabled := range []bool{false, true} {
 		t.Run(fmt.Sprintf("old-user-enabled=%v", enabled), func(t *testing.T) {
-			db, svc := setupInboundRuntimeTest(t)
 			inbound := model.Inbound{Type: "naive", Tag: "before", Options: inboundTestOptions(t)}
+			db, svc := setupInboundRuntimeTest(t, testutil.ManagedPortRebuildCalls(inboundRuntimeForwardCall(t, "apply", inbound))...)
 			if err := db.Create(&inbound).Error; err != nil {
 				t.Fatal(err)
 			}
@@ -407,9 +448,63 @@ func TestInboundRuntimeSaveAddFailureRestoresCore(t *testing.T) {
 	}
 }
 
+func TestInboundRuntimeSaveCompensationFailureIsReported(t *testing.T) {
+	inbound := model.Inbound{Type: "mixed", Tag: "before-compensation-failure", Options: inboundTestOptions(t, "mixed")}
+	db, svc := setupInboundRuntimeTest(t, testutil.ManagedPortRebuildCalls(inboundRuntimeForwardCall(t, "apply", inbound))...)
+	if err := db.Create(&inbound).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RestartInbounds(db, []uint{inbound.Id}); err != nil {
+		t.Fatal(err)
+	}
+	configSvc := &ConfigService{}
+	if err := configSvc.SettingService.SetConfig(`{"log":{"disabled":true},"route":{"final":"direct"}}`); err != nil {
+		t.Fatal(err)
+	}
+	busy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer busy.Close()
+	updated := inbound
+	updated.Tag = "failed-compensation-rename"
+	updated.Options = json.RawMessage(fmt.Sprintf(`{"listen":"127.0.0.1","listen_port":%d}`, busy.Addr().(*net.TCPAddr).Port))
+	injected := errors.New("injected compensation config read failure")
+	compensationReads := 0
+	const callback = "test:inbound_compensation_config_failure"
+	if err := db.Callback().Query().Before("gorm:query").Register(callback, func(tx *gorm.DB) {
+		_, inTransaction := tx.Statement.ConnPool.(*sql.Tx)
+		// Preflight reads are transactional; only compensation reloads config
+		// after the real socket bind failure and managed-port restoration.
+		if !inTransaction && tx.Statement.Table == "settings" {
+			where := tx.Statement.Clauses["WHERE"].Expression
+			if reflect.DeepEqual(where, clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "key = ?", Vars: []interface{}{"config"}}}}) {
+				compensationReads++
+				tx.AddError(injected)
+			}
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Callback().Query().Remove(callback) })
+	_, changed, err := configSvc.Save("inbounds", "edit", inboundRuntimePayload(t, updated), "", "test", "localhost")
+	if err == nil || changed || compensationReads != 1 || !strings.Contains(err.Error(), "address already in use") || !strings.Contains(err.Error(), "保存补偿失败") || !strings.Contains(err.Error(), injected.Error()) || strings.Contains(err.Error(), "配置已自动回滚") {
+		t.Fatalf("expected bind failure and explicit compensation failure: changed=%v reads=%d err=%v", changed, compensationReads, err)
+	}
+	var stored model.Inbound
+	if err := db.First(&stored, inbound.Id).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.Tag != inbound.Tag || stored.Type != inbound.Type || !equalJSONBytes(stored.Options, inbound.Options) {
+		t.Fatalf("database before-image not restored: %+v", stored)
+	}
+	assertInboundRuntimeColdConfig(t, db, svc, inbound.Tag, true)
+	assertInboundRuntimeTag(t, updated.Tag, false)
+}
+
 func TestInboundRuntimeRollbackUsesSnapshotAfterDelete(t *testing.T) {
-	db, svc := setupInboundRuntimeTest(t)
 	inbound := model.Inbound{Type: "naive", Tag: "before-delete", Options: inboundTestOptions(t)}
+	db, svc := setupInboundRuntimeTest(t, inboundRuntimeForwardCall(t, "remove", inbound))
 	if err := db.Create(&inbound).Error; err != nil {
 		t.Fatal(err)
 	}

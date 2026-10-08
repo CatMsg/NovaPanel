@@ -323,7 +323,9 @@ KbdInteractiveAuthentication no
 PubkeyAuthentication no
 UsePAM no
 EOF
-sshd_effective=$(LC_ALL=C sshd -T) || die "sshd rejected the temporary listener configuration"
+SSHD_BIN=$(command -v sshd) || die "OpenSSH daemon executable is unavailable"
+[[ "$SSHD_BIN" == /* && -x "$SSHD_BIN" ]] || die "resolved sshd path must be absolute and executable"
+sshd_effective=$(LC_ALL=C "$SSHD_BIN" -T) || die "sshd rejected the temporary listener configuration"
 port_count=$(awk '$1 == "port" { count++ } END { print count + 0 }' <<<"$sshd_effective")
 [[ "$port_count" == "1" ]] || die "sshd effective configuration contains unexpected ports"
 awk -v port="$SSH_PORT" '
@@ -335,8 +337,8 @@ awk -v port="$SSH_PORT" '
     }
     END { exit !(found_port && count == 2) }
 ' <<<"$sshd_effective" || die "sshd is not restricted to IPv4/IPv6 loopback on port $SSH_PORT"
-sshd -t
-sshd -D -E "$WORK_DIR/sshd.log" &
+"$SSHD_BIN" -t
+"$SSHD_BIN" -D -E "$WORK_DIR/sshd.log" &
 SSHD_PID=$!
 for attempt in {1..50}; do
     kill -0 "$SSHD_PID" 2>/dev/null || { cat "$WORK_DIR/sshd.log" >&2; die "temporary sshd exited before listening"; }
