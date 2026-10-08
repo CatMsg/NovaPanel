@@ -39,4 +39,6 @@
 
 在仓库根目录运行 `sh runNovas.sh`，使用原有 `db/novas.db` 与测试数据，不创建空库替代开发环境。默认面板为 `http://127.0.0.1:2095/app/`，实际端口和路径以现有设置为准。
 
+iMac/macOS 本地开发沿用 `sh runNovas.sh`、原有 `db/novas.db` 和 2095 端口，不依赖 UFW、iptables、nftables、cron 或 systemd；非 Linux 环境跳过 Linux 防火墙/NAT 集成。需要真实特权 Linux 环境的全新安装及 ACME cron 验收，仅在隔离的 GitHub-hosted Linux 作业中执行，不在 Mac 开发机上执行。
+
 单元测试与 mock API 的端到端测试用于验证界面和并发行为，不等于已验证公网 VPS、防火墙、协议握手和服务商的解锁限额。发布与线上更新另行执行。

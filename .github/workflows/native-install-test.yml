@@ -26,7 +26,7 @@ jobs:
       - name: 构建原生验收用 novas
         run: go build -o "$RUNNER_TEMP/novas-fresh-ufw-test" main.go
 
-      - name: 运行真实 UFW 与 ACME cron 验收
+      - name: 运行真实 UFW 与 SSH 验收
         env:
           NOVAS_FRESH_UFW_OPT_IN: "1"
           NOVAS_RUNNER_ENVIRONMENT: ${{ runner.environment }}
@@ -59,3 +59,46 @@ jobs:
             NOVAS_WORKSPACE="$NOVAS_WORKSPACE" \
             bash "$GITHUB_WORKSPACE/scripts/test-fresh-ufw-linux.sh" \
               "$RUNNER_TEMP/novas-fresh-ufw-test"
+
+  test-acme-cron-linux:
+    name: Native ACME/cron acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v6.0.2
+
+      - name: 运行真实 ACME cron 验收
+        env:
+          NOVAS_ACME_CRON_OPT_IN: "1"
+          NOVAS_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          NOVAS_GITHUB_JOB: ${{ github.job }}
+          NOVAS_GITHUB_WORKFLOW: ${{ github.workflow }}
+          NOVAS_GITHUB_EVENT_NAME: ${{ github.event_name }}
+          NOVAS_GITHUB_SERVER_URL: ${{ github.server_url }}
+          NOVAS_GITHUB_REPOSITORY: ${{ github.repository }}
+          NOVAS_GITHUB_RUN_ID: ${{ github.run_id }}
+          NOVAS_GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          NOVAS_RUNNER_OS: ${{ runner.os }}
+          NOVAS_RUNNER_NAME: ${{ runner.name }}
+          NOVAS_RUNNER_TEMP: ${{ runner.temp }}
+          NOVAS_WORKSPACE: ${{ github.workspace }}
+        run: |
+          sudo env \
+            NOVAS_ACME_CRON_OPT_IN="$NOVAS_ACME_CRON_OPT_IN" \
+            NOVAS_GITHUB_ACTIONS="$GITHUB_ACTIONS" \
+            NOVAS_RUNNER_ENVIRONMENT="$NOVAS_RUNNER_ENVIRONMENT" \
+            NOVAS_GITHUB_JOB="$NOVAS_GITHUB_JOB" \
+            NOVAS_GITHUB_WORKFLOW="$NOVAS_GITHUB_WORKFLOW" \
+            NOVAS_GITHUB_EVENT_NAME="$NOVAS_GITHUB_EVENT_NAME" \
+            NOVAS_GITHUB_SERVER_URL="$NOVAS_GITHUB_SERVER_URL" \
+            NOVAS_GITHUB_REPOSITORY="$NOVAS_GITHUB_REPOSITORY" \
+            NOVAS_GITHUB_RUN_ID="$NOVAS_GITHUB_RUN_ID" \
+            NOVAS_GITHUB_RUN_ATTEMPT="$NOVAS_GITHUB_RUN_ATTEMPT" \
+            NOVAS_RUNNER_OS="$NOVAS_RUNNER_OS" \
+            NOVAS_RUNNER_NAME="$NOVAS_RUNNER_NAME" \
+            NOVAS_RUNNER_TEMP="$NOVAS_RUNNER_TEMP" \
+            NOVAS_WORKSPACE="$NOVAS_WORKSPACE" \
+            bash "$GITHUB_WORKSPACE/scripts/test-acme-cron-linux.sh"

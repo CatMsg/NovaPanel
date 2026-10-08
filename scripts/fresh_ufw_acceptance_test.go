@@ -4,8 +4,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func freshUFWScript(t *testing.T) string {
@@ -121,17 +124,17 @@ func TestFreshUFWRuntimeDirectoryOrdering(t *testing.T) {
 	}
 }
 
-func TestFreshUFWACMECompletesBeforeTemporarySSHConfig(t *testing.T) {
+func TestNativeAcceptanceScriptsAreIndependent(t *testing.T) {
 	contents := freshUFWScript(t)
+	for _, forbidden := range []string{"ACME", "acme", "crontab", " cron", "runuser"} {
+		if strings.Contains(contents, forbidden) {
+			t.Errorf("ACME/cron work must not run in the UFW harness: %s", forbidden)
+		}
+	}
 	previous := -1
 	for _, step := range []string{
-		`apt-get install -y --no-upgrade --no-install-recommends ufw openssh-client iproute2 cron`,
+		`apt-get install -y --no-upgrade --no-install-recommends ufw openssh-client iproute2`,
 		`verify_ssh_baseline_unchanged || die "package installation changed host SSH configuration, ownership or listeners"`,
-		`RUNNER_USER="$SUDO_USER"`,
-		`systemctl enable --now cron`,
-		`runuser -u "$RUNNER_USER" -- env -i`,
-		`PASS: extracted real ACME bootstrap installed official acme.sh and one owned cron job; no CA action was run`,
-		`verify_ssh_baseline_unchanged || die "ACME cron setup changed host SSH configuration, ownership or listeners"`,
 		`ssh-keygen -q -t ed25519 -N '' -f "$WORK_DIR/ssh_host_ed25519_key"`,
 		`(set -o noclobber; cat "$WORK_DIR/ssh-global-drop-in" >"$SSH_DROP_IN")`,
 		`install_fresh_ufw "$WORK_DIR/panel-home" "" "$PANEL_PORT" "$SUB_PORT"`,
@@ -143,45 +146,340 @@ func TestFreshUFWACMECompletesBeforeTemporarySSHConfig(t *testing.T) {
 		previous = position
 	}
 
-	dropIn := strings.Index(contents, `(set -o noclobber; cat "$WORK_DIR/ssh-global-drop-in" >"$SSH_DROP_IN")`)
-	// The drop-in remains until EXIT cleanup. No later phase may enable cron
-	// (including via the real ACME bootstrap) or trigger package unit reloads.
-	for _, line := range strings.Split(contents[dropIn:], "\n") {
+	for _, line := range strings.Split(contents, "\n") {
 		fields := strings.Fields(line)
-		if len(fields) == 0 {
-			continue
-		}
-		switch fields[0] {
-		case "apt-get", "runuser":
-			t.Errorf("package/ACME work overlaps temporary SSH configuration: %s", line)
-		case "systemctl":
-			if len(fields) < 2 || (fields[1] != "show" && fields[1] != "is-active") {
-				t.Errorf("systemd mutation overlaps temporary SSH configuration: %s", line)
+		for i, field := range fields {
+			if i >= 2 && fields[i-2] == "command" && fields[i-1] == "-v" {
+				continue
 			}
+			if field == "systemctl" && (i+1 == len(fields) || (fields[i+1] != "show" && fields[i+1] != "is-active")) {
+				t.Errorf("UFW harness must only inspect systemd: %s", line)
+			}
+		}
+	}
+	cron := acmeCronScript(t)
+	for _, required := range []string{
+		`apt-get install -y --no-upgrade --no-install-recommends cron curl`,
+		`systemctl enable --now cron`, `runuser -u "$RUNNER_USER" -- env -i`,
+		`HOME="$ACME_USER_HOME"`, `ACME_USER_HOME="$WORK_DIR/acme-home"`,
+		`ensure_acme_cron prepare_cloudflare_acme install_acme_payload`,
+		"        prepare_cloudflare_acme\n", "        verify_acme_renewal_cron\n",
+		`"$HOME/.acme.sh/acme.sh" --version`,
+		`[[ "$(count_owned_acme_jobs "$ACME_CRONTAB_AFTER")" == "1" ]]`,
+		`cmp -s "$ACME_CRONTAB_BEFORE" "$ACME_CRONTAB_WITHOUT_OWNED"`,
+		"trap cleanup EXIT", "trap 'exit 130' INT", "trap 'exit 143' TERM",
+	} {
+		if !strings.Contains(cron, required) {
+			t.Errorf("missing real isolated ACME/cron acceptance: %s", required)
+		}
+	}
+	for _, forbidden := range []string{"test-fresh-ufw", "sshd", "/etc/ssh", "ufw ", "verify_ssh_baseline", "--issue", "--renew", "CF_Token=", "secrets."} {
+		if strings.Contains(cron, forbidden) {
+			t.Errorf("cron harness crosses isolation/no-CA boundary: %s", forbidden)
+		}
+	}
+	guard := strings.Index(cron, "\nrequire_github_hosted_release_job\n")
+	for _, mutation := range []string{"\nWORK_DIR=$(mktemp", "\napt-get update", "\nsystemctl enable"} {
+		if guard < 0 || strings.Index(cron, mutation) <= guard {
+			t.Errorf("cron mutation precedes hosted-runner guard: %s", mutation)
 		}
 	}
 }
 
-func TestFreshUFWACMEHandoffRejectsSSHDrift(t *testing.T) {
-	contents := freshUFWScript(t)
-	const handoff = `verify_ssh_baseline_unchanged || die "ACME cron setup changed host SSH configuration, ownership or listeners"`
-	if !strings.Contains(contents, "\n"+handoff+"\n") {
-		t.Fatal("missing SSH baseline verification at the ACME-to-UFW handoff")
+func acmeCronScript(t *testing.T) string {
+	t.Helper()
+	contents, err := os.ReadFile("test-acme-cron-linux.sh")
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, result := range []string{"0", "1"} {
-		t.Run(result, func(t *testing.T) {
-			output, err := runFreshUFWHelper(t, `
-verify_ssh_baseline_unchanged() { return "$FIXTURE_BASELINE_RESULT"; }
-`+handoff+`
-printf 'reached isolated SSH phase\n'
-`, "FIXTURE_BASELINE_RESULT="+result)
-			if result == "0" {
-				if err != nil || !strings.Contains(output, "reached isolated SSH phase") {
-					t.Fatalf("unchanged baseline did not reach the SSH phase: %v\n%s", err, output)
+	return string(contents)
+}
+
+func TestNativeAcceptanceJobGuards(t *testing.T) {
+	for _, harness := range []struct{ job, optIn, script string }{
+		{"test-fresh-ufw-linux", "NOVAS_FRESH_UFW_OPT_IN", freshUFWScript(t)},
+		{"test-acme-cron-linux", "NOVAS_ACME_CRON_OPT_IN", acmeCronScript(t)},
+	} {
+		t.Run(harness.job, func(t *testing.T) {
+			// Mock identity inspection only; never execute the privileged body.
+			contents := strings.ReplaceAll(harness.script, `"$EUID"`, `"$FIXTURE_EUID"`)
+			valid := map[string]string{
+				harness.optIn: "1", "NOVAS_GITHUB_ACTIONS": "true",
+				"NOVAS_RUNNER_ENVIRONMENT": "github-hosted", "NOVAS_GITHUB_JOB": harness.job,
+				"NOVAS_GITHUB_WORKFLOW": "发布 NovaPanel", "NOVAS_GITHUB_EVENT_NAME": "workflow_dispatch",
+				"NOVAS_GITHUB_SERVER_URL": "https://github.com", "NOVAS_GITHUB_REPOSITORY": "CatMsg/NovaPanel",
+				"NOVAS_GITHUB_RUN_ID": "123", "NOVAS_GITHUB_RUN_ATTEMPT": "1",
+				"NOVAS_RUNNER_OS": "Linux", "NOVAS_RUNNER_NAME": "GitHub Actions 1",
+				"NOVAS_RUNNER_TEMP": "/home/runner/work/_temp", "NOVAS_WORKSPACE": "/home/runner/work/NovaPanel/NovaPanel",
+				"SUDO_USER": "runner", "FIXTURE_EUID": "0", "FIXTURE_UNAME": "Linux", "FIXTURE_RUNNER_UID": "1001",
+			}
+			cases := []struct {
+				key, value string
+				allowed    bool
+			}{
+				{"", "", true}, {"NOVAS_GITHUB_WORKFLOW", "NovaPanel 安装验收", true},
+				{harness.optIn, "", false}, {harness.optIn, "true", false},
+				{"NOVAS_GITHUB_ACTIONS", "false", false}, {"NOVAS_RUNNER_ENVIRONMENT", "self-hosted", false},
+				{"NOVAS_GITHUB_JOB", "other-job", false}, {"NOVAS_GITHUB_JOB", "", false},
+				{"NOVAS_GITHUB_WORKFLOW", "发布 NovaPanel copy", false}, {"NOVAS_GITHUB_WORKFLOW", "", false},
+				{"NOVAS_GITHUB_EVENT_NAME", "push", false}, {"NOVAS_GITHUB_SERVER_URL", "https://example.com", false},
+				{"NOVAS_GITHUB_REPOSITORY", "other/NovaPanel", false},
+				{"NOVAS_GITHUB_RUN_ID", "", false}, {"NOVAS_GITHUB_RUN_ID", "123x", false},
+				{"NOVAS_GITHUB_RUN_ATTEMPT", "", false}, {"NOVAS_GITHUB_RUN_ATTEMPT", "x1", false},
+				{"NOVAS_RUNNER_OS", "macOS", false}, {"FIXTURE_UNAME", "Darwin", false},
+				{"NOVAS_RUNNER_NAME", "self-hosted", false}, {"NOVAS_RUNNER_TEMP", "/tmp", false},
+				{"NOVAS_WORKSPACE", "/tmp/NovaPanel", false}, {"FIXTURE_EUID", "1001", false},
+				{"SUDO_USER", "root", false}, {"FIXTURE_RUNNER_UID", "0", false},
+			}
+			otherJob := "test-fresh-ufw-linux"
+			if harness.job == otherJob {
+				otherJob = "test-acme-cron-linux"
+			}
+			cases = append(cases, struct {
+				key, value string
+				allowed    bool
+			}{"NOVAS_GITHUB_JOB", otherJob, false})
+			for _, tt := range cases {
+				t.Run(tt.key+"="+tt.value, func(t *testing.T) {
+					env := make([]string, 0, len(valid))
+					for key, value := range valid {
+						if key == tt.key {
+							value = tt.value
+						}
+						env = append(env, key+"="+value)
+					}
+					output, err := runFreshUFWHelperContents(t, contents, `
+uname() { printf '%s\n' "$FIXTURE_UNAME"; }
+id() { [[ "$*" == '-u runner' ]] || return 1; printf '%s\n' "$FIXTURE_RUNNER_UID"; }
+require_github_hosted_release_job
+printf 'guard accepted\n'
+`, env...)
+					if (err == nil) != tt.allowed || strings.Contains(output, "guard accepted") != tt.allowed {
+						t.Fatalf("guard allowed=%v, want %v: %v\n%s", err == nil, tt.allowed, err, output)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestNativeAcceptanceWorkflowIsolationAndReleaseGates(t *testing.T) {
+	for _, path := range []string{"../.github/workflows/native-install-test.yml", "../.github/workflows/release.yml"} {
+		t.Run(path, func(t *testing.T) {
+			contents, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var workflow struct{ Jobs map[string]yaml.Node }
+			if err := yaml.Unmarshal(contents, &workflow); err != nil {
+				t.Fatal(err)
+			}
+			for _, tt := range []struct{ job, optIn, script string }{
+				{"test-fresh-ufw-linux", "NOVAS_FRESH_UFW_OPT_IN", "test-fresh-ufw-linux.sh"},
+				{"test-acme-cron-linux", "NOVAS_ACME_CRON_OPT_IN", "test-acme-cron-linux.sh"},
+			} {
+				node, exists := workflow.Jobs[tt.job]
+				if !exists {
+					t.Fatalf("missing independent job %s", tt.job)
 				}
-			} else if err == nil || strings.Contains(output, "reached isolated SSH phase") ||
-				!strings.Contains(output, "ACME cron setup changed host SSH configuration, ownership or listeners") {
-				t.Fatalf("SSH baseline drift was not refused before the SSH phase: %v\n%s", err, output)
+				var job struct {
+					RunsOn          string `yaml:"runs-on"`
+					ContinueOnError bool   `yaml:"continue-on-error"`
+					If              string
+					Needs           []string
+					Permissions     map[string]string
+					Steps           []struct {
+						If, Run         string
+						ContinueOnError bool `yaml:"continue-on-error"`
+						Env             map[string]string
+					}
+				}
+				if err := node.Decode(&job); err != nil {
+					t.Fatal(err)
+				}
+				if job.RunsOn != "ubuntu-latest" || job.If != "" || job.ContinueOnError || job.Permissions["contents"] != "read" {
+					t.Fatalf("job %s must run unconditionally on its own hosted runner with read-only contents", tt.job)
+				}
+				for _, dependency := range job.Needs {
+					if dependency != "test-backend" {
+						t.Errorf("acceptance jobs must not depend on one another: %s needs %s", tt.job, dependency)
+					}
+				}
+				found := 0
+				for _, step := range job.Steps {
+					if step.ContinueOnError || strings.Contains(step.Run, "|| true") || strings.Contains(step.Run, "secrets.") {
+						t.Errorf("acceptance bypass or credential reference in %s", tt.job)
+					}
+					other := "test-acme-cron-linux.sh"
+					if tt.script == other {
+						other = "test-fresh-ufw-linux.sh"
+					}
+					if strings.Contains(step.Run, other) {
+						t.Errorf("%s invokes the other environment's script", tt.job)
+					}
+					if !strings.Contains(step.Run, tt.script) {
+						continue
+					}
+					syntax := exec.Command("bash", "-n")
+					syntax.Stdin = strings.NewReader(step.Run)
+					if output, err := syntax.CombinedOutput(); err != nil {
+						t.Errorf("invalid workflow shell syntax in %s: %v\n%s", tt.job, err, output)
+					}
+					found++
+					if step.If != "" || step.Env[tt.optIn] != "1" || !strings.Contains(step.Run, "sudo env") ||
+						!strings.Contains(step.Run, tt.optIn+`="$`+tt.optIn+`"`) ||
+						!strings.Contains(step.Run, `NOVAS_GITHUB_ACTIONS="$GITHUB_ACTIONS"`) {
+						t.Errorf("missing unconditional opt-in/root/action identity forwarding in %s", tt.job)
+					}
+					for key, expression := range map[string]string{
+						"NOVAS_RUNNER_ENVIRONMENT": "runner.environment", "NOVAS_GITHUB_JOB": "github.job",
+						"NOVAS_GITHUB_WORKFLOW": "github.workflow", "NOVAS_GITHUB_EVENT_NAME": "github.event_name",
+						"NOVAS_GITHUB_SERVER_URL": "github.server_url", "NOVAS_GITHUB_REPOSITORY": "github.repository",
+						"NOVAS_GITHUB_RUN_ID": "github.run_id", "NOVAS_GITHUB_RUN_ATTEMPT": "github.run_attempt",
+						"NOVAS_RUNNER_OS": "runner.os", "NOVAS_RUNNER_NAME": "runner.name",
+						"NOVAS_RUNNER_TEMP": "runner.temp", "NOVAS_WORKSPACE": "github.workspace",
+					} {
+						if step.Env[key] != "${{ "+expression+" }}" || !strings.Contains(step.Run, key+`="$`+key+`"`) {
+							t.Errorf("missing exact %s forwarding in %s", key, tt.job)
+						}
+					}
+				}
+				if found != 1 {
+					t.Errorf("expected exactly one guarded script invocation in %s, got %d", tt.job, found)
+				}
+			}
+			if strings.HasSuffix(path, "/release.yml") {
+				var build struct {
+					Needs []string
+					If    string
+				}
+				node := workflow.Jobs["build-linux"]
+				if err := node.Decode(&build); err != nil {
+					t.Fatal(err)
+				}
+				if build.If != "" {
+					t.Fatal("release build must not override failed acceptance dependencies")
+				}
+				for _, gate := range []string{"test-fresh-ufw-linux", "test-acme-cron-linux"} {
+					found := false
+					for _, dependency := range build.Needs {
+						if dependency == gate {
+							found = true
+						}
+					}
+					if !found {
+						t.Errorf("release build missing required gate %s", gate)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestACMECronOwnedCleanup(t *testing.T) {
+	for _, tt := range []struct {
+		name, before               string
+		present                    bool
+		owned                      int
+		drift, readFail, stripFail bool
+		status                     int
+	}{
+		{name: "originally absent", owned: 1},
+		{name: "originally empty", present: true, owned: 1},
+		{name: "unrelated and lookalike jobs retained", present: true, before: "fixtures", owned: 1},
+		{name: "all exact owned jobs removed", present: true, before: "fixtures", owned: 2},
+		{name: "unrelated concurrent addition retained and surfaced", owned: 1, drift: true, status: 1},
+		{name: "listing error refuses mutation", owned: 1, readFail: true, status: 1},
+		{name: "filter error refuses mutation", owned: 1, stripFail: true, status: 1},
+		{name: "original failure preserved", owned: 1, status: 23},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			work := filepath.Join(dir, "work")
+			if err := os.Mkdir(work, 0700); err != nil {
+				t.Fatal(err)
+			}
+			home := filepath.Join(work, "acme home", ".acme.sh")
+			owned := `5 4 * * * "` + home + `"/acme.sh --cron --home "` + home + `" > /dev/null` + "\n"
+			before := ""
+			if tt.before != "" {
+				before = "# preserve this comment\nMAILTO=runner\n0 * * * * echo unrelated\n" +
+					"# " + owned +
+					`5 4 * * * "` + home + `"/acme.sh --cron --home "` + home + `-other"` + "\n" +
+					`5 4 * * * "` + home + `"/acme.sh --cron --home "` + home + `"suffix` + "\n" +
+					`5 4 * * * sh -c '"` + home + `"/acme.sh --cron --home "` + home + `"'` + "\n"
+			}
+			current := before + strings.Repeat(owned, tt.owned)
+			want := before
+			if tt.drift {
+				current += "0 2 * * * echo added-concurrently\n"
+				want += "0 2 * * * echo added-concurrently\n"
+			}
+			if tt.readFail || tt.stripFail {
+				want = current
+			}
+			for path, data := range map[string]string{filepath.Join(work, "before"): before, filepath.Join(dir, "current"): current} {
+				if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			present := "0"
+			if tt.present {
+				present = "1"
+			}
+			originalStatus := "0"
+			if tt.status == 23 {
+				originalStatus = "23"
+			}
+			body := `
+RUNNER_USER=runner
+WORK_DIR="$FIXTURE_ROOT/work"
+ACME_USER_HOME="$WORK_DIR/acme home"
+ACME_CRONTAB_BEFORE="$WORK_DIR/before"
+ACME_CRONTAB_WAS_PRESENT="$FIXTURE_PRESENT"
+ACME_CRONTAB_READY=1
+crontab() {
+    [[ "$1" == -u && "$2" == runner ]] || return 1
+    case "$3" in
+        -l)
+            if [[ "$FIXTURE_READ_FAIL" == true ]]; then printf 'permission denied\n' >&2; return 1; fi
+            if [[ -f "$FIXTURE_ROOT/current" ]]; then cat "$FIXTURE_ROOT/current"
+            else printf 'no crontab for runner\n' >&2; return 1; fi ;;
+        -r) rm "$FIXTURE_ROOT/current" ;;
+        *) cp "$3" "$FIXTURE_ROOT/current" ;;
+    esac
+}
+if [[ "$FIXTURE_STRIP_FAIL" == true ]]; then strip_owned_acme_jobs() { return 1; }; fi
+trap cleanup EXIT
+exit "$FIXTURE_STATUS"
+`
+			output, err := runFreshUFWHelperContents(t, acmeCronScript(t), body,
+				"FIXTURE_ROOT="+dir, "FIXTURE_PRESENT="+present, "FIXTURE_STATUS="+originalStatus,
+				"FIXTURE_READ_FAIL="+strconv.FormatBool(tt.readFail),
+				"FIXTURE_STRIP_FAIL="+strconv.FormatBool(tt.stripFail))
+			status := 0
+			if err != nil {
+				if exitErr, ok := err.(*exec.ExitError); ok {
+					status = exitErr.ExitCode()
+				} else {
+					t.Fatal(err)
+				}
+			}
+			if status != tt.status {
+				t.Fatalf("cleanup status=%d, want %d: %s", status, tt.status, output)
+			}
+			data, readErr := os.ReadFile(filepath.Join(dir, "current"))
+			wantPresent := tt.present || want != ""
+			if wantPresent {
+				if readErr != nil || string(data) != want {
+					t.Fatalf("unowned crontab changed: %v\ngot %q\nwant %q", readErr, data, want)
+				}
+			} else if !os.IsNotExist(readErr) {
+				t.Fatalf("originally absent crontab not removed: %v", readErr)
+			}
+			_, workErr := os.Stat(work)
+			if (tt.status == 1 && workErr != nil) || (tt.status != 1 && !os.IsNotExist(workErr)) {
+				t.Fatalf("cleanup recovery directory state incorrect: %v", workErr)
 			}
 		})
 	}
@@ -848,7 +1146,7 @@ func TestFreshUFWHarnessPreservesNativeSafetyBoundaries(t *testing.T) {
 		`INITIAL_SSH_PORTS=$(installer_ssh_ports)`,
 		`INITIAL_SSH_LISTENERS=$(inspect_baseline_ssh`,
 		`verify_ssh_baseline_unchanged || die "package installation changed host SSH`,
-		`apt-get install -y --no-upgrade --no-install-recommends ufw openssh-client iproute2 cron`,
+		`apt-get install -y --no-upgrade --no-install-recommends ufw openssh-client iproute2`,
 		`ssh_config_ports <<<"$INITIAL_SSH_EFFECTIVE"; printf '%s\n' "$SSH_PORT"`,
 		`cmp -s "$WORK_DIR/ssh-global-drop-in" "$SSH_DROP_IN"`,
 		`OWNED_ALLOW_PORTS+=("$port")`,
