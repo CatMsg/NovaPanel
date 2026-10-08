@@ -664,6 +664,71 @@ else
     die "UFW default configuration is missing"
 fi
 
+# Complete cron/systemd work before any temporary global SSH port declaration:
+# enabling cron can rerun Ubuntu's SSH socket generator during daemon-reload.
+RUNNER_USER="$SUDO_USER"
+command -v runuser >/dev/null 2>&1 || die "runuser is required to isolate the ACME cron acceptance to the GitHub runner user"
+command -v crontab >/dev/null 2>&1 || die "crontab is unavailable"
+systemctl enable --now cron
+ACME_USER_HOME="$WORK_DIR/acme-home"
+ACME_TMP="$WORK_DIR/acme-tmp"
+ACME_FUNCTIONS="$WORK_DIR/acme-functions.sh"
+ACME_SYSTEMCTL_BIN="$WORK_DIR/acme-bin"
+mkdir -p "$ACME_USER_HOME" "$ACME_TMP" "$ACME_SYSTEMCTL_BIN"
+chown -R "$RUNNER_USER":"$(id -gn "$RUNNER_USER")" "$ACME_USER_HOME" "$ACME_TMP"
+chmod 0700 "$ACME_USER_HOME" "$ACME_TMP"
+chmod 0755 "$ACME_SYSTEMCTL_BIN"
+cat >"$ACME_SYSTEMCTL_BIN/systemctl" <<'EOF'
+#!/bin/sh
+exec /usr/bin/sudo -n /usr/bin/systemctl "$@"
+EOF
+chmod 0755 "$ACME_SYSTEMCTL_BIN/systemctl"
+
+extract_novas_function() {
+    awk -v function_name="$1" '
+        $0 == function_name "() {" { in_function = 1 }
+        in_function { print }
+        in_function && $0 == "}" { exit }
+    ' "${NOVAS_WORKSPACE}/novas.sh"
+}
+: >"$ACME_FUNCTIONS"
+for function_name in \
+    install_cron_package verify_sysv_cron_boot_links enable_sysv_cron \
+    start_cron_service cron_service_backend cron_service_is_active \
+    is_exact_no_crontab_error verify_crontab_usable verify_acme_renewal_cron \
+    ensure_acme_cron prepare_cloudflare_acme install_acme_payload; do
+    extract_novas_function "$function_name" >>"$ACME_FUNCTIONS"
+done
+chmod 0644 "$ACME_FUNCTIONS"
+
+ACME_CRONTAB_BEFORE="$WORK_DIR/runner-crontab-before"
+read_runner_crontab "$ACME_CRONTAB_BEFORE" || die "cannot safely snapshot the runner user's existing crontab"
+ACME_CRONTAB_WAS_PRESENT="$CRON_READ_PRESENT"
+ACME_CRONTAB_READY=1
+
+runuser -u "$RUNNER_USER" -- env -i \
+    HOME="$ACME_USER_HOME" USER="$RUNNER_USER" LOGNAME="$RUNNER_USER" SHELL=/bin/bash \
+    TMPDIR="$ACME_TMP" PATH="$ACME_SYSTEMCTL_BIN:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    /bin/bash -euo pipefail -c '
+        source "$1"
+        LOGE() { printf "error: %s\\n" "$*" >&2; }
+        LOGI() { printf "info: %s\\n" "$*"; }
+        release=ubuntu
+        prepare_cloudflare_acme
+        verify_acme_renewal_cron
+        "$HOME/.acme.sh/acme.sh" --version
+    ' acceptance "$ACME_FUNCTIONS"
+
+ACME_CRONTAB_AFTER="$WORK_DIR/runner-crontab-after"
+ACME_CRONTAB_WITHOUT_OWNED="$WORK_DIR/runner-crontab-without-owned"
+read_runner_crontab "$ACME_CRONTAB_AFTER" || die "cannot read runner crontab after acme.sh setup"
+[[ "$(count_owned_acme_jobs "$ACME_CRONTAB_AFTER")" == "1" ]] || die "prepare_cloudflare_acme did not install exactly one valid renewal job"
+strip_owned_acme_jobs "$ACME_CRONTAB_AFTER" "$ACME_CRONTAB_WITHOUT_OWNED"
+cmp -s "$ACME_CRONTAB_BEFORE" "$ACME_CRONTAB_WITHOUT_OWNED" || die "acme.sh changed unrelated runner crontab entries"
+[[ -x "$ACME_USER_HOME/.acme.sh/acme.sh" ]] || die "official acme.sh was not installed in the temporary HOME"
+printf 'PASS: extracted real ACME bootstrap installed official acme.sh and one owned cron job; no CA action was run\n'
+verify_ssh_baseline_unchanged || die "ACME cron setup changed host SSH configuration, ownership or listeners"
+
 ssh-keygen -q -t ed25519 -N '' -f "$WORK_DIR/ssh_host_ed25519_key"
 cat >"$WORK_DIR/sshd_config" <<EOF
 Port $SSH_PORT
@@ -776,65 +841,3 @@ for address in 127.0.0.1 ::1; do
     [[ -s "$keyscan_file" ]] || die "SSH did not return a host key while UFW was active at $address:$SSH_PORT"
 done
 printf 'PASS: real sshd remained reachable over IPv4/IPv6 loopback with UFW active; allow rules were independently verified in UFW status\n'
-
-RUNNER_USER="$SUDO_USER"
-command -v runuser >/dev/null 2>&1 || die "runuser is required to isolate the ACME cron acceptance to the GitHub runner user"
-command -v crontab >/dev/null 2>&1 || die "crontab is unavailable"
-systemctl enable --now cron
-ACME_USER_HOME="$WORK_DIR/acme-home"
-ACME_TMP="$WORK_DIR/acme-tmp"
-ACME_FUNCTIONS="$WORK_DIR/acme-functions.sh"
-ACME_SYSTEMCTL_BIN="$WORK_DIR/acme-bin"
-mkdir -p "$ACME_USER_HOME" "$ACME_TMP" "$ACME_SYSTEMCTL_BIN"
-chown -R "$RUNNER_USER":"$(id -gn "$RUNNER_USER")" "$ACME_USER_HOME" "$ACME_TMP"
-chmod 0700 "$ACME_USER_HOME" "$ACME_TMP"
-chmod 0755 "$ACME_SYSTEMCTL_BIN"
-cat >"$ACME_SYSTEMCTL_BIN/systemctl" <<'EOF'
-#!/bin/sh
-exec /usr/bin/sudo -n /usr/bin/systemctl "$@"
-EOF
-chmod 0755 "$ACME_SYSTEMCTL_BIN/systemctl"
-
-extract_novas_function() {
-    awk -v function_name="$1" '
-        $0 == function_name "() {" { in_function = 1 }
-        in_function { print }
-        in_function && $0 == "}" { exit }
-    ' "${NOVAS_WORKSPACE}/novas.sh"
-}
-: >"$ACME_FUNCTIONS"
-for function_name in \
-    install_cron_package verify_sysv_cron_boot_links enable_sysv_cron \
-    start_cron_service cron_service_backend cron_service_is_active \
-    is_exact_no_crontab_error verify_crontab_usable verify_acme_renewal_cron \
-    ensure_acme_cron prepare_cloudflare_acme install_acme_payload; do
-    extract_novas_function "$function_name" >>"$ACME_FUNCTIONS"
-done
-chmod 0644 "$ACME_FUNCTIONS"
-
-ACME_CRONTAB_BEFORE="$WORK_DIR/runner-crontab-before"
-read_runner_crontab "$ACME_CRONTAB_BEFORE" || die "cannot safely snapshot the runner user's existing crontab"
-ACME_CRONTAB_WAS_PRESENT="$CRON_READ_PRESENT"
-ACME_CRONTAB_READY=1
-
-runuser -u "$RUNNER_USER" -- env -i \
-    HOME="$ACME_USER_HOME" USER="$RUNNER_USER" LOGNAME="$RUNNER_USER" SHELL=/bin/bash \
-    TMPDIR="$ACME_TMP" PATH="$ACME_SYSTEMCTL_BIN:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-    /bin/bash -euo pipefail -c '
-        source "$1"
-        LOGE() { printf "error: %s\\n" "$*" >&2; }
-        LOGI() { printf "info: %s\\n" "$*"; }
-        release=ubuntu
-        prepare_cloudflare_acme
-        verify_acme_renewal_cron
-        "$HOME/.acme.sh/acme.sh" --version
-    ' acceptance "$ACME_FUNCTIONS"
-
-ACME_CRONTAB_AFTER="$WORK_DIR/runner-crontab-after"
-ACME_CRONTAB_WITHOUT_OWNED="$WORK_DIR/runner-crontab-without-owned"
-read_runner_crontab "$ACME_CRONTAB_AFTER" || die "cannot read runner crontab after acme.sh setup"
-[[ "$(count_owned_acme_jobs "$ACME_CRONTAB_AFTER")" == "1" ]] || die "prepare_cloudflare_acme did not install exactly one valid renewal job"
-strip_owned_acme_jobs "$ACME_CRONTAB_AFTER" "$ACME_CRONTAB_WITHOUT_OWNED"
-cmp -s "$ACME_CRONTAB_BEFORE" "$ACME_CRONTAB_WITHOUT_OWNED" || die "acme.sh changed unrelated runner crontab entries"
-[[ -x "$ACME_USER_HOME/.acme.sh/acme.sh" ]] || die "official acme.sh was not installed in the temporary HOME"
-printf 'PASS: extracted real ACME bootstrap installed official acme.sh and one owned cron job; no CA action was run\n'

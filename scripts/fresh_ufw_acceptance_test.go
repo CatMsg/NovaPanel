@@ -121,6 +121,72 @@ func TestFreshUFWRuntimeDirectoryOrdering(t *testing.T) {
 	}
 }
 
+func TestFreshUFWACMECompletesBeforeTemporarySSHConfig(t *testing.T) {
+	contents := freshUFWScript(t)
+	previous := -1
+	for _, step := range []string{
+		`apt-get install -y --no-upgrade --no-install-recommends ufw openssh-client iproute2 cron`,
+		`verify_ssh_baseline_unchanged || die "package installation changed host SSH configuration, ownership or listeners"`,
+		`RUNNER_USER="$SUDO_USER"`,
+		`systemctl enable --now cron`,
+		`runuser -u "$RUNNER_USER" -- env -i`,
+		`PASS: extracted real ACME bootstrap installed official acme.sh and one owned cron job; no CA action was run`,
+		`verify_ssh_baseline_unchanged || die "ACME cron setup changed host SSH configuration, ownership or listeners"`,
+		`ssh-keygen -q -t ed25519 -N '' -f "$WORK_DIR/ssh_host_ed25519_key"`,
+		`(set -o noclobber; cat "$WORK_DIR/ssh-global-drop-in" >"$SSH_DROP_IN")`,
+		`install_fresh_ufw "$WORK_DIR/panel-home" "" "$PANEL_PORT" "$SUB_PORT"`,
+	} {
+		position := strings.Index(contents, step)
+		if strings.Count(contents, step) != 1 || position <= previous {
+			t.Fatalf("missing, duplicated or out-of-order isolated acceptance step: %s", step)
+		}
+		previous = position
+	}
+
+	dropIn := strings.Index(contents, `(set -o noclobber; cat "$WORK_DIR/ssh-global-drop-in" >"$SSH_DROP_IN")`)
+	// The drop-in remains until EXIT cleanup. No later phase may enable cron
+	// (including via the real ACME bootstrap) or trigger package unit reloads.
+	for _, line := range strings.Split(contents[dropIn:], "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		switch fields[0] {
+		case "apt-get", "runuser":
+			t.Errorf("package/ACME work overlaps temporary SSH configuration: %s", line)
+		case "systemctl":
+			if len(fields) < 2 || (fields[1] != "show" && fields[1] != "is-active") {
+				t.Errorf("systemd mutation overlaps temporary SSH configuration: %s", line)
+			}
+		}
+	}
+}
+
+func TestFreshUFWACMEHandoffRejectsSSHDrift(t *testing.T) {
+	contents := freshUFWScript(t)
+	const handoff = `verify_ssh_baseline_unchanged || die "ACME cron setup changed host SSH configuration, ownership or listeners"`
+	if !strings.Contains(contents, "\n"+handoff+"\n") {
+		t.Fatal("missing SSH baseline verification at the ACME-to-UFW handoff")
+	}
+	for _, result := range []string{"0", "1"} {
+		t.Run(result, func(t *testing.T) {
+			output, err := runFreshUFWHelper(t, `
+verify_ssh_baseline_unchanged() { return "$FIXTURE_BASELINE_RESULT"; }
+`+handoff+`
+printf 'reached isolated SSH phase\n'
+`, "FIXTURE_BASELINE_RESULT="+result)
+			if result == "0" {
+				if err != nil || !strings.Contains(output, "reached isolated SSH phase") {
+					t.Fatalf("unchanged baseline did not reach the SSH phase: %v\n%s", err, output)
+				}
+			} else if err == nil || strings.Contains(output, "reached isolated SSH phase") ||
+				!strings.Contains(output, "ACME cron setup changed host SSH configuration, ownership or listeners") {
+				t.Fatalf("SSH baseline drift was not refused before the SSH phase: %v\n%s", err, output)
+			}
+		})
+	}
+}
+
 func TestFreshUFWRuntimeDirectoryCleanup(t *testing.T) {
 	contents := freshUFWScript(t)
 	main := strings.Index(contents, "\nrequire_github_hosted_release_job\n")
