@@ -194,6 +194,21 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 				outbound[key] = value
 			}
 		}
+		var httpVersions []int
+		if protocol == "http" {
+			httpVersions, err = util.ValidateHTTPInbound(inData)
+			if err != nil {
+				return nil, nil, fmt.Errorf("HTTP inbound %q: %w", inData.Tag, err)
+			}
+			version, resolveErr := util.ResolveHTTPOutboundVersion(outbound, httpVersions)
+			if resolveErr != nil {
+				return nil, nil, fmt.Errorf("HTTP inbound %q subscription: %w", inData.Tag, resolveErr)
+			}
+			if err = util.ValidateHTTPOutboundTLSForInbound(outbound, inData); err != nil {
+				return nil, nil, fmt.Errorf("HTTP inbound %q subscription: %w", inData.Tag, err)
+			}
+			outbound["version"] = version
+		}
 
 		var addrs []map[string]interface{}
 		err = json.Unmarshal(inData.Addrs, &addrs)
@@ -232,6 +247,16 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 						outTls[key] = value
 					}
 					newOut["tls"] = outTls
+				}
+				if protocol == "http" {
+					version, resolveErr := util.ResolveHTTPOutboundVersion(newOut, httpVersions)
+					if resolveErr != nil {
+						return nil, nil, fmt.Errorf("HTTP inbound %q address %d subscription: %w", inData.Tag, index+1, resolveErr)
+					}
+					if err = util.ValidateHTTPOutboundTLSForInbound(newOut, inData); err != nil {
+						return nil, nil, fmt.Errorf("HTTP inbound %q address %d subscription: %w", inData.Tag, index+1, err)
+					}
+					newOut["version"] = version
 				}
 
 				remark, _ := addr["remark"].(string)

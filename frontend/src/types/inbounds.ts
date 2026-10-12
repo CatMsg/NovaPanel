@@ -70,7 +70,9 @@ export interface Direct extends InboundBasics {
 }
 export interface Mixed extends InboundBasics {}
 export interface SOCKS extends InboundBasics {}
-export interface HTTP extends InboundBasics {}
+export interface HTTP extends InboundBasics {
+  version?: number | number[]
+}
 export interface Shadowsocks extends InboundBasics {
   method: string
   password: string
@@ -251,7 +253,7 @@ const defaultValues: Record<InType, Inbound> = {
   direct: <Direct>{ type: InTypes.Direct },
   mixed: <Mixed>{ type: InTypes.Mixed },
   socks: <SOCKS>{ type: InTypes.SOCKS },
-  http: <HTTP>{ type: InTypes.HTTP, tls_id: 0 },
+  http: <HTTP>{ type: InTypes.HTTP, tls_id: 0, version: [1, 2] },
   shadowsocks: <Shadowsocks>{ type: InTypes.Shadowsocks, method: 'none' },
   vmess: <VMess>{ type: InTypes.VMess, tls_id: 0, transport: {} },
   trojan: <Trojan>{ type: InTypes.Trojan, tls_id: 0, transport: {} },

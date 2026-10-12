@@ -30,7 +30,8 @@
               :clients="clients"
               :inTags="inTags"
               :outTags="outTags"
-              :rsTags="rsTags" />
+              :rsTags="rsTags"
+              :dnsServers="dnsServers" />
           </v-card-text>
         </v-card>
         <RuleOptions
@@ -39,7 +40,8 @@
           :clients="clients"
           :inTags="inTags"
           :outTags="outTags"
-          :rsTags="rsTags" />
+          :rsTags="rsTags"
+          :dnsServers="dnsServers" />
         <v-row>
           <v-col cols="12" sm="6" md="4">
             <v-select
@@ -177,7 +179,7 @@
 import { logicalRule, rule, actionKeys } from '@/types/rules'
 import RuleOptions from '@/components/Rule.vue'
 export default {
-  props: ['visible', 'data', 'index', 'clients', 'inTags', 'outTags', 'rsTags'],
+  props: ['visible', 'data', 'index', 'clients', 'inTags', 'outTags', 'rsTags', 'dnsServers'],
   emits: ['close', 'save'],
   data() {
     return {

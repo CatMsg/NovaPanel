@@ -2,6 +2,7 @@ import { Inbound } from './inbounds'
 import { Outbound } from './outbounds'
 import { Dns } from './dns'
 import { Dial } from './dial'
+import type { DnsTagConditionMap } from './dnsConditions'
 
 interface Log {
   disabled?: boolean
@@ -40,6 +41,8 @@ interface RouteRule       {
   domain_regex?: string[] | string
   source_ip_cidr?: string[] | string
   source_ip_is_private?: boolean
+  dns_server_address?: DnsTagConditionMap
+  dns_search_domain?: DnsTagConditionMap
   ip_cidr?: string[] | string
   ip_is_private?: boolean
   source_port?: number[] | number

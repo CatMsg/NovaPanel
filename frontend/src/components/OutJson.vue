@@ -92,6 +92,27 @@
       </v-col>
     </v-row>
     <Headers :data="inData.out_json" v-if="type == inTypes.HTTP" />
+    <v-expansion-panels v-if="type == inTypes.HTTP" class="http-client-advanced" variant="accordion">
+      <v-expansion-panel value="advanced">
+        <v-expansion-panel-title>{{ $t('types.http.clientAdvanced') }}</v-expansion-panel-title>
+        <v-expansion-panel-text>
+          <v-row>
+            <v-col cols="12" sm="6" md="4">
+              <v-select
+                v-model.number="httpClientVersion"
+                :items="httpVersionOptions"
+                :label="$t('types.http.version')"
+                hide-details
+              />
+            </v-col>
+          </v-row>
+          <p class="http-client-advanced__hint">{{ $t('types.http.clientDefaultHint') }}</p>
+          <v-alert v-if="httpClientIssue" class="mt-3" type="error" variant="tonal">
+            {{ $t(`types.http.errors.${httpClientIssue}`) }}
+          </v-alert>
+        </v-expansion-panel-text>
+      </v-expansion-panel>
+    </v-expansion-panels>
     <AnyTls v-if="type == inTypes.AnyTls" :data="inData.out_json" direction="out_json" />
     <Naive v-if="type == inTypes.Naive" :data="inData.out_json" direction="out_json" />
   </v-card>
@@ -104,6 +125,7 @@ import UoT from './UoT.vue'
 import Headers from './Headers.vue'
 import AnyTls from './protocols/AnyTls.vue'
 import Naive from './protocols/Naive.vue'
+import { httpClientIssue } from '@/utils/httpVersions'
 
 export default {
   props: ['inData', 'type'],
@@ -152,7 +174,30 @@ export default {
       get() { return this.$props.inData.out_json.hop_interval? parseInt(this.$props.inData.out_json.hop_interval.replace('s','')) : 0 },
       set(v:number) { this.$props.inData.out_json.hop_interval = v>0 ? v + 's' : undefined }
     },
+    httpClientVersion: {
+      get(): number { return Number(this.$props.inData.out_json.version ?? 0) },
+      set(v:number) {
+        if (v === 0) delete this.$props.inData.out_json.version
+        else this.$props.inData.out_json.version = v
+      },
+    },
+    httpVersionOptions(): Array<{ title: string; value: number }> {
+      return [0, 1, 2, 3].map(version => ({
+        title: version === 0 ? this.$t('types.http.auto') : this.$t('types.http.versionLabel', { version }),
+        value: version,
+      }))
+    },
+    httpClientIssue(): string {
+      return this.$props.type === InTypes.HTTP
+        ? httpClientIssue(this.$props.inData) ?? ''
+        : ''
+    },
   },
   components: { Network, UoT, Headers, AnyTls, Naive }
 }
 </script>
+
+<style scoped>
+.http-client-advanced { margin-top: 10px; }
+.http-client-advanced__hint { margin: 8px 0 0; color: rgba(var(--v-theme-on-surface), .68); font-size: .82rem; }
+</style>

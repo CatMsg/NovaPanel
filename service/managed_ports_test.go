@@ -125,7 +125,10 @@ func TestCollectInboundForwardProtocolsMatchesListenerTransport(t *testing.T) {
 	}{
 		{name: "mixed", typeName: "mixed", want: []string{"tcp"}},
 		{name: "socks ignores proxy network", typeName: "socks", options: `,"network":"udp"`, want: []string{"tcp"}},
-		{name: "http", typeName: "http", want: []string{"tcp"}},
+		{name: "http defaults to HTTP1 and HTTP2", typeName: "http", want: []string{"tcp"}},
+		{name: "http empty version list defaults to HTTP1 and HTTP2", typeName: "http", options: `,"version":[]`, want: []string{"tcp"}},
+		{name: "http3 uses UDP", typeName: "http", options: `,"version":3`, want: []string{"udp"}},
+		{name: "combined HTTP1 and HTTP3 uses both protocols", typeName: "http", options: `,"version":[1,3]`, want: []string{"tcp", "udp"}},
 		{name: "shadowsocks default", typeName: "shadowsocks", want: []string{"tcp", "udp"}},
 		{name: "shadowsocks tcp", typeName: "shadowsocks", options: `,"network":"tcp"`, want: []string{"tcp"}},
 		{name: "shadowsocks udp array", typeName: "shadowsocks", options: `,"network":["udp"]`, want: []string{"udp"}},
@@ -162,6 +165,17 @@ func TestCollectInboundForwardProtocolsMatchesListenerTransport(t *testing.T) {
 				t.Fatalf("protocols = %#v, want %#v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCollectHTTPInboundForwardProtocolsRejectsInvalidVersion(t *testing.T) {
+	inbound := &model.Inbound{
+		Type:    "http",
+		Tag:     "invalid-http-version",
+		Options: json.RawMessage(`{"listen_port":24000,"version":[1,4]}`),
+	}
+	if _, err := collectInboundForwardProtocols(inbound); err == nil {
+		t.Fatal("expected invalid HTTP inbound version to be rejected")
 	}
 }
 

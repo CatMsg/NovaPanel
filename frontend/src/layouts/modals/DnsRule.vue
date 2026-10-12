@@ -1,5 +1,5 @@
 <template>
-  <v-dialog transition="dialog-bottom-transition" width="800">
+  <v-dialog transition="dialog-bottom-transition" width="800" @after-enter="updateData()">
     <v-card class="rounded-lg">
       <v-card-title>
         {{ $t('actions.' + title) + " " + $t('objects.dnsrule') }}
@@ -24,7 +24,8 @@
               :rule="r"
               :clients="clients"
               :inTags="inTags"
-              :ruleSets="ruleSets" />
+              :ruleSets="ruleSets"
+              :dnsServers="dnsServers" />
           </v-card-text>
         </v-card>
         <RuleOptions
@@ -32,7 +33,8 @@
           :rule="ruleData.rules[0]"
           :clients="clients"
           :inTags="inTags"
-          :ruleSets="ruleSets" />
+          :ruleSets="ruleSets"
+          :dnsServers="dnsServers" />
         <v-row>
           <v-col cols="12" sm="6" md="4">
             <v-select
@@ -156,7 +158,7 @@ import { logicalDnsRule, dnsRule, actionDnsRuleKeys } from '@/types/dns'
 import RuleOptions from '@/components/DnsRule.vue'
 import { i18n } from '@/locales'
 export default {
-  props: ['visible', 'data', 'index', 'clients', 'inTags', 'serverTags', 'ruleSets'],
+  props: ['visible', 'data', 'index', 'clients', 'inTags', 'serverTags', 'ruleSets', 'dnsServers'],
   emits: ['close', 'save'],
   data() {
     return {
@@ -306,13 +308,6 @@ export default {
     extra: {
       get() { return this.ruleData.extra?.length > 0 ? this.ruleData.extra.join(',') : "" },
       set(v:string) { this.ruleData.extra = v.length > 0 ? v.split(',') : undefined }
-    },
-  },
-  watch: {
-    visible(newValue) {
-      if (newValue) {
-        this.updateData()
-      }
     },
   },
   components: { RuleOptions }

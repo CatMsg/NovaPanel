@@ -31,6 +31,9 @@ func validateConfigReferences(rawConfig []byte) error {
 	outboundTags := map[string]struct{}{"direct": {}}
 	inboundTags := make(map[string]struct{})
 	graph := make(map[string][]string)
+	dnsTags := make(map[string]struct{})
+	dnsGraph := make(map[string][]string)
+	dnsResolverPaths := make(map[string]string)
 
 	for index, item := range objectList(config["outbounds"]) {
 		tag := stringValue(item["tag"])
@@ -119,13 +122,52 @@ func validateConfigReferences(rawConfig []byte) error {
 		}
 	}
 	if dns, ok := config["dns"].(map[string]interface{}); ok {
+		seenTags := make(map[string]struct{})
 		for index, server := range objectList(dns["servers"]) {
+			path := fmt.Sprintf("dns.servers[%d]", index)
+			tag := stringValue(server["tag"])
+			if tag != "" {
+				if _, exists := seenTags[tag]; exists {
+					return fmt.Errorf("%s.tag DNS 服务器标签重复: %s", path, tag)
+				}
+				seenTags[tag] = struct{}{}
+			} else {
+				// box.go assigns index tags to untagged DNS transports.
+				tag = fmt.Sprint(index)
+			}
+			dnsTags[tag] = struct{}{}
+			// TransportManager.Create replaces implicit/explicit index collisions.
+			dnsGraph[tag] = nil
+			delete(dnsResolverPaths, tag)
+			// Match dns/transport_adapter.go: only explicit resolver dependencies
+			// participate in transport startup ordering, not dns.final or defaults.
+			switch stringValue(server["type"]) {
+			case "local", "udp", "tcp", "tls", "https", "quic", "h3", "dhcp", "mdns":
+				ref := domainResolverReference(server["domain_resolver"], path+".domain_resolver")
+				if ref.tag != "" {
+					dnsGraph[tag] = []string{ref.tag}
+					dnsResolverPaths[tag] = ref.path
+				}
+			}
 			if detour := stringValue(server["detour"]); detour != "" {
-				refs = append(refs, configReference{kind: "outbound", tag: detour, path: fmt.Sprintf("dns.servers[%d].detour", index)})
+				refs = append(refs, configReference{kind: "outbound", tag: detour, path: path + ".detour"})
 			}
 		}
+		if final := stringValue(dns["final"]); final != "" {
+			refs = append(refs, configReference{kind: "dns_server", tag: final, path: "dns.final"})
+		}
+		collectDNSRuleReferences(dns["rules"], "dns.rules", true, &refs)
 		collectRuleSetReferences(dns["rules"], "dns.rules", &refs)
 	}
+	collectDNSRuleReferences(route["rules"], "route.rules", false, &refs)
+	for _, key := range []string{"inbounds", "outbounds", "endpoints", "services", "http_clients", "ntp", "dns", "route", "certificate_providers"} {
+		collectDomainResolverReferences(config[key], key, &refs)
+	}
+	dns, _ := config["dns"].(map[string]interface{})
+	// Start inserts "local" only with no transports and no explicit final.
+	// DNS rules and route.default_domain_resolver use it after initialization;
+	// per-dialer resolvers are resolved eagerly during construction.
+	implicitLocalFallback := len(dnsTags) == 0 && stringValue(dns["final"]) == ""
 	if experimental, ok := config["experimental"].(map[string]interface{}); ok {
 		if clashAPI, ok := experimental["clash_api"].(map[string]interface{}); ok {
 			if detour := stringValue(clashAPI["external_ui_download_detour"]); detour != "" {
@@ -148,9 +190,87 @@ func validateConfigReferences(rawConfig []byte) error {
 			if _, exists := ruleSetTags[ref.tag]; !exists {
 				return fmt.Errorf("%s 引用了不存在的规则集: %s", ref.path, ref.tag)
 			}
+		case "dns_server", "dns_rule_server":
+			if _, exists := dnsTags[ref.tag]; !exists {
+				if ref.kind == "dns_rule_server" && implicitLocalFallback && ref.tag == "local" {
+					continue
+				}
+				return fmt.Errorf("%s 引用了不存在的 DNS 服务器: %s", ref.path, ref.tag)
+			}
+		case "dns_default_resolver":
+			if _, exists := dnsTags[ref.tag]; !exists && !(implicitLocalFallback && ref.tag == "local") {
+				return fmt.Errorf("%s 引用了不存在的 DNS 服务器: %s", ref.path, ref.tag)
+			}
 		}
 	}
-	return validateOutboundDependencyCycles(graph)
+	if err := validateOutboundDependencyCycles(graph); err != nil {
+		return err
+	}
+	return validateDependencyCycles(dnsGraph, func(cycle []string) error {
+		return fmt.Errorf("%s DNS 服务器依赖形成循环: %s", dnsResolverPaths[cycle[len(cycle)-2]], strings.Join(cycle, " -> "))
+	})
+}
+
+func domainResolverReference(value interface{}, path string) configReference {
+	if resolver, ok := value.(map[string]interface{}); ok {
+		value = resolver["server"]
+		path += ".server"
+	}
+	return configReference{kind: "dns_server", tag: stringValue(value), path: path}
+}
+
+func collectDomainResolverReferences(value interface{}, path string, refs *[]configReference) {
+	switch typed := value.(type) {
+	case []interface{}:
+		for index, item := range typed {
+			collectDomainResolverReferences(item, fmt.Sprintf("%s[%d]", path, index), refs)
+		}
+	case map[string]interface{}:
+		for _, key := range []string{"domain_resolver", "default_domain_resolver", "stun_domain_resolver"} {
+			ref := domainResolverReference(typed[key], path+"."+key)
+			if path == "route" && key == "default_domain_resolver" {
+				ref.kind = "dns_default_resolver"
+			}
+			if ref.tag != "" {
+				*refs = append(*refs, ref)
+			}
+		}
+		// Follow option containers, not arbitrary maps such as HTTP headers,
+		// hosts.predefined, DNS records or credentials. See sing-box/option.
+		for _, key := range []string{"servers", "rules", "rule_set", "tls", "reality", "handshake", "realm", "http_client", "acme", "certificate_provider", "control_dialer", "tunnel_dialer", "mesh_with", "verify_client_url", "dashboard"} {
+			collectDomainResolverReferences(typed[key], path+"."+key, refs)
+		}
+		if handshakes, ok := typed["handshake_for_server_name"].(map[string]interface{}); ok {
+			names := make([]string, 0, len(handshakes))
+			for name := range handshakes {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			for _, name := range names {
+				collectDomainResolverReferences(handshakes[name], fmt.Sprintf("%s.handshake_for_server_name[%q]", path, name), refs)
+			}
+		}
+	}
+}
+
+func collectDNSRuleReferences(value interface{}, path string, dnsRule bool, refs *[]configReference) {
+	rules, _ := value.([]interface{})
+	for index, value := range rules {
+		rule, ok := value.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		rulePath := fmt.Sprintf("%s[%d]", path, index)
+		action := stringValue(rule["action"])
+		isReference := action == "resolve"
+		if dnsRule {
+			isReference = action == "" || action == "route" || action == "evaluate"
+		}
+		if server := stringValue(rule["server"]); isReference && server != "" {
+			*refs = append(*refs, configReference{kind: "dns_rule_server", tag: server, path: rulePath + ".server"})
+		}
+		collectDNSRuleReferences(rule["rules"], rulePath+".rules", dnsRule, refs)
+	}
 }
 
 func ruleSetDownloadDetour(ruleSet map[string]interface{}) (string, string) {
@@ -209,6 +329,12 @@ func outboundDependencies(item map[string]interface{}) []string {
 }
 
 func validateOutboundDependencyCycles(graph map[string][]string) error {
+	return validateDependencyCycles(graph, func(cycle []string) error {
+		return fmt.Errorf("出站依赖形成循环: %s", strings.Join(cycle, " -> "))
+	})
+}
+
+func validateDependencyCycles(graph map[string][]string, cycleError func([]string) error) error {
 	state := make(map[string]uint8)
 	stack := make([]string, 0)
 	var visit func(string) error
@@ -223,7 +349,7 @@ func validateOutboundDependencyCycles(graph map[string][]string) error {
 				}
 			}
 			cycle := append(append([]string(nil), stack[start:]...), tag)
-			return fmt.Errorf("出站依赖形成循环: %s", strings.Join(cycle, " -> "))
+			return cycleError(cycle)
 		case 2:
 			return nil
 		}

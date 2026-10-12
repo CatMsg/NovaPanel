@@ -11,4 +11,21 @@ go test -mod=readonly -race github.com/sagernet/sing-box/route \
   -run '^TestNetworkManagerStarted' -count=20 -timeout=120s
 go test -mod=readonly -race ./core \
   -run '^TestAddInboundNaiveRequiresUsers$' -count=20 -timeout=120s
+http_test_output="$(mktemp)"
+trap 'unlink "$http_test_output"' EXIT
+GOMAXPROCS=2 go test -mod=readonly -race -p 2 \
+  -tags 'with_quic,badlinkname,tfogo_checklinkname0' \
+  -ldflags='-checklinkname=0' ./core \
+  -run '^(TestHTTPProxyLoopbackIntegration|TestDNSConfigurationRuleContextIntegration)$' \
+  -count=1 -timeout=180s -v | tee "$http_test_output"
+for required_pass in \
+  '--- PASS: TestHTTPProxyLoopbackIntegration/http1_tcp_and_connect_udp' \
+  '--- PASS: TestHTTPProxyLoopbackIntegration/http2_tcp_and_connect_udp' \
+  '--- PASS: TestHTTPProxyLoopbackIntegration/http3_tcp_and_connect_udp' \
+  '--- PASS: TestDNSConfigurationRuleContextIntegration'; do
+  if ! grep -Fq -- "$required_pass" "$http_test_output"; then
+    printf 'required race test did not pass: %s\n' "$required_pass" >&2
+    exit 1
+  fi
+done
 go test -mod=readonly -race ./core -count=1 -timeout=180s

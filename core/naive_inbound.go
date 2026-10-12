@@ -33,12 +33,6 @@ var (
 	_ http.Handler    = (*naiveInbound)(nil)
 )
 
-func (n *naiveInbound) Close() error {
-	// Upstream closes both the TCP listener and the HTTP server that owns it.
-	// Normalize only that idempotent result, across remove, replacement and Stop.
-	return normalizeNaiveCloseError(n.Inbound.Close())
-}
-
 func normalizeNaiveCloseError(err error) error {
 	if onlyClosedNetworkErrors(err) {
 		return nil

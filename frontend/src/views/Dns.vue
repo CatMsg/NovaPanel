@@ -121,39 +121,61 @@
             <v-icon icon="mdi-file-edit" /><span>{{ $t('actions.edit') }}</span>
             <v-tooltip activator="parent" location="top" :text="$t('actions.edit')"></v-tooltip>
           </v-btn>
-          <v-btn class="np-card-action" variant="text" color="warning" @click="delDnsOverlay[index] = true">
+          <v-btn class="np-card-action" variant="text" color="warning" @click="openDnsDeleteDialog(item.tag)">
             <v-icon icon="mdi-file-remove" /><span>{{ $t('actions.del') }}</span>
             <v-tooltip activator="parent" location="top" :text="$t('actions.del')"></v-tooltip>
           </v-btn>
-          <v-overlay
-            v-model="delDnsOverlay[index]"
-            contained
-            class="align-center justify-center"
-          >
-            <v-card :title="$t('actions.del')" rounded="lg">
-              <v-divider></v-divider>
-              <v-card-text>{{ $t('confirm') }}</v-card-text>
-              <v-card-actions>
-                <v-btn color="error" variant="outlined" @click="delDns(index)">{{ $t('yes') }}</v-btn>
-                <v-btn color="success" variant="outlined" @click="delDnsOverlay[index] = false">{{ $t('no') }}</v-btn>
-              </v-card-actions>
-            </v-card>
-          </v-overlay>
         </v-card-actions>
       </v-card>
     </v-col>
   </v-row>
+  <v-dialog v-model="deleteDnsDialogVisible" max-width="560" width="calc(100vw - 32px)" scrollable>
+    <v-card class="dns-delete-dialog" rounded="lg">
+      <v-card-title>{{ $t('actions.del') }} {{ deleteDnsTargetTag }}</v-card-title>
+      <v-divider></v-divider>
+      <v-card-text class="dns-delete-dialog__content">
+        <p>{{ $t('confirm') }}</p>
+        <v-alert
+          v-if="deleteDnsReferences.length > 0"
+          class="mt-3"
+          type="warning"
+          variant="tonal"
+          :title="$t('dns.references.deleteBlockedTitle')"
+        >
+          <p>{{ $t('dns.references.deleteBlockedText') }}</p>
+          <ul class="dns-reference-list">
+            <li v-for="(reference, referenceIndex) in deleteDnsReferences" :key="`${reference.kind}-${referenceIndex}`">
+              {{ dnsReferenceLabel(reference) }}
+            </li>
+          </ul>
+        </v-alert>
+        <v-alert v-else class="mt-3" type="info" variant="tonal">
+          {{ $t('dns.references.noDeleteDependencies') }}
+        </v-alert>
+      </v-card-text>
+      <v-card-actions>
+        <v-btn color="error" variant="outlined" :disabled="deleteDnsReferences.length > 0" @click="delDns(deleteDnsTargetTag)">
+          {{ $t('yes') }}
+        </v-btn>
+        <v-btn color="success" variant="outlined" @click="deleteDnsDialogVisible = false">{{ $t('no') }}</v-btn>
+      </v-card-actions>
+    </v-card>
+  </v-dialog>
 </template>
 
 <script lang="ts" setup>
 import Data from '@/store/modules/data'
 import { computed, defineAsyncComponent, ref, onBeforeMount } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { push } from 'notivue'
 import { Config } from '@/types/config'
 import { FindDiff } from '@/plugins/utils'
+import { findDnsTagReferences, renameDnsTagReferences, type DnsExternalStore, type DnsTagReference } from '@/plugins/dnsReferences'
 import PageHero from '@/components/PageHero.vue'
 import EmptyState from '@/components/EmptyState.vue'
 
 const DnsVue = defineAsyncComponent(() => import('@/layouts/modals/Dns.vue'))
+const { t } = useI18n()
 
 const oldConfig = ref(<any>{})
 const loading = ref(false)
@@ -205,6 +227,50 @@ const dnsServerTags = computed((): string[] => {
   return dns.value?.servers?.filter((s:any) => s.tag && s.tag != "")?.map((s:any) => s.tag) ?? []
 })
 
+const externalStoreName: Record<DnsExternalStore, string> = {
+  inbounds: 'inbound',
+  outbounds: 'outbound',
+  endpoints: 'endpoint',
+  services: 'service',
+}
+
+const currentReferenceStores = () => ({
+  inbounds: Data().inbounds ?? [],
+  outbounds: Data().outbounds ?? [],
+  endpoints: Data().endpoints ?? [],
+  services: Data().services ?? [],
+})
+
+const dnsReferenceLabel = (reference: DnsTagReference): string => {
+  switch (reference.kind) {
+    case 'default-dns':
+      return t('dns.references.defaultDns')
+    case 'dns-rule':
+      return t('dns.references.dnsRule', { index: reference.indexPath.join('.') })
+    case 'route-resolve-rule':
+      return t('dns.references.routeResolveRule', { index: reference.indexPath.join('.') })
+    case 'config-resolver':
+      return t('dns.references.configResolver', { path: reference.path })
+    case 'external-resolver':
+      return t('dns.references.externalResolver', {
+        resource: t(`objects.${externalStoreName[reference.store]}`),
+        tag: reference.tag,
+        path: reference.path,
+      })
+  }
+}
+
+const deleteDnsDialogVisible = ref(false)
+const deleteDnsTargetTag = ref('')
+const deleteDnsReferences = computed(() => deleteDnsTargetTag.value
+  ? findDnsTagReferences(appConfig.value, currentReferenceStores(), deleteDnsTargetTag.value)
+  : [])
+
+const openDnsDeleteDialog = (tag: string) => {
+  deleteDnsTargetTag.value = tag
+  deleteDnsDialogVisible.value = true
+}
+
 const finalDns = computed({
   get() { return dns.value?.final?? '' },
   set(v:string) { dns.value.final = v.length>0 ? v : undefined }
@@ -221,8 +287,6 @@ const optimisticCache = computed({
   }
 })
 
-
-let delDnsOverlay = ref(new Array<boolean>)
 
 const dnsModal = ref({
   visible: false,
@@ -241,18 +305,99 @@ const closeDnsModal = () => {
 }
 
 const saveDnsModal = (data:any) => {
-  // New or Edit
-  if (dnsModal.value.index == -1) {
-    dns.value.servers.push(data)
-  } else {
-    dns.value.servers[dnsModal.value.index] = data
+  const tag = typeof data?.tag === 'string' ? data.tag.trim() : ''
+  if (!tag) {
+    push.error({ title: t('dns.references.invalidTagTitle'), message: t('dns.references.invalidTagText') })
+    return
   }
+
+  const index = dnsModal.value.index
+  const duplicate = dns.value.servers.some((server: any, serverIndex: number) =>
+    serverIndex !== index && typeof server?.tag === 'string' && server.tag.trim() === tag
+  )
+  if (duplicate) {
+    push.error({ title: t('dns.references.duplicateTagTitle'), message: t('dns.references.duplicateTagText') })
+    return
+  }
+
+  const currentServer = index >= 0 ? dns.value.servers[index] : undefined
+  if (index >= 0 && !currentServer) {
+    push.error({ title: t('dns.references.renameBlockedTitle'), message: t('dns.references.staleEditText') })
+    return
+  }
+  if (index >= 0) {
+    let originalTag: unknown
+    try {
+      originalTag = JSON.parse(dnsModal.value.data)?.tag
+    } catch {
+      push.error({ title: t('dns.references.renameBlockedTitle'), message: t('dns.references.staleEditText') })
+      return
+    }
+    if (currentServer.tag !== originalTag) {
+      push.error({ title: t('dns.references.renameBlockedTitle'), message: t('dns.references.staleEditText') })
+      return
+    }
+  }
+
+  const oldTag = typeof currentServer?.tag === 'string' ? currentServer.tag : ''
+  if (oldTag && oldTag !== tag) {
+    const duplicateOldTag = dns.value.servers.some((server: any, serverIndex: number) =>
+      serverIndex !== index && server?.tag === oldTag
+    )
+    if (duplicateOldTag) {
+      push.error({ title: t('dns.references.renameBlockedTitle'), message: t('dns.references.ambiguousTagText') })
+      return
+    }
+
+    const externalReferences = findDnsTagReferences(undefined, currentReferenceStores(), oldTag)
+    if (externalReferences.length > 0) {
+      const dependencies = externalReferences.map(dnsReferenceLabel).join('；')
+      push.error({
+        title: t('dns.references.renameBlockedTitle'),
+        message: `${t('dns.references.renameBlockedText')} ${dependencies}`,
+      })
+      return
+    }
+  }
+
+  const draft = JSON.parse(JSON.stringify(appConfig.value)) as Config
+  const updatedServer = { ...data, tag }
+  if (index === -1) {
+    draft.dns.servers.push(updatedServer)
+  } else {
+    draft.dns.servers[index] = updatedServer
+    if (oldTag && oldTag !== tag) renameDnsTagReferences(draft, oldTag, tag)
+  }
+  Data().config = draft
   dnsModal.value.visible = false
 }
 
-const delDns = (index: number) => {
-  dns.value.servers.splice(index,1)
-  delDnsOverlay.value[index] = false
+const delDns = (expectedTag: string) => {
+  const matchingIndexes = dns.value.servers.flatMap((server: any, index: number) =>
+    server?.tag === expectedTag ? [index] : []
+  )
+  if (matchingIndexes.length !== 1) {
+    push.error({ title: t('dns.references.deleteBlockedTitle'), message: t('dns.references.staleDeleteText') })
+    return
+  }
+
+  const references = findDnsTagReferences(appConfig.value, currentReferenceStores(), expectedTag)
+  if (references.length > 0) {
+    push.error({
+      title: t('dns.references.deleteBlockedTitle'),
+      message: `${t('dns.references.deleteBlockedText')} ${references.map(dnsReferenceLabel).join('；')}`,
+    })
+    return
+  }
+
+  const draft = JSON.parse(JSON.stringify(appConfig.value)) as Config
+  const draftIndexes = draft.dns.servers.flatMap((server: any, serverIndex: number) =>
+    server?.tag === expectedTag ? [serverIndex] : []
+  )
+  if (draftIndexes.length !== 1) return
+  draft.dns.servers.splice(draftIndexes[0], 1)
+  Data().config = draft
+  deleteDnsDialogVisible.value = false
 }
 
 </script>
@@ -269,6 +414,12 @@ const delDns = (index: number) => {
 .dns-section__heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .dns-section__heading h2 { margin: 0; font-size: 18px; letter-spacing: -0.02em; }
 .dns-section__heading p { margin: 5px 0 0; color: var(--np-text-muted); font-size: 13px; }
+.dns-delete-dialog {
+  --np-surface-strong: rgb(var(--v-theme-surface));
+  max-height: calc(100dvh - 32px);
+}
+.dns-delete-dialog__content { max-height: min(60dvh, 480px); overflow-y: auto; }
+.dns-reference-list { margin: 8px 0 0; padding-inline-start: 22px; overflow-wrap: anywhere; }
 
 .dns-section :deep(.v-checkbox .v-label),
 .dns-section :deep(.v-switch .v-label) {

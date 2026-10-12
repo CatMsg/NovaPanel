@@ -3,10 +3,12 @@ package route
 import (
 	"context"
 	"net"
+	"sync"
 	"sync/atomic"
 	"testing"
 
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common/control"
@@ -17,114 +19,140 @@ import (
 )
 
 func TestNetworkManagerStartedLifecycle(t *testing.T) {
-	r, platform, router := newStartedTestManager(t, false)
-	if err := r.Start(adapter.StartStateInitialize); err != nil {
-		t.Fatal(err)
-	}
-	<-awaitStartedTestUpdate(platform).Done()
-	if got := router.resets.Load(); got != 0 {
-		t.Fatalf("initial callback reset network before PostStart: %d", got)
-	}
-	if err := r.Start(adapter.StartStatePostStart); err != nil {
+	r, platform, router, scope := newStartedTestManager(t, false)
+	if err := r.Start(adapter.StartStateInitialize, scope); err != nil {
 		t.Fatal(err)
 	}
 	platform.monitor.emit()
-	<-awaitStartedTestUpdate(platform).Done()
-	if got := router.resets.Load(); got != 1 {
-		t.Fatalf("callback after PostStart must reset network once: %d", got)
+	select {
+	case <-platform.updates:
+		t.Fatal("interface update dispatched before PostStart")
+	default:
 	}
-	if err := r.Close(); err != nil {
+	if got := router.resets.Load(); got != 0 {
+		t.Fatalf("reset before PostStart: %d", got)
+	}
+	if err := r.Start(adapter.StartStatePostStart, scope); err != nil {
 		t.Fatal(err)
 	}
-	if !platform.monitor.closed.Load() {
-		t.Fatal("Close did not close the interface monitor")
+	finishStartedTestUpdate(r, <-platform.updates)
+	if got := router.resets.Load(); got != 1 {
+		t.Fatalf("pending initial reset=%d, want 1", got)
+	}
+	platform.monitor.emit()
+	finishStartedTestUpdate(r, <-platform.updates)
+	if got := router.resets.Load(); got != 2 {
+		t.Fatalf("post-start reset=%d, want 2", got)
+	}
+	if err := scope.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if platform.monitor.closed.Load() != 1 || platform.monitor.unregistered.Load() != 1 {
+		t.Fatal("Scope.Close did not unregister and close the interface monitor exactly once")
 	}
 }
 
 func TestNetworkManagerStartedConcurrentCallback(t *testing.T) {
 	for i := 0; i < 64; i++ {
-		r, platform, router := newStartedTestManager(t, false)
-		if err := r.Start(adapter.StartStateInitialize); err != nil {
+		r, platform, router, scope := newStartedTestManager(t, false)
+		if err := r.Start(adapter.StartStateInitialize, scope); err != nil {
 			t.Fatal(err)
 		}
-		// Receiving the context releases the callback's WIFI read, but does not
-		// order its later started read against the concurrent PostStart write.
-		updateContext := awaitStartedTestUpdate(platform)
-		if err := r.Start(adapter.StartStatePostStart); err != nil {
-			t.Fatal(err)
+		var workers sync.WaitGroup
+		workers.Add(2)
+		go func() {
+			defer workers.Done()
+			if err := r.Start(adapter.StartStatePostStart, scope); err != nil {
+				t.Error(err)
+			}
+		}()
+		go func() { defer workers.Done(); platform.monitor.emit() }()
+		workers.Wait()
+		for {
+			update := <-platform.updates
+			if update.ctx.Err() != nil {
+				close(update.release)
+				continue
+			}
+			finishStartedTestUpdate(r, update)
+			break
 		}
-		<-updateContext.Done()
-		before := router.resets.Load()
-		platform.monitor.emit()
-		<-awaitStartedTestUpdate(platform).Done()
-		if got := router.resets.Load(); got != before+1 {
-			t.Fatalf("iteration %d: post-start callback resets=%d, want %d", i, got, before+1)
+		if got := router.resets.Load(); got != 1 {
+			t.Fatalf("iteration %d: reset=%d, want 1", i, got)
 		}
-		if err := r.Close(); err != nil {
+		if err := scope.Close(); err != nil {
 			t.Fatal(err)
 		}
 	}
 }
 
 func TestNetworkManagerStartedCloseCancelsCallback(t *testing.T) {
-	r, platform, router := newStartedTestManager(t, true)
-	if err := r.Start(adapter.StartStateInitialize); err != nil {
+	r, platform, router, scope := newStartedTestManager(t, true)
+	if err := r.Start(adapter.StartStateInitialize, scope); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Start(adapter.StartStatePostStart); err != nil {
+	platform.monitor.emit()
+	if err := r.Start(adapter.StartStatePostStart, scope); err != nil {
 		t.Fatal(err)
 	}
-	updateContext := awaitStartedTestUpdate(platform)
-	if err := r.Close(); err != nil {
+	update := <-platform.updates
+	if err := scope.Close(); err != nil {
 		t.Fatal(err)
 	}
-	<-updateContext.Done()
-	// Close cancels, rather than joins, the callback in this upstream version.
-	// Drain it explicitly before checking that cancellation suppressed reset.
-	r.interfaceUpdateRunAccess.Lock()
-	r.interfaceUpdateRunAccess.Unlock()
+	if update.ctx.Err() != context.Canceled {
+		t.Fatal("Scope.Close did not cancel pending callback")
+	}
+	// Scope.Close joins resetRunAccess, so no explicit drain is needed.
 	if got := router.resets.Load(); got != 0 {
-		t.Fatalf("cancelled callback reset network during Close: %d", got)
+		t.Fatalf("cancelled callback reset network: %d", got)
 	}
-	r.interfaceUpdateAccess.Lock()
-	pending := r.interfaceUpdateCancel != nil
-	r.interfaceUpdateAccess.Unlock()
-	if pending || !platform.monitor.closed.Load() {
-		t.Fatal("Close left the callback cancellation or monitor active")
+	if err := scope.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if platform.monitor.closed.Load() != 1 || platform.monitor.unregistered.Load() != 1 {
+		t.Fatal("repeated Scope.Close repeated monitor cleanup")
 	}
 }
 
-func awaitStartedTestUpdate(platform *startedTestPlatform) context.Context {
-	return <-platform.updates
+type startedTestUpdate struct {
+	ctx     context.Context
+	release chan struct{}
 }
 
-func newStartedTestManager(t *testing.T, waitForCancel bool) (*NetworkManager, *startedTestPlatform, *startedTestRouter) {
+func finishStartedTestUpdate(r *NetworkManager, update startedTestUpdate) {
+	close(update.release)
+	r.resetRunAccess.Lock()
+	r.resetRunAccess.Unlock()
+}
+
+func newStartedTestManager(t *testing.T, waitForCancel bool) (*NetworkManager, *startedTestPlatform, *startedTestRouter, *adapter.Scope) {
 	t.Helper()
-	platform := &startedTestPlatform{
-		monitor:       &startedTestMonitor{},
-		updates:       make(chan context.Context),
-		waitForCancel: waitForCancel,
-	}
+	platform := &startedTestPlatform{monitor: &startedTestMonitor{}, updates: make(chan startedTestUpdate), waitForCancel: waitForCancel}
 	router := &startedTestRouter{}
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	ctx = pause.WithDefaultManager(ctx)
+	ctx := pause.WithDefaultManager(context.Background())
 	ctx = service.ContextWith[adapter.PlatformInterface](ctx, platform)
 	ctx = service.ContextWith[adapter.Router](ctx, router)
 	ctx = service.ContextWith[adapter.EndpointManager](ctx, startedTestEndpoints{})
 	ctx = service.ContextWith[adapter.InboundManager](ctx, startedTestInbounds{})
 	ctx = service.ContextWith[adapter.OutboundManager](ctx, startedTestOutbounds{})
-	r, err := NewNetworkManager(ctx, logger.NOP(), option.RouteOptions{}, option.DNSOptions{})
+	logger := log.NewNOPFactory().Logger()
+	scope := adapter.NewScope(ctx, logger)
+	t.Cleanup(func() {
+		if err := scope.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	r, err := NewNetworkManager(ctx, logger, option.RouteOptions{}, option.DNSOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return r, platform, router
+	return r, platform, router, scope
 }
 
 type startedTestPlatform struct {
 	adapter.PlatformInterface
 	monitor       *startedTestMonitor
-	updates       chan context.Context
+	updates       chan startedTestUpdate
 	waitForCancel bool
 }
 
@@ -135,39 +163,43 @@ func (p *startedTestPlatform) CreateDefaultInterfaceMonitor(logger.Logger) tun.D
 func (p *startedTestPlatform) UsePlatformNetworkInterfaces() bool { return false }
 func (p *startedTestPlatform) UsePlatformWIFIMonitor() bool       { return true }
 func (p *startedTestPlatform) ReadWIFIState(ctx context.Context) adapter.WIFIState {
+	update := startedTestUpdate{ctx: ctx, release: make(chan struct{})}
 	select {
-	case p.updates <- ctx:
+	case p.updates <- update:
 	case <-ctx.Done():
 		return adapter.WIFIState{}
 	}
 	if p.waitForCancel {
 		<-ctx.Done()
+	} else {
+		select {
+		case <-update.release:
+		case <-ctx.Done():
+		}
 	}
 	return adapter.WIFIState{}
 }
 
 type startedTestMonitor struct {
 	tun.DefaultInterfaceMonitor
-	callback tun.DefaultInterfaceUpdateCallback
-	closed   atomic.Bool
+	callback     tun.DefaultInterfaceUpdateCallback
+	closed       atomic.Int32
+	unregistered atomic.Int32
 }
 
 func (m *startedTestMonitor) RegisterCallback(callback tun.DefaultInterfaceUpdateCallback) *list.Element[tun.DefaultInterfaceUpdateCallback] {
 	m.callback = callback
 	return nil
 }
-func (m *startedTestMonitor) Start() error {
-	m.emit()
-	return nil
+func (m *startedTestMonitor) UnregisterCallback(*list.Element[tun.DefaultInterfaceUpdateCallback]) {
+	m.unregistered.Add(1)
 }
-func (m *startedTestMonitor) Close() error {
-	m.closed.Store(true)
-	return nil
+func (m *startedTestMonitor) Start() error { return nil }
+func (m *startedTestMonitor) Close() error { m.closed.Add(1); return nil }
+func (m *startedTestMonitor) DefaultInterface() *control.Interface {
+	return &control.Interface{Index: 1, Name: "test-interface", Flags: net.FlagUp}
 }
-func (m *startedTestMonitor) DefaultInterface() *control.Interface { return nil }
-func (m *startedTestMonitor) emit() {
-	m.callback(&control.Interface{Index: 1, Name: "test-interface", Flags: net.FlagUp}, 0)
-}
+func (m *startedTestMonitor) emit() { m.callback(m.DefaultInterface(), 0) }
 
 type startedTestRouter struct {
 	adapter.Router

@@ -19,11 +19,11 @@ type fakeDNSTransport struct {
 	entered chan struct{}
 }
 
-func (t *fakeDNSTransport) Start(adapter.StartStage) error { return nil }
-func (t *fakeDNSTransport) Close() error                   { return nil }
-func (t *fakeDNSTransport) Type() string                   { return "udp" }
-func (t *fakeDNSTransport) Tag() string                    { return "test" }
-func (t *fakeDNSTransport) Dependencies() []string         { return nil }
+func (t *fakeDNSTransport) Start(adapter.StartStage, *adapter.Scope) error { return nil }
+func (t *fakeDNSTransport) Close() error                                   { return nil }
+func (t *fakeDNSTransport) Type() string                                   { return "udp" }
+func (t *fakeDNSTransport) Tag() string                                    { return "test" }
+func (t *fakeDNSTransport) Dependencies() []string                         { return nil }
 func (t *fakeDNSTransport) Reset() {
 	t.access.Lock()
 	t.resets++

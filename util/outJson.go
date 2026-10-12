@@ -41,7 +41,17 @@ func FillOutJson(i *model.Inbound, hostname string) error {
 	outJson["server_port"] = (*inbound)["listen_port"]
 
 	switch i.Type {
-	case "http", "socks", "mixed", "anytls":
+	case "http":
+		versions, err := ValidateHTTPInbound(i)
+		if err != nil {
+			return err
+		}
+		version, err := ResolveHTTPOutboundVersion(outJson, versions)
+		if err != nil {
+			return err
+		}
+		outJson["version"] = version
+	case "socks", "mixed", "anytls":
 	case "naive":
 		naiveOut(&outJson, *inbound)
 	case "shadowsocks":

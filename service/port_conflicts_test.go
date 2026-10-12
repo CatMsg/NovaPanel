@@ -174,6 +174,45 @@ func TestManagedPortConflictsAllowSamePortAcrossTCPAndUDP(t *testing.T) {
 	}
 }
 
+func TestHTTPInboundManagedPortProtocolsFollowServedVersions(t *testing.T) {
+	logger.InitLogger(logging.ERROR)
+	if err := database.InitDB(filepath.Join(t.TempDir(), "http-version-ports.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+	db := database.GetDB()
+	inbounds := []model.Inbound{
+		{Type: "http", Tag: "http3-only", Options: json.RawMessage(`{"listen_port":443,"version":3}`)},
+		{Type: "http", Tag: "http-default", Options: json.RawMessage(`{"listen_port":444,"version":[]}`)},
+		{Type: "http", Tag: "http-combined", Options: json.RawMessage(`{"listen_port":445,"version":[1,3]}`)},
+	}
+	if err := db.Create(&inbounds).Error; err != nil {
+		t.Fatalf("create HTTP inbounds: %v", err)
+	}
+	if err := RebuildManagedPortEntries(); err != nil {
+		t.Fatalf("rebuild managed ports: %v", err)
+	}
+	var entries []model.ManagedPortEntry
+	if err := db.Find(&entries).Error; err != nil {
+		t.Fatalf("query managed ports: %v", err)
+	}
+	protocolByTag := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		protocolByTag[entry.OwnerTag] = entry.Protocols
+	}
+	want := map[string]string{"http3-only": "udp", "http-default": "tcp", "http-combined": "tcp,udp"}
+	for tag, protocols := range want {
+		if protocolByTag[tag] != protocols {
+			t.Errorf("%s protocols = %q, want %q", tag, protocolByTag[tag], protocols)
+		}
+	}
+	if err := validateManagedPortProtocolConflicts(db, "入站", "tcp-on-http3", 0, 0, []int{443}, []string{"tcp"}); err != nil {
+		t.Fatalf("HTTP/3 UDP listener should permit TCP on the same numeric port: %v", err)
+	}
+	if err := validateManagedPortProtocolConflicts(db, "入站", "udp-on-http3", 0, 0, []int{443}, []string{"udp"}); err == nil {
+		t.Fatal("HTTP/3 listener must reserve UDP on its port")
+	}
+}
+
 func TestVLESSCanShareNumericPortWithHysteria2(t *testing.T) {
 	logger.InitLogger(logging.ERROR)
 	dir := t.TempDir()

@@ -28,6 +28,12 @@ func NormalizeSingBoxConfig(raw []byte) ([]byte, error) {
 	if err := normalizeDeprecatedObjects(config); err != nil {
 		return nil, err
 	}
+	if err := validateHTTPProxyConfig(config); err != nil {
+		return nil, err
+	}
+	if err := validateDNSRuleMapValues(config); err != nil {
+		return nil, err
+	}
 
 	return json.MarshalIndent(config, "", "  ")
 }

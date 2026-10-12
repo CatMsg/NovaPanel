@@ -1,5 +1,5 @@
 <template>
-  <v-dialog transition="dialog-bottom-transition" width="800">
+  <v-dialog transition="dialog-bottom-transition" width="800" @after-enter="updateData(id)">
     <v-card class="rounded-lg">
       <v-card-title>
         {{ $t('actions.' + title) + " " + $t('objects.outbound') }}
@@ -50,6 +50,9 @@
               </v-row>
               <Socks v-if="outbound.type == outTypes.SOCKS" :data="outbound" />
               <Http v-if="outbound.type == outTypes.HTTP" :data="outbound" />
+              <v-alert v-if="httpIssue" class="mt-3" type="error" variant="tonal">
+                {{ $t(`types.http.errors.${httpIssue}`) }}
+              </v-alert>
               <Shadowsocks v-if="outbound.type == outTypes.Shadowsocks" direction="out" :data="outbound" />
               <Vmess v-if="outbound.type == outTypes.VMess" :data="outbound" />
               <Trojan v-if="outbound.type == outTypes.Trojan" :data="outbound" />
@@ -96,6 +99,7 @@
           color="primary"
           variant="tonal"
           :loading="loading"
+          :disabled="Boolean(httpIssue)"
           @click="saveChanges"
         >
           {{ $t('actions.save') }}
@@ -131,6 +135,7 @@ import UrlTest from '@/components/protocols/UrlTest.vue'
 import HttpUtils from '@/plugins/httputil'
 import AnyTls from '@/components/protocols/AnyTls.vue'
 import Data from '@/store/modules/data'
+import { httpOutboundIssue } from '@/utils/httpVersions'
 export default {
   props: ['visible', 'data', 'id', 'tags'],
   emits: ['close'],
@@ -172,6 +177,7 @@ export default {
     },
     async saveChanges() {
       if (!this.$props.visible) return
+      if (this.httpIssue) return
       // check duplicate tag
       const isDuplicatedTag = Data().checkTag("outbound",this.$props.id, this.outbound.tag)
       if (isDuplicatedTag) return
@@ -196,14 +202,12 @@ export default {
       }
     }
   },
-  watch: {
-    visible(newValue) {
-      if (newValue) {
-        this.updateData(this.$props.id)
-      }
-    },
-  },
   computed: {
+    httpIssue(): string {
+      return this.outbound.type === OutTypes.HTTP
+        ? httpOutboundIssue(this.outbound as any) ?? ''
+        : ''
+    },
     availableTags(): string[] {
       return (this.$props.tags ?? []).filter((tag:string) => tag !== this.outbound.tag)
     }

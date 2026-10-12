@@ -1,0 +1,165 @@
+package sub
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/CatMsg/NovaPanel/database/model"
+)
+
+func TestJSONSubscriptionDerivesAndPreservesHTTPVersionFields(t *testing.T) {
+	service := &JsonService{}
+	tests := []struct {
+		name     string
+		options  string
+		outbound string
+		client   string
+		tls      *model.Tls
+		want     int
+		wantErr  string
+	}{
+		{
+			name:     "legacy omitted version defaults to H1 for H1 and H2 server",
+			options:  `{"listen_port":8080}`,
+			outbound: `{"type":"http","tag":"http-default","path":"/proxy","headers":{"X-Test":["kept"]},"transport":{"type":"ws","path":"/kept"}}`,
+			want:     1,
+		},
+		{
+			name:     "H2 only derives H2",
+			options:  `{"listen_port":8081,"version":2}`,
+			outbound: `{"type":"http","tag":"http-h2","tls":{"enabled":true}}`,
+			tls:      &model.Tls{Server: json.RawMessage(`{"enabled":true}`), Client: json.RawMessage(`{"enabled":true}`)},
+			want:     2,
+		},
+		{
+			name:    "H2C-only listener stays available to external clients without a generated node",
+			options: `{"listen_port":8083,"version":[2]}`,
+		},
+		{
+			name:     "H3 only derives H3 with matching TLS",
+			options:  `{"listen_port":8443,"version":3}`,
+			outbound: `{"type":"http","tag":"http-h3","tls":{"enabled":true}}`,
+			tls:      &model.Tls{Server: json.RawMessage(`{"enabled":true}`), Client: json.RawMessage(`{"enabled":true}`)},
+			want:     3,
+		},
+		{
+			name:     "unsupported explicit client version rejected",
+			options:  `{"listen_port":8082,"version":[1,2]}`,
+			outbound: `{"type":"http","tag":"http-explicit"}`,
+			client:   `{"http":{"version":3,"tls":{"enabled":true}}}`,
+			wantErr:  "is not served",
+		},
+		{
+			name:     "TLS override mismatch rejected",
+			options:  `{"listen_port":8084}`,
+			outbound: `{"type":"http","tag":"http-tls","version":1,"tls":{"enabled":true}}`,
+			client:   `{"http":{"tls":{"enabled":false}}}`,
+			wantErr:  "does not match HTTP inbound TLS",
+			tls:      &model.Tls{Server: json.RawMessage(`{"enabled":true}`), Client: json.RawMessage(`{"enabled":true}`)},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			inbound := &model.Inbound{
+				Id:      1,
+				Type:    "http",
+				Tag:     "http-test",
+				Options: json.RawMessage(test.options),
+				Addrs:   json.RawMessage(`[]`),
+				OutJson: json.RawMessage(test.outbound),
+				Tls:     test.tls,
+			}
+			if test.tls != nil {
+				inbound.TlsId = 1
+			}
+			clientConfig := test.client
+			if clientConfig == "" {
+				clientConfig = `{}`
+			}
+			outbounds, tags, err := service.getOutbounds(json.RawMessage(clientConfig), []*model.Inbound{inbound})
+			if test.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+					t.Fatalf("error = %v, want substring %q", err, test.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("build JSON subscription outbounds: %v", err)
+			}
+			if test.name == "H2C-only listener stays available to external clients without a generated node" {
+				if len(*outbounds) != 0 || len(*tags) != 0 {
+					t.Fatalf("h2c-only server emitted native HTTP outbound: %#v %#v", *outbounds, *tags)
+				}
+				return
+			}
+			if len(*outbounds) != 1 || len(*tags) != 1 {
+				t.Fatalf("outbounds=%#v tags=%#v, want one", *outbounds, *tags)
+			}
+			outbound := (*outbounds)[0]
+			if version, ok := outbound["version"].(int); !ok || version != test.want {
+				t.Fatalf("version = %#v, want %d", version, test.want)
+			}
+			if test.name == "legacy omitted version defaults to H1 for H1 and H2 server" {
+				if outbound["path"] != "/proxy" || outbound["headers"] == nil || outbound["transport"] == nil {
+					t.Fatalf("HTTP outbound fields were not preserved: %#v", outbound)
+				}
+			}
+		})
+	}
+}
+
+func TestClashHTTPExportUsesOnlyHTTP1CompatibleVariants(t *testing.T) {
+	tlsEnabled := &model.Tls{Server: json.RawMessage(`{"enabled":true}`), Client: json.RawMessage(`{"enabled":true}`)}
+	inbounds := []*model.Inbound{
+		{Type: "http", Tag: "h1-h2", Options: json.RawMessage(`{"version":[1,2]}`), Addrs: json.RawMessage(`[]`)},
+		{Type: "http", Tag: "h2-only", Options: json.RawMessage(`{"version":2}`), Addrs: json.RawMessage(`[]`)},
+		{Type: "http", Tag: "h1-h3-forced", Options: json.RawMessage(`{"version":[1,3]}`), Addrs: json.RawMessage(`[]`), TlsId: 1, Tls: tlsEnabled},
+		{Type: "http", Tag: "h1-h3-auto", Options: json.RawMessage(`{"version":[1,3]}`), Addrs: json.RawMessage(`[]`), TlsId: 1, Tls: tlsEnabled},
+	}
+	outbounds := []map[string]interface{}{
+		{"type": "http", "tag": "h1-h2", "version": 2},
+		{"type": "http", "tag": "h2-only", "version": 2},
+		{"type": "http", "tag": "h1-h3-forced", "version": 3, "tls": map[string]interface{}{"enabled": true}},
+		{"type": "http", "tag": "h1-h3-auto", "version": 1, "tls": map[string]interface{}{"enabled": true}},
+		{"type": "mixed", "tag": "mixed-proxy"},
+	}
+	tags := []string{"h1-h2", "h2-only", "h1-h3-forced", "h1-h3-auto", "mixed-proxy"}
+	filtered, filteredTags, err := filterClashHTTPOutbounds(inbounds, outbounds, tags)
+	if err != nil {
+		t.Fatalf("filter Clash outbounds: %v", err)
+	}
+	if len(filtered) != 3 || len(filteredTags) != 3 {
+		t.Fatalf("filtered outbounds=%#v tags=%#v, want H1-compatible HTTP variants plus mixed", filtered, filteredTags)
+	}
+	if filteredTags[0] != "h1-h2" || filtered[0]["version"] != 1 {
+		t.Fatalf("H1 variant was not selected for H1+H2 server: %#v", filtered[0])
+	}
+	if filteredTags[1] != "h1-h3-auto" || filtered[1]["version"] != 1 {
+		t.Fatalf("H1 variant was not retained for H1+H3 server: %#v", filtered[1])
+	}
+	if filteredTags[2] != "mixed-proxy" || filtered[2]["type"] != "mixed" {
+		t.Fatalf("non-HTTP mixed outbound was not preserved: %#v", filtered[2])
+	}
+}
+
+func TestClashHTTPExportOmitsUnknownNonH1Versions(t *testing.T) {
+	outbounds := []map[string]interface{}{
+		{"type": "http", "tag": "external-h3", "version": 3, "tls": map[string]interface{}{"enabled": true}},
+		{"type": "http", "tag": "external-h2", "version": float64(2), "tls": map[string]interface{}{"enabled": true}},
+		{"type": "http", "tag": "external-h1", "version": 1},
+		{"type": "http", "tag": "legacy-http"},
+		{"type": "mixed", "tag": "mixed-proxy"},
+	}
+	tags := []string{"external-h3", "external-h2", "external-h1", "legacy-http", "mixed-proxy"}
+	filtered, filteredTags, err := filterClashHTTPOutbounds(nil, outbounds, tags)
+	if err != nil {
+		t.Fatalf("filter unknown-source Clash outbounds: %v", err)
+	}
+	if len(filtered) != 3 || len(filteredTags) != 3 {
+		t.Fatalf("outbounds=%#v tags=%#v, want explicit H1, legacy HTTP, and mixed", filtered, filteredTags)
+	}
+	if filteredTags[0] != "external-h1" || filteredTags[1] != "legacy-http" || filteredTags[2] != "mixed-proxy" {
+		t.Fatalf("unexpected retained unknown-source outbounds: %#v", filteredTags)
+	}
+}

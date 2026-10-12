@@ -82,6 +82,11 @@ func (s *ClashService) GetClash(subId string, requestHosts ...string) (*string, 
 	if err != nil {
 		return nil, nil, err
 	}
+	filteredOutbounds, filteredTags, err := filterClashHTTPOutbounds(inDatas, *outbounds, *outTags)
+	if err != nil {
+		return nil, nil, err
+	}
+	outbounds, outTags = &filteredOutbounds, &filteredTags
 	s.appendMieruSubscriptionOutbounds(client.Config, inDatas, hostname, outbounds, outTags)
 
 	links := s.LinkService.GetLinks(&client.Links, "external", "")

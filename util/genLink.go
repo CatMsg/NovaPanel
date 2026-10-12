@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"strconv"
 	"strings"
@@ -79,6 +80,10 @@ func LinkGenerator(clientConfig json.RawMessage, i *model.Inbound, hostname stri
 	case "socks":
 		return socksLink(userConfig["socks"], Addrs)
 	case "http":
+		compatible, err := HTTPInboundURICompatible(clientConfig, i)
+		if err != nil || !compatible {
+			return []string{}
+		}
 		return httpLink(userConfig["http"], Addrs)
 	case "mixed":
 		return append(
@@ -240,13 +245,33 @@ func socksLink(userConfig map[string]interface{}, addrs []map[string]interface{}
 }
 
 func httpLink(userConfig map[string]interface{}, addrs []map[string]interface{}) []string {
+	if userConfig == nil {
+		return nil
+	}
+	username, _ := userConfig["username"].(string)
+	password, _ := userConfig["password"].(string)
 	var links []string
-	protocol := "http"
 	for _, addr := range addrs {
-		if addr["tls"] != nil {
-			protocol = "https"
+		server, ok := addr["server"].(string)
+		if !ok || strings.TrimSpace(server) == "" {
+			continue
 		}
-		links = append(links, fmt.Sprintf("%s://%s:%s@%s:%d", protocol, userConfig["username"], userConfig["password"], addr["server"].(string), uint(addr["server_port"].(float64))))
+		port, ok := integerValue(addr["server_port"])
+		if !ok || port < 1 || port > 65535 {
+			continue
+		}
+		scheme := "http"
+		if tls, ok := addr["tls"].(map[string]interface{}); ok && boolValue(tls["enabled"]) {
+			scheme = "https"
+		}
+		server = strings.TrimPrefix(strings.TrimSuffix(server, "]"), "[")
+		link := url.URL{
+			Scheme:   scheme,
+			User:     url.UserPassword(username, password),
+			Host:     net.JoinHostPort(server, strconv.Itoa(port)),
+			Fragment: fmt.Sprint(addr["remark"]),
+		}
+		links = append(links, link.String())
 	}
 	return links
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
 	"github.com/CatMsg/NovaPanel/logger"
+	"github.com/CatMsg/NovaPanel/util"
 )
 
 const hy2ForwardScript = "scripts/hy2-forward.sh"
@@ -180,8 +181,29 @@ func collectInboundForwardProtocols(inbound *model.Inbound) ([]string, error) {
 	}
 
 	switch inbound.Type {
-	case "mixed", "socks", "http", "shadowtls", "anytls":
+	case "mixed", "socks", "shadowtls", "anytls":
 		return []string{"tcp"}, nil
+	case "http":
+		versions, err := util.HTTPInboundVersions(inbound.Options)
+		if err != nil {
+			return nil, err
+		}
+		tcp, udp := false, false
+		for _, version := range versions {
+			if version == 1 || version == 2 {
+				tcp = true
+			} else if version == 3 {
+				udp = true
+			}
+		}
+		protocols := make([]string, 0, 2)
+		if tcp {
+			protocols = append(protocols, "tcp")
+		}
+		if udp {
+			protocols = append(protocols, "udp")
+		}
+		return protocols, nil
 	case "vmess", "trojan", "vless":
 		quic, err := inboundUsesQUICTransport(inbound)
 		if err != nil {

@@ -64,6 +64,8 @@ export interface HTTP extends OutboundBasics, Dial {
   headers?: {
     [key: string]: string
   }
+  version?: 0 | 1 | 2 | 3
+  disable_version_fallback?: boolean
   tls?: oTls
 }
 

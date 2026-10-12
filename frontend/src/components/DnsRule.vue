@@ -166,6 +166,15 @@
         </v-combobox>
       </v-col>
     </v-row>
+    <v-expansion-panels class="dns-rule-advanced" variant="accordion">
+      <v-expansion-panel value="dns-conditions">
+        <v-expansion-panel-title>{{ $t('dns.condition.advanced') }}</v-expansion-panel-title>
+        <v-expansion-panel-text>
+          <DnsTagMap :rule="rule" :servers="dnsServers" field="dns_server_address" />
+          <DnsTagMap :rule="rule" :servers="dnsServers" field="dns_search_domain" />
+        </v-expansion-panel-text>
+      </v-expansion-panel>
+    </v-expansion-panels>
     <v-card-actions>
       <v-spacer></v-spacer>
       <v-menu v-model="menu" :close-on-content-click="false" location="start">
@@ -209,8 +218,11 @@
 </template>
 
 <script lang="ts">
+import DnsTagMap from '@/components/DnsTagMap.vue'
+
 export default {
-  props: ['rule', 'clients', 'inTags', 'rsTags', 'deleteable', 'ruleSets'],
+  components: { DnsTagMap },
+  props: ['rule', 'clients', 'inTags', 'rsTags', 'deleteable', 'ruleSets', 'dnsServers'],
   data() {
     return {
       menu: false,

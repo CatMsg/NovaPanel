@@ -1,3 +1,5 @@
+import type { DnsTagConditionMap } from './dnsConditions'
+
 interface generalRule {
   invert: boolean
   action: 'route' | 'route-options' | 'reject' | 'hijack-dns' | 'sniff' | 'resolve' | 'bypass'
@@ -68,6 +70,8 @@ export interface rule extends generalRule {
   interface_address?: string[]
   network_interface_address?: string[]
   default_interface_address?: string[]
+  dns_server_address?: DnsTagConditionMap
+  dns_search_domain?: DnsTagConditionMap
 }
 
 export interface ruleset {

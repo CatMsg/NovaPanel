@@ -38,7 +38,7 @@ func (c *Core) RemoveInbound(tag string) error {
 		return common.NewError("sing-box is not running")
 	}
 	logger.Info("remove inbound: ", tag)
-	return inbound_manager.Remove(tag)
+	return c.instance.inbound.Remove(tag)
 }
 
 func (c *Core) AddOutbound(config []byte) error {
@@ -76,7 +76,7 @@ func (c *Core) RemoveOutbound(tag string) error {
 		return common.NewError("sing-box is not running")
 	}
 	logger.Info("remove outbound: ", tag)
-	return outbound_manager.Remove(tag)
+	return c.instance.outbound.Remove(tag)
 }
 
 func (c *Core) AddEndpoint(config []byte) error {
@@ -110,7 +110,7 @@ func (c *Core) RemoveEndpoint(tag string) error {
 		return common.NewError("sing-box is not running")
 	}
 	logger.Info("remove endpoint: ", tag)
-	return endpoint_manager.Remove(tag)
+	return c.instance.endpoint.Remove(tag)
 }
 
 func (c *Core) AddService(config []byte) error {
@@ -143,5 +143,5 @@ func (c *Core) RemoveService(tag string) error {
 		return common.NewError("sing-box is not running")
 	}
 	logger.Info("remove service: ", tag)
-	return service_manager.Remove(tag)
+	return c.instance.service.Remove(tag)
 }

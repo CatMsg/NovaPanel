@@ -18,7 +18,7 @@ func main() {
 }
 
 // Retain the legacy script filename for existing build callers, but never edit
-// the replacement or the global module cache. Alpha.4 already uses MyInterfaces.
+// the replacement or the global module cache. Alpha.12 already uses MyInterfaces.
 func checkSingBoxWindowsCompat() error {
 	verify := exec.Command("go", "run", "-mod=readonly", "./scripts/verify-sing-box.go")
 	verify.Stdout = os.Stdout

@@ -6,6 +6,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -15,14 +16,18 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/module"
+	"gopkg.in/yaml.v3"
 )
 
 const (
 	singBoxModule  = "github.com/sagernet/sing-box"
-	singBoxVersion = "v1.15.0-alpha.4"
-	singBoxSum     = "h1:dqPrdSREKapxsSW17ISeVFZF5I1KY3FagBFCsI2LpV4="
-	singBoxModSum  = "h1:jtgVcFwVF4XhAlhzoQZkqjLLSnSPizqedVLy8ZQqZEk="
-	singBoxZipSHA  = "04d2fe633d88676abda1010460f002b51d7e037a2caa4efa6a5ac609ad4ff473"
+	singBoxVersion = "v1.15.0-alpha.12"
+	singBoxSum     = "h1:mAzZow7/pGOmTLVcFUnmXKgkLEmVmOUDswNjTdYf3Ns="
+	singBoxModSum  = "h1:1gZ6h/h1qzAEVu8bQhvtVQWW/gy1EsueQcJ9uCl+vCU="
+	singBoxZipSHA  = "7d6e28f0b3380a92f34f30cd22bca2bc05e88384dfe6f3b6cc19f9848a84414f"
 	singBoxTest    = "route/network_started_test.go"
 )
 
@@ -95,15 +100,12 @@ func verifySingBox(archiveSource string) error {
 		if err != nil {
 			return err
 		}
-		if name == "route/network.go" {
-			data, err = expectedNetworkPatch(data)
-			if err != nil {
-				return err
-			}
-		}
 		expected[name] = data
 	}
 	if err := verifySourceTree(source, expected); err != nil {
+		return err
+	}
+	if err := verifyCronetPins(root); err != nil {
 		return err
 	}
 	// Include untracked, non-ignored files so this gate also works before the
@@ -129,7 +131,73 @@ func verifySingBox(archiveSource string) error {
 			return fmt.Errorf("Git archive: %w", err)
 		}
 	}
-	fmt.Printf("Verified %s %s: %d official files, four atomic replacements, one regression test; Git-visible source complete\n", singBoxModule, singBoxVersion, len(expected))
+	fmt.Printf("Verified %s %s: %d official files, no production patches, one regression test; Git-visible source complete; release Cronet pin matches official source and module requirements\n", singBoxModule, singBoxVersion, len(expected))
+	return nil
+}
+
+func verifyCronetPins(root string) error {
+	const cronetModule = "github.com/sagernet/cronet-go"
+	read := func(name string) ([]byte, error) {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
+		if err != nil {
+			return nil, fmt.Errorf("Cronet compatibility: %s: %w", name, err)
+		}
+		return data, nil
+	}
+	// verifySourceTree authenticates the official pin and go.mod before this check.
+	pinData, err := read("third_party/sing-box/.github/CRONET_GO_VERSION")
+	if err != nil {
+		return err
+	}
+	pin := strings.TrimSpace(string(pinData))
+	if decoded, err := hex.DecodeString(pin); err != nil || len(decoded) != 20 {
+		return fmt.Errorf("official CRONET_GO_VERSION must be a full 40-character commit: %q", pin)
+	}
+	workflowData, err := read(".github/workflows/release.yml")
+	if err != nil {
+		return err
+	}
+	var workflow struct {
+		Env map[string]string `yaml:"env"`
+	}
+	if err := yaml.Unmarshal(workflowData, &workflow); err != nil {
+		return fmt.Errorf("parse release workflow: %w", err)
+	}
+	if workflow.Env["CRONET_GO_VERSION"] != pin {
+		return fmt.Errorf("release CRONET_GO_VERSION %q must match official pin %s", workflow.Env["CRONET_GO_VERSION"], pin)
+	}
+	versions := make(map[string]string)
+	for _, name := range []string{"third_party/sing-box/go.mod", "go.mod"} {
+		data, err := read(name)
+		if err != nil {
+			return err
+		}
+		file, err := modfile.Parse(name, data, nil)
+		if err != nil {
+			return fmt.Errorf("parse %s: %w", name, err)
+		}
+		for _, path := range []string{cronetModule, cronetModule + "/all"} {
+			for _, replacement := range file.Replace {
+				if replacement.Old.Path == path {
+					return fmt.Errorf("%s must not replace %s", name, path)
+				}
+			}
+			var version string
+			for _, requirement := range file.Require {
+				if requirement.Mod.Path == path {
+					version = requirement.Mod.Version
+				}
+			}
+			revision, err := module.PseudoVersionRev(version)
+			if err != nil || revision != pin[:12] {
+				return fmt.Errorf("%s requires %s %q, which must reference official Cronet commit %s", name, path, version, pin)
+			}
+			if official, ok := versions[path]; ok && version != official {
+				return fmt.Errorf("%s requires %s %s, want official version %s", name, path, version, official)
+			}
+			versions[path] = version
+		}
+	}
 	return nil
 }
 
@@ -140,21 +208,6 @@ func readZipFile(file *zip.File) ([]byte, error) {
 	}
 	defer reader.Close()
 	return io.ReadAll(reader)
-}
-
-func expectedNetworkPatch(data []byte) ([]byte, error) {
-	for _, edit := range [][2]string{
-		{"\t\"sync\"\n", "\t\"sync\"\n\t\"sync/atomic\"\n"},
-		{"\tstarted                  bool\n", "\tstarted                  atomic.Bool\n"},
-		{"\t\tr.started = true\n", "\t\tr.started.Store(true)\n"},
-		{"\tif !r.started {\n", "\tif !r.started.Load() {\n"},
-	} {
-		if bytes.Count(data, []byte(edit[0])) != 1 {
-			return nil, fmt.Errorf("official network.go patch context changed: %q", edit[0])
-		}
-		data = bytes.Replace(data, []byte(edit[0]), []byte(edit[1]), 1)
-	}
-	return data, nil
 }
 
 func verifySourceTree(source string, expected map[string][]byte) error {
@@ -188,7 +241,7 @@ func verifySourceTree(source string, expected map[string][]byte) error {
 				return fmt.Errorf("extra source file %s", name)
 			}
 			if !bytes.Equal(data, original) {
-				return fmt.Errorf("source differs beyond allowed atomic patch: %s", name)
+				return fmt.Errorf("source differs from official archive: %s", name)
 			}
 		} else if len(data) == 0 {
 			return fmt.Errorf("empty regression test %s", name)

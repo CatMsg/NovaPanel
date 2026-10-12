@@ -2,10 +2,11 @@
 
 ## Sing-Box
 
-NovaPanel includes `github.com/sagernet/sing-box v1.15.0-alpha.4`, official
-commit `4566ef0890e0cde8448000e8aa3223fb286daa94`, with a local atomic
-start-state synchronization patch in `third_party/sing-box/route/network.go`.
-The complete corresponding source, original license, patch provenance, checksums,
+NovaPanel includes `github.com/sagernet/sing-box v1.15.0-alpha.12`, official
+commit `25b0d5ea3e466d246c708ac0f20d0448110e566c`, without local production
+source patches. Upstream's scoped lifecycle supersedes the former atomic
+start-state patch; a local lifecycle regression test is retained.
+The complete corresponding source, original license, provenance, checksums,
 and verification instructions are included in the NovaPanel source repository
 under `third_party/sing-box` and `third_party/SING_BOX_PATCH.md`.
 

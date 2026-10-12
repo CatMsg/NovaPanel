@@ -7,6 +7,7 @@
     :inTags="inboundTags"
     :outTags="outboundTags"
     :rsTags="rulesetTags"
+    :dnsServers="dnsServers"
     @close="closeRuleModal"
     @save="saveRuleModal"
   />
@@ -55,6 +56,7 @@
     :inTags="inboundTags"
     :serverTags="dnsServerTags"
     :ruleSets="rulesetTags"
+    :dnsServers="dnsServers"
     @close="closeDnsRuleModal"
     @save="saveDnsRuleModal"
   />
@@ -298,6 +300,7 @@ import { computed, defineAsyncComponent, ref, onBeforeMount } from 'vue'
 import { Config } from '@/types/config'
 import { ruleset } from '@/types/rules'
 import { dnsRule } from '@/types/dns'
+import { dnsConditionServerOptions } from '@/types/dnsConditions'
 import { FindDiff } from '@/plugins/utils'
 import PageHero from '@/components/PageHero.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -384,6 +387,10 @@ const inboundTags = computed((): string[] => [
 const dnsServerTags = computed((): string[] =>
   appConfig.value.dns?.servers?.filter((server: any) => server.tag)?.map((server: any) => server.tag) ?? []
 )
+const dnsServers = computed((): any[] => dnsConditionServerOptions(
+  appConfig.value.dns?.servers,
+  appConfig.value.dns?.final,
+) as any[])
 
 const dnsRules = computed((): dnsRule[] => {
   if (!appConfig.value.dns) return []

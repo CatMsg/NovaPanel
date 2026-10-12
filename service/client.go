@@ -490,6 +490,11 @@ func (s *ClientService) updateLinksWithFixedInbounds(tx *gorm.DB, clients []*mod
 			if inbound == nil {
 				continue
 			}
+			if inbound.Type == "http" {
+				if _, err := util.HTTPInboundURICompatible(client.Config, inbound); err != nil {
+					return err
+				}
+			}
 			newLinks := util.LinkGenerator(client.Config, inbound, hostname)
 			for _, newLink := range newLinks {
 				newClientLinks = append(newClientLinks, map[string]string{

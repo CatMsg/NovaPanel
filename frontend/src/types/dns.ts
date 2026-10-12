@@ -1,3 +1,5 @@
+import type { DnsTagConditionMap } from './dnsConditions'
+
 export interface Dns {
   servers: DnsServer[]
   rules: dnsRule[]
@@ -128,4 +130,6 @@ export interface dnsRule extends generalDnsRule {
   rule_set?: string[]
   rule_set_ip_cidr_match_source?: boolean
   match_response?: boolean | string
+  dns_server_address?: DnsTagConditionMap
+  dns_search_domain?: DnsTagConditionMap
 }

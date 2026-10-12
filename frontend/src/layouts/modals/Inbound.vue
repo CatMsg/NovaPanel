@@ -45,9 +45,18 @@
             <v-tab value="s">{{ $t('in.sSide') }}</v-tab>
             <v-tab value="c">{{ $t('in.cSide') }}</v-tab>
           </v-tabs>
+          <v-alert
+            v-if="inbound.type == inTypes.HTTP && httpIssue"
+            class="mt-3"
+            type="error"
+            variant="tonal"
+          >
+            {{ $t(`types.http.errors.${httpIssue}`) }}
+          </v-alert>
           <v-window v-model="side" style="margin-top: 10px;">
             <v-window-item value="s">
               <Listen :data="inbound" :inTags="inTags" v-if="inbound.type != inTypes.Tun" />
+              <HttpInbound v-if="inbound.type == inTypes.HTTP" :data="inbound" :tlsConfigs="tlsConfigs" />
               <Direct v-if="inbound.type == inTypes.Direct" :data="inbound" />
               <Shadowsocks v-if="inbound.type == inTypes.Shadowsocks" direction="in" :data="inbound" />
               <Hysteria v-if="inbound.type == inTypes.Hysteria" direction="in" :data="inbound" />
@@ -129,6 +138,7 @@ import { InTypes, createInbound, Addr, ShadowTLS } from '@/types/inbounds'
 import RandomUtil from '@/plugins/randomUtil'
 import Dial from '@/components/Dial.vue'
 import Listen from '@/components/Listen.vue'
+import HttpInbound from '@/components/protocols/HttpInbound.vue'
 import Direct from '@/components/protocols/Direct.vue'
 import Users from '@/components/Users.vue'
 import Shadowsocks from '@/components/protocols/Shadowsocks.vue'
@@ -149,6 +159,7 @@ import AddrVue from '@/components/Addr.vue'
 import OutJsonVue from '@/components/OutJson.vue'
 import Data from '@/store/modules/data'
 import { push } from 'notivue'
+import { httpInboundIssue } from '@/utils/httpVersions'
 export default {
   props: ['visible', 'id', 'inTags', 'tlsConfigs'],
   emits: ['close'],
@@ -260,6 +271,7 @@ export default {
     },
     async saveChanges() {
       if (!this.$props.visible) return
+      if (this.inbound.type == InTypes.HTTP && this.httpIssue) return
       // check duplicate tag
       const isDuplicatedTag = Data().checkTag("inbound", this.inbound.id, this.inbound.tag)
       if (isDuplicatedTag) return
@@ -301,7 +313,13 @@ export default {
       if (this.inbound.tag == "") return false
       if (this.inbound.listen_port > 65535 || this.inbound.listen_port < 1) return false
       if (this.OnlyTLS.includes(this.inbound.type) && this.inbound.tls_id == 0) return false
+      if (this.inbound.type == InTypes.HTTP && this.httpIssue) return false
       return true
+    },
+    httpIssue(): string {
+      return this.inbound.type === InTypes.HTTP
+        ? httpInboundIssue(this.inbound as any, this.$props.tlsConfigs ?? []) ?? ''
+        : ''
     },
     clients() {
       return Data().clients?? []
@@ -325,7 +343,7 @@ export default {
     },
   },
   components: {
-    Listen, InTls, Hysteria2, Naive, Direct, Shadowsocks,
+    Listen, InTls, HttpInbound, Hysteria2, Naive, Direct, Shadowsocks,
     Users, Hysteria, ShadowTls, TProxy, Multiplex, Tuic, Tun,
     AnyTls, Mieru, Masque, Transport, AddrVue, OutJsonVue, Dial
   }

@@ -298,6 +298,15 @@
         <v-switch v-model="rule.rule_set_ip_cidr_match_source" color="primary" :label="$t('rule.rulesetMatchSrc')" hide-details></v-switch>
       </v-col>
     </v-row>
+    <v-expansion-panels class="route-rule-dns-advanced" variant="accordion">
+      <v-expansion-panel value="dns-conditions">
+        <v-expansion-panel-title>{{ $t('dns.condition.advanced') }}</v-expansion-panel-title>
+        <v-expansion-panel-text>
+          <DnsTagMap :rule="rule" :servers="dnsServers" field="dns_server_address" />
+          <DnsTagMap :rule="rule" :servers="dnsServers" field="dns_search_domain" />
+        </v-expansion-panel-text>
+      </v-expansion-panel>
+    </v-expansion-panels>
     <v-card-actions>
       <v-spacer></v-spacer>
       <v-menu v-model="menu" :close-on-content-click="false" location="start">
@@ -351,9 +360,10 @@
 
 <script lang="ts">
 import ExpTextarea from '@/components/ExpTextarea.vue'
+import DnsTagMap from '@/components/DnsTagMap.vue'
 export default {
-  components: { ExpTextarea },
-  props: ['rule', 'clients', 'inTags', 'outTags', 'rsTags', 'deleteable'],
+  components: { ExpTextarea, DnsTagMap },
+  props: ['rule', 'clients', 'inTags', 'outTags', 'rsTags', 'deleteable', 'dnsServers'],
   data() {
     return {
       menu: false,

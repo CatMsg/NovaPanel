@@ -221,3 +221,123 @@ func TestDNSRuleNeedsResponseMigrationChecksLogicalChildren(t *testing.T) {
 		t.Fatal("a migrated logical parent must not hide a deprecated child filter")
 	}
 }
+
+func TestNormalizeSingBoxConfigValidatesDNSRuleMapReferences(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  string
+		wantErr string
+	}{
+		{
+			name:   "valid scalar and list values in nested rules",
+			config: `{"dns":{"servers":[{"tag":"local","type":"local"},{"tag":"resolved","type":"resolved"}],"rules":[{"type":"logical","mode":"and","rules":[{"dns_server_address":{"local":["192.0.2.0/24","2001:db8::1"],"resolved":"198.51.100.2"},"dns_search_domain":{"local":["Example.COM.","example.net"],"resolved":"example.org"}}]}]},"route":{"rules":[]}}`,
+		},
+		{
+			name:   "implicit local fallback",
+			config: `{"route":{"rules":[{"type":"logical","mode":"and","rules":[{"dns_search_domain":{"local":"example.org"}}]}]}}`,
+		},
+		{
+			name:    "empty map",
+			config:  `{"dns":{"servers":[{"tag":"local","type":"local"}],"rules":[{"dns_server_address":{}}]}}`,
+			wantErr: "non-empty map",
+		},
+		{
+			name:    "empty list",
+			config:  `{"dns":{"servers":[{"tag":"local","type":"local"}],"rules":[{"dns_server_address":{"local":[]}}]}}`,
+			wantErr: "non-empty string or string list",
+		},
+		{
+			name:    "blank key",
+			config:  `{"dns":{"servers":[{"tag":"local","type":"local"}],"rules":[{"dns_search_domain":{" ":"example.org"}}]}}`,
+			wantErr: "blank DNS server tag",
+		},
+		{
+			name:    "blank value",
+			config:  `{"dns":{"servers":[{"tag":"local","type":"local"}],"rules":[{"dns_search_domain":{"local":[" "]}}]}}`,
+			wantErr: "must not be blank",
+		},
+		{
+			name:    "invalid CIDR",
+			config:  `{"dns":{"servers":[{"tag":"local","type":"local"}],"rules":[{"dns_server_address":{"local":"192.0.2.1/99"}}]}}`,
+			wantErr: "IP address or CIDR",
+		},
+		{
+			name:    "nested DNS missing tag",
+			config:  `{"dns":{"servers":[{"tag":"local","type":"local"}],"rules":[{"type":"logical","mode":"and","rules":[{"dns_server_address":{"missing":"192.0.2.1"}}]}]}}`,
+			wantErr: "missing DNS server tag",
+		},
+		{
+			name:    "nested route missing tag",
+			config:  `{"dns":{"servers":[{"tag":"local","type":"local"}]},"route":{"rules":[{"type":"logical","mode":"and","rules":[{"dns_search_domain":{"missing":"example.org"}}]}]}}`,
+			wantErr: "missing DNS server tag",
+		},
+		{
+			name:    "unsupported DNS transport",
+			config:  `{"dns":{"servers":[{"tag":"remote","type":"udp"}],"rules":[{"dns_server_address":{"remote":"192.0.2.1"}}]}}`,
+			wantErr: "does not support dns_server_address",
+		},
+		{
+			name:    "implicit local unavailable with explicit final",
+			config:  `{"dns":{"final":"local","rules":[{"dns_search_domain":{"local":"example.org"}}]}}`,
+			wantErr: "missing DNS server tag",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := NormalizeSingBoxConfig([]byte(test.config))
+			if test.wantErr == "" {
+				if err != nil {
+					t.Fatalf("normalize valid config: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("error = %v, want substring %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestNormalizeSingBoxConfigRejectsHTTPVersionAndTLSMismatches(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  string
+		wantErr string
+	}{
+		{
+			name:    "HTTP3 requires enabled TLS",
+			config:  `{"inbounds":[{"type":"http","version":3,"tls":{"enabled":false}}]}`,
+			wantErr: "version 3 requires an enabled TLS",
+		},
+		{
+			name:    "invalid HTTP inbound version",
+			config:  `{"inbounds":[{"type":"http","version":[1,4]}]}`,
+			wantErr: "version must contain only 1, 2, or 3",
+		},
+		{
+			name:    "HTTP3 outbound requires TLS",
+			config:  `{"outbounds":[{"type":"http","version":3}]}`,
+			wantErr: "version 3 requires TLS to be enabled",
+		},
+		{
+			name:    "explicit HTTP3 with Host is invalid",
+			config:  `{"outbounds":[{"type":"http","version":3,"tls":{"enabled":true},"headers":{"Host":["proxy.example"]}}]}`,
+			wantErr: "versions 2 and 3 do not support path or Host",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := NormalizeSingBoxConfig([]byte(test.config))
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("error = %v, want substring %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestNormalizeSingBoxConfigAllowsStandaloneH2CInbound(t *testing.T) {
+	if _, err := NormalizeSingBoxConfig([]byte(`{"inbounds":[{"type":"http","tag":"standalone-h2c","version":[2]}]}`)); err != nil {
+		t.Fatalf("standalone raw H2C inbound should remain valid: %v", err)
+	}
+}

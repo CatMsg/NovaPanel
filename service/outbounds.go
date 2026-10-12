@@ -83,6 +83,9 @@ func (s *OutboundService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 		if outbound.Type == "" || outbound.Tag == "" {
 			return nil, common.NewError("出站类型和标签不能为空")
 		}
+		if err := validateHTTPOutboundModel(&outbound); err != nil {
+			return nil, err
+		}
 
 		err = tx.Save(&outbound).Error
 		if err != nil {

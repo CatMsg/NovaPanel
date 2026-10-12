@@ -55,8 +55,16 @@ func (s *UserCenterService) Build(subID string, now time.Time) (userCenterView, 
 		online = false
 	}
 
+	resetLocation := now.Location()
+	if client.AutoReset {
+		resetLocation, err = s.SettingService.GetTimeLocation()
+		if err != nil {
+			return userCenterView{}, nil, err
+		}
+	}
+
 	updateInterval, _ := s.SettingService.GetSubUpdates()
-	view := newUserCenterView(client, online, updateInterval, now)
+	view := newUserCenterView(client, online, updateInterval, now, resetLocation)
 	usage := resolveClientSubscriptionUsage(client)
 	if usage.inherited {
 		view.Remaining = formatUserCenterBytes(usage.remaining)
@@ -69,7 +77,7 @@ func (s *UserCenterService) Build(subID string, now time.Time) (userCenterView, 
 	return view, getClientSubscriptionHeaders(client, updateInterval), nil
 }
 
-func newUserCenterView(client *model.Client, online bool, updateInterval int, now time.Time) userCenterView {
+func newUserCenterView(client *model.Client, online bool, updateInterval int, now time.Time, resetLocation *time.Location) userCenterView {
 	up := nonNegative(client.Up)
 	down := nonNegative(client.Down)
 	used := safeTrafficSum(up, down)
@@ -125,7 +133,7 @@ func newUserCenterView(client *model.Client, online bool, updateInterval int, no
 		view.ExpiryRemaining = "无到期时间"
 	}
 
-	view.ResetTitle, view.ResetDetail = describeClientReset(client, now)
+	view.ResetTitle, view.ResetDetail = describeClientReset(client, now, resetLocation)
 	if updateInterval > 0 {
 		view.UpdateInterval = fmt.Sprintf("每 %d 小时", updateInterval)
 	} else {
@@ -185,25 +193,29 @@ func formatUserCenterDuration(value time.Duration) string {
 	return strings.Join(parts, " ")
 }
 
-func describeClientReset(client *model.Client, now time.Time) (string, string) {
+func describeClientReset(client *model.Client, now time.Time, resetLocation *time.Location) (string, string) {
+	if resetLocation == nil {
+		resetLocation = now.Location()
+	}
 	if client.DelayStart {
 		if client.AutoReset {
-			return "等待首次使用", fmt.Sprintf("首次产生流量后开始计时，此后每 %d 天重置本周期流量", client.ResetDays)
+			return "等待首次使用", fmt.Sprintf("首次产生流量后启用月度重置；每月 1 日 00:00（%s）重置本周期流量", resetLocation)
 		}
 		return "等待首次使用", fmt.Sprintf("首次产生流量后开始 %d 天有效期", client.ResetDays)
 	}
 	if !client.AutoReset {
 		return "未启用周期重置", "当前用量不会按周期自动清零"
 	}
+	resetTitle := "每月 1 日重置"
 	if client.NextReset > 0 {
-		next := time.Unix(client.NextReset, 0).In(now.Location())
+		next := time.Unix(client.NextReset, 0).In(resetLocation)
 		remaining := next.Sub(now)
 		if remaining > 0 {
-			return "每 " + fmt.Sprint(client.ResetDays) + " 天", next.Format("2006-01-02 15:04 MST") + " · 剩余 " + formatUserCenterDuration(remaining)
+			return resetTitle, next.Format("2006-01-02 15:04 MST") + fmt.Sprintf(" (%s) · 剩余 %s", resetLocation, formatUserCenterDuration(remaining))
 		}
-		return "每 " + fmt.Sprint(client.ResetDays) + " 天", "重置任务等待执行"
+		return resetTitle, "重置任务等待执行"
 	}
-	return "每 " + fmt.Sprint(client.ResetDays) + " 天", "下一次重置时间尚未生成"
+	return resetTitle, "下一次重置时间尚未生成"
 }
 
 func renderUserCenter(writer io.Writer, view userCenterView) error {
