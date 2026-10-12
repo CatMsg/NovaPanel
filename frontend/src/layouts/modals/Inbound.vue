@@ -159,7 +159,7 @@ import AddrVue from '@/components/Addr.vue'
 import OutJsonVue from '@/components/OutJson.vue'
 import Data from '@/store/modules/data'
 import { push } from 'notivue'
-import { httpInboundIssue } from '@/utils/httpVersions'
+import { httpInboundIssue, synchronizeHttpInboundClientVersion } from '@/utils/httpVersions'
 export default {
   props: ['visible', 'id', 'inTags', 'tlsConfigs'],
   emits: ['close'],
@@ -285,6 +285,10 @@ export default {
       if (this.inbound.type == InTypes.Masque) {
         ;(this.inbound as any).network = 'quic'
         ;(this.inbound as any).udp = true
+      }
+
+      if (this.inbound.type == InTypes.HTTP) {
+        synchronizeHttpInboundClientVersion(this.inbound as any)
       }
 
       // save data

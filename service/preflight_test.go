@@ -154,8 +154,8 @@ func TestSaveRejectsH2CPanelInboundWithoutChangingRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal H2C inbound payload: %v", err)
 	}
-	if _, _, err := svc.Save("inbounds", "edit", payload, "", "test", "localhost"); err == nil || !strings.Contains(err.Error(), "falls back to HTTP/1, which the inbound does not serve") {
-		t.Fatalf("expected panel H2C inbound rejection, got %v", err)
+	if _, _, err := svc.Save("inbounds", "edit", payload, "", "test", "localhost"); err == nil || !strings.Contains(err.Error(), "HTTP inbound version 2 requires an enabled TLS server configuration") {
+		t.Fatalf("expected panel H2C inbound TLS rejection, got %v", err)
 	}
 	assertRejectedConfigSaveRowsUnchanged(t, db, beforeConfig, beforeInbound)
 }

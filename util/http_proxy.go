@@ -76,6 +76,69 @@ func ValidateHTTPInbound(inbound *model.Inbound) ([]int, error) {
 	return versions, nil
 }
 
+// ValidateHTTPClientVersionOverride validates the shape of a per-user HTTP
+// version hint. The hint is not authoritative for the listener's protocol.
+func ValidateHTTPClientVersionOverride(httpConfig map[string]interface{}) error {
+	if httpConfig == nil {
+		return nil
+	}
+	raw, exists := httpConfig["version"]
+	if !exists || raw == nil {
+		return nil
+	}
+	version, ok := integerValue(raw)
+	if !ok || version < 0 || version > 3 {
+		return fmt.Errorf("HTTP client version override must be 0, 1, 2, or 3")
+	}
+	return nil
+}
+
+// CloneJSONMap makes an independent copy of a JSON-compatible object,
+// including nested TLS maps and slices.
+func CloneJSONMap(source map[string]interface{}) (map[string]interface{}, error) {
+	if source == nil {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(source)
+	if err != nil {
+		return nil, err
+	}
+	var clone map[string]interface{}
+	if err := json.Unmarshal(encoded, &clone); err != nil {
+		return nil, err
+	}
+	return clone, nil
+}
+
+// SetHTTPOutboundVersion derives protocol-specific settings from the listener
+// version without mutating shared TLS configuration.
+func SetHTTPOutboundVersion(outbound map[string]interface{}, version int) error {
+	if outbound == nil || version < 1 || version > 3 {
+		return fmt.Errorf("HTTP outbound version must be 1, 2, or 3")
+	}
+	outbound["version"] = version
+	if version == 2 {
+		outbound["disable_version_fallback"] = true
+	} else {
+		delete(outbound, "disable_version_fallback")
+	}
+
+	tls, ok := outbound["tls"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	tls, err := CloneJSONMap(tls)
+	if err != nil {
+		return fmt.Errorf("copy HTTP outbound TLS: %w", err)
+	}
+	if enabled, _ := tls["enabled"].(bool); enabled {
+		alpn := map[int]string{1: "http/1.1", 2: "h2", 3: "h3"}[version]
+		tls["alpn"] = []interface{}{alpn}
+	}
+	outbound["tls"] = tls
+	return nil
+}
+
 // ResolveHTTPOutboundVersion applies sing-box HTTP outbound validation and, when
 // supportedVersions is non-nil, selects a version served by the corresponding
 // HTTP inbound. For subscriptions, HTTP/1 is preferred for legacy clients.
@@ -176,8 +239,24 @@ func HTTPInboundURICompatible(clientConfig json.RawMessage, inbound *model.Inbou
 		}
 	}
 	if httpConfig, ok := configs["http"].(map[string]interface{}); ok {
-		for key, value := range httpConfig {
-			outbound[key] = value
+		if len(versions) == 1 {
+			if err := ValidateHTTPClientVersionOverride(httpConfig); err != nil {
+				return false, err
+			}
+			for key, value := range httpConfig {
+				if key != "version" {
+					outbound[key] = value
+				}
+			}
+		} else {
+			for key, value := range httpConfig {
+				outbound[key] = value
+			}
+		}
+	}
+	if len(versions) == 1 {
+		if err := SetHTTPOutboundVersion(outbound, 1); err != nil {
+			return false, err
 		}
 	}
 	version, err := ResolveHTTPOutboundVersion(outbound, versions)

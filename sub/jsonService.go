@@ -153,6 +153,13 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 			return nil, nil, err
 		}
 		protocol, _ := outbound["type"].(string)
+		var httpVersions []int
+		if protocol == "http" {
+			httpVersions, err = util.ValidateHTTPInbound(inData)
+			if err != nil {
+				return nil, nil, fmt.Errorf("HTTP inbound %q: %w", inData.Tag, err)
+			}
+		}
 
 		// Shadowsocks
 		if protocol == "shadowsocks" {
@@ -187,27 +194,45 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 			outbound["ip"] = ip
 		} else { // Other protocols
 			config, _ := configs[protocol].(map[string]interface{})
-			for key, value := range config {
-				if key == "name" || key == "alterId" || (key == "flow" && inData.TlsId == 0) {
-					continue
+			if protocol == "http" {
+				if err := mergeHTTPClientOverrides(outbound, config, inData.TlsId == 0, len(httpVersions) == 1); err != nil {
+					return nil, nil, fmt.Errorf("HTTP inbound %q client configuration: %w", inData.Tag, err)
 				}
-				outbound[key] = value
+			} else {
+				for key, value := range config {
+					if key == "name" || key == "alterId" || (key == "flow" && inData.TlsId == 0) {
+						continue
+					}
+					outbound[key] = value
+				}
 			}
 		}
-		var httpVersions []int
 		if protocol == "http" {
-			httpVersions, err = util.ValidateHTTPInbound(inData)
-			if err != nil {
-				return nil, nil, fmt.Errorf("HTTP inbound %q: %w", inData.Tag, err)
+			version := 0
+			if len(httpVersions) == 1 {
+				version = httpVersions[0]
+			} else {
+				version, err = util.ResolveHTTPOutboundVersion(outbound, httpVersions)
+				if err != nil {
+					return nil, nil, fmt.Errorf("HTTP inbound %q subscription: %w", inData.Tag, err)
+				}
 			}
-			version, resolveErr := util.ResolveHTTPOutboundVersion(outbound, httpVersions)
-			if resolveErr != nil {
-				return nil, nil, fmt.Errorf("HTTP inbound %q subscription: %w", inData.Tag, resolveErr)
+			if version == 0 {
+				return nil, nil, fmt.Errorf("HTTP inbound %q has no supported version", inData.Tag)
+			}
+			if len(httpVersions) == 1 {
+				if err := util.SetHTTPOutboundVersion(outbound, version); err != nil {
+					return nil, nil, fmt.Errorf("HTTP inbound %q subscription: %w", inData.Tag, err)
+				}
+			} else {
+				outbound["version"] = version
+			}
+			if _, err := util.ResolveHTTPOutboundVersion(outbound, httpVersions); err != nil {
+				return nil, nil, fmt.Errorf("HTTP inbound %q subscription: %w", inData.Tag, err)
 			}
 			if err = util.ValidateHTTPOutboundTLSForInbound(outbound, inData); err != nil {
 				return nil, nil, fmt.Errorf("HTTP inbound %q subscription: %w", inData.Tag, err)
 			}
-			outbound["version"] = version
 		}
 
 		var addrs []map[string]interface{}
@@ -227,12 +252,13 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 			}
 		} else {
 			for index, addr := range addrs {
-				// Copy original config
-				newOut := make(map[string]interface{}, len(outbound))
-				for key, value := range outbound {
-					newOut[key] = value
+				// Each address gets an independent copy so TLS overrides cannot
+				// leak into another address or the shared inbound template.
+				newOut, err := util.CloneJSONMap(outbound)
+				if err != nil {
+					return nil, nil, fmt.Errorf("copy outbound for inbound %q address %d: %w", inData.Tag, index+1, err)
 				}
-				// Change and push copied config
+				// Change and push copied config.
 				newOut["server"], _ = addr["server"].(string)
 				port, _ := addr["server_port"].(float64)
 				newOut["server_port"] = int(port)
@@ -243,20 +269,38 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 					if outTls == nil {
 						outTls = make(map[string]interface{})
 					}
-					for key, value := range addrTls {
+					addrTlsCopy, copyErr := util.CloneJSONMap(addrTls)
+					if copyErr != nil {
+						return nil, nil, fmt.Errorf("copy TLS override for inbound %q address %d: %w", inData.Tag, index+1, copyErr)
+					}
+					for key, value := range addrTlsCopy {
 						outTls[key] = value
 					}
 					newOut["tls"] = outTls
 				}
 				if protocol == "http" {
-					version, resolveErr := util.ResolveHTTPOutboundVersion(newOut, httpVersions)
-					if resolveErr != nil {
+					version := 0
+					if len(httpVersions) == 1 {
+						version = httpVersions[0]
+					} else {
+						version, err = util.ResolveHTTPOutboundVersion(newOut, httpVersions)
+						if err != nil {
+							return nil, nil, fmt.Errorf("HTTP inbound %q address %d subscription: %w", inData.Tag, index+1, err)
+						}
+					}
+					if len(httpVersions) == 1 {
+						if err := util.SetHTTPOutboundVersion(newOut, version); err != nil {
+							return nil, nil, fmt.Errorf("HTTP inbound %q address %d subscription: %w", inData.Tag, index+1, err)
+						}
+					} else {
+						newOut["version"] = version
+					}
+					if _, resolveErr := util.ResolveHTTPOutboundVersion(newOut, httpVersions); resolveErr != nil {
 						return nil, nil, fmt.Errorf("HTTP inbound %q address %d subscription: %w", inData.Tag, index+1, resolveErr)
 					}
 					if err = util.ValidateHTTPOutboundTLSForInbound(newOut, inData); err != nil {
 						return nil, nil, fmt.Errorf("HTTP inbound %q address %d subscription: %w", inData.Tag, index+1, err)
 					}
-					newOut["version"] = version
 				}
 
 				remark, _ := addr["remark"].(string)
@@ -273,6 +317,21 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 		}
 	}
 	return &outbounds, &outTags, nil
+}
+
+func mergeHTTPClientOverrides(outbound, clientHTTP map[string]interface{}, hasNoTLS bool, ignoreVersion bool) error {
+	if ignoreVersion {
+		if err := util.ValidateHTTPClientVersionOverride(clientHTTP); err != nil {
+			return err
+		}
+	}
+	for key, value := range clientHTTP {
+		if key == "name" || key == "alterId" || (key == "flow" && hasNoTLS) || (ignoreVersion && key == "version") {
+			continue
+		}
+		outbound[key] = value
+	}
+	return nil
 }
 
 func withoutUnsupportedJSONOutbounds(outbounds []map[string]interface{}, tags []string, unsupported ...string) ([]map[string]interface{}, []string) {

@@ -67,7 +67,7 @@ async function installHttpMocks(page: Page, fixtures: HttpFixtures = {}) {
   }
 }
 
-test('new HTTP inbound blocks invalid TLS and client versions before save', async ({ page }) => {
+test('new HTTP inbound saves one inherited version and requires TLS for HTTP/2 or HTTP/3', async ({ page }) => {
   const api = await installHttpMocks(page, {
     tls: [
       { id: 7, name: 'Disabled TLS', server: { enabled: false } },
@@ -81,18 +81,15 @@ test('new HTTP inbound blocks invalid TLS and client versions before save', asyn
   await openSelect(editor.getByRole('combobox', { name: '类型' }))
   await page.getByRole('option', { name: 'HTTP', exact: true }).click()
   const save = editor.getByRole('button', { name: '保存', exact: true })
-  const versions = editor.getByRole('combobox', { name: '提供的 HTTP 版本' })
-  await expect(versions).toHaveValue(/HTTP\/1.*HTTP\/2/)
+  const version = editor.getByRole('combobox', { name: 'HTTP 版本' })
+  await expect(version).toHaveValue('HTTP/1.1')
 
-  await openSelect(versions)
-  await page.getByRole('option', { name: 'HTTP/1', exact: true }).click()
-  await expect(editor.getByText(/仅提供 HTTP\/2 的入站需要启用 TLS/)).toBeVisible()
+  await openSelect(version)
+  await page.getByRole('option', { name: 'HTTP/2', exact: true }).click()
+  await expect(editor.getByText(/HTTP\/2 入站需要启用 TLS/).first()).toBeVisible()
   await expect(save).toBeDisabled()
-  await versions.press('Escape')
-  await openSelect(versions)
-  await page.getByRole('option', { name: 'HTTP/1', exact: true }).click()
 
-  await openSelect(versions)
+  await openSelect(version)
   await page.getByRole('option', { name: 'HTTP/3', exact: true }).click()
   await expect(editor.getByText(/HTTP\/3 要求启用 TLS/).first()).toBeVisible()
   await expect(save).toBeDisabled()
@@ -107,29 +104,80 @@ test('new HTTP inbound blocks invalid TLS and client versions before save', asyn
   await expect(save).toBeEnabled()
 
   await editor.getByRole('tab', { name: '服务器端' }).click()
-  await openSelect(versions)
-  await page.getByRole('option', { name: 'HTTP/3', exact: true }).click()
   await editor.getByRole('tab', { name: '客户端' }).click()
-  await editor.getByRole('button', { name: 'HTTP 客户端高级选项', exact: true }).click()
-  const clientVersion = editor.getByRole('combobox', { name: 'HTTP 版本' }).last()
-  await openSelect(clientVersion)
-  await page.getByRole('option', { name: 'HTTP/3', exact: true }).click()
-  await expect(editor.getByText(/显式客户端 HTTP 版本未由此入站提供/).first()).toBeVisible()
-  await expect(save).toBeDisabled()
-
-  await openSelect(clientVersion)
-  await page.getByRole('option', { name: '自动', exact: true }).click()
-  await expect(save).toBeEnabled()
+  await expect(editor.getByRole('textbox', { name: '客户端 HTTP 版本（继承）' })).toHaveValue('HTTP/3')
   await save.click()
   await expect.poll(() => api.savedPayloads()).toHaveLength(1)
   const savedInbound = api.savedPayloads()[0] as Record<string, any>
   expect(savedInbound.type).toBe('http')
-  expect([...savedInbound.version].sort()).toEqual([1, 2])
+  expect(savedInbound.version).toBe(3)
   expect(savedInbound.tls_id).toBe(8)
-  expect(savedInbound.out_json?.version).toBeUndefined()
+  expect(savedInbound.out_json?.version).toBe(3)
+  expect(savedInbound.out_json).not.toHaveProperty('disable_version_fallback')
 })
 
-test('imported scalar HTTP inbound version displays and round-trips unchanged', async ({ page }) => {
+test('new HTTP inbound defaults to scalar HTTP/1.1 and synchronizes the client payload', async ({ page }) => {
+  const api = await installHttpMocks(page)
+  await page.goto('/app/inbounds')
+  await page.getByRole('button', { name: '添加', exact: true }).click()
+
+  const editor = page.getByRole('dialog').last()
+  await openSelect(editor.getByRole('combobox', { name: '类型' }))
+  await page.getByRole('option', { name: 'HTTP', exact: true }).click()
+  await expect(editor.getByRole('combobox', { name: 'HTTP 版本' })).toHaveValue('HTTP/1.1')
+  await editor.getByRole('button', { name: '保存', exact: true }).click()
+
+  await expect.poll(() => api.savedPayloads()).toHaveLength(1)
+  const savedInbound = api.savedPayloads()[0] as Record<string, any>
+  expect(savedInbound.version).toBe(1)
+  expect(savedInbound.out_json?.version).toBe(1)
+  expect(savedInbound.out_json).not.toHaveProperty('disable_version_fallback')
+})
+
+test('legacy multi-version inbound stays unset until an explicit single-version migration', async ({ page }) => {
+  const inbound = {
+    id: 42,
+    type: 'http',
+    tag: 'legacy-http',
+    listen: '127.0.0.1',
+    listen_port: 8081,
+    tls_id: 0,
+    version: [1, 2],
+    out_json: { version: 3, disable_version_fallback: true },
+    addrs: [],
+  }
+  const api = await installHttpMocks(page, { inbounds: [inbound] })
+  await page.goto('/app/inbounds')
+  await page.getByRole('row', { name: /legacy-http/ }).getByRole('button', { name: '编辑' }).click()
+
+  const editor = page.getByRole('dialog').last()
+  const version = editor.getByRole('combobox', { name: 'HTTP 版本' })
+  const save = editor.getByRole('button', { name: '保存', exact: true })
+  await expect(version).toHaveValue('')
+  await expect(editor.getByText(/此旧版入站未保存为单一 HTTP 版本/)).toBeVisible()
+  await expect(editor.getByText(/保存此入站前，请明确选择一个 HTTP 版本/)).toBeVisible()
+  await expect(save).toBeDisabled()
+  expect(api.preflightPayloads()).toHaveLength(0)
+  expect(api.savedPayloads()).toHaveLength(0)
+
+  await editor.getByRole('tab', { name: '客户端' }).click()
+  await expect(editor.getByRole('textbox', { name: '客户端 HTTP 版本（继承）' })).toHaveValue('请在服务器端选择一个版本')
+  expect(api.preflightPayloads()).toHaveLength(0)
+  expect(api.savedPayloads()).toHaveLength(0)
+
+  await editor.getByRole('tab', { name: '服务器端' }).click()
+  await openSelect(version)
+  await page.getByRole('option', { name: 'HTTP/1.1', exact: true }).click()
+  await expect(save).toBeEnabled()
+  await save.click()
+  await expect.poll(() => api.savedPayloads()).toHaveLength(1)
+  const savedInbound = api.savedPayloads()[0] as Record<string, any>
+  expect(savedInbound.version).toBe(1)
+  expect(savedInbound.out_json?.version).toBe(1)
+  expect(savedInbound.out_json).not.toHaveProperty('disable_version_fallback')
+})
+
+test('imported scalar HTTP version displays and synchronizes a stale client version on save', async ({ page }) => {
   const inbound = {
     id: 41,
     type: 'http',
@@ -138,7 +186,7 @@ test('imported scalar HTTP inbound version displays and round-trips unchanged', 
     listen_port: 8080,
     tls_id: 0,
     version: 1,
-    out_json: { version: 1 },
+    out_json: { version: 3, disable_version_fallback: true },
     addrs: [],
   }
   const api = await installHttpMocks(page, { inbounds: [inbound] })
@@ -146,10 +194,16 @@ test('imported scalar HTTP inbound version displays and round-trips unchanged', 
   const inboundRow = page.getByRole('row', { name: /scalar-http/ })
   await inboundRow.getByRole('button', { name: '编辑' }).click()
   const editor = page.getByRole('dialog').last()
-  await expect(editor.getByText('HTTP/1', { exact: true })).toBeVisible()
+  await expect(editor.getByRole('combobox', { name: 'HTTP 版本' })).toHaveValue('HTTP/1.1')
+  await editor.getByRole('tab', { name: '客户端' }).click()
+  await expect(editor.getByRole('textbox', { name: '客户端 HTTP 版本（继承）' })).toHaveValue('HTTP/1.1')
+  expect(api.savedPayloads()).toHaveLength(0)
   await editor.getByRole('button', { name: '保存', exact: true }).click()
   await expect.poll(() => api.savedPayloads()).toHaveLength(1)
-  expect((api.savedPayloads()[0] as Record<string, any>).version).toBe(1)
+  const savedInbound = api.savedPayloads()[0] as Record<string, any>
+  expect(savedInbound.version).toBe(1)
+  expect(savedInbound.out_json?.version).toBe(1)
+  expect(savedInbound.out_json).not.toHaveProperty('disable_version_fallback')
 })
 
 test('HTTP outbound blocks H2 without TLS when fallback is disabled and H3 without TLS', async ({ page }) => {

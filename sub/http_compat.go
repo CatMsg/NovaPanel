@@ -49,7 +49,13 @@ func filterClashHTTPOutbounds(inbounds []*model.Inbound, outbounds []map[string]
 			if !clashHTTPVersionIsH1OrLegacy(outbound) {
 				continue
 			}
-			filteredOutbounds = append(filteredOutbounds, outbound)
+			filtered, err := util.CloneJSONMap(outbound)
+			if err != nil {
+				return nil, nil, fmt.Errorf("copy external HTTP outbound: %w", err)
+			}
+			delete(filtered, "version")
+			clampClashHTTP1ALPN(filtered)
+			filteredOutbounds = append(filteredOutbounds, filtered)
 			filteredTags = append(filteredTags, tag)
 			continue
 		}
@@ -60,23 +66,74 @@ func filterClashHTTPOutbounds(inbounds []*model.Inbound, outbounds []map[string]
 		if !hasHTTPVersion(versions, 1) {
 			continue
 		}
+		if !clashHTTPVersionIsH1OrLegacy(outbound) {
+			continue
+		}
 		version, err := util.ResolveHTTPOutboundVersion(outbound, versions)
 		if err != nil {
 			return nil, nil, fmt.Errorf("HTTP inbound %q Clash subscription: %w", inbound.Tag, err)
 		}
-		if err := util.ValidateHTTPOutboundTLSForInbound(outbound, inbound); err != nil {
-			return nil, nil, fmt.Errorf("HTTP inbound %q Clash subscription: %w", inbound.Tag, err)
-		}
-		if version == 3 || !hasHTTPVersion(versions, 1) || util.HTTPOutboundHasPathOrHost(outbound) {
+		if version != 1 {
 			continue
 		}
-		// Clash's HTTP proxy schema has no HTTP-version selector. Export only
-		// the HTTP/1-compatible variant when the listener serves HTTP/1.
-		outbound["version"] = 1
-		filteredOutbounds = append(filteredOutbounds, outbound)
+		filtered, err := util.CloneJSONMap(outbound)
+		if err != nil {
+			return nil, nil, fmt.Errorf("copy HTTP inbound %q Clash outbound: %w", inbound.Tag, err)
+		}
+		if err := util.SetHTTPOutboundVersion(filtered, version); err != nil {
+			return nil, nil, fmt.Errorf("HTTP inbound %q Clash subscription: %w", inbound.Tag, err)
+		}
+		if _, err := util.ResolveHTTPOutboundVersion(filtered, versions); err != nil {
+			return nil, nil, fmt.Errorf("HTTP inbound %q Clash subscription: %w", inbound.Tag, err)
+		}
+		if err := util.ValidateHTTPOutboundTLSForInbound(filtered, inbound); err != nil {
+			return nil, nil, fmt.Errorf("HTTP inbound %q Clash subscription: %w", inbound.Tag, err)
+		}
+		if util.HTTPOutboundHasPathOrHost(filtered) {
+			continue
+		}
+		clampClashHTTP1ALPN(filtered)
+		filteredOutbounds = append(filteredOutbounds, filtered)
 		filteredTags = append(filteredTags, tag)
 	}
 	return filteredOutbounds, filteredTags, nil
+}
+
+func clampClashHTTP1ALPN(outbound map[string]interface{}) {
+	if outbound == nil {
+		return
+	}
+	if tls, ok := outbound["tls"].(map[string]interface{}); ok {
+		if enabled, _ := tls["enabled"].(bool); enabled {
+			if clone, err := util.CloneJSONMap(tls); err == nil {
+				clone["alpn"] = []interface{}{"http/1.1"}
+				outbound["tls"] = clone
+			}
+		}
+		return
+	}
+	if enabled, _ := outbound["tls"].(bool); enabled {
+		outbound["alpn"] = []interface{}{"http/1.1"}
+	}
+}
+
+func filterRawClashHTTPProxies(proxies []map[string]interface{}) ([]map[string]interface{}, error) {
+	filtered := make([]map[string]interface{}, 0, len(proxies))
+	for _, proxy := range proxies {
+		copy, err := util.CloneJSONMap(proxy)
+		if err != nil {
+			return nil, fmt.Errorf("copy raw Clash proxy: %w", err)
+		}
+		if strings.EqualFold(strings.TrimSpace(asString(copy["type"])), "http") {
+			if !clashHTTPVersionIsH1OrLegacy(copy) {
+				continue
+			}
+			delete(copy, "version")
+			clampClashHTTP1ALPN(copy)
+		}
+		filtered = append(filtered, copy)
+	}
+	return filtered, nil
 }
 
 func hasHTTPVersion(versions []int, wanted int) bool {

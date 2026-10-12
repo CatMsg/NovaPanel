@@ -16,12 +16,15 @@ trap 'unlink "$http_test_output"' EXIT
 GOMAXPROCS=2 go test -mod=readonly -race -p 2 \
   -tags 'with_quic,badlinkname,tfogo_checklinkname0' \
   -ldflags='-checklinkname=0' ./core \
-  -run '^(TestHTTPProxyLoopbackIntegration|TestDNSConfigurationRuleContextIntegration)$' \
+  -run '^(TestHTTPProxyLoopbackIntegration|TestHTTPProxyGeneratedSingletonVersionLoopback|TestDNSConfigurationRuleContextIntegration)$' \
   -count=1 -timeout=180s -v | tee "$http_test_output"
 for required_pass in \
   '--- PASS: TestHTTPProxyLoopbackIntegration/http1_tcp_and_connect_udp' \
   '--- PASS: TestHTTPProxyLoopbackIntegration/http2_tcp_and_connect_udp' \
   '--- PASS: TestHTTPProxyLoopbackIntegration/http3_tcp_and_connect_udp' \
+  '--- PASS: TestHTTPProxyGeneratedSingletonVersionLoopback/http1' \
+  '--- PASS: TestHTTPProxyGeneratedSingletonVersionLoopback/http2' \
+  '--- PASS: TestHTTPProxyGeneratedSingletonVersionLoopback/http3' \
   '--- PASS: TestDNSConfigurationRuleContextIntegration'; do
   if ! grep -Fq -- "$required_pass" "$http_test_output"; then
     printf 'required race test did not pass: %s\n' "$required_pass" >&2

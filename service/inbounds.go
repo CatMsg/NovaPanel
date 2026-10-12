@@ -172,6 +172,9 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 				return nil, err
 			}
 		}
+		if err = validateHTTPInboundWrite(&inbound, act); err != nil {
+			return nil, err
+		}
 		var oldInbound *model.Inbound
 		var oldConfig []byte
 		if act == "edit" {

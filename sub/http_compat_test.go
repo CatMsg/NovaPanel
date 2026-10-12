@@ -2,6 +2,8 @@ package sub
 
 import (
 	"encoding/json"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -35,6 +37,12 @@ func TestJSONSubscriptionDerivesAndPreservesHTTPVersionFields(t *testing.T) {
 		{
 			name:    "H2C-only listener stays available to external clients without a generated node",
 			options: `{"listen_port":8083,"version":[2]}`,
+		},
+		{
+			name:     "legacy multi-version explicit H2 remains unchanged",
+			options:  `{"listen_port":8083,"version":[1,2]}`,
+			outbound: `{"type":"http","tag":"legacy-h2","version":2}`,
+			want:     2,
 		},
 		{
 			name:     "H3 only derives H3 with matching TLS",
@@ -100,6 +108,9 @@ func TestJSONSubscriptionDerivesAndPreservesHTTPVersionFields(t *testing.T) {
 			if version, ok := outbound["version"].(int); !ok || version != test.want {
 				t.Fatalf("version = %#v, want %d", version, test.want)
 			}
+			if fallback, _ := outbound["disable_version_fallback"].(bool); test.name == "legacy multi-version explicit H2 remains unchanged" && fallback {
+				t.Fatalf("legacy H2 without TLS was forced to disable HTTP/1 fallback: %#v", outbound)
+			}
 			if test.name == "legacy omitted version defaults to H1 for H1 and H2 server" {
 				if outbound["path"] != "/proxy" || outbound["headers"] == nil || outbound["transport"] == nil {
 					t.Fatalf("HTTP outbound fields were not preserved: %#v", outbound)
@@ -109,7 +120,148 @@ func TestJSONSubscriptionDerivesAndPreservesHTTPVersionFields(t *testing.T) {
 	}
 }
 
-func TestClashHTTPExportUsesOnlyHTTP1CompatibleVariants(t *testing.T) {
+func TestJSONSubscriptionSingletonRejectsInvalidClientVersionShape(t *testing.T) {
+	inbound := &model.Inbound{
+		Type:    "http",
+		Tag:     "http-singleton",
+		Options: json.RawMessage(`{"version":[1]}`),
+		OutJson: json.RawMessage(`{"type":"http","tag":"http-singleton","version":1}`),
+		Addrs:   json.RawMessage(`[]`),
+	}
+	_, _, err := (&JsonService{}).getOutbounds(json.RawMessage(`{"http":{"version":[2]}}`), []*model.Inbound{inbound})
+	if err == nil || !strings.Contains(err.Error(), "HTTP client version override must be 0, 1, 2, or 3") {
+		t.Fatalf("invalid singleton client version shape error = %v", err)
+	}
+}
+
+func TestJSONSubscriptionSingletonListenerOverridesStaleClientVersion(t *testing.T) {
+	tests := []struct {
+		name          string
+		options       string
+		outbound      string
+		clientVersion int
+		version       int
+		wantALPN      string
+		wantFallback  bool
+		tls           *model.Tls
+	}{
+		{
+			name:          "H1 listener",
+			options:       `{"version":[1]}`,
+			outbound:      `{"type":"http","tag":"http-h1","version":3}`,
+			clientVersion: 2,
+			version:       1,
+		},
+		{
+			name:          "H2 listener",
+			options:       `{"version":2}`,
+			outbound:      `{"type":"http","tag":"http-h2","version":1,"tls":{"enabled":true,"alpn":["http/1.1","h2"]}}`,
+			clientVersion: 1,
+			version:       2,
+			wantALPN:      "h2",
+			wantFallback:  true,
+			tls:           enabledSubHTTPTestTLS(),
+		},
+		{
+			name:          "H3 listener",
+			options:       `{"version":[3]}`,
+			outbound:      `{"type":"http","tag":"http-h3","version":2,"tls":{"enabled":true,"alpn":["h2","h3"]}}`,
+			clientVersion: 2,
+			version:       3,
+			wantALPN:      "h3",
+			tls:           enabledSubHTTPTestTLS(),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			inbound := &model.Inbound{
+				Id:      10,
+				Type:    "http",
+				Tag:     "http-test",
+				Options: json.RawMessage(test.options),
+				Addrs:   json.RawMessage(`[]`),
+				OutJson: json.RawMessage(test.outbound),
+				Tls:     test.tls,
+			}
+			if test.tls != nil {
+				inbound.TlsId = 1
+			}
+			clientConfig := json.RawMessage(`{"http":{"version":` + strconv.Itoa(test.clientVersion) + `,"username":"proxy-user","password":"proxy-secret"}}`)
+			outbounds, _, err := (&JsonService{}).getOutbounds(clientConfig, []*model.Inbound{inbound})
+			if err != nil {
+				t.Fatalf("build JSON subscription: %v", err)
+			}
+			if len(*outbounds) != 1 {
+				t.Fatalf("got %d outbounds, want 1", len(*outbounds))
+			}
+			outbound := (*outbounds)[0]
+			if got := outbound["version"]; got != test.version {
+				t.Fatalf("version = %#v, want %d", got, test.version)
+			}
+			if outbound["username"] != "proxy-user" || outbound["password"] != "proxy-secret" {
+				t.Fatalf("HTTP credentials were not retained: %#v", outbound)
+			}
+			gotFallback, _ := outbound["disable_version_fallback"].(bool)
+			if gotFallback != test.wantFallback {
+				t.Fatalf("disable_version_fallback = %t, want %t", gotFallback, test.wantFallback)
+			}
+			if test.wantALPN != "" {
+				tls := outbound["tls"].(map[string]interface{})
+				if got := tls["alpn"].([]interface{}); !reflect.DeepEqual(got, []interface{}{test.wantALPN}) {
+					t.Fatalf("ALPN = %#v, want [%q]", got, test.wantALPN)
+				}
+			}
+		})
+	}
+}
+
+func TestJSONSubscriptionHTTPAddressTLSOverridesAreIndependent(t *testing.T) {
+	inbound := &model.Inbound{
+		Id:      11,
+		Type:    "http",
+		Tag:     "http-multi-address",
+		TlsId:   1,
+		Options: json.RawMessage(`{"version":[2]}`),
+		OutJson: json.RawMessage(`{"type":"http","tag":"http-multi-address","tls":{"enabled":true,"server_name":"base.example","alpn":["http/1.1","h2"]}}`),
+		Tls:     enabledSubHTTPTestTLS(),
+		Addrs: json.RawMessage(`[
+			{"server":"one.example","server_port":443,"tls":{"enabled":true,"server_name":"one.example","alpn":["h3"]}},
+			{"server":"two.example","server_port":443,"tls":{"enabled":true,"server_name":"two.example","alpn":["h3"]}}
+		]`),
+	}
+	outbounds, _, err := (&JsonService{}).getOutbounds(json.RawMessage(`{}`), []*model.Inbound{inbound})
+	if err != nil {
+		t.Fatalf("build address-specific HTTP outbounds: %v", err)
+	}
+	if len(*outbounds) != 2 {
+		t.Fatalf("got %d address outbounds, want 2", len(*outbounds))
+	}
+	firstTLS := (*outbounds)[0]["tls"].(map[string]interface{})
+	secondTLS := (*outbounds)[1]["tls"].(map[string]interface{})
+	if firstTLS["server_name"] != "one.example" || secondTLS["server_name"] != "two.example" {
+		t.Fatalf("address TLS overrides were mixed: %#v %#v", firstTLS, secondTLS)
+	}
+	for _, outbound := range *outbounds {
+		tls := outbound["tls"].(map[string]interface{})
+		if got := tls["alpn"].([]interface{}); !reflect.DeepEqual(got, []interface{}{"h2"}) {
+			t.Fatalf("HTTP/2 ALPN = %#v, want [h2]", got)
+		}
+	}
+	firstTLS["server_name"] = "mutated.example"
+	firstTLS["alpn"].([]interface{})[0] = "mutated"
+	if secondTLS["server_name"] != "two.example" || !reflect.DeepEqual(secondTLS["alpn"], []interface{}{"h2"}) {
+		t.Fatalf("mutating first address changed second address TLS: %#v", secondTLS)
+	}
+}
+
+func enabledSubHTTPTestTLS() *model.Tls {
+	return &model.Tls{
+		Server: json.RawMessage(`{"enabled":true}`),
+		Client: json.RawMessage(`{"enabled":true}`),
+	}
+}
+
+func TestClashHTTPExportOmitsHTTP2AndHTTP3VariantsWithoutDowngrading(t *testing.T) {
 	tlsEnabled := &model.Tls{Server: json.RawMessage(`{"enabled":true}`), Client: json.RawMessage(`{"enabled":true}`)}
 	inbounds := []*model.Inbound{
 		{Type: "http", Tag: "h1-h2", Options: json.RawMessage(`{"version":[1,2]}`), Addrs: json.RawMessage(`[]`)},
@@ -121,7 +273,7 @@ func TestClashHTTPExportUsesOnlyHTTP1CompatibleVariants(t *testing.T) {
 		{"type": "http", "tag": "h1-h2", "version": 2},
 		{"type": "http", "tag": "h2-only", "version": 2},
 		{"type": "http", "tag": "h1-h3-forced", "version": 3, "tls": map[string]interface{}{"enabled": true}},
-		{"type": "http", "tag": "h1-h3-auto", "version": 1, "tls": map[string]interface{}{"enabled": true}},
+		{"type": "http", "tag": "h1-h3-auto", "version": 1, "tls": map[string]interface{}{"enabled": true, "alpn": []interface{}{"h2", "h3"}}},
 		{"type": "mixed", "tag": "mixed-proxy"},
 	}
 	tags := []string{"h1-h2", "h2-only", "h1-h3-forced", "h1-h3-auto", "mixed-proxy"}
@@ -129,17 +281,17 @@ func TestClashHTTPExportUsesOnlyHTTP1CompatibleVariants(t *testing.T) {
 	if err != nil {
 		t.Fatalf("filter Clash outbounds: %v", err)
 	}
-	if len(filtered) != 3 || len(filteredTags) != 3 {
-		t.Fatalf("filtered outbounds=%#v tags=%#v, want H1-compatible HTTP variants plus mixed", filtered, filteredTags)
+	if len(filtered) != 2 || len(filteredTags) != 2 {
+		t.Fatalf("filtered outbounds=%#v tags=%#v, want only the explicit H1 variant plus mixed", filtered, filteredTags)
 	}
-	if filteredTags[0] != "h1-h2" || filtered[0]["version"] != 1 {
-		t.Fatalf("H1 variant was not selected for H1+H2 server: %#v", filtered[0])
+	if filteredTags[0] != "h1-h3-auto" || filtered[0]["version"] != 1 {
+		t.Fatalf("explicit H1 variant was not retained for H1+H3 server: %#v", filtered[0])
 	}
-	if filteredTags[1] != "h1-h3-auto" || filtered[1]["version"] != 1 {
-		t.Fatalf("H1 variant was not retained for H1+H3 server: %#v", filtered[1])
+	if got := filtered[0]["tls"].(map[string]interface{})["alpn"].([]interface{}); !reflect.DeepEqual(got, []interface{}{"http/1.1"}) {
+		t.Fatalf("Clash H1 ALPN = %#v, want [http/1.1]", got)
 	}
-	if filteredTags[2] != "mixed-proxy" || filtered[2]["type"] != "mixed" {
-		t.Fatalf("non-HTTP mixed outbound was not preserved: %#v", filtered[2])
+	if filteredTags[1] != "mixed-proxy" || filtered[1]["type"] != "mixed" {
+		t.Fatalf("non-HTTP mixed outbound was not preserved: %#v", filtered[1])
 	}
 }
 

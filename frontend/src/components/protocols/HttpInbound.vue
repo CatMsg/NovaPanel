@@ -3,43 +3,53 @@
     <v-row>
       <v-col cols="12" sm="8" md="6">
         <v-select
-          v-model="versions"
+          v-model="version"
           :items="versionOptions"
-          :label="$t('types.http.versions')"
-          multiple
-          chips
-          closable-chips
+          :label="$t('types.http.version')"
           hide-details
         />
       </v-col>
     </v-row>
+    <v-alert v-if="requiresChoice" type="warning" variant="tonal" class="mt-3">
+      {{ $t('types.http.legacyVersionWarning') }}
+    </v-alert>
     <p class="http-inbound__hint">{{ $t('types.http.serverDefaultHint') }}</p>
     <v-alert v-if="needsTls && !tlsEnabled" type="error" variant="tonal" class="mt-3">
-      {{ $t('types.http.errors.tlsRequired') }}
+      {{ $t(`types.http.errors.${tlsIssue}`) }}
     </v-alert>
   </v-card>
 </template>
 
 <script lang="ts">
-import { effectiveInboundHttpVersions, hasEnabledInboundTls } from '@/utils/httpVersions'
+import {
+  hasEnabledInboundTls,
+  requiresHttpVersionSelection,
+  selectedInboundHttpVersion,
+  synchronizeHttpInboundClientVersion,
+} from '@/utils/httpVersions'
 
 export default {
   props: ['data', 'tlsConfigs'],
   computed: {
-    versions: {
-      get(): unknown[] { return effectiveInboundHttpVersions(this.$props.data) },
-      set(value: unknown[]) { this.$props.data.version = value },
+    version: {
+      get(): number | undefined { return selectedInboundHttpVersion(this.$props.data.version) },
+      set(value: number) {
+        if (![1, 2, 3].includes(value)) return
+        this.$props.data.version = value
+        synchronizeHttpInboundClientVersion(this.$props.data)
+      },
     },
-    versionOptions(): Array<{ title: string; value: unknown }> {
-      const values = new Set([1, 2, 3, ...this.versions])
-      return Array.from(values).sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true })).map(value => ({
-        title: typeof value === 'number' && [1, 2, 3].includes(value)
-          ? this.$t('types.http.versionLabel', { version: value })
-          : this.$t('types.http.unknownVersion', { version: String(value) }),
+    versionOptions(): Array<{ title: string; value: number }> {
+      return [1, 2, 3].map(value => ({
+        title: value === 1
+          ? this.$t('types.http.version11')
+          : this.$t('types.http.versionLabel', { version: value }),
         value,
       }))
     },
-    needsTls(): boolean { return this.versions.includes(3) },
+    requiresChoice(): boolean { return requiresHttpVersionSelection(this.$props.data.version) },
+    needsTls(): boolean { return this.version === 2 || this.version === 3 },
+    tlsIssue(): string { return this.version === 2 ? 'http2OnlyRequiresTls' : 'tlsRequired' },
     tlsEnabled(): boolean {
       return hasEnabledInboundTls(this.$props.data, this.$props.tlsConfigs ?? [])
     },

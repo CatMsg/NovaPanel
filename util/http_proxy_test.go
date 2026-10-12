@@ -2,6 +2,7 @@ package util
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"reflect"
 	"strings"
@@ -85,6 +86,151 @@ func TestResolveHTTPOutboundVersionCompatibility(t *testing.T) {
 			}
 			if got != test.want {
 				t.Fatalf("version = %d, want %d", got, test.want)
+			}
+		})
+	}
+}
+
+func TestSetHTTPOutboundVersionUsesProtocolSpecificTLSSettings(t *testing.T) {
+	for _, test := range []struct {
+		version      int
+		wantALPN     string
+		wantFallback bool
+	}{
+		{version: 1, wantALPN: "http/1.1"},
+		{version: 2, wantALPN: "h2", wantFallback: true},
+		{version: 3, wantALPN: "h3"},
+	} {
+		t.Run(fmt.Sprint(test.version), func(t *testing.T) {
+			sharedTLS := map[string]interface{}{"enabled": true, "alpn": []interface{}{"h2", "h3"}, "server_name": "proxy.example"}
+			outbound := map[string]interface{}{
+				"type":                     "http",
+				"version":                  3,
+				"disable_version_fallback": true,
+				"tls":                      sharedTLS,
+			}
+			if err := SetHTTPOutboundVersion(outbound, test.version); err != nil {
+				t.Fatalf("set version: %v", err)
+			}
+			if outbound["version"] != test.version {
+				t.Fatalf("version = %#v, want %d", outbound["version"], test.version)
+			}
+			if got := boolValue(outbound["disable_version_fallback"]); got != test.wantFallback {
+				t.Fatalf("disable_version_fallback = %t, want %t", got, test.wantFallback)
+			}
+			tls := outbound["tls"].(map[string]interface{})
+			if got := tls["alpn"].([]interface{}); !reflect.DeepEqual(got, []interface{}{test.wantALPN}) {
+				t.Fatalf("TLS ALPN = %#v, want [%q]", got, test.wantALPN)
+			}
+			if got := sharedTLS["alpn"].([]interface{}); !reflect.DeepEqual(got, []interface{}{"h2", "h3"}) {
+				t.Fatalf("shared TLS ALPN was mutated: %#v", got)
+			}
+		})
+	}
+}
+
+func TestHTTPInboundURICompatibilityPreservesLegacyVersionChecks(t *testing.T) {
+	inbound := &model.Inbound{
+		Type:    "http",
+		Options: json.RawMessage(`{"version":[1,2]}`),
+		OutJson: json.RawMessage(`{"type":"http","version":1}`),
+	}
+	compatible, err := HTTPInboundURICompatible(json.RawMessage(`{"http":{"version":2}}`), inbound)
+	if err != nil || compatible {
+		t.Fatalf("legacy explicit H2 cannot be represented by an HTTP/1 URI: compatible=%t err=%v", compatible, err)
+	}
+	if _, err := HTTPInboundURICompatible(json.RawMessage(`{"http":{"version":3}}`), inbound); err == nil || !strings.Contains(err.Error(), "is not served") {
+		t.Fatalf("legacy unsupported explicit version should retain mismatch validation, got %v", err)
+	}
+}
+
+func TestFillOutJsonUsesSingletonVersionAndPreservesLegacyMultiVersionConfig(t *testing.T) {
+	tests := []struct {
+		name         string
+		options      string
+		outbound     string
+		tls          *model.Tls
+		wantVersion  int
+		wantALPN     []interface{}
+		wantFallback interface{}
+	}{
+		{
+			name:        "singleton H1 replaces stale H3",
+			options:     `{"version":[1]}`,
+			outbound:    `{"type":"http","version":3,"disable_version_fallback":true}`,
+			wantVersion: 1,
+		},
+		{
+			name:         "singleton H2 replaces stale H1",
+			options:      `{"version":2}`,
+			outbound:     `{"type":"http","version":1}`,
+			tls:          &model.Tls{Server: json.RawMessage(`{"enabled":true,"alpn":["http/1.1","h2"]}`), Client: json.RawMessage(`{"enabled":true}`)},
+			wantVersion:  2,
+			wantALPN:     []interface{}{"h2"},
+			wantFallback: true,
+		},
+		{
+			name:        "singleton H3 replaces stale H2",
+			options:     `{"version":[3]}`,
+			outbound:    `{"type":"http","version":2}`,
+			tls:         &model.Tls{Server: json.RawMessage(`{"enabled":true,"alpn":["h2","h3"]}`), Client: json.RawMessage(`{"enabled":true}`)},
+			wantVersion: 3,
+			wantALPN:    []interface{}{"h3"},
+		},
+		{
+			name:         "legacy H2C retains old fallback behavior",
+			options:      `{"version":[1,2]}`,
+			outbound:     `{"type":"http","version":2}`,
+			wantVersion:  2,
+			wantFallback: nil,
+		},
+		{
+			name:         "legacy TLS ALPN and fallback remain unchanged",
+			options:      `{"version":[1,2]}`,
+			outbound:     `{"type":"http","version":2,"disable_version_fallback":false}`,
+			tls:          &model.Tls{Server: json.RawMessage(`{"enabled":true,"alpn":["h2","http/1.1"]}`), Client: json.RawMessage(`{"enabled":true}`)},
+			wantVersion:  2,
+			wantALPN:     []interface{}{"h2", "http/1.1"},
+			wantFallback: false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			originalTLSServer := ""
+			if test.tls != nil {
+				originalTLSServer = string(test.tls.Server)
+			}
+			inbound := &model.Inbound{
+				Type:    "http",
+				Tag:     "http-test",
+				Options: json.RawMessage(test.options),
+				OutJson: json.RawMessage(test.outbound),
+				Tls:     test.tls,
+			}
+			if test.tls != nil {
+				inbound.TlsId = 1
+			}
+			if err := FillOutJson(inbound, "proxy.example"); err != nil {
+				t.Fatalf("fill outbound: %v", err)
+			}
+			var outbound map[string]interface{}
+			if err := json.Unmarshal(inbound.OutJson, &outbound); err != nil {
+				t.Fatalf("decode generated outbound: %v", err)
+			}
+			if outbound["version"] != float64(test.wantVersion) {
+				t.Fatalf("version = %#v, want %d", outbound["version"], test.wantVersion)
+			}
+			if outbound["disable_version_fallback"] != test.wantFallback {
+				t.Fatalf("disable_version_fallback = %#v, want %#v", outbound["disable_version_fallback"], test.wantFallback)
+			}
+			if test.wantALPN != nil {
+				got := outbound["tls"].(map[string]interface{})["alpn"]
+				if !reflect.DeepEqual(got, test.wantALPN) {
+					t.Fatalf("ALPN = %#v, want %#v", got, test.wantALPN)
+				}
+			}
+			if test.tls != nil && string(test.tls.Server) != originalTLSServer {
+				t.Fatalf("source TLS config was mutated: %s", test.tls.Server)
 			}
 		})
 	}

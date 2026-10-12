@@ -2,7 +2,7 @@ export type HttpVersionIssue =
   | 'tlsRequired'
   | 'outboundTlsRequired'
   | 'http2OnlyRequiresTls'
-  | 'clientVersionMismatch'
+  | 'singleVersionRequired'
   | 'pathHostRequiresHttp1'
   | 'pathAndHostTogether'
   | 'invalidVersion'
@@ -15,9 +15,9 @@ export interface HttpInboundLike {
 
 const supportedVersions = new Set([1, 2, 3])
 
-export function normalizeHttpVersions(value: unknown, fallback: number[] = [1, 2]): unknown[] {
+export function normalizeHttpVersions(value: unknown, fallback: number[] = []): unknown[] {
   const candidates = Array.isArray(value) ? value : value === undefined || value === null ? fallback : [value]
-  return Array.from(new Set(candidates.length > 0 ? candidates : fallback))
+  return [...candidates]
 }
 
 export function effectiveInboundHttpVersions(inbound: Pick<HttpInboundLike, 'version'>): unknown[] {
@@ -27,6 +27,15 @@ export function effectiveInboundHttpVersions(inbound: Pick<HttpInboundLike, 'ver
 function validVersion(value: unknown, allowAuto = false): value is number {
   return typeof value === 'number' && Number.isInteger(value) &&
     (supportedVersions.has(value) || (allowAuto && value === 0))
+}
+
+export function selectedInboundHttpVersion(value: unknown): number | undefined {
+  const candidate = Array.isArray(value) ? value.length === 1 ? value[0] : undefined : value
+  return validVersion(candidate) ? candidate : undefined
+}
+
+export function requiresHttpVersionSelection(value: unknown): boolean {
+  return value === undefined || value === null || (Array.isArray(value) && value.length !== 1)
 }
 
 export function hasHttpPathOrHost(options: Record<string, unknown> | null | undefined): boolean {
@@ -68,17 +77,25 @@ export function hasEnabledInboundTls(inbound: Pick<HttpInboundLike, 'tls_id'>, t
 export function httpClientIssue(
   inbound: HttpInboundLike,
 ): HttpVersionIssue | undefined {
-  const versions = effectiveInboundHttpVersions(inbound)
-  const invalidVersion = versions.some(version => !validVersion(version))
-  if (invalidVersion) return 'invalidVersion'
+  const version = selectedInboundHttpVersion(inbound.version)
+  if (version === undefined) return undefined
   const client = inbound.out_json
   if (!client) return undefined
-  const clientVersion = client.version === undefined || client.version === null ? 0 : client.version
-  if (!validVersion(clientVersion, true)) return 'invalidVersion'
   if (hasHttpPathAndHost(client)) return 'pathAndHostTogether'
-  if ((clientVersion === 2 || clientVersion === 3) && hasHttpPathOrHost(client)) return 'pathHostRequiresHttp1'
-  if (clientVersion !== 0 && !versions.includes(clientVersion)) return 'clientVersionMismatch'
+  if ((version === 2 || version === 3) && hasHttpPathOrHost(client)) return 'pathHostRequiresHttp1'
   return undefined
+}
+
+export function synchronizeHttpInboundClientVersion(inbound: HttpInboundLike): boolean {
+  const version = selectedInboundHttpVersion(inbound.version)
+  if (version === undefined) return false
+
+  const client = inbound.out_json ?? {}
+  client.version = version
+  if (version === 2) client.disable_version_fallback = true
+  else delete client.disable_version_fallback
+  inbound.out_json = client
+  return true
 }
 
 export function httpInboundIssue(
@@ -87,7 +104,10 @@ export function httpInboundIssue(
 ): HttpVersionIssue | undefined {
   const versions = effectiveInboundHttpVersions(inbound)
   if (versions.some(version => !validVersion(version))) return 'invalidVersion'
-  if (versions.includes(3) && !hasEnabledInboundTls(inbound, tlsConfigs)) return 'tlsRequired'
-  if (versions.includes(2) && !versions.includes(1) && !hasEnabledInboundTls(inbound, tlsConfigs)) return 'http2OnlyRequiresTls'
+  if (versions.length !== 1) return 'singleVersionRequired'
+
+  const version = versions[0]
+  if (version === 3 && !hasEnabledInboundTls(inbound, tlsConfigs)) return 'tlsRequired'
+  if (version === 2 && !hasEnabledInboundTls(inbound, tlsConfigs)) return 'http2OnlyRequiresTls'
   return httpClientIssue(inbound)
 }

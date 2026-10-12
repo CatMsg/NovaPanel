@@ -481,10 +481,14 @@ func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, b
 }
 
 func (s *ClashService) ConvertRawClashProxies(rawProxies []map[string]interface{}, basicConfig string) (string, error) {
+	filtered, err := filterRawClashHTTPProxies(rawProxies)
+	if err != nil {
+		return "", err
+	}
 	proxies := make([]interface{}, 0, len(rawProxies))
 	proxyTags := make([]string, 0, len(rawProxies))
 	seen := make(map[string]struct{}, len(rawProxies))
-	for _, proxy := range rawProxies {
+	for _, proxy := range filtered {
 		name := strings.TrimSpace(asString(proxy["name"]))
 		proxyType := strings.ToLower(strings.TrimSpace(asString(proxy["type"])))
 		if name == "" || proxyType == "" || proxyType == "direct" || proxyType == "selector" || proxyType == "url-test" {

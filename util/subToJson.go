@@ -38,7 +38,7 @@ func GetExternalLinkWithHeadersTimeout(url string, timeout time.Duration) (strin
 
 	response, err := client.Get(url)
 	if err != nil {
-		logger.Warning("sub: Error making HTTP request:", err)
+		logger.Warning("sub: Error making external subscription HTTP request")
 		return "", nil
 	}
 	defer response.Body.Close()
@@ -49,7 +49,7 @@ func GetExternalLinkWithHeadersTimeout(url string, timeout time.Duration) (strin
 
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxExternalSubscriptionSize+1))
 	if err != nil {
-		logger.Warning("sub: Error reading response body:", err)
+		logger.Warning("sub: Error reading external subscription response")
 		return "", nil
 	}
 	if len(body) > maxExternalSubscriptionSize {
