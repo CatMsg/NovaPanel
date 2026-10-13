@@ -53,6 +53,10 @@ var defaultConfig = `{
 }`
 
 var defaultValueMap = map[string]string{
+	"maintenanceMode":              "false",
+	"remoteBackupConfig":           "",
+	"remoteBackupOwner":            "",
+	"remoteBackupState":            "",
 	"webListen":                    "",
 	"webDomain":                    "",
 	"webPort":                      "2095",
@@ -169,6 +173,11 @@ func (s *SettingService) GetAllSetting() (*map[string]string, error) {
 	delete(allSetting, "secret")
 	delete(allSetting, "config")
 	delete(allSetting, "version")
+	for key := range allSetting {
+		if strings.HasPrefix(key, "remoteBackup") {
+			delete(allSetting, key)
+		}
+	}
 	delete(allSetting, "alertTelegramToken")
 	delete(allSetting, "alertWebhookURL")
 	delete(allSetting, "alertLastFingerprint")
@@ -772,6 +781,19 @@ func (s *SettingService) Save(tx *gorm.DB, data json.RawMessage) (func() error, 
 
 	changedSettings := make(map[string]string, len(settings))
 	for key, value := range settings {
+		if strings.HasPrefix(key, "remoteBackup") {
+			return nil, errors.New("use the dedicated remote backup settings API")
+		}
+		if key == "maintenanceMode" {
+			current, err := s.getStringTx(tx, key)
+			if err != nil {
+				return nil, err
+			}
+			if current != value {
+				return nil, errors.New("use the maintenance lifecycle API")
+			}
+			continue
+		}
 		value = s.normalizeSettingValue(key, value)
 		if err := s.validateSettingValue(key, value); err != nil {
 			return nil, err

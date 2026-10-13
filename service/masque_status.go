@@ -2,7 +2,9 @@ package service
 
 import (
 	"fmt"
-	"time"
+
+	"github.com/CatMsg/NovaPanel/database"
+	"github.com/CatMsg/NovaPanel/database/model"
 )
 
 type MasqueDiagnostic struct {
@@ -12,149 +14,76 @@ type MasqueDiagnostic struct {
 	Detail string `json:"detail"`
 }
 
-func (r *masqueRuntime) statusSnapshot() map[string]interface{} {
-	if r == nil {
-		return map[string]interface{}{}
+func (s *MasqueService) GetSummary() map[string]int {
+	result := map[string]int{"total": 0, "running": 0}
+	inbounds, err := s.loadMasqueInbounds()
+	if err != nil {
+		return result
 	}
-
-	r.sessionMu.Lock()
-	lastConnect := r.lastConnect
-	lastClose := r.lastClose
-	lastError := r.lastError
-	totalSessions := r.nextSession
-	sessions := make([]map[string]interface{}, 0, len(r.sessions))
-	activeUsers := make(map[string]struct{})
-	for _, session := range r.sessions {
-		activeUsers[session.identity.Name] = struct{}{}
-		sessions = append(sessions, map[string]interface{}{
-			"id": session.id, "user": session.identity.Name, "client_addr": session.remote,
-			"started_at":     session.startedAt.Format(time.RFC3339),
-			"uptime_seconds": int64(time.Since(session.startedAt).Seconds()),
-			"rx_bytes":       session.rxBytes.Load(), "tx_bytes": session.txBytes.Load(),
-			"rx_packets": session.rxPackets.Load(), "tx_packets": session.txPackets.Load(),
-		})
-	}
-	r.sessionMu.Unlock()
-
-	result := map[string]interface{}{
-		"session_active":   len(sessions) > 0,
-		"active_sessions":  len(sessions),
-		"active_users":     len(activeUsers),
-		"configured_users": len(r.clients),
-		"sessions":         sessions,
-		"total_sessions":   totalSessions,
-		"takeover_count":   uint64(0),
-		"rx_bytes":         r.rxBytes.Load(),
-		"tx_bytes":         r.txBytes.Load(),
-		"rx_packets":       r.rxPackets.Load(),
-		"tx_packets":       r.txPackets.Load(),
-	}
-	if !lastConnect.IsZero() {
-		result["last_connected_at"] = lastConnect.Format(time.RFC3339)
-	}
-	if !lastClose.IsZero() {
-		result["last_disconnected_at"] = lastClose.Format(time.RFC3339)
-	}
-	if lastError != "" {
-		result["last_error"] = lastError
+	result["total"] = len(inbounds)
+	for _, inbound := range inbounds {
+		if corePtr != nil && corePtr.IsRunning() {
+			if _, exists := corePtr.GetInstance().Endpoint().Get(inbound.Tag); exists {
+				result["running"]++
+			}
+		}
 	}
 	return result
 }
 
-func buildMasqueDiagnostics(config *masqueInboundConfig, runtime *masqueRuntime, cert masqueCertificateSnapshot, certErr error, startError string) []MasqueDiagnostic {
-	checks := make([]MasqueDiagnostic, 0, 7)
-
-	if config != nil && config.Network == "quic" {
-		checks = append(checks, MasqueDiagnostic{ID: "transport", Status: "ok", Title: "传输协议", Detail: "HTTP/3 CONNECT-IP / QUIC"})
+func (s *MasqueService) GetStatus(tag string) (map[string]interface{}, error) {
+	var inbound model.Inbound
+	if err := database.GetDB().Preload("Tls").Where("type = ? AND tag = ?", "masque", tag).First(&inbound).Error; err != nil {
+		return nil, err
+	}
+	config, err := parseMasqueInbound(&inbound)
+	if err != nil {
+		return nil, err
+	}
+	users, err := loadMasqueUsers(database.GetDB(), &inbound)
+	if err != nil {
+		return nil, err
+	}
+	running := false
+	active := 0
+	if corePtr != nil && corePtr.IsRunning() {
+		_, running = corePtr.GetInstance().Endpoint().Get(tag)
+		for _, session := range corePtr.GetInstance().ConnTracker().Sessions() {
+			if session.Inbound == tag {
+				active++
+			}
+		}
+	}
+	compatible := masqueMihomoEnabled(&inbound)
+	detail := "内置用户态协议栈；无系统 TUN / NAT 规则。sing-box 使用 JSON 订阅；TCP/UDP 按面板用户统计和限速。"
+	if compatible {
+		detail += " 已开启 Mihomo 密钥认证，可使用 Clash / Mihomo 订阅；同一套密钥同时只允许一个隧道。"
 	} else {
-		network := ""
-		if config != nil {
-			network = config.Network
-		}
-		checks = append(checks, MasqueDiagnostic{ID: "transport", Status: "error", Title: "传输协议", Detail: fmt.Sprintf("不支持 %q，仅支持 quic", network)})
+		detail += " 未开启 Mihomo 兼容，Clash 订阅不会包含此入站。"
 	}
-
-	if runtime != nil && runtime.running.Load() {
-		checks = append(checks, MasqueDiagnostic{ID: "listener", Status: "ok", Title: "UDP 监听", Detail: runtime.bindAddr})
-	} else {
-		detail := startError
-		if detail == "" {
-			detail = "服务未运行"
-		}
-		checks = append(checks, MasqueDiagnostic{ID: "listener", Status: "error", Title: "UDP 监听", Detail: detail})
-	}
-
-	if certErr != nil {
-		checks = append(checks, MasqueDiagnostic{ID: "certificate", Status: "error", Title: "TLS 证书", Detail: certErr.Error()})
-	} else if cert.LastError != "" {
-		checks = append(checks, MasqueDiagnostic{ID: "certificate", Status: "error", Title: "TLS 证书热重载", Detail: cert.LastError})
-	} else if !cert.NotBefore.IsZero() && time.Now().Before(cert.NotBefore) {
-		checks = append(checks, MasqueDiagnostic{ID: "certificate", Status: "error", Title: "TLS 证书", Detail: "证书尚未生效"})
-	} else if !cert.NotAfter.IsZero() && time.Now().After(cert.NotAfter) {
-		checks = append(checks, MasqueDiagnostic{ID: "certificate", Status: "error", Title: "TLS 证书", Detail: "证书已过期"})
-	} else if !cert.NotAfter.IsZero() && time.Until(cert.NotAfter) <= 14*24*time.Hour {
-		checks = append(checks, MasqueDiagnostic{ID: "certificate", Status: "warning", Title: "TLS 证书", Detail: "证书将在 14 天内过期"})
-	} else {
-		detail := "入站内置证书"
-		if cert.Source == "file" {
-			detail = fmt.Sprintf("文件证书，已热重载 %d 次", cert.ReloadCount)
-		}
-		checks = append(checks, MasqueDiagnostic{ID: "certificate", Status: "ok", Title: "TLS 证书", Detail: detail})
-	}
-
-	checks = append(checks, masqueTunDiagnostics(runtime)...)
-
-	if runtime != nil {
-		runtime.sessionMu.Lock()
-		activeSessions := len(runtime.sessions)
-		activeUsers := len(runtime.userSessions)
-		runtime.sessionMu.Unlock()
-		if activeSessions > 0 {
-			checks = append(checks, MasqueDiagnostic{ID: "session", Status: "ok", Title: "CONNECT-IP 会话", Detail: fmt.Sprintf("%d 个活动会话，%d 位用户", activeSessions, activeUsers)})
-		} else {
-			checks = append(checks, MasqueDiagnostic{ID: "session", Status: "info", Title: "CONNECT-IP 会话", Detail: "当前没有活动客户端"})
-		}
-		if len(runtime.clients) == 0 {
-			checks = append(checks, MasqueDiagnostic{ID: "clients", Status: "warning", Title: "授权用户", Detail: "尚未给此入站分配用户"})
-		} else {
-			checks = append(checks, MasqueDiagnostic{ID: "clients", Status: "ok", Title: "授权用户", Detail: fmt.Sprintf("已配置 %d 位用户", len(runtime.clients))})
-		}
-	}
-	return checks
+	return map[string]interface{}{
+		"tag": tag, "host": config.Host, "port": config.Port, "network": "HTTP/3", "running": running,
+		"configured_users": len(users), "active_connections": active,
+		"mihomo_compatible": compatible,
+		"client_subnet":     config.Address.String(), "template": "/.well-known/masque/ip/{target}/{ipproto}/",
+		"cert_source": "TLS template", "bind_addr": fmt.Sprintf("UDP :%d", config.Port),
+		"diagnostics": []MasqueDiagnostic{{ID: "native", Status: "info", Title: "原生 sing-box MASQUE", Detail: detail}},
+	}, nil
 }
 
 func (s *MasqueService) healthSummary() (map[string]int, []string) {
 	summary := s.GetSummary()
-	summary["warnings"] = 0
-	summary["errors"] = 0
-	details := make([]string, 0)
-
+	summary["errors"], summary["warnings"] = 0, 0
 	inbounds, err := s.loadMasqueInbounds()
 	if err != nil {
 		summary["errors"]++
 		return summary, []string{err.Error()}
 	}
+	var details []string
 	for _, inbound := range inbounds {
-		if inbound == nil {
-			continue
-		}
-		status, err := s.GetStatus(inbound.Tag)
-		if err != nil {
+		if _, err := s.GetStatus(inbound.Tag); err != nil {
 			summary["errors"]++
 			details = append(details, inbound.Tag+": "+err.Error())
-			continue
-		}
-		checks, _ := status["diagnostics"].([]MasqueDiagnostic)
-		for _, check := range checks {
-			if check.Status != "error" && check.Status != "warning" {
-				continue
-			}
-			if check.Status == "error" {
-				summary["errors"]++
-			} else {
-				summary["warnings"]++
-			}
-			details = append(details, fmt.Sprintf("%s: %s - %s", inbound.Tag, check.Title, check.Detail))
 		}
 	}
 	return summary, details

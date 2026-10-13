@@ -1,6 +1,8 @@
 package database
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,6 +11,81 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestBackupStripsRemoteSecretsAndRehearsalIsReadOnly(t *testing.T) {
+	if err := InitDB(filepath.Join(t.TempDir(), "snapshot-source.db")); err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range map[string]string{"remoteBackupConfig": `{"password":"synthetic-never-export"}`, "remoteBackupOwner": "synthetic-owner", "remoteBackupState": "synthetic-state", "test-marker": "preserve"} {
+		if err := GetDB().Create(&model.Setting{Key: key, Value: value}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	path, cleanup, err := CreateDBBackup("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	info, err := os.Stat(filepath.Dir(path))
+	if err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatal("snapshot directory not private")
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(before, []byte("synthetic-never-export")) || bytes.Contains(before, []byte("synthetic-owner")) {
+		t.Fatal("snapshot contains removed secret or ownership bytes")
+	}
+	counts, err := RehearseDB(context.Background(), path)
+	if err != nil || counts["users"] != 1 {
+		t.Fatalf("rehearsal: %v %v", counts, err)
+	}
+	after, _ := os.ReadFile(path)
+	if !bytes.Equal(before, after) {
+		t.Fatal("rehearsal changed snapshot bytes")
+	}
+	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+		if _, err := os.Stat(path + suffix); !os.IsNotExist(err) {
+			t.Fatal("rehearsal created sidecar")
+		}
+	}
+	var value model.Setting
+	if err := GetDB().Where("key = ?", "remoteBackupConfig").First(&value).Error; err != nil || !stringsContainsSynthetic(value.Value) {
+		t.Fatal("snapshot removed live credential")
+	}
+}
+
+func stringsContainsSynthetic(value string) bool {
+	return bytes.Contains([]byte(value), []byte("synthetic-never-export"))
+}
+
+func TestPreserveRestoreMaintenanceBeforeSwap(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		path := filepath.Join(t.TempDir(), "replacement.db")
+		conn, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.AutoMigrate(&model.Setting{}); err != nil {
+			t.Fatal(err)
+		}
+		if existing {
+			if err := conn.Create(&model.Setting{Key: "maintenanceMode", Value: "false"}).Error; err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := preserveRestoreMaintenance(conn); err != nil {
+			t.Fatal(err)
+		}
+		var rows []model.Setting
+		if err := conn.Where("key = ?", "maintenanceMode").Find(&rows).Error; err != nil || len(rows) != 1 || rows[0].Value != "true" {
+			t.Fatal("replacement pause not preserved")
+		}
+		sqlDB, _ := conn.DB()
+		_ = sqlDB.Close()
+	}
+}
 
 func TestValidateAndSanitizeRestoreDB(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "restore.db")

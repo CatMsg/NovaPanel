@@ -96,7 +96,12 @@
     hover
   >
     <template #item.tag="{ item }">
-      <strong class="resource-table__primary">{{ item.tag }}</strong>
+      <div class="inbound-tag-cell">
+        <strong class="resource-table__primary">{{ item.tag }}</strong>
+        <v-chip v-if="item.exclude_from_sub" size="x-small" color="warning" variant="tonal" prepend-icon="mdi-eye-off-outline">
+          {{ $t('in.subscriptionHidden') }}
+        </v-chip>
+      </div>
     </template>
     <template #item.address="{ item }">{{ item.listen || '0.0.0.0' }}</template>
     <template #item.port="{ item }">{{ item.listen_port ?? '-' }}</template>
@@ -139,6 +144,11 @@
         <v-card-subtitle style="margin-top: -15px;">
           <v-row>
             <v-col>{{ item.type }}</v-col>
+            <v-col v-if="item.exclude_from_sub" cols="auto">
+              <v-chip size="x-small" color="warning" variant="tonal" prepend-icon="mdi-eye-off-outline">
+                {{ $t('in.subscriptionHidden') }}
+              </v-chip>
+            </v-col>
           </v-row>
         </v-card-subtitle>
         <v-card-text>
@@ -458,6 +468,13 @@ const closeMasqueStatus = () => {
 
 .resource-grid {
   margin-top: 0;
+}
+
+.inbound-tag-cell {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .resource-card {

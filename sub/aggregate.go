@@ -110,12 +110,20 @@ func (a *AggregateService) buildAggregateJson(outbounds []map[string]interface{}
 		return nil, nil, err
 	}
 	a.JsonService.addDefaultOutbounds(&outbounds, &outTags)
-	jsonConfig["outbounds"] = outbounds
+	proxyOutbounds, endpoints := splitNativeJSONEndpoints(outbounds)
+	jsonConfig["outbounds"] = proxyOutbounds
+	if len(endpoints) > 0 {
+		jsonConfig["endpoints"] = endpoints
+	}
 	if err := a.JsonService.addOthers(&jsonConfig); err != nil {
 		return nil, nil, err
 	}
 
 	result, err := json.MarshalIndent(jsonConfig, "", "  ")
+	if err != nil {
+		return nil, nil, err
+	}
+	result, err = service.NormalizeSingBoxConfig(result)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -288,13 +296,33 @@ func aggregateJSONOutbounds(data string) ([]map[string]interface{}, bool, error)
 	if err := json.Unmarshal([]byte(trimmed), &config); err != nil {
 		return nil, true, err
 	}
-	rawOutbounds, exists := config["outbounds"]
-	if !exists {
+	rawOutbounds, hasOutbounds := config["outbounds"]
+	rawEndpoints, hasEndpoints := config["endpoints"]
+	if !hasOutbounds && !hasEndpoints {
 		return nil, false, nil
 	}
 	var rawNodes []json.RawMessage
-	if err := json.Unmarshal(rawOutbounds, &rawNodes); err != nil {
-		return nil, true, err
+	if hasOutbounds {
+		if err := json.Unmarshal(rawOutbounds, &rawNodes); err != nil {
+			return nil, true, err
+		}
+	}
+	if hasEndpoints {
+		var endpoints []json.RawMessage
+		if err := json.Unmarshal(rawEndpoints, &endpoints); err != nil {
+			return nil, true, err
+		}
+		for _, raw := range endpoints {
+			var node map[string]interface{}
+			if err := json.Unmarshal(raw, &node); err != nil {
+				return nil, true, err
+			}
+			// Only client endpoints are subscription proxy targets. Do not copy
+			// remote server listeners or host/network-specific endpoint state.
+			if node["type"] == "masque-client" {
+				rawNodes = append(rawNodes, raw)
+			}
+		}
 	}
 	outbounds := make([]map[string]interface{}, 0, len(rawNodes))
 	for _, rawNode := range rawNodes {
@@ -312,7 +340,7 @@ func aggregateJSONOutbounds(data string) ([]map[string]interface{}, bool, error)
 
 func skipAggregateJSONOutbound(outbound map[string]interface{}) bool {
 	switch strings.ToLower(strings.TrimSpace(asString(outbound["type"]))) {
-	case "", "direct", "selector", "urltest", "dns":
+	case "", "direct", "selector", "urltest", "dns", "block":
 		return true
 	default:
 		return false

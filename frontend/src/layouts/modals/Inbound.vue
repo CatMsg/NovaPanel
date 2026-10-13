@@ -34,6 +34,22 @@
             <v-col cols="12" sm="6" md="4">
               <v-text-field v-model="inbound.tag" :label="$t('objects.tag')" hide-details></v-text-field>
             </v-col>
+            <v-col cols="12">
+              <v-switch
+                v-model="inbound.exclude_from_sub"
+                color="warning"
+                density="compact"
+                hide-details
+                inset
+              >
+                <template #label>
+                  <span class="subscription-visibility__label">
+                    <strong>{{ $t('in.hideFromSubscriptions') }}</strong>
+                    <small>{{ $t('in.hideFromSubscriptionsHint') }}</small>
+                  </span>
+                </template>
+              </v-switch>
+            </v-col>
           </v-row>
           <v-tabs
             v-if="HasInData.includes(inbound.type) && inbound.type != inTypes.Masque"
@@ -193,6 +209,7 @@ export default {
         InTypes.Masque,
       ],
       HasTls: [
+        InTypes.Masque,
         InTypes.HTTP,
         InTypes.VMess,
         InTypes.Trojan,
@@ -209,7 +226,7 @@ export default {
         InTypes.Trojan,
         InTypes.Shadowsocks,
       ],
-      OnlyTLS: [InTypes.Hysteria, InTypes.Hysteria2, InTypes.TUIC, InTypes.Naive, InTypes.AnyTls ],
+      OnlyTLS: [InTypes.Hysteria, InTypes.Hysteria2, InTypes.TUIC, InTypes.Naive, InTypes.AnyTls, InTypes.Masque ],
     }
   },
   methods: {
@@ -251,8 +268,17 @@ export default {
       // Tag change only in add inbound
       const tag = this.$props.id > 0 ? this.inbound.tag : this.inbound.type + "-" + this.inbound.listen_port
       // Use previous data
-      const prevConfig = { id: this.inbound.id, tag: tag, listen: this.inbound.listen?? "::", listen_port: this.inbound.listen_port }
-      this.inbound = createInbound(this.inbound.type, this.inbound.type != this.inTypes.Tun ? prevConfig : { tag: tag })
+      const prevConfig = {
+        id: this.inbound.id,
+        tag,
+        listen: this.inbound.listen?? "::",
+        listen_port: this.inbound.listen_port,
+        exclude_from_sub: this.inbound.exclude_from_sub ?? false,
+      }
+      this.inbound = createInbound(
+        this.inbound.type,
+        this.inbound.type != this.inTypes.Tun ? prevConfig : { tag, exclude_from_sub: prevConfig.exclude_from_sub },
+      )
       if (this.HasInData.includes(this.inbound.type)){
         this.inbound.addrs = []
         this.inbound.out_json = {}
@@ -283,8 +309,8 @@ export default {
         }
       }
       if (this.inbound.type == InTypes.Masque) {
-        ;(this.inbound as any).network = 'quic'
-        ;(this.inbound as any).udp = true
+        ;(this.inbound as any).version = [3]
+        ;(this.inbound as any).system = false
       }
 
       if (this.inbound.type == InTypes.HTTP) {
@@ -392,6 +418,8 @@ export default {
 
 .inbound-advanced { margin-top: 12px; }
 .inbound-advanced__hint { margin-top: 3px; color: rgba(var(--v-theme-on-surface), .62); font-size: .75rem; font-weight: 400; }
+.subscription-visibility__label { display: flex; flex-direction: column; gap: 3px; white-space: normal; }
+.subscription-visibility__label small { color: rgba(var(--v-theme-on-surface), .62); font-size: .75rem; font-weight: 400; }
 
 .modal-shell.v-theme--dark {
   background: linear-gradient(180deg, rgba(18, 23, 37, 0.98), rgba(14, 17, 28, 0.96));

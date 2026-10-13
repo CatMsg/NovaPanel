@@ -4,218 +4,117 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/netip"
-	"strconv"
 	"strings"
 
 	"github.com/CatMsg/NovaPanel/database/model"
-	"github.com/CatMsg/NovaPanel/util/common"
+	"github.com/CatMsg/NovaPanel/util"
 	"gorm.io/gorm"
 )
 
 type masqueInboundConfig struct {
-	ID               uint
-	Tag              string
-	Host             string
-	Port             int
-	Network          string
-	PrivateKey       string
-	PublicKey        string
-	ClientSubnet     string
-	MTU              int
-	KeepAlive        int
-	SNI              string
-	RemoteDNSResolve bool
-	UDP              bool
+	Host    string
+	Port    int
+	Address netip.Prefix
 }
 
 func parseMasqueInbound(inbound *model.Inbound) (*masqueInboundConfig, error) {
-	var payload struct {
-		Server           string `json:"server"`
-		ListenPort       int    `json:"listen_port"`
-		Network          string `json:"network"`
-		PrivateKey       string `json:"private_key"`
-		PublicKey        string `json:"public_key"`
-		ClientSubnet     string `json:"client_subnet"`
-		MTU              int    `json:"mtu"`
-		KeepAlive        int    `json:"keepalive"`
-		SNI              string `json:"sni"`
-		RemoteDNSResolve bool   `json:"remote_dns_resolve"`
-		UDP              *bool  `json:"udp"`
-	}
 	if inbound == nil {
-		return nil, common.NewError("missing masque inbound")
+		return nil, fmt.Errorf("missing MASQUE inbound")
 	}
-	if inbound.Options != nil {
-		if err := json.Unmarshal(inbound.Options, &payload); err != nil {
-			return nil, err
-		}
+	var options struct {
+		Server  string   `json:"server"`
+		Port    int      `json:"listen_port"`
+		Address []string `json:"address"`
+		Version []int    `json:"version"`
+		System  bool     `json:"system"`
+		MTU     int      `json:"mtu"`
 	}
-	udp := true
-	if payload.UDP != nil {
-		udp = *payload.UDP
-	}
-
-	config := &masqueInboundConfig{
-		ID:               inbound.Id,
-		Tag:              strings.TrimSpace(inbound.Tag),
-		Host:             strings.TrimSpace(payload.Server),
-		Port:             payload.ListenPort,
-		Network:          normalizeMasqueNetwork(payload.Network),
-		PrivateKey:       strings.TrimSpace(payload.PrivateKey),
-		PublicKey:        strings.TrimSpace(payload.PublicKey),
-		ClientSubnet:     strings.TrimSpace(payload.ClientSubnet),
-		MTU:              payload.MTU,
-		KeepAlive:        payload.KeepAlive,
-		SNI:              strings.TrimSpace(payload.SNI),
-		RemoteDNSResolve: payload.RemoteDNSResolve,
-		UDP:              udp,
-	}
-	if config.MTU <= 0 {
-		config.MTU = 1380
-	}
-	if config.KeepAlive <= 0 {
-		config.KeepAlive = 25
-	}
-	if err := validateMasqueInboundConfig(config); err != nil {
+	if err := json.Unmarshal(inbound.Options, &options); err != nil {
 		return nil, err
 	}
-	return config, nil
+	if options.System || len(options.Version) != 1 || options.Version[0] != 3 {
+		return nil, fmt.Errorf("MASQUE requires system:false and HTTP/3 only")
+	}
+	if options.Port < 1 || options.Port > 65535 || strings.TrimSpace(options.Server) == "" {
+		return nil, fmt.Errorf("MASQUE server and valid listen_port are required")
+	}
+	if options.MTU < 1280 || options.MTU > 9000 {
+		return nil, fmt.Errorf("MASQUE MTU must be between 1280 and 9000")
+	}
+	if len(options.Address) != 1 {
+		return nil, fmt.Errorf("MASQUE requires one IPv4 server address/prefix")
+	}
+	address, err := netip.ParsePrefix(options.Address[0])
+	if err != nil || !address.Addr().Is4() || address.Bits() < 16 || address.Bits() > 30 || address.Addr() == address.Masked().Addr() {
+		return nil, fmt.Errorf("MASQUE address must be a server IPv4 address in a /16 through /30 pool (for example 172.16.0.1/24)")
+	}
+	var tls map[string]any
+	if inbound.TlsId == 0 || inbound.Tls == nil || json.Unmarshal(inbound.Tls.Server, &tls) != nil || tls["enabled"] != true {
+		return nil, fmt.Errorf("MASQUE HTTP/3 requires an enabled TLS template")
+	}
+	if maximum, _ := tls["max_version"].(string); maximum == "1.0" || maximum == "1.1" || maximum == "1.2" {
+		return nil, fmt.Errorf("MASQUE HTTP/3 requires TLS 1.3")
+	}
+	if reality, _ := tls["reality"].(map[string]any); reality["enabled"] == true {
+		return nil, fmt.Errorf("MASQUE HTTP/3 does not support Reality TLS templates")
+	}
+	return &masqueInboundConfig{Host: strings.TrimSpace(options.Server), Port: options.Port, Address: address}, nil
 }
 
-func normalizeMasqueNetwork(network string) string {
-	network = strings.TrimSpace(network)
-	if network == "" {
-		return "quic"
-	}
-	return network
-}
-
-func validateMasqueNetwork(network string) error {
-	network = normalizeMasqueNetwork(network)
-	if network != "quic" {
-		return fmt.Errorf("unsupported masque network %q: only quic is currently available", network)
-	}
-	return nil
-}
-
-func validateMasqueInboundConfig(config *masqueInboundConfig) error {
-	if config == nil {
-		return common.NewError("missing masque config")
-	}
-	if config.Tag == "" {
-		return common.NewError("masque tag is required")
-	}
-	if config.Host == "" {
-		return common.NewError("masque server host is required")
-	}
-	if config.Port < 1 || config.Port > 65535 {
-		return fmt.Errorf("invalid masque port: %d", config.Port)
-	}
-	if err := validateMasqueNetwork(config.Network); err != nil {
+func prepareMasqueInbound(tx *gorm.DB, inbound, _ *model.Inbound, hostname string) error {
+	var options map[string]any
+	if err := json.Unmarshal(inbound.Options, &options); err != nil {
 		return err
 	}
-	if _, err := parseMasqueClientSubnet(config.ClientSubnet); err != nil {
-		return err
+	if options == nil {
+		options = make(map[string]any)
 	}
-	if _, err := parseMasquePrivateKey(config.PrivateKey); err != nil {
-		return fmt.Errorf("invalid masque server private key: %w", err)
-	}
-	derivedPublicKey, err := masquePublicKeyFromPrivate(config.PrivateKey)
-	if err != nil {
-		return fmt.Errorf("derive masque server public key: %w", err)
-	}
-	if config.PublicKey == "" {
-		config.PublicKey = derivedPublicKey
-	} else if config.PublicKey != derivedPublicKey {
-		return common.NewError("masque server public key does not match private key")
-	}
-	if config.MTU < 576 || config.MTU > 9000 {
-		return fmt.Errorf("invalid masque MTU: %d", config.MTU)
-	}
-	if config.KeepAlive < 1 || config.KeepAlive > 300 {
-		return fmt.Errorf("invalid masque keepalive: %d", config.KeepAlive)
-	}
-	return nil
-}
-
-func prepareMasqueInbound(tx *gorm.DB, inbound, oldInbound *model.Inbound, hostname string) error {
-	if inbound == nil {
-		return common.NewError("missing masque inbound")
-	}
-	options := make(map[string]interface{})
-	if len(inbound.Options) > 0 {
-		if err := json.Unmarshal(inbound.Options, &options); err != nil {
-			return err
+	for _, key := range []string{"private_key", "public_key", "client_subnet", "keepalive", "remote_dns_resolve", "network", "udp", "sni"} {
+		if _, present := options[key]; present {
+			return fmt.Errorf("legacy MASQUE option %s is not supported; use native server options", key)
 		}
 	}
-	server, _ := options["server"].(string)
-	if strings.TrimSpace(server) == "" {
-		if oldInbound != nil && oldInbound.Type == "masque" {
-			if oldConfig, parseErr := parseMasqueInbound(oldInbound); parseErr == nil {
-				server = oldConfig.Host
+	if host, _ := options["server"].(string); strings.TrimSpace(host) == "" {
+		options["server"] = hostname
+	}
+	if _, present := options["system"]; !present {
+		options["system"] = false
+	}
+	if _, present := options["version"]; !present {
+		options["version"] = []int{3}
+	}
+	if _, present := options["mtu"]; !present {
+		options["mtu"] = 1280
+	}
+	if _, present := options["listen"]; !present {
+		options["listen"] = "::"
+	}
+	if _, present := options["address"]; !present {
+		var others []model.Inbound
+		if err := tx.Where("type = ? AND id <> ?", "masque", inbound.Id).Find(&others).Error; err != nil {
+			return err
+		}
+		for second := 16; second < 32; second++ {
+			candidate := netip.MustParsePrefix(fmt.Sprintf("172.%d.0.1/24", second))
+			conflict := false
+			for _, other := range others {
+				var fields struct {
+					Address []netip.Prefix `json:"address"`
+				}
+				if err := json.Unmarshal(other.Options, &fields); err != nil {
+					return err
+				}
+				for _, address := range fields.Address {
+					conflict = conflict || candidate.Overlaps(address)
+				}
 			}
-		}
-		if strings.TrimSpace(server) == "" {
-			server = hostname
-		}
-		options["server"] = strings.TrimSpace(server)
-	}
-	options["network"] = "quic"
-	options["listen"] = "::"
-	if value, ok := options["mtu"].(float64); !ok || value <= 0 {
-		options["mtu"] = 1380
-	}
-	if value, ok := options["keepalive"].(float64); !ok || value <= 0 {
-		options["keepalive"] = 25
-	}
-	if _, ok := options["udp"]; !ok {
-		options["udp"] = true
-	}
-
-	privateKey, _ := options["private_key"].(string)
-	privateKey = strings.TrimSpace(privateKey)
-	if privateKey == "" && oldInbound != nil && oldInbound.Type == "masque" {
-		oldConfig, err := parseMasqueInbound(oldInbound)
-		if err == nil {
-			privateKey = oldConfig.PrivateKey
-		}
-	}
-	if privateKey == "" {
-		credential, err := newMasqueClientCredential()
-		if err != nil {
-			return err
-		}
-		privateKey = credential.PrivateKey
-	}
-	publicKey, err := masquePublicKeyFromPrivate(privateKey)
-	if err != nil {
-		return fmt.Errorf("invalid masque server key: %w", err)
-	}
-	options["private_key"] = privateKey
-	options["public_key"] = publicKey
-
-	subnetRaw, _ := options["client_subnet"].(string)
-	subnetRaw = strings.TrimSpace(subnetRaw)
-	if subnetRaw == "" {
-		if oldInbound != nil && oldInbound.Type == "masque" {
-			if oldConfig, parseErr := parseMasqueInbound(oldInbound); parseErr == nil {
-				subnetRaw = oldConfig.ClientSubnet
-				options["client_subnet"] = subnetRaw
+			if !conflict {
+				options["address"] = []string{candidate.String()}
+				break
 			}
 		}
 	}
-	if subnetRaw == "" {
-		existing, err := loadMasqueSubnetsTx(tx)
-		if err != nil {
-			return err
-		}
-		subnet, err := allocateMasqueSubnet(existing)
-		if err != nil {
-			return err
-		}
-		options["client_subnet"] = subnet.String()
-	}
-
+	var err error
 	inbound.Options, err = json.MarshalIndent(options, "", "  ")
 	if err != nil {
 		return err
@@ -224,92 +123,89 @@ func prepareMasqueInbound(tx *gorm.DB, inbound, oldInbound *model.Inbound, hostn
 	if err != nil {
 		return err
 	}
-	candidate, err := parseMasqueClientSubnet(config.ClientSubnet)
-	if err != nil {
-		return err
+	if masqueMihomoEnabled(inbound) {
+		if _, err := masqueServerPublicKey(inbound); err != nil {
+			return err
+		}
 	}
 	var others []model.Inbound
 	if err := tx.Where("type = ? AND id <> ?", "masque", inbound.Id).Find(&others).Error; err != nil {
 		return err
 	}
-	for index := range others {
-		other, err := parseMasqueInbound(&others[index])
-		if err != nil {
-			continue
+	for _, other := range others {
+		var fields struct {
+			Address []netip.Prefix `json:"address"`
 		}
-		prefix, err := parseMasqueClientSubnet(other.ClientSubnet)
-		if err == nil && masqueSubnetOverlaps(candidate, []netip.Prefix{prefix}) {
-			return fmt.Errorf("MASQUE 客户端地址池 %s 与入站 %s 冲突", candidate, others[index].Tag)
+		if err := json.Unmarshal(other.Options, &fields); err != nil {
+			return err
+		}
+		for _, address := range fields.Address {
+			if config.Address.Overlaps(address) {
+				return fmt.Errorf("MASQUE address pool overlaps inbound %s", other.Tag)
+			}
 		}
 	}
 	return nil
 }
 
-func masqueTemplateDescription(config *masqueInboundConfig) string {
-	return "https://cloudflareaccess.com"
-}
-
-func parseMasqueClientSubnet(raw string) (netip.Prefix, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return netip.Prefix{}, common.NewError("masque client subnet is required")
-	}
-	if !strings.Contains(raw, "/") {
-		raw += "/24"
-	}
-	prefix, err := netip.ParsePrefix(raw)
+func buildMasqueEndpointConfig(tx *gorm.DB, inbound *model.Inbound) (json.RawMessage, error) {
+	users, err := loadMasqueUsers(tx, inbound)
 	if err != nil {
-		return netip.Prefix{}, fmt.Errorf("invalid masque client subnet: %w", err)
-	}
-	if !prefix.Addr().Is4() {
-		return netip.Prefix{}, common.NewError("masque client subnet must be IPv4")
-	}
-	if prefix.Bits() < 16 || prefix.Bits() > 30 {
-		return netip.Prefix{}, common.NewError("masque client subnet prefix must be between /16 and /30")
-	}
-	return prefix.Masked(), nil
-}
-
-func loadMasqueSubnetsTx(tx *gorm.DB) ([]netip.Prefix, error) {
-	var inbounds []model.Inbound
-	if err := tx.Where("type = ?", "masque").Find(&inbounds).Error; err != nil {
 		return nil, err
 	}
-	result := make([]netip.Prefix, 0, len(inbounds))
-	for index := range inbounds {
-		config, err := parseMasqueInbound(&inbounds[index])
+	// Upstream users:[] disables authentication. Never instantiate that config.
+	if len(users) == 0 {
+		return nil, nil
+	}
+	if _, err := parseMasqueInbound(inbound); err != nil {
+		return nil, err
+	}
+	raw, err := inbound.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	var options map[string]any
+	if err := json.Unmarshal(raw, &options); err != nil {
+		return nil, err
+	}
+	options["type"], options["users"] = "masque-server", users
+	delete(options, "server")
+	delete(options, "mihomo_compatible")
+	if masqueMihomoEnabled(inbound) {
+		enabled := make(map[string]bool)
+		for _, user := range users {
+			enabled[user.Username] = true
+		}
+		compatible, err := loadMasqueMihomoUsers(tx, inbound, enabled)
 		if err != nil {
-			continue
+			return nil, err
 		}
-		prefix, err := parseMasqueClientSubnet(config.ClientSubnet)
-		if err == nil {
-			result = append(result, prefix)
-		}
+		options["mihomo_users"] = compatible
 	}
-	return result, nil
+	return json.Marshal(options)
 }
 
-func masqueSubnetOverlaps(candidate netip.Prefix, existing []netip.Prefix) bool {
-	for _, prefix := range existing {
-		if candidate.Contains(prefix.Addr()) || prefix.Contains(candidate.Addr()) {
-			return true
-		}
+func buildMasqueClientTemplate(inbound *model.Inbound) (json.RawMessage, error) {
+	config, err := parseMasqueInbound(inbound)
+	if err != nil {
+		return nil, err
 	}
-	return false
-}
-
-func allocateMasqueSubnet(existing []netip.Prefix) (netip.Prefix, error) {
-	for second := 16; second <= 31; second++ {
-		for third := 0; third <= 255; third++ {
-			prefix := netip.PrefixFrom(netip.AddrFrom4([4]byte{172, byte(second), byte(third), 0}), 24)
-			if !masqueSubnetOverlaps(prefix, existing) {
-				return prefix, nil
-			}
-		}
+	copy := *inbound
+	copy.OutJson = json.RawMessage(`{}`)
+	if err := util.FillOutJson(&copy, config.Host); err != nil {
+		return nil, err
 	}
-	return netip.Prefix{}, fmt.Errorf("no free private /24 subnet is available for MASQUE")
-}
-
-func masqueCredentialKey(inboundID uint) string {
-	return strconv.FormatUint(uint64(inboundID), 10)
+	if masqueMihomoEnabled(inbound) {
+		compatible, err := masqueMihomoTemplate(inbound)
+		if err != nil {
+			return nil, err
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(copy.OutJson, &fields); err != nil {
+			return nil, err
+		}
+		fields["nova_mihomo"] = compatible
+		return json.Marshal(fields)
+	}
+	return copy.OutJson, nil
 }

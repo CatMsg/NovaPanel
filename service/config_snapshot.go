@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/CatMsg/NovaPanel/database/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 // Keep the rollback history bound aligned with core.maxClientHistoryEntries.
@@ -89,6 +91,10 @@ func (snapshot *configSnapshot) restore(tx *gorm.DB) error {
 	if !snapshot.afterCaptured {
 		return errors.New("configuration snapshot is missing its transactional after-image")
 	}
+	preservedSettings, err := currentOperationalSettings(tx)
+	if err != nil {
+		return err
+	}
 	if err := snapshot.restoreClients(tx); err != nil {
 		return err
 	}
@@ -112,7 +118,6 @@ func (snapshot *configSnapshot) restore(tx *gorm.DB) error {
 		value interface{}
 		count int
 	}{
-		{&snapshot.settings, len(snapshot.settings)},
 		{&snapshot.tls, len(snapshot.tls)},
 		{&snapshot.inbounds, len(snapshot.inbounds)},
 		{&snapshot.outbounds, len(snapshot.outbounds)},
@@ -128,7 +133,40 @@ func (snapshot *configSnapshot) restore(tx *gorm.DB) error {
 			return err
 		}
 	}
+	settings := make([]model.Setting, 0, len(snapshot.settings)+len(preservedSettings))
+	for _, setting := range snapshot.settings {
+		if !isOperationalSetting(setting.Key) {
+			settings = append(settings, setting)
+		}
+	}
+	settings = append(settings, preservedSettings...)
+	if len(settings) > 0 {
+		// Settings may include write-only remote backup credentials. Never let
+		// debug SQL logging interpolate them during compensation.
+		quietTx := tx.Session(&gorm.Session{Logger: gormlogger.Discard})
+		if err := quietTx.Omit(clause.Associations).Create(&settings).Error; err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func currentOperationalSettings(tx *gorm.DB) ([]model.Setting, error) {
+	var current []model.Setting
+	if err := tx.Order("key ASC").Find(&current).Error; err != nil {
+		return nil, fmt.Errorf("read operational settings before rollback: %w", err)
+	}
+	preserved := make([]model.Setting, 0, 4)
+	for _, setting := range current {
+		if isOperationalSetting(setting.Key) {
+			preserved = append(preserved, setting)
+		}
+	}
+	return preserved, nil
+}
+
+func isOperationalSetting(key string) bool {
+	return key == maintenanceModeSetting || strings.HasPrefix(key, "remoteBackup")
 }
 
 func (snapshot *configSnapshot) restoreClients(tx *gorm.DB) error {

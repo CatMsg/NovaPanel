@@ -75,7 +75,14 @@ func NewFailoverService(configService *ConfigService) *FailoverService {
 }
 
 func (s *FailoverService) Start() {
+	if IsMaintenanceMode() {
+		return
+	}
 	s.mu.Lock()
+	if IsMaintenanceMode() {
+		s.mu.Unlock()
+		return
+	}
 	if s.cancel != nil {
 		s.mu.Unlock()
 		return
@@ -285,6 +292,9 @@ func saveFailoverPolicies(policies []FailoverPolicy) error {
 }
 
 func (s *FailoverService) runOnce() {
+	if IsMaintenanceMode() {
+		return
+	}
 	if !s.runMu.TryLock() {
 		return
 	}
@@ -312,6 +322,9 @@ func (s *FailoverService) runOnce() {
 }
 
 func (s *FailoverService) evaluate(policy FailoverPolicy, now time.Time) {
+	if IsMaintenanceMode() {
+		return
+	}
 	status := FailoverStatus{Policy: policy, LastChecked: now.Format(time.RFC3339), Probes: make([]FailoverProbe, 0, len(policy.Members))}
 	current, runtimeMembers, err := selectorState(policy.Tag)
 	if err != nil {
@@ -328,6 +341,9 @@ func (s *FailoverService) evaluate(policy FailoverPolicy, now time.Time) {
 	if status.Candidate == "" {
 		status.Error = "所有成员探测失败，保留当前出口"
 		s.storeStatus(status, now)
+		return
+	}
+	if IsMaintenanceMode() {
 		return
 	}
 
@@ -358,6 +374,9 @@ func (s *FailoverService) evaluate(policy FailoverPolicy, now time.Time) {
 	s.mu.Unlock()
 
 	if status.Pending < required {
+		return
+	}
+	if IsMaintenanceMode() {
 		return
 	}
 	if err := selectOutbound(policy.Tag, status.Candidate); err != nil {

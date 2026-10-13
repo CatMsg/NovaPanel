@@ -54,6 +54,7 @@ interface InboundBasics extends Listen {
   type: InType
   tag: string
   tls_id: number
+  exclude_from_sub?: boolean
   addrs?: Addr[]
   out_json?: any
 }
@@ -176,15 +177,12 @@ export interface Mieru extends InboundBasics {
 }
 export interface Masque extends InboundBasics {
   server?: string
-  network: 'quic'
-  private_key?: string
-  public_key?: string
-  client_subnet?: string
+  version: number[]
+  system: false
+  mihomo_compatible?: boolean
+  address?: string[]
+  path?: string
   mtu: number
-  keepalive: number
-  sni?: string
-  remote_dns_resolve?: boolean
-  udp: boolean
 }
 export interface Tun extends InboundBasics {
   interface_name?: string
@@ -284,12 +282,9 @@ const defaultValues: Record<InType, Inbound> = {
   },
   masque: <Masque>{
     type: InTypes.Masque,
-    network: 'quic',
-    client_subnet: '',
-    mtu: 1380,
-    keepalive: 25,
-    remote_dns_resolve: false,
-    udp: true,
+    version: [3],
+    system: false,
+    mtu: 1280,
   },
   tun: <Tun>{ type: InTypes.Tun, mtu: 9000, udp_timeout: '5m', auto_route: false },
   redirect: <Redirect>{ type: InTypes.Redirect },
@@ -297,6 +292,6 @@ const defaultValues: Record<InType, Inbound> = {
 }
 
 export function createInbound<T extends Inbound>(type: InType,json?: Partial<T>): Inbound {
-  const defaultObject: Inbound = { ...defaultValues[type] ?? {}, ...(json ?? {}) }
+  const defaultObject: Inbound = { exclude_from_sub: false, ...defaultValues[type] ?? {}, ...(json ?? {}) }
   return defaultObject
 }

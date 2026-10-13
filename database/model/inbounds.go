@@ -9,6 +9,8 @@ type Inbound struct {
 	Type string `json:"type" form:"type"`
 	Tag  string `json:"tag" form:"tag" gorm:"unique"`
 
+	ExcludeFromSub bool `json:"exclude_from_sub" form:"exclude_from_sub" gorm:"default:false;not null"`
+
 	// Foreign key to tls table
 	TlsId uint `json:"tls_id" form:"tls_id"`
 	Tls   *Tls `json:"tls" form:"tls" gorm:"foreignKey:TlsId;references:Id"`
@@ -24,6 +26,7 @@ func (i *Inbound) UnmarshalJSON(data []byte) error {
 	if err = json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
+	i.ExcludeFromSub = false
 
 	// Extract fixed fields and store the rest in Options
 	if val, exists := raw["id"].(float64); exists {
@@ -40,6 +43,8 @@ func (i *Inbound) UnmarshalJSON(data []byte) error {
 		i.TlsId = uint(val)
 	}
 	delete(raw, "tls_id")
+	i.ExcludeFromSub, _ = raw["exclude_from_sub"].(bool)
+	delete(raw, "exclude_from_sub")
 	delete(raw, "tls")
 	delete(raw, "users")
 
@@ -81,6 +86,9 @@ func (i Inbound) MarshalJSON() ([]byte, error) {
 		}
 
 		for k, v := range restFields {
+			if k == "exclude_from_sub" {
+				continue
+			}
 			combined[k] = v
 		}
 	}
@@ -91,6 +99,7 @@ func (i Inbound) MarshalJSON() ([]byte, error) {
 	if i.Type == "naive" {
 		delete(combined, "http_version")
 	}
+	delete(combined, "exclude_from_sub")
 
 	return json.Marshal(combined)
 }
@@ -113,6 +122,7 @@ func (i Inbound) MarshalFull() (*map[string]interface{}, error) {
 	combined["type"] = i.Type
 	combined["tag"] = i.Tag
 	combined["tls_id"] = i.TlsId
+	combined["exclude_from_sub"] = i.ExcludeFromSub
 	combined["addrs"] = i.Addrs
 	combined["out_json"] = i.OutJson
 
@@ -123,6 +133,9 @@ func (i Inbound) MarshalFull() (*map[string]interface{}, error) {
 		}
 
 		for k, v := range restFields {
+			if k == "exclude_from_sub" {
+				continue
+			}
 			combined[k] = v
 		}
 	}

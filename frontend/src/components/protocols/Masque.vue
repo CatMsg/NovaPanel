@@ -2,82 +2,40 @@
   <v-card class="masque-config" variant="flat">
     <v-card-text>
       <div class="masque-config__heading">
-        <div>
-          <span>HTTP/3 CONNECT-IP</span>
-          <h3>多用户 MASQUE</h3>
-          <p>一个 UDP 监听端口承载多个面板用户，每位用户自动生成独立密钥、隧道 IP 和会话。</p>
+        <div><span>sing-box · HTTP/3 CONNECT-IP</span><h3>原生 MASQUE</h3>
+          <p>单个 UDP 端口，多用户账号密码认证。使用内置用户态协议栈，不创建系统 TUN 或 NAT 规则。</p>
         </div>
-        <v-chip color="primary" variant="tonal">QUIC</v-chip>
+        <v-chip color="primary" variant="tonal">HTTP/3</v-chip>
       </div>
-
+      <v-alert type="info" variant="tonal" class="mb-4">
+        需要启用的 TLS 模板。sing-box 使用 JSON 订阅；开启下方兼容开关后也支持 Clash / Mihomo 订阅。
+        TCP/UDP 按用户统计、限速并记录历史；不开放客户端路由通告、隧道间直连或 ICMP 转发。没有有效用户时不启动监听。
+      </v-alert>
+      <v-switch v-model="data.mihomo_compatible" label="同时兼容 Mihomo（密钥认证）" color="primary" hide-details class="mb-4" />
+      <v-alert v-if="data.mihomo_compatible" type="info" variant="tonal" class="mb-4">
+        同一 UDP 端口同时支持 sing-box 账号认证和 Mihomo 密钥认证，共用原生核心统计和限速。
+        TLS 模板必须使用 ECDSA 证书，不能使用 RSA。Mihomo 为每个用户分配固定地址，同一套密钥同时只允许一个隧道；多台独立客户端请分配不同用户。未定义通用 MASQUE 单节点 URI，请使用订阅。
+      </v-alert>
       <v-row>
-        <v-col cols="12" sm="6">
-          <v-text-field v-model="data.server" label="订阅域名" hint="留空时使用当前面板访问域名" persistent-hint />
-        </v-col>
-        <v-col cols="12" sm="6">
-          <v-text-field v-model="data.client_subnet" label="客户端地址池" placeholder="自动分配，例如 172.16.0.0/24" hint="每位用户会从该地址池获得独立 /32 地址" persistent-hint />
-        </v-col>
-        <v-col cols="12" sm="6" md="4">
-          <v-text-field v-model.number="data.mtu" label="MTU" type="number" min="576" max="9000" hide-details />
-        </v-col>
-        <v-col cols="12" sm="6" md="4">
-          <v-text-field v-model.number="data.keepalive" label="Keepalive（秒）" type="number" min="1" max="300" hide-details />
-        </v-col>
-        <v-col cols="12" sm="6" md="4">
-          <v-text-field v-model="data.sni" label="SNI（可选）" hide-details />
-        </v-col>
-        <v-col cols="12" sm="6">
-          <v-switch v-model="data.remote_dns_resolve" color="primary" label="远程 DNS 解析" hide-details />
-        </v-col>
-        <v-col cols="12" sm="6">
-          <v-switch v-model="data.udp" color="primary" label="允许 UDP" hide-details disabled />
-        </v-col>
+        <v-col cols="12" sm="6"><v-text-field v-model="data.server" label="订阅域名" hint="留空使用当前面板域名" persistent-hint /></v-col>
+        <v-col cols="12" sm="6"><v-text-field v-model="serverAddress" label="服务端隧道地址 / 地址池" placeholder="自动分配，例如 172.16.0.1/24" hint="原生服务自动分配用户隧道地址" persistent-hint /></v-col>
+        <v-col cols="12" sm="6"><v-text-field v-model.number="data.mtu" label="MTU" type="number" min="1280" max="9000" /></v-col>
+        <v-col cols="12" sm="6"><v-text-field v-model="data.path" label="CONNECT-IP 路径（可选）" hint="默认使用原生 MASQUE 路径模板" persistent-hint /></v-col>
       </v-row>
-
-      <v-expansion-panels class="mt-3" variant="accordion">
-        <v-expansion-panel title="服务端身份密钥">
-          <v-expansion-panel-text>
-            <v-alert type="info" variant="tonal" class="mb-4">首次保存可自动生成。重新生成会使已有用户订阅失效，需要重新拉取。</v-alert>
-            <v-row>
-              <v-col cols="12" sm="6">
-                <v-textarea v-model="data.private_key" label="服务端私钥" rows="3" auto-grow hide-details />
-              </v-col>
-              <v-col cols="12" sm="6">
-                <v-textarea v-model="data.public_key" label="服务端公钥" rows="3" auto-grow readonly hide-details />
-              </v-col>
-            </v-row>
-            <v-btn class="mt-4" color="primary" variant="tonal" :loading="loading" prepend-icon="mdi-key-plus" @click="genMasqueKey">生成服务端密钥</v-btn>
-          </v-expansion-panel-text>
-        </v-expansion-panel>
-      </v-expansion-panels>
     </v-card-text>
   </v-card>
 </template>
 
 <script lang="ts">
-import HttpUtils from '@/plugins/httputil'
-import { push } from 'notivue'
-
 export default {
   props: ['data'],
-  data() { return { loading: false } },
-  created() {
-    this.$props.data.network = 'quic'
-    this.$props.data.udp = true
-  },
-  methods: {
-    async genMasqueKey() {
-      this.loading = true
-      const msg = await HttpUtils.get('api/keypairs', { k: 'masque' })
-      this.loading = false
-      if (!msg.success) {
-        push.error({ message: `生成密钥失败：${msg.obj}` })
-        return
-      }
-      msg.obj.forEach((line: string) => {
-        if (line.startsWith('PrivateKey')) this.$props.data.private_key = line.substring(12)
-        if (line.startsWith('PublicKey')) this.$props.data.public_key = line.substring(11)
-      })
+  computed: {
+    serverAddress: {
+      get(): string { return this.$props.data.address?.[0] ?? '' },
+      set(value: string) {
+        if (value.trim()) this.$props.data.address = [value.trim()]
+        else delete this.$props.data.address
+      },
     },
   },
 }
@@ -89,5 +47,4 @@ export default {
 .masque-config__heading span { color: var(--np-accent); font-size: 12px; letter-spacing: .08em; }
 .masque-config__heading h3 { margin: 4px 0; font-size: 22px; }
 .masque-config__heading p { margin: 0; color: var(--np-text-muted); line-height: 1.6; }
-@media (max-width: 600px) { .masque-config__heading { align-items: flex-start; } }
 </style>

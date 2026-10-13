@@ -41,6 +41,12 @@ var (
 	_ masque.ServerHandler                = (*ServerEndpoint)(nil)
 )
 
+// ServerHTTPOptionsCustomizer lets an embedding application wrap tunnel
+// authentication without replacing the native CONNECT-IP data plane.
+type ServerHTTPOptionsCustomizer interface {
+	CustomizeMASQUEHTTP(*http.ServerOptions)
+}
+
 type ServerEndpoint struct {
 	endpointBase
 	ctx            context.Context
@@ -95,19 +101,24 @@ func NewServerEndpoint(ctx context.Context, router adapter.Router, logger log.Co
 		AdvertiseRoutes: options.AdvertiseRoutes,
 		Resolve:         serverEndpoint.resolve,
 		Handler:         serverEndpoint,
+		SessionObserver: service.FromContext[masque.ServerSessionObserver](ctx),
 	})
 	if err != nil {
 		return nil, err
 	}
 	serverEndpoint.server = server
-	serverEndpoint.httpServer = http.NewServer(http.ServerOptions{
+	httpOptions := http.ServerOptions{
 		Authenticator: auth.NewAuthenticator(options.Users),
 		Logger:        logger,
 		HTTP1:         serveHTTP1,
 		HTTP2:         serveHTTP2,
 		HTTP2Options:  options.HTTP2Options,
 		Tunnels:       map[string]http.TunnelHandler{"connect-ip": server},
-	})
+	}
+	if customizer := service.FromContext[ServerHTTPOptionsCustomizer](ctx); customizer != nil {
+		customizer.CustomizeMASQUEHTTP(&httpOptions)
+	}
+	serverEndpoint.httpServer = http.NewServer(httpOptions)
 	if options.TLS != nil {
 		tlsConfig, tlsErr := tls.NewServerWithOptions(tls.ServerOptions{
 			Context:        ctx,

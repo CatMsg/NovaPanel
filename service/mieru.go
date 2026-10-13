@@ -238,13 +238,34 @@ func (s *MieruService) SyncFromDB() error {
 	if s == nil {
 		return nil
 	}
+	if IsMaintenanceMode() {
+		return s.Stop()
+	}
 	if IsTrafficBudgetBlocked() {
 		return s.Stop()
 	}
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
+	if IsMaintenanceMode() {
+		return nil
+	}
 	if IsTrafficBudgetBlocked() {
 		return nil
+	}
+	return s.syncFromDBLocked()
+}
+
+func (s *MieruService) syncFromDBDuringMaintenanceResume() error {
+	if s == nil {
+		return nil
+	}
+	if IsTrafficBudgetBlocked() {
+		return common.NewError("VPS 总流量预算已触发硬保护，无法恢复 Mieru 服务")
+	}
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+	if IsTrafficBudgetBlocked() {
+		return common.NewError("VPS 总流量预算已触发硬保护，无法恢复 Mieru 服务")
 	}
 	return s.syncFromDBLocked()
 }
@@ -466,10 +487,14 @@ func (s *MieruService) EnableTemporaryDebug() (time.Time, error) {
 }
 
 func (s *MieruService) StartWatchdog() {
-	if s == nil || runtime.GOOS != "linux" || IsTrafficBudgetBlocked() {
+	if s == nil || runtime.GOOS != "linux" || IsTrafficBudgetBlocked() || IsMaintenanceMode() {
 		return
 	}
 	s.mu.Lock()
+	if IsTrafficBudgetBlocked() || IsMaintenanceMode() {
+		s.mu.Unlock()
+		return
+	}
 	if s.watchCancel != nil {
 		s.mu.Unlock()
 		return
@@ -562,7 +587,7 @@ func (s *MieruService) refreshMieruSourceIPs(ctx context.Context) {
 }
 
 func (s *MieruService) runWatchdogCheck(ctx context.Context) {
-	if IsTrafficBudgetBlocked() {
+	if IsTrafficBudgetBlocked() || IsMaintenanceMode() {
 		return
 	}
 	s.mu.Lock()
@@ -770,8 +795,14 @@ func limitMieruDiagnostic(value string, limit int) string {
 }
 
 func (s *MieruService) restartUnhealthyRuntime(expected *mieruRuntime, reason string) error {
+	if IsMaintenanceMode() || IsTrafficBudgetBlocked() {
+		return nil
+	}
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
+	if IsMaintenanceMode() || IsTrafficBudgetBlocked() {
+		return nil
+	}
 	s.mu.Lock()
 	if s.active != expected || s.total == 0 {
 		s.mu.Unlock()
@@ -1323,7 +1354,7 @@ func mergeEnvironment(base, overrides []string) []string {
 }
 
 func (s *MieruService) handleRuntimeExit(runtimeState *mieruRuntime, waitErr error) {
-	if s == nil || runtimeState == nil || runtimeState.intentionalStop.Load() {
+	if s == nil || runtimeState == nil || runtimeState.intentionalStop.Load() || IsMaintenanceMode() {
 		return
 	}
 	message := "mita exited unexpectedly"
@@ -1348,6 +1379,9 @@ func (s *MieruService) handleRuntimeExit(runtimeState *mieruRuntime, waitErr err
 			}
 			delay := mieruRestartDelays[delayIndex]
 			time.Sleep(delay)
+			if IsMaintenanceMode() {
+				return
+			}
 			s.mu.Lock()
 			if !s.restartScheduled || s.total == 0 {
 				s.mu.Unlock()

@@ -102,6 +102,7 @@ func EndpointRegistry() *endpoint.Registry {
 	registry := endpoint.NewRegistry()
 
 	wireguard.RegisterEndpoint(registry)
+	registerMASQUEEndpoints(registry)
 	registerTailscaleEndpoint(registry)
 
 	return registry

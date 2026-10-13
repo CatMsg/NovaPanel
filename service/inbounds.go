@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -79,10 +80,11 @@ func (s *InboundService) GetAll() (*[]map[string]interface{}, error) {
 		var shadowtls_version uint
 		ss_managed := false
 		inbData := map[string]interface{}{
-			"id":     inbound.Id,
-			"type":   inbound.Type,
-			"tag":    inbound.Tag,
-			"tls_id": inbound.TlsId,
+			"id":               inbound.Id,
+			"type":             inbound.Type,
+			"tag":              inbound.Tag,
+			"tls_id":           inbound.TlsId,
+			"exclude_from_sub": inbound.ExcludeFromSub,
 		}
 		if inbound.Options != nil {
 			var restFields map[string]json.RawMessage
@@ -93,6 +95,9 @@ func (s *InboundService) GetAll() (*[]map[string]interface{}, error) {
 			inbData["listen_port"] = restFields["listen_port"]
 			if inbound.Type == "mieru" {
 				inbData["transport"] = restFields["transport"]
+			}
+			if inbound.Type == "masque" {
+				inbData["mihomo_compatible"] = restFields["mihomo_compatible"]
 			}
 			if inbound.Type == "shadowtls" {
 				if raw, ok := restFields["version"]; ok && len(raw) > 0 {
@@ -172,9 +177,6 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 				return nil, err
 			}
 		}
-		if err = validateHTTPInboundWrite(&inbound, act); err != nil {
-			return nil, err
-		}
 		var oldInbound *model.Inbound
 		var oldConfig []byte
 		if act == "edit" {
@@ -183,12 +185,20 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			if err != nil {
 				return nil, err
 			}
+			if inboundSubscriptionMetadataOnly(oldInbound, &inbound) {
+				err := tx.Model(&model.Inbound{}).Where("id = ?", inbound.Id).
+					Update("exclude_from_sub", inbound.ExcludeFromSub).Error
+				return nil, err
+			}
 			if corePtr != nil && corePtr.IsRunning() {
 				oldConfig, err = s.buildInboundCoreConfig(tx, oldInbound)
 				if err != nil {
 					return nil, err
 				}
 			}
+		}
+		if err = validateHTTPInboundWrite(&inbound, act); err != nil {
+			return nil, err
 		}
 		if inbound.Type == "masque" {
 			if err := prepareMasqueInbound(tx, &inbound, oldInbound, hostname); err != nil {
@@ -224,7 +234,11 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			return nil, err
 		}
 
-		err = util.FillOutJson(&inbound, hostname)
+		if inbound.Type == "masque" {
+			inbound.OutJson, err = buildMasqueClientTemplate(&inbound)
+		} else {
+			err = util.FillOutJson(&inbound, hostname)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -232,6 +246,7 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			oldInbound.Type == inbound.Type &&
 			oldInbound.Tag == inbound.Tag &&
 			oldInbound.TlsId == inbound.TlsId &&
+			oldInbound.ExcludeFromSub == inbound.ExcludeFromSub &&
 			equalJSONBytes(oldInbound.Addrs, inbound.Addrs) &&
 			equalJSONBytes(oldInbound.OutJson, inbound.OutJson) &&
 			equalJSONBytes(oldInbound.Options, inbound.Options) {
@@ -384,6 +399,35 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 	return postCommit, nil
 }
 
+// A subscription-visibility edit must not restart listeners or regenerate links.
+func inboundSubscriptionMetadataOnly(oldInbound, inbound *model.Inbound) bool {
+	if oldInbound.ExcludeFromSub == inbound.ExcludeFromSub {
+		return false
+	}
+	oldFields, err := oldInbound.MarshalFull()
+	if err != nil {
+		return false
+	}
+	newFields, err := inbound.MarshalFull()
+	if err != nil {
+		return false
+	}
+	delete(*oldFields, "exclude_from_sub")
+	delete(*newFields, "exclude_from_sub")
+	// Decode RawMessages too, so harmless JSON formatting does not turn a
+	// visibility-only edit into a runtime mutation.
+	var oldValue, newValue any
+	oldJSON, err := json.Marshal(oldFields)
+	if err != nil || json.Unmarshal(oldJSON, &oldValue) != nil {
+		return false
+	}
+	newJSON, err := json.Marshal(newFields)
+	if err != nil || json.Unmarshal(newJSON, &newValue) != nil {
+		return false
+	}
+	return reflect.DeepEqual(oldValue, newValue)
+}
+
 func (s *InboundService) removeInboundByTag(tag string) error {
 	return retryWriteTx(func(tx *gorm.DB) error {
 		oldInbound := &model.Inbound{}
@@ -420,7 +464,11 @@ func (s *InboundService) UpdateOutJsons(tx *gorm.DB, inboundIds []uint, hostname
 		return err
 	}
 	for _, inbound := range inbounds {
-		err = util.FillOutJson(&inbound, hostname)
+		if inbound.Type == "masque" {
+			inbound.OutJson, err = buildMasqueClientTemplate(&inbound)
+		} else {
+			err = util.FillOutJson(&inbound, hostname)
+		}
 		if err != nil {
 			return err
 		}

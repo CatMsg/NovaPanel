@@ -151,7 +151,8 @@ func (a *ApiService) getDataSnapshot(c *gin.Context) (interface{}, error) {
 
 	sysInfo := a.ServerService.GetSingboxInfo()
 	if sysInfo["running"] == false {
-		logs := a.ServerService.GetLogs("1", "debug")
+		// lastLog is displayed as an error, not as a general shutdown log.
+		logs := a.ServerService.GetLogs("1", "error")
 		if len(logs) > 0 {
 			data["lastLog"] = logs[0]
 		}
@@ -164,6 +165,7 @@ func (a *ApiService) getDataSnapshot(c *gin.Context) (interface{}, error) {
 		cacheKey := "load:" + getHostname(c)
 		if cached, ok := getCachedLoadData(cacheKey); ok {
 			cached["onlines"] = onlines
+			delete(cached, "lastLog")
 			if _, ok := data["lastLog"]; ok {
 				cached["lastLog"] = data["lastLog"]
 			}
@@ -726,6 +728,10 @@ func (a *ApiService) RestartApp(c *gin.Context) {
 }
 
 func (a *ApiService) RestartSb(c *gin.Context) {
+	if service.IsMaintenanceMode() {
+		jsonMsg(c, "restartSb", common.NewError("maintenance mode is active; resume the proxy data plane before restarting sing-box"))
+		return
+	}
 	err := a.ConfigService.RestartCore()
 	jsonMsg(c, "restartSb", err)
 }
@@ -749,7 +755,15 @@ func (a *ApiService) ImportDb(c *gin.Context) {
 		return
 	}
 	defer file.Close()
-	err = database.ImportDB(file)
+	releaseBackupGuard, err := service.AcquireRemoteBackupRestoreGuard()
+	if err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
+	defer releaseBackupGuard()
+	// The lifecycle service serializes import against saves/resume and carries
+	// any active pause into the replacement DB before swapping it into service.
+	err = service.GetMaintenanceService().ImportDatabase(file)
 	jsonMsg(c, "", err)
 }
 

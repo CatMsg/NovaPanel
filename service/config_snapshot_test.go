@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,12 +9,31 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
+
+type snapshotCaptureLogger struct {
+	mu         sync.Mutex
+	statements []string
+}
+
+func (l *snapshotCaptureLogger) LogMode(gormlogger.LogLevel) gormlogger.Interface { return l }
+func (*snapshotCaptureLogger) Info(context.Context, string, ...interface{})       {}
+func (*snapshotCaptureLogger) Warn(context.Context, string, ...interface{})       {}
+func (*snapshotCaptureLogger) Error(context.Context, string, ...interface{})      {}
+func (l *snapshotCaptureLogger) Trace(_ context.Context, _ time.Time, query func() (string, int64), _ error) {
+	sql, _ := query()
+	l.mu.Lock()
+	l.statements = append(l.statements, sql)
+	l.mu.Unlock()
+}
 
 func newConfigSnapshotTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -140,6 +160,72 @@ func TestConfigSnapshotRestoresBeforeImage(t *testing.T) {
 	}
 	if len(endpoints) != 1 || endpoints[0].Tag != "before" {
 		t.Fatalf("unexpected restored endpoints: %#v", endpoints)
+	}
+}
+
+func TestConfigSnapshotRollbackPreservesLiveOperationalSettings(t *testing.T) {
+	db := newConfigSnapshotTestDB(t)
+	settings := &SettingService{}
+	if _, err := settings.GetAllSetting(); err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range map[string]string{
+		maintenanceModeSetting: "false",
+		"remoteBackupConfig":   `{"enabled":false,"password":"old-test-value"}`,
+		"remoteBackupOwner":    "old-owner",
+		"remoteBackupState":    `{"lastRun":"old"}`,
+		"subUpdates":           "12",
+	} {
+		if err := settings.setString(key, value); err != nil {
+			t.Fatalf("seed setting %s: %v", key, err)
+		}
+	}
+
+	snapshot := takeConfigSnapshot(t, db, false)
+	if err := settings.setString("subUpdates", "13"); err != nil {
+		t.Fatal(err)
+	}
+	captureSnapshotAfterImage(t, db, snapshot)
+
+	const liveBackupConfig = `{"enabled":true,"password":"current-test-value"}`
+	for key, value := range map[string]string{
+		maintenanceModeSetting: "true",
+		"remoteBackupConfig":   liveBackupConfig,
+		"remoteBackupOwner":    "current-owner",
+		"remoteBackupState":    `{"lastRun":"current"}`,
+	} {
+		if err := settings.setString(key, value); err != nil {
+			t.Fatalf("update operational setting %s: %v", key, err)
+		}
+	}
+
+	logCapture := &snapshotCaptureLogger{}
+	if err := db.Session(&gorm.Session{Logger: logCapture}).Transaction(snapshot.restore); err != nil {
+		t.Fatalf("restore configuration snapshot: %v", err)
+	}
+	logCapture.mu.Lock()
+	loggedSQL := strings.Join(logCapture.statements, "\n")
+	logCapture.mu.Unlock()
+	if !strings.Contains(loggedSQL, "INSERT") {
+		t.Fatal("capture logger did not observe rollback SQL")
+	}
+	if strings.Contains(loggedSQL, "current-test-value") {
+		t.Fatal("operational backup credential was emitted to SQL logs")
+	}
+	for key, want := range map[string]string{
+		maintenanceModeSetting: "true",
+		"remoteBackupConfig":   liveBackupConfig,
+		"remoteBackupOwner":    "current-owner",
+		"remoteBackupState":    `{"lastRun":"current"}`,
+		"subUpdates":           "12",
+	} {
+		got, err := settings.getString(key)
+		if err != nil {
+			t.Fatalf("read restored setting %s: %v", key, err)
+		}
+		if got != want {
+			t.Errorf("setting %s was not restored with the correct lifecycle semantics", key)
+		}
 	}
 }
 

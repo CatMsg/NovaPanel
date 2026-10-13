@@ -117,6 +117,16 @@ func (s *TrafficBudgetService) GetStatus() TrafficBudgetStatus {
 }
 
 func (s *TrafficBudgetService) CheckAndEnforce() error {
+	// Keep accounting and threshold state current while paused. Runtime restore
+	// is independently suppressed by restoreProxyDataPlaneAfterTrafficBudget.
+	return s.checkAndEnforce()
+}
+
+func (s *TrafficBudgetService) reconcileForMaintenanceResume() error {
+	return s.checkAndEnforce()
+}
+
+func (s *TrafficBudgetService) checkAndEnforce() error {
 	trafficBudgetMu.Lock()
 	cfg, err := s.loadTrafficBudgetConfig(database.GetDB())
 	if err != nil {
@@ -660,6 +670,9 @@ func stopProxyDataPlaneForTrafficBudget() error {
 }
 
 func restoreProxyDataPlaneAfterTrafficBudget() error {
+	if IsMaintenanceMode() {
+		return nil
+	}
 	var errs []error
 	if corePtr != nil {
 		if err := (&ConfigService{}).StartCore(); err != nil {

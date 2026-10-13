@@ -8,7 +8,6 @@ import (
 	"net/netip"
 	"net/url"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -129,59 +128,9 @@ func CloseLocalSession(id string) error {
 	return fmt.Errorf("无效的连接 ID")
 }
 
-func (s *MasqueService) sessionViews() []SessionView {
-	if s == nil {
-		return nil
-	}
-	s.mu.Lock()
-	runtimes := make([]*masqueRuntime, 0, len(s.runtimes))
-	for _, runtime := range s.runtimes {
-		runtimes = append(runtimes, runtime)
-	}
-	s.mu.Unlock()
+func (s *MasqueService) sessionViews() []SessionView { return nil }
 
-	result := make([]SessionView, 0)
-	for _, runtime := range runtimes {
-		runtime.sessionMu.Lock()
-		for _, session := range runtime.sessions {
-			result = append(result, SessionView{
-				ID:   "masque:" + runtime.tag + ":" + strconv.FormatUint(session.id, 10),
-				Kind: "masque", Inbound: runtime.tag, User: session.identity.Name,
-				Network: "ip", Source: session.remote, SourceIP: sourceIPFromSessionSource(session.remote), Destination: "CONNECT-IP",
-				Protocol: "http3-connect-ip", StartedAt: session.startedAt,
-				Upload: session.rxBytes.Load(), Download: session.txBytes.Load(),
-			})
-		}
-		runtime.sessionMu.Unlock()
-	}
-	return result
-}
-
-func (s *MasqueService) closeSession(value string) bool {
-	separator := strings.LastIndex(value, ":")
-	if separator <= 0 || separator == len(value)-1 {
-		return false
-	}
-	tag := value[:separator]
-	id, err := strconv.ParseUint(value[separator+1:], 10, 64)
-	if err != nil {
-		return false
-	}
-	s.mu.Lock()
-	runtime := s.runtimes[tag]
-	s.mu.Unlock()
-	if runtime == nil {
-		return false
-	}
-	runtime.sessionMu.Lock()
-	session := runtime.sessions[id]
-	runtime.sessionMu.Unlock()
-	if session == nil {
-		return false
-	}
-	session.close()
-	return true
-}
+func (s *MasqueService) closeSession(value string) bool { return false }
 
 func (s *FleetService) GetFleetSessions() (*FleetSessions, error) {
 	configs, err := s.loadFleetServers()

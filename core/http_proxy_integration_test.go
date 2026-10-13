@@ -529,7 +529,8 @@ func assertHTTPProxyRoundTrip(t *testing.T, proxy adapter.Outbound, server *Box,
 	if _, err := packetConn.WriteTo(udpPayload, udpTarget); err != nil {
 		t.Fatalf("%s UDP payload write failed: %v", label, err)
 	}
-	udpResponse := make([]byte, len(udpPayload)+1)
+	// SOCKS-based external-client harnesses also receive an encapsulation header.
+	udpResponse := make([]byte, 64*1024)
 	n, _, err := packetConn.ReadFrom(udpResponse)
 	if err != nil {
 		t.Fatalf("%s UDP payload read failed: %v", label, err)

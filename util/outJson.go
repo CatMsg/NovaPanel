@@ -98,33 +98,24 @@ func FillOutJson(i *model.Inbound, hostname string) error {
 }
 
 func masqueOut(out *map[string]interface{}, inbound map[string]interface{}) {
-	if server, ok := inbound["server"].(string); ok && server != "" {
-		(*out)["server"] = server
+	tls, _ := (*out)["tls"].(map[string]interface{})
+	if tls == nil {
+		tls = make(map[string]interface{})
 	}
-	(*out)["network"] = "quic"
-	(*out)["udp"] = true
-	(*out)["congestion-controller"] = "bbr"
-	(*out)["proto"] = "bbr"
-	if publicKey, ok := inbound["public_key"].(string); ok {
-		(*out)["public-key"] = publicKey
+	tls["enabled"], tls["alpn"] = true, []string{"h3"}
+	server := (*out)["server"]
+	if host, ok := inbound["server"].(string); ok && host != "" {
+		server = host
 	}
-	if mtu, ok := inbound["mtu"]; ok {
+	*out = map[string]interface{}{
+		"type": "masque-client", "tag": inbound["tag"], "server": server, "server_port": inbound["listen_port"],
+		"system": false, "version": 3, "disable_version_fallback": true, "on_demand": true, "tls": tls,
+	}
+	if mtu, present := inbound["mtu"]; present {
 		(*out)["mtu"] = mtu
 	}
-	if keepAlive, ok := inbound["keepalive"]; ok {
-		(*out)["keepalive"] = keepAlive
-	}
-	if sni, ok := inbound["sni"].(string); ok && sni != "" {
-		(*out)["sni"] = sni
-	} else {
-		delete(*out, "sni")
-	}
-	if remoteDNS, ok := inbound["remote_dns_resolve"].(bool); ok && remoteDNS {
-		(*out)["remote-dns-resolve"] = true
-		(*out)["dns"] = []string{"1.1.1.1", "8.8.8.8"}
-	} else {
-		delete(*out, "remote-dns-resolve")
-		delete(*out, "dns")
+	if path, ok := inbound["path"].(string); ok && path != "" {
+		(*out)["path"] = path
 	}
 }
 

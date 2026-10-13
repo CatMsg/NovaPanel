@@ -96,6 +96,10 @@ export function shuffleConfigs(configs: Config, key?: string) {
   const keys = key ? [key] : Object.keys(configs)
   keys.forEach(k => {
     switch (k) {
+      case "masque":
+        configs[k].password = RandomUtil.randomShadowsocksPassword(32)
+        delete configs[k].mihomo
+        break
       case "mixed":
       case "socks":
       case "http":
@@ -208,6 +212,6 @@ export function createClient<T extends Client>(json?: Partial<T>): Client {
 
   // Add missing config
   defaultObject.config = { ...randomConfigs(defaultObject.name), ...defaultObject.config }
-  
+
   return defaultObject
 }

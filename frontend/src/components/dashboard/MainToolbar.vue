@@ -53,6 +53,47 @@
         {{ $t('main.stats.title') }}
       </v-btn>
     </div>
+    <section
+      class="maintenance-status"
+      :class="{
+        'maintenance-status--paused': maintenance?.enabled,
+        'maintenance-status--error': !!maintenanceError,
+        'maintenance-status--unknown': !maintenance && !maintenanceError,
+      }"
+      aria-live="polite"
+      data-testid="maintenance-status"
+    >
+      <div class="maintenance-status__copy">
+        <v-icon
+          :icon="maintenanceError ? 'mdi-alert-circle-outline' : maintenance?.enabled ? 'mdi-pause-circle-outline' : 'mdi-information-outline'"
+          :color="maintenanceError ? 'error' : maintenance?.enabled ? 'warning' : 'info'"
+          size="22"
+        />
+        <div>
+          <div class="maintenance-status__title">{{ $t('main.maintenance.title') }}</div>
+          <div class="maintenance-status__detail">
+            <template v-if="maintenance?.transitioning">{{ $t('main.maintenance.transitioning') }}</template>
+            <template v-else-if="maintenance?.enabled">{{ $t('main.maintenance.paused') }}</template>
+            <template v-else-if="maintenance">{{ $t('main.maintenance.off') }}</template>
+            <template v-else>{{ $t('main.maintenance.checking') }}</template>
+          </div>
+        </div>
+      </div>
+      <v-btn
+        class="maintenance-status__button"
+        :color="maintenanceError ? 'info' : maintenance?.enabled ? 'primary' : 'warning'"
+        :disabled="!maintenance || maintenance.transitioning || maintenancePending"
+        :loading="maintenancePending"
+        variant="tonal"
+        data-testid="maintenance-action"
+        @click="emit('maintenance-request', !maintenance?.enabled)"
+      >
+        {{ maintenance?.enabled ? $t('main.maintenance.resume') : $t('main.maintenance.pause') }}
+      </v-btn>
+      <v-alert v-if="maintenanceError" class="maintenance-status__error" density="compact" type="error" variant="tonal" data-testid="maintenance-error">
+        {{ maintenanceError }}
+      </v-alert>
+    </section>
   </v-card>
 </template>
 
@@ -62,10 +103,18 @@ type MenuEntry = {
   value: Array<{ title: string; value: string }>
 }
 
+type MaintenanceState = {
+  enabled: boolean
+  transitioning: boolean
+}
+
 const props = defineProps<{
   menu: boolean
   menuItems: MenuEntry[]
   reloadItems: string[]
+  maintenance: MaintenanceState | null
+  maintenancePending: boolean
+  maintenanceError: string
 }>()
 
 const emit = defineEmits<{
@@ -74,6 +123,7 @@ const emit = defineEmits<{
   (e: 'backup'): void
   (e: 'log'): void
   (e: 'stats'): void
+  (e: 'maintenance-request', enabled: boolean): void
 }>()
 
 const updateReloadItems = (value: string[] | null) => {
@@ -142,6 +192,56 @@ const updateReloadItems = (value: string[] | null) => {
   justify-content: flex-start;
 }
 
+.maintenance-status {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 12px 14px;
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  border-radius: 18px;
+  background: rgba(59, 130, 246, 0.07);
+}
+
+.maintenance-status--paused {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(245, 158, 11, 0.09);
+}
+
+.maintenance-status--error {
+  border-color: rgba(220, 38, 38, 0.32);
+  background: rgba(220, 38, 38, 0.08);
+}
+
+.maintenance-status__copy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.maintenance-status__title {
+  font-weight: 700;
+  color: var(--np-text-main);
+}
+
+.maintenance-status__detail {
+  color: var(--np-text-muted);
+  font-size: 0.86rem;
+}
+
+.maintenance-status__button {
+  justify-self: end;
+  border-radius: 999px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.maintenance-status__error {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
 .main-toolbar__button {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.5);
@@ -201,6 +301,18 @@ const updateReloadItems = (value: string[] | null) => {
 
 .main-toolbar.v-theme--dark .main-toolbar__label {
   color: rgba(186, 202, 224, 0.78);
+}
+
+.main-toolbar.v-theme--dark .maintenance-status {
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.main-toolbar.v-theme--dark .maintenance-status--paused {
+  background: rgba(245, 158, 11, 0.14);
+}
+
+.main-toolbar.v-theme--dark .maintenance-status--error {
+  background: rgba(220, 38, 38, 0.15);
 }
 
 @media (max-width: 960px) {
@@ -269,6 +381,15 @@ const updateReloadItems = (value: string[] | null) => {
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.62),
       0 10px 18px rgba(15, 23, 42, 0.06);
+  }
+
+  .maintenance-status {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .maintenance-status__button {
+    justify-self: stretch;
   }
 }
 </style>

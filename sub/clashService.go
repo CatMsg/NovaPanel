@@ -68,20 +68,34 @@ func (s *ClashService) GetClash(subId string, requestHosts ...string) (*string, 
 	if len(requestHosts) > 0 {
 		hostname = strings.TrimSpace(requestHosts[0])
 	}
-	cacheKey := "clash:" + strings.TrimSpace(subId) + ":" + hostname
-	if body, headers, ok := getCachedSubResult(cacheKey); ok {
-		return body, headers, nil
-	}
-
 	client, inDatas, err := s.getData(subId)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	outbounds, outTags, err := s.getOutbounds(client.Config, inDatas)
+	visibilityKey, err := subscriptionVisibilityCacheKey(client)
 	if err != nil {
 		return nil, nil, err
 	}
+	cacheKey := "clash:" + strings.TrimSpace(subId) + ":" + hostname + ":" + visibilityKey
+	cacheable := true
+	for _, inbound := range inDatas {
+		if inbound.Type == "masque" && strings.Contains(string(inbound.OutJson), `"nova_mihomo"`) {
+			// Certificate files may rotate outside panel saves; never return an
+			// old public-key pin or revoked user key from the subscription cache.
+			cacheable = false
+		}
+	}
+	if cacheable {
+		if body, headers, ok := getCachedSubResult(cacheKey); ok {
+			return body, headers, nil
+		}
+	}
+
+	outbounds, outTags, err := s.getOutbounds(client.Config, inDatas, "clash")
+	if err != nil {
+		return nil, nil, err
+	}
+	*outbounds, *outTags = withoutUnsupportedJSONOutbounds(*outbounds, *outTags, "masque-client")
 	filteredOutbounds, filteredTags, err := filterClashHTTPOutbounds(inDatas, *outbounds, *outTags)
 	if err != nil {
 		return nil, nil, err
@@ -117,7 +131,9 @@ func (s *ClashService) GetClash(subId string, requestHosts ...string) (*string, 
 	updateInterval, _ := s.SettingService.GetSubUpdates()
 	headers := getClientSubscriptionHeaders(client, updateInterval)
 
-	storeCachedSubResult(cacheKey, resultStr, headers)
+	if cacheable {
+		storeCachedSubResult(cacheKey, resultStr, headers)
+	}
 	return &resultStr, headers, nil
 }
 
@@ -194,9 +210,8 @@ func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, b
 		proxy["type"] = t
 
 		server, _ := obMap["server"].(string)
-		if len(server) > 0 && strings.Contains(server, ":") && !strings.Contains(server, ".") && !(strings.HasPrefix(server, "[") && strings.HasSuffix(server, "]")) {
-			server = "'[" + server + "]'"
-		}
+		// YAML handles quoting. The server field is a host, not a host:port URL.
+		server = strings.Trim(server, "[]")
 		if len(server) > 0 {
 			proxy["server"] = server
 		}
@@ -292,7 +307,7 @@ func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, b
 			}
 		case "masque":
 			proxy["type"] = "masque"
-			copyClashFields(proxy, obMap, "network", "private-key", "public-key", "ip", "mtu", "udp", "remote-dns-resolve", "dns", "congestion-controller", "proto", "keepalive")
+			copyClashFields(proxy, obMap, "network", "uri", "private-key", "public-key", "ip", "mtu", "udp", "remote-dns-resolve", "dns", "congestion-controller", "proto", "keepalive")
 			if sni := asString(obMap["sni"]); sni != "" {
 				proxy["sni"] = sni
 			} else if server := asString(obMap["server"]); server != "" && !isIPLiteral(server) {

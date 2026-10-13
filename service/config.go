@@ -127,13 +127,30 @@ func (s *ConfigService) getConfig(db *gorm.DB, data string) (*[]byte, error) {
 }
 
 func (s *ConfigService) StartCore() error {
+	return s.startCore(false)
+}
+
+func (s *ConfigService) startCoreDuringMaintenanceResume() error {
+	return s.startCore(true)
+}
+
+func (s *ConfigService) startCore(maintenanceResume bool) error {
+	if IsMaintenanceMode() && !maintenanceResume {
+		return nil
+	}
 	if IsTrafficBudgetBlocked() {
 		return nil
 	}
 	startCoreMu.Lock()
 	defer startCoreMu.Unlock()
+	if IsMaintenanceMode() && !maintenanceResume {
+		return nil
+	}
 	if IsTrafficBudgetBlocked() {
 		return nil
+	}
+	if corePtr == nil {
+		return common.NewError("sing-box core is unavailable")
 	}
 	if corePtr.IsRunning() {
 		return nil
@@ -172,6 +189,9 @@ func (s *ConfigService) StartCore() error {
 }
 
 func (s *ConfigService) RestartCore() error {
+	if IsMaintenanceMode() {
+		return nil
+	}
 	if IsTrafficBudgetBlocked() {
 		return common.NewError("VPS 总流量预算已触发硬保护，当前禁止启动代理数据面")
 	}
@@ -179,8 +199,14 @@ func (s *ConfigService) RestartCore() error {
 }
 
 func (s *ConfigService) restartCoreWithConfig(config json.RawMessage) error {
+	if IsMaintenanceMode() {
+		return nil
+	}
 	startCoreMu.Lock()
 	defer startCoreMu.Unlock()
+	if IsMaintenanceMode() {
+		return nil
+	}
 
 	var rawConfig *[]byte
 	err := database.RetryOnLocked(3, 100*time.Millisecond, func() error {
@@ -220,6 +246,9 @@ func (s *ConfigService) restartCoreWithConfig(config json.RawMessage) error {
 }
 
 func (s *ConfigService) StopCore() error {
+	if corePtr == nil {
+		return nil
+	}
 	err := corePtr.Stop()
 	if err != nil {
 		return err

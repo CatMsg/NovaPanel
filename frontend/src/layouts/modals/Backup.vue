@@ -1,5 +1,5 @@
 <template>
-  <v-dialog transition="dialog-bottom-transition" width="90%" max-width="500">
+  <v-dialog transition="dialog-bottom-transition" width="90%" max-width="640">
     <v-card class="rounded-lg backup-dialog" :loading="busy">
       <v-card-title class="backup-dialog__title">
         <span>{{ $t('main.backup.title') }}</span>
@@ -37,6 +37,7 @@
             @click="config()"
           >{{ $t('main.backup.sbConfig') }}</v-btn>
         </div>
+        <OffHostBackup :active="!!visible" :blocked="downloading || restoring" @busy="remoteBusy = $event" />
       </v-card-text>
     </v-card>
   </v-dialog>
@@ -46,19 +47,22 @@
 import { i18n } from '@/locales'
 import HttpUtils from '@/plugins/httputil'
 import { push } from 'notivue'
+import OffHostBackup from './OffHostBackup.vue'
 
 export default {
+  components: { OffHostBackup },
   props: ['control', 'visible'],
   data() {
     return {
       exclude: ['stats', 'changes'],
       downloading: false,
       restoring: false,
+      remoteBusy: false,
     }
   },
   computed: {
     busy() {
-      return this.downloading || this.restoring
+      return this.downloading || this.restoring || this.remoteBusy
     },
   },
   methods: {

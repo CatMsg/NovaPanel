@@ -13,11 +13,36 @@
           v-model:menu="menu"
           :menu-items="menuItems"
           :reload-items="reloadItems"
+          :maintenance="maintenanceStatus"
+          :maintenance-pending="maintenanceActionPending"
+          :maintenance-error="maintenanceError"
           @update:reload-items="reloadItems = $event"
           @backup="backupModal.visible = true"
           @log="logModal.visible = true"
           @stats="usageStatsModal.visible = true"
+          @maintenance-request="requestMaintenanceChange"
         />
+
+        <v-dialog v-model="pauseMaintenanceDialog" max-width="500" data-testid="maintenance-pause-confirmation">
+          <v-card rounded="xl">
+            <v-card-title>{{ $t('main.maintenance.confirmTitle') }}</v-card-title>
+            <v-card-text>
+              {{ $t('main.maintenance.confirmWarning') }}
+            </v-card-text>
+            <v-card-actions class="justify-end px-6 pb-5">
+              <v-btn variant="text" @click="pauseMaintenanceDialog = false">{{ $t('main.maintenance.cancel') }}</v-btn>
+              <v-btn
+                color="warning"
+                variant="flat"
+                :disabled="maintenanceActionPending"
+                data-testid="maintenance-pause-confirm"
+                @click="confirmPauseMaintenance"
+              >
+                {{ $t('main.maintenance.confirmPause') }}
+              </v-btn>
+            </v-card-actions>
+          </v-card>
+        </v-dialog>
 
         <v-row class="main-grid">
           <v-col cols="12" sm="6" md="3" v-for="i in reloadItems" :key="i">
@@ -57,7 +82,13 @@
                   <MainSystemCard :tiles-data="tilesData" />
                 </template>
                 <template v-if="i == 'i-sbd'">
-                  <MainRuntimeCard :tiles-data="tilesData" :loading="loading" :onlines="onlines" @restart="restartSingbox()" />
+                  <MainRuntimeCard
+                    :tiles-data="tilesData"
+                    :loading="loading"
+                    :onlines="onlines"
+                    :restart-disabled="maintenanceRestartDisabled"
+                    @restart="restartSingbox()"
+                  />
                 </template>
               </v-card-text>
             </v-card>
@@ -69,7 +100,8 @@
 </template>
 
 <script lang="ts" setup>
-import HttpUtils from '@/plugins/httputil'
+import api, { readApi } from '@/plugins/api'
+import HttpUtils, { logout } from '@/plugins/httputil'
 import { HumanReadable } from '@/plugins/utils'
 import Data, { reloadItemsStorageKey } from '@/store/modules/data'
 import Gauge from '@/components/tiles/Gauge.vue'
@@ -90,6 +122,50 @@ const History = defineAsyncComponent(() => import('@/components/tiles/History.vu
 
 const loading = ref(false)
 const menu = ref(false)
+type MaintenanceStatus = {
+  enabled: boolean
+  transitioning: boolean
+  error?: string
+}
+
+const maintenanceStatus = ref<MaintenanceStatus | null>(null)
+const maintenanceStatusError = ref<string | null>(null)
+const maintenanceActionError = ref<string | null>(null)
+const maintenanceActionPending = ref(false)
+const pauseMaintenanceDialog = ref(false)
+const maintenanceRestartDisabled = computed(() =>
+  !maintenanceStatus.value ||
+  maintenanceStatus.value.enabled ||
+  maintenanceStatus.value.transitioning ||
+  maintenanceStatusError.value !== null ||
+  maintenanceActionPending.value,
+)
+let maintenanceStatusRequestId = 0
+const maintenanceError = computed(() => {
+  const t = i18n.global.t
+  const detail = (value: string | null) => value?.trim() || t('main.maintenance.unknownError')
+  const errors: string[] = []
+  if (maintenanceActionError.value !== null) {
+    errors.push(t('main.maintenance.actionFailed', { detail: detail(maintenanceActionError.value) }))
+  }
+  if (maintenanceStatusError.value !== null) {
+    errors.push(t('main.maintenance.statusFailed', { detail: detail(maintenanceStatusError.value) }))
+  }
+  if (maintenanceStatus.value?.error) {
+    errors.push(t('main.maintenance.reportedError', { detail: maintenanceStatus.value.error }))
+  }
+  return errors.join(' ')
+})
+
+const handleMaintenanceAuthError = (message?: string) => {
+  if (message === 'Invalid login') void logout()
+}
+
+const maintenanceErrorDetail = (message?: string) => {
+  if (message === 'Invalid login') return i18n.global.t('invalidLogin')
+  if (message === 'Network Error') return i18n.global.t('main.maintenance.networkError')
+  return message ?? ''
+}
 const menuItems = [
   { title: i18n.global.t('main.gauges'), value: [
     { title: i18n.global.t('main.gauge.cpu'), value: "g-cpu" },
@@ -181,9 +257,73 @@ const reloadSys = async () => {
   }
 }
 
+const refreshMaintenanceStatus = async () => {
+  const requestId = ++maintenanceStatusRequestId
+  try {
+    const response = await readApi('api/maintenance-status')
+    const message = response.data as { success?: boolean; msg?: string; obj?: Partial<MaintenanceStatus> | null }
+    if (requestId !== maintenanceStatusRequestId) return
+    if (!message?.success || typeof message.obj?.enabled !== 'boolean') {
+      maintenanceStatusError.value = maintenanceErrorDetail(message?.msg)
+      handleMaintenanceAuthError(message?.msg)
+      return
+    }
+    maintenanceStatus.value = {
+      enabled: message.obj.enabled,
+      transitioning: message.obj.transitioning === true,
+      error: typeof message.obj.error === 'string' ? message.obj.error : undefined,
+    }
+    maintenanceStatusError.value = null
+  } catch (error) {
+    if (requestId === maintenanceStatusRequestId) {
+      maintenanceStatusError.value = maintenanceErrorDetail(error instanceof Error ? error.message : String(error))
+    }
+  }
+}
+
+const changeMaintenance = async (enabled: boolean) => {
+  if (maintenanceActionPending.value) return
+  maintenanceActionPending.value = true
+  maintenanceActionError.value = null
+  let actionError: string | null = null
+  try {
+    try {
+      const response = await api.post('api/maintenance', { enabled }, {
+        headers: { 'Content-Type': 'application/json' },
+      })
+      const message = response.data as { success?: boolean; msg?: string }
+      if (!message?.success) {
+        actionError = maintenanceErrorDetail(message?.msg)
+        handleMaintenanceAuthError(message?.msg)
+      }
+    } catch (error) {
+      actionError = maintenanceErrorDetail(error instanceof Error ? error.message : String(error))
+    }
+    await refreshMaintenanceStatus()
+    if (actionError !== null) maintenanceActionError.value = actionError
+  } finally {
+    maintenanceActionPending.value = false
+  }
+}
+
+const requestMaintenanceChange = (enabled: boolean) => {
+  if (!maintenanceStatus.value || maintenanceStatus.value.transitioning || maintenanceActionPending.value) return
+  if (enabled) {
+    pauseMaintenanceDialog.value = true
+    return
+  }
+  void changeMaintenance(false)
+}
+
+const confirmPauseMaintenance = () => {
+  pauseMaintenanceDialog.value = false
+  void changeMaintenance(true)
+}
+
 let timerId: ReturnType<typeof setTimeout> | null = null
 let pollingActive = false
 let stopVisibilityListener: (() => void) | null = null
+let maintenanceTimerId: ReturnType<typeof setTimeout> | null = null
 
 const scheduleTick = () => {
   timerId = setTimeout(async () => {
@@ -223,8 +363,27 @@ const syncPollingState = () => {
   }
 }
 
+const stopMaintenanceTimer = () => {
+  if (maintenanceTimerId) {
+    clearTimeout(maintenanceTimerId)
+    maintenanceTimerId = null
+  }
+}
+
+const scheduleMaintenancePoll = () => {
+  if (maintenanceTimerId || !isPageVisible()) return
+  maintenanceTimerId = setTimeout(async () => {
+    maintenanceTimerId = null
+    if (!isPageVisible()) return
+    await refreshMaintenanceStatus()
+    scheduleMaintenancePoll()
+  }, 15000)
+}
+
 onMounted(async () => {
   loading.value = true
+  void refreshMaintenanceStatus()
+  scheduleMaintenancePoll()
   if (Data().reloadItems.length != 0) {
     await reloadData()
     startTimer()
@@ -232,15 +391,19 @@ onMounted(async () => {
   stopVisibilityListener = onPageVisibilityChange((visible) => {
     if (!visible) {
       stopTimer()
+      stopMaintenanceTimer()
       return
     }
     syncPollingState()
+    void refreshMaintenanceStatus()
+    scheduleMaintenancePoll()
   })
   loading.value = false
 })
 
 onBeforeUnmount(() => {
   stopTimer()
+  stopMaintenanceTimer()
   stopVisibilityListener?.()
   stopVisibilityListener = null
 })

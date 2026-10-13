@@ -49,23 +49,27 @@ type JsonService struct {
 }
 
 func (j *JsonService) GetJson(subId string, format string) (*string, []string, error) {
-	cacheKey := "json:" + strings.TrimSpace(subId)
+	client, inDatas, err := j.getData(subId)
+	if err != nil {
+		return nil, nil, err
+	}
+	visibilityKey, err := subscriptionVisibilityCacheKey(client)
+	if err != nil {
+		return nil, nil, err
+	}
+	cacheKey := "json:" + strings.TrimSpace(subId) + ":" + visibilityKey
 	if body, headers, ok := getCachedSubResult(cacheKey); ok {
 		return body, headers, nil
 	}
 
 	var jsonConfig map[string]interface{}
 
-	client, inDatas, err := j.getData(subId)
-	if err != nil {
-		return nil, nil, err
-	}
-
 	outbounds, outTags, err := j.getOutbounds(client.Config, inDatas)
 	if err != nil {
 		return nil, nil, err
 	}
-	*outbounds, *outTags = withoutUnsupportedJSONOutbounds(*outbounds, *outTags, "masque")
+	proxyOutbounds, endpoints := splitNativeJSONEndpoints(*outbounds)
+	*outbounds = proxyOutbounds
 
 	links := j.LinkService.GetLinks(&client.Links, "external", "")
 	tagNumEnable := 0
@@ -88,6 +92,9 @@ func (j *JsonService) GetJson(subId string, format string) (*string, []string, e
 	}
 
 	jsonConfig["outbounds"] = outbounds
+	if len(endpoints) > 0 {
+		jsonConfig["endpoints"] = endpoints
+	}
 
 	// Add other objects from settings
 	if err := j.addOthers(&jsonConfig); err != nil {
@@ -121,20 +128,14 @@ func (j *JsonService) getData(subId string) (*model.Client, []*model.Inbound, er
 	if err != nil {
 		return nil, nil, err
 	}
-	var clientInbounds []uint
-	err = json.Unmarshal(client.Inbounds, &clientInbounds)
-	if err != nil {
-		return nil, nil, err
-	}
-	var inbounds []*model.Inbound
-	err = db.Model(model.Inbound{}).Preload("Tls").Where("id in ?", clientInbounds).Find(&inbounds).Error
+	inbounds, err := visibleSubscriptionInbounds(client)
 	if err != nil {
 		return nil, nil, err
 	}
 	return client, inbounds, nil
 }
 
-func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*model.Inbound) (*[]map[string]interface{}, *[]string, error) {
+func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*model.Inbound, formats ...string) (*[]map[string]interface{}, *[]string, error) {
 	var outbounds []map[string]interface{}
 	var configs map[string]interface{}
 	var outTags []string
@@ -153,6 +154,8 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 			return nil, nil, err
 		}
 		protocol, _ := outbound["type"].(string)
+		mihomoTemplate, _ := outbound["nova_mihomo"].(map[string]interface{})
+		delete(outbound, "nova_mihomo")
 		var httpVersions []int
 		if protocol == "http" {
 			httpVersions, err = util.ValidateHTTPInbound(inData)
@@ -182,16 +185,35 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 			}
 			userPass = append(userPass, pass)
 			outbound["password"] = strings.Join(userPass, ":")
-		} else if protocol == "masque" {
-			masqueConfigs, _ := configs["masque"].(map[string]interface{})
-			credential, _ := masqueConfigs[strconv.FormatUint(uint64(inData.Id), 10)].(map[string]interface{})
-			privateKey, _ := credential["private_key"].(string)
-			ip, _ := credential["ip"].(string)
-			if strings.TrimSpace(privateKey) == "" || strings.TrimSpace(ip) == "" {
-				continue
+		} else if protocol == "masque-client" {
+			credential, _ := configs["masque"].(map[string]interface{})
+			username, _ := credential["username"].(string)
+			password, _ := credential["password"].(string)
+			if username == "" || password == "" {
+				return nil, nil, fmt.Errorf("native MASQUE credentials missing for inbound %q", inData.Tag)
 			}
-			outbound["private-key"] = privateKey
-			outbound["ip"] = ip
+			outbound["username"], outbound["password"] = username, password
+			if len(formats) > 0 && formats[0] == "clash" && mihomoTemplate != nil {
+				if inData.Tls != nil {
+					publicKey, err := service.MasqueMihomoPublicKey(inData)
+					if err != nil {
+						return nil, nil, err
+					}
+					mihomoTemplate["public-key"] = publicKey
+				}
+				entries, _ := credential["mihomo"].(map[string]interface{})
+				compatible, _ := entries[strconv.FormatUint(uint64(inData.Id), 10)].(map[string]interface{})
+				privateKey, _ := compatible["private_key"].(string)
+				ip, _ := compatible["ip"].(string)
+				if privateKey == "" || ip == "" {
+					return nil, nil, fmt.Errorf("credentials for Mihomo MASQUE missing for inbound %q", inData.Tag)
+				}
+				outbound = map[string]interface{}{"type": "masque", "tag": outbound["tag"], "server": outbound["server"], "server_port": outbound["server_port"], "private-key": privateKey, "ip": ip}
+				for key, value := range mihomoTemplate {
+					outbound[key] = value
+				}
+				protocol = "masque"
+			}
 		} else { // Other protocols
 			config, _ := configs[protocol].(map[string]interface{})
 			if protocol == "http" {
@@ -302,6 +324,13 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 						return nil, nil, fmt.Errorf("HTTP inbound %q address %d subscription: %w", inData.Tag, index+1, err)
 					}
 				}
+				if protocol == "masque-client" {
+					tls, _ := newOut["tls"].(map[string]interface{})
+					if tls == nil || tls["enabled"] != true {
+						return nil, nil, fmt.Errorf("native MASQUE requires TLS")
+					}
+					tls["alpn"] = []string{"h3"}
+				}
 
 				remark, _ := addr["remark"].(string)
 				newTag := fmt.Sprintf("%d.%s%s", index+1, tag, remark)
@@ -315,6 +344,33 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 				}
 			}
 		}
+	}
+	reserved := map[string]struct{}{"proxy": {}, "auto": {}, "direct": {}}
+	for _, node := range outbounds {
+		if node["type"] != "masque-client" {
+			reserved[asString(node["tag"])] = struct{}{}
+		}
+	}
+	for index, node := range outbounds {
+		if node["type"] != "masque-client" {
+			continue
+		}
+		tag := asString(node["tag"])
+		if _, collision := reserved[tag]; collision {
+			base := "masque." + tag
+			for suffix := 1; ; suffix++ {
+				candidate := base
+				if suffix > 1 {
+					candidate = fmt.Sprintf("%s.%d", base, suffix)
+				}
+				if _, exists := reserved[candidate]; !exists {
+					tag = candidate
+					break
+				}
+			}
+		}
+		node["tag"], outTags[index] = tag, tag
+		reserved[tag] = struct{}{}
 	}
 	return &outbounds, &outTags, nil
 }
@@ -358,6 +414,17 @@ func withoutUnsupportedJSONOutbounds(outbounds []map[string]interface{}, tags []
 		}
 	}
 	return filtered, filteredTags
+}
+
+func splitNativeJSONEndpoints(nodes []map[string]interface{}) (outbounds, endpoints []map[string]interface{}) {
+	for _, node := range nodes {
+		if node["type"] == "masque-client" {
+			endpoints = append(endpoints, node)
+		} else {
+			outbounds = append(outbounds, node)
+		}
+	}
+	return
 }
 
 func (j *JsonService) addDefaultOutbounds(outbounds *[]map[string]interface{}, outTags *[]string) {

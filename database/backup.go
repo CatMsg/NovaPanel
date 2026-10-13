@@ -2,11 +2,14 @@ package database
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -24,8 +27,13 @@ import (
 )
 
 const maxDatabaseBackupSize int64 = 1 << 30
+const restoreValidationTimeout = 3 * time.Minute
 
 func CreateDBBackup(exclude string) (string, func(), error) {
+	return CreateDBBackupContext(context.Background(), exclude)
+}
+
+func CreateDBBackupContext(ctx context.Context, exclude string) (string, func(), error) {
 	exclude_changes, exclude_stats := false, false
 	for _, table := range strings.Split(exclude, ",") {
 		if table == "changes" {
@@ -35,23 +43,19 @@ func CreateDBBackup(exclude string) (string, func(), error) {
 		}
 	}
 
-	tempFile, err := os.CreateTemp("", "."+config.GetName()+"-backup-*.db")
+	// VACUUM creates its output with the process umask. A private directory
+	// protects the snapshot even before we can chmod the finished file.
+	dir, err := os.MkdirTemp("", ".novapanel-backup-*")
 	if err != nil {
 		return "", nil, err
 	}
-	dbPath := tempFile.Name()
-	if err := tempFile.Close(); err != nil {
-		_ = os.Remove(dbPath)
-		return "", nil, err
-	}
-	if err := os.Remove(dbPath); err != nil {
-		return "", nil, err
-	}
+	dbPath := filepath.Join(dir, "snapshot.db")
 	cleanup := func() {
 		_ = os.Remove(dbPath)
 		removeSQLiteSidecars(dbPath)
+		_ = os.Remove(dir)
 	}
-	if err := db.Exec("VACUUM INTO ?", dbPath).Error; err != nil {
+	if err := db.WithContext(ctx).Exec("VACUUM INTO ?", dbPath).Error; err != nil {
 		cleanup()
 		return "", nil, err
 	}
@@ -74,6 +78,13 @@ func CreateDBBackup(exclude string) (string, func(), error) {
 		_ = bdb.Close()
 		cleanup()
 	}
+	backupDb = backupDb.WithContext(ctx)
+	// Never export credentials capable of uploading or deleting remote backups.
+	// VACUUM below also removes deleted values from SQLite free pages.
+	if err := backupDb.Exec("DELETE FROM settings WHERE key LIKE 'remoteBackup%'").Error; err != nil {
+		closeAndCleanup()
+		return "", nil, err
+	}
 	if exclude_stats {
 		if err := backupDb.Exec("DELETE FROM stats").Error; err != nil {
 			closeAndCleanup()
@@ -92,7 +103,7 @@ func CreateDBBackup(exclude string) (string, func(), error) {
 			return "", nil, err
 		}
 	}
-	if exclude_stats || exclude_changes {
+	{
 		if err := backupDb.Exec("VACUUM").Error; err != nil {
 			closeAndCleanup()
 			return "", nil, err
@@ -105,7 +116,130 @@ func CreateDBBackup(exclude string) (string, func(), error) {
 	return dbPath, cleanup, nil
 }
 
+// RehearseDB opens only the caller's isolated snapshot, read-only and immutable.
+// Unlike ImportDB/ValidateDB it neither sanitizes settings nor initializes DBs.
+func RehearseDB(ctx context.Context, path string) (map[string]int64, error) {
+	ctx, cancel := context.WithTimeout(ctx, restoreValidationTimeout)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	u := url.URL{Scheme: "file", Path: path, RawQuery: "mode=ro&immutable=1"}
+	conn, err := sql.Open("sqlite3", u.String())
+	if err != nil {
+		return nil, errors.New("cannot open rehearsal database")
+	}
+	defer conn.Close()
+	conn.SetMaxOpenConns(1)
+	var integrity string
+	if err := conn.QueryRowContext(ctx, "PRAGMA quick_check").Scan(&integrity); err != nil || integrity != "ok" {
+		return nil, errors.New("SQLite quick_check failed")
+	}
+	// Restore checks index consistency too; quick_check alone can accept an
+	// artifact that import rejects after it has displaced older recovery points.
+	if err := conn.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&integrity); err != nil || integrity != "ok" {
+		return nil, errors.New("SQLite integrity_check failed")
+	}
+	required := map[string]string{
+		"settings": "id,key,value", "users": "id,username,password",
+		"inbounds": "id,type,tag,options", "outbounds": "id,type,tag,options",
+		"endpoints": "id,type,tag,options", "clients": "id,name,config,inbounds",
+	}
+	report := make(map[string]int64)
+	for table, columns := range required {
+		var kind string
+		if err := conn.QueryRowContext(ctx, "SELECT type FROM sqlite_master WHERE name = ?", table).Scan(&kind); err != nil || kind != "table" {
+			return nil, fmt.Errorf("backup schema missing table %s", table)
+		}
+		// All identifiers originate in the fixed allowlist above, never the file.
+		rows, err := conn.QueryContext(ctx, "SELECT "+columns+" FROM "+table+" LIMIT 0")
+		if err != nil {
+			return nil, fmt.Errorf("backup schema incompatible table %s", table)
+		}
+		_ = rows.Close()
+		// Names alone are insufficient: reject lookalike tables with incompatible
+		// SQLite column declarations, including a non-primary-key id.
+		info, err := conn.QueryContext(ctx, "PRAGMA table_info("+table+")")
+		if err != nil {
+			return nil, errors.New("backup schema inspection failed")
+		}
+		types := map[string]string{}
+		primaryID := false
+		for info.Next() {
+			var cid, notNull, pk int
+			var name, kind string
+			var defaultValue interface{}
+			if err := info.Scan(&cid, &name, &kind, &notNull, &defaultValue, &pk); err != nil {
+				_ = info.Close()
+				return nil, errors.New("backup schema inspection failed")
+			}
+			types[name] = strings.ToLower(kind)
+			if name == "id" && pk == 1 {
+				primaryID = true
+			}
+		}
+		infoErr := info.Err()
+		_ = info.Close()
+		if infoErr != nil {
+			return nil, errors.New("backup schema inspection failed")
+		}
+		for _, column := range strings.Split(columns, ",") {
+			expected := "text"
+			if column == "id" {
+				expected = "integer"
+			}
+			if column == "options" || column == "config" || column == "inbounds" {
+				expected = "blob"
+			}
+			if types[column] != expected || !primaryID {
+				return nil, fmt.Errorf("backup schema incompatible table %s", table)
+			}
+		}
+		var count int64
+		if err := conn.QueryRowContext(ctx, "SELECT count(*) FROM "+table).Scan(&count); err != nil {
+			return nil, errors.New("backup row count failed")
+		}
+		report[table] = count
+	}
+	rows, err := conn.QueryContext(ctx, "SELECT value FROM settings WHERE key = ?", "fleetServers")
+	if err != nil {
+		return nil, errors.New("backup settings inspection failed")
+	}
+	defer rows.Close()
+	for rows.Next() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		var raw sql.NullString
+		if err := rows.Scan(&raw); err != nil {
+			return nil, errors.New("backup settings inspection failed")
+		}
+		if value := strings.TrimSpace(raw.String); value != "" {
+			var fleet []map[string]interface{}
+			if err := json.Unmarshal([]byte(value), &fleet); err != nil {
+				return nil, errors.New("backup fleet configuration is invalid")
+			}
+			if fleet == nil {
+				return nil, errors.New("backup fleet configuration must be an array")
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, errors.New("backup settings inspection failed")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return report, nil
+}
+
 func ImportDB(file multipart.File) error {
+	return ImportDBWithMaintenance(file, false)
+}
+
+// ImportDBWithMaintenance preserves an existing pause in the replacement
+// before the live connection is closed. Only the API captures lifecycle state.
+func ImportDBWithMaintenance(file multipart.File, preserveMaintenance bool) error {
 	// Check if the file is a SQLite database
 	isValidDb, err := IsSQLiteDB(file)
 	if err != nil {
@@ -168,6 +302,12 @@ func ImportDB(file multipart.File) error {
 	newSQLDB, err := newDb.DB()
 	if err != nil {
 		return common.NewErrorf("Error opening validated db: %v", err)
+	}
+	if preserveMaintenance {
+		if err := preserveRestoreMaintenance(newDb); err != nil {
+			_ = newSQLDB.Close()
+			return common.NewError("Error preserving maintenance state in replacement db")
+		}
 	}
 	if err := newSQLDB.Close(); err != nil {
 		return common.NewErrorf("Error closing validated db: %v", err)
@@ -235,6 +375,19 @@ func ImportDB(file multipart.File) error {
 	return nil
 }
 
+func preserveRestoreMaintenance(conn *gorm.DB) error {
+	return conn.Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&model.Setting{}).Where("key = ?", "maintenanceMode").Update("value", "true")
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return tx.Create(&model.Setting{Key: "maintenanceMode", Value: "true"}).Error
+		}
+		return nil
+	})
+}
+
 func removeSQLiteSidecars(path string) {
 	for _, suffix := range []string{"-wal", "-shm"} {
 		if err := os.Remove(path + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -266,6 +419,13 @@ func restoreFallbackDatabase(dbPath, fallbackPath string) error {
 // replace the live database. This keeps a bad backup from taking the panel
 // offline and removes machine-specific TLS paths that cannot work locally.
 func validateAndSanitizeRestoreDB(path string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), restoreValidationTimeout)
+	defer cancel()
+	// Import and rehearsal share the same read-only acceptance gate. Only a
+	// real restore may subsequently sanitize machine-specific TLS paths.
+	if _, err := RehearseDB(ctx, path); err != nil {
+		return err
+	}
 	conn, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
 	if err != nil {
 		return err
@@ -275,24 +435,7 @@ func validateAndSanitizeRestoreDB(path string) error {
 		return err
 	}
 	defer sqlDB.Close()
-
-	var integrity string
-	if err := conn.Raw("PRAGMA integrity_check").Scan(&integrity).Error; err != nil {
-		return err
-	}
-	if !strings.EqualFold(strings.TrimSpace(integrity), "ok") {
-		return fmt.Errorf("sqlite integrity_check: %s", integrity)
-	}
-
-	for _, table := range []string{"settings", "inbounds", "outbounds", "endpoints", "users", "clients"} {
-		var count int64
-		if err := conn.Raw("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&count).Error; err != nil {
-			return err
-		}
-		if count != 1 {
-			return fmt.Errorf("缺少数据表 %s", table)
-		}
-	}
+	conn = conn.WithContext(ctx)
 
 	var settings []model.Setting
 	if err := conn.Find(&settings).Error; err != nil {
@@ -302,16 +445,6 @@ func validateAndSanitizeRestoreDB(path string) error {
 	for _, setting := range settings {
 		values[setting.Key] = setting.Value
 	}
-	if raw := strings.TrimSpace(values["fleetServers"]); raw != "" {
-		var fleet []map[string]interface{}
-		if err := json.Unmarshal([]byte(raw), &fleet); err != nil {
-			return fmt.Errorf("服务器集合配置损坏: %w", err)
-		}
-		if fleet == nil {
-			return fmt.Errorf("服务器集合配置必须是数组")
-		}
-	}
-
 	updates := make(map[string]string)
 	for _, pair := range [][2]string{
 		{"webCertFile", "webKeyFile"},

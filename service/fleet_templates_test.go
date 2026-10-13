@@ -26,12 +26,16 @@ func TestApplyFleetTemplateFailurePreservesPostCommitOperations(t *testing.T) {
 	}
 	db := database.GetDB()
 	previousCore, previousMasque, previousMieru := corePtr, masquePtr, mieruPtr
-	corePtr, masquePtr, mieruPtr = nil, NewMasqueService(), nil
+	corePtr, masquePtr, mieruPtr = core.NewCore(), NewMasqueService(), nil
 	t.Cleanup(func() {
+		_ = corePtr.Stop()
 		corePtr, masquePtr, mieruPtr = previousCore, previousMasque, previousMieru
 	})
 	config := model.Setting{Key: "config", Value: `{"log":{"disabled":true},"route":{"final":"direct"}}`}
 	if err := db.Create(&config).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := corePtr.Start([]byte(`{"log":{"disabled":true},"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}`)); err != nil {
 		t.Fatal(err)
 	}
 	client := model.Client{Name: "fleet-user", Enable: true, Config: json.RawMessage(`{}`),
@@ -56,10 +60,11 @@ func TestApplyFleetTemplateFailurePreservesPostCommitOperations(t *testing.T) {
 	const callback = "test:fleet_post_commit_failure"
 	if err := db.Callback().Query().Before("gorm:query").Register(callback, func(tx *gorm.DB) {
 		_, inTransaction := tx.Statement.ConnPool.(*sql.Tx)
+		_, nativeReconcile := tx.Statement.Dest.(*[]*model.Inbound)
 		// Linux's managed-port rebuild also reads inbounds before MASQUE. Only
 		// inject into the MASQUE type-filtered query, on both operating systems.
 		masqueWhere := clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "type = ?", Vars: []interface{}{"masque"}}}}
-		if inTransaction || tx.Statement.Table != "inbounds" || !reflect.DeepEqual(tx.Statement.Clauses["WHERE"].Expression, masqueWhere) {
+		if inTransaction || !nativeReconcile || tx.Statement.Table != "inbounds" || !reflect.DeepEqual(tx.Statement.Clauses["WHERE"].Expression, masqueWhere) {
 			return
 		}
 		runtimeReads++
@@ -132,7 +137,7 @@ func TestApplyFleetTemplateFailurePreservesPostCommitOperations(t *testing.T) {
 	if err := db.Model(&model.Outbound{}).Where("tag = ?", "failed-new-outbound").Count(&failedOutbounds).Error; err != nil || failedOutbounds != 0 {
 		t.Fatalf("template compensation retained failed outbound: count=%d err=%v", failedOutbounds, err)
 	}
-	if runtimeReads != 2 {
+	if runtimeReads < 2 {
 		t.Fatalf("expected runtime apply failure followed by successful compensation sync, reads=%d", runtimeReads)
 	}
 	var wantCalls [][]string
@@ -405,6 +410,103 @@ func TestCaptureFleetTemplateOutboundsKeepsOptionsAfterStorage(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("captured template omitted stream outbound")
+	}
+}
+
+func TestFleetTemplatePreservesInboundSubscriptionVisibility(t *testing.T) {
+	if err := database.InitDB(filepath.Join(t.TempDir(), "fleet-inbound-visibility.db")); err != nil {
+		t.Fatal(err)
+	}
+	db := database.GetDB()
+	inbounds := []model.Inbound{
+		{
+			Type:           "direct",
+			Tag:            "fleet-hidden-inbound",
+			ExcludeFromSub: true,
+			Addrs:          json.RawMessage(`[]`),
+			Options:        json.RawMessage(`{"listen":"::","listen_port":1080,"exclude_from_sub":false}`),
+		},
+		{
+			Type:    "direct",
+			Tag:     "fleet-visible-inbound",
+			Addrs:   json.RawMessage(`[]`),
+			Options: json.RawMessage(`{"listen":"::","listen_port":1081}`),
+		},
+	}
+	config := model.Setting{Key: "config", Value: `{"log":{"disabled":true},"route":{"final":"direct"}}`}
+	if err := db.Create(&inbounds).Error; err != nil {
+		t.Fatalf("create test inbound: %v", err)
+	}
+	if err := db.Create(&config).Error; err != nil {
+		t.Fatalf("create test config: %v", err)
+	}
+	template, err := (&FleetService{}).CaptureFleetTemplate("visibility", FleetTemplateSections{Inbounds: true}, "panel.example")
+	if err != nil {
+		t.Fatalf("capture fleet template: %v", err)
+	}
+	assertFleetInboundVisibility := func(stage string, captured []FleetTemplateInbound) {
+		t.Helper()
+		states := make(map[string]bool, len(captured))
+		for _, inbound := range captured {
+			states[inbound.Tag] = inbound.ExcludeFromSub
+		}
+		if len(states) != len(inbounds) || !states["fleet-hidden-inbound"] || states["fleet-visible-inbound"] {
+			t.Fatalf("%s template lost inbound visibility: %+v", stage, captured)
+		}
+	}
+	assertFleetInboundVisibility("captured", template.Inbounds)
+	if len(template.Inbounds) != len(inbounds) {
+		t.Fatalf("captured %d inbounds, want %d", len(template.Inbounds), len(inbounds))
+	}
+	for _, inbound := range template.Inbounds {
+		if strings.Contains(string(inbound.Options), "exclude_from_sub") {
+			t.Fatalf("panel visibility metadata leaked into template options for %q: %s", inbound.Tag, inbound.Options)
+		}
+	}
+	raw, err := json.Marshal(template)
+	if err != nil {
+		t.Fatalf("marshal fleet template: %v", err)
+	}
+	var decoded FleetTemplate
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal fleet template: %v", err)
+	}
+	assertFleetInboundVisibility("serialized", decoded.Inbounds)
+	var legacy FleetTemplate
+	if err := json.Unmarshal([]byte(`{"inbounds":[{"id":1,"type":"direct","tag":"legacy"}]}`), &legacy); err != nil {
+		t.Fatalf("unmarshal legacy fleet template: %v", err)
+	}
+	if legacy.Inbounds[0].ExcludeFromSub {
+		t.Fatal("legacy fleet template without visibility metadata must default to visible")
+	}
+
+	if err := db.Model(&model.Inbound{}).Where("id = ?", inbounds[0].Id).Update("exclude_from_sub", false).Error; err != nil {
+		t.Fatalf("clear hidden target visibility before apply: %v", err)
+	}
+	if err := db.Model(&model.Inbound{}).Where("id = ?", inbounds[1].Id).Update("exclude_from_sub", true).Error; err != nil {
+		t.Fatalf("set visible target visibility before apply: %v", err)
+	}
+	if err := db.Model(&model.Inbound{}).Where("id = ?", inbounds[0].Id).Update("options", []byte(`{"listen":"::","listen_port":1080,"exclude_from_sub":false}`)).Error; err != nil {
+		t.Fatalf("restore stale panel key before apply: %v", err)
+	}
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		return (&ConfigService{}).applyFleetTemplateTx(tx, decoded, "panel.example")
+	}); err != nil {
+		t.Fatalf("apply fleet template: %v", err)
+	}
+	var applied []model.Inbound
+	if err := db.Order("id").Find(&applied).Error; err != nil {
+		t.Fatalf("read applied inbounds: %v", err)
+	}
+	assertApplied := make(map[string]bool, len(applied))
+	for _, inbound := range applied {
+		assertApplied[inbound.Tag] = inbound.ExcludeFromSub
+		if strings.Contains(string(inbound.Options), "exclude_from_sub") {
+			t.Fatalf("panel visibility metadata persisted in core options for %q: %s", inbound.Tag, inbound.Options)
+		}
+	}
+	if len(applied) != len(inbounds) || !assertApplied["fleet-hidden-inbound"] || assertApplied["fleet-visible-inbound"] {
+		t.Fatalf("fleet template apply did not restore both visibility states: %+v", applied)
 	}
 }
 

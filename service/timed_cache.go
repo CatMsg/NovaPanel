@@ -42,9 +42,3 @@ func (c *timedCache) set(key string, version int64, ttl time.Duration, value int
 	}
 	c.mu.Unlock()
 }
-
-func (c *timedCache) clear() {
-	c.mu.Lock()
-	c.entries = make(map[string]timedCacheEntry)
-	c.mu.Unlock()
-}

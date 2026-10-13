@@ -16,6 +16,7 @@ import (
 	"github.com/sagernet/sing/common/buf"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/common/logger"
+	M "github.com/sagernet/sing/common/metadata"
 
 	"go4.org/netipx"
 )
@@ -26,6 +27,23 @@ type ServerHandler interface {
 	NewOutboundQueue(handler func(packetBuffers []*buf.Buffer)) *tun.OutboundQueue
 }
 
+// ServerSessionObserver is an optional embedding hook for authenticated proxy
+// accounting. Opening runs before Accept; release runs before address reuse.
+type ServerSessionObserver interface {
+	OnSessionOpened(ctx context.Context, user string, peer M.Socksaddr, assigned []netip.Addr) (release func(), err error)
+	AllowPeerRoutes(ctx context.Context, user string, routes []AddressRange) error
+	AllowPeerForwarding(ctx context.Context, user string, destination netip.Addr) error
+}
+
+type ServerSessionAddressPolicy interface {
+	SessionAddress(context.Context, string) netip.Addr
+	ReservedSessionAddress(netip.Addr) bool
+}
+
+type ServerSessionRoutePolicy interface {
+	SessionRoutes(context.Context, string, []AddressRange) ([]AddressRange, error)
+}
+
 type ServerOptions struct {
 	Context         context.Context
 	Logger          logger.ContextLogger
@@ -34,6 +52,7 @@ type ServerOptions struct {
 	AdvertiseRoutes []netip.Prefix
 	Resolve         func(ctx context.Context, domain string) ([]netip.Addr, error)
 	Handler         ServerHandler
+	SessionObserver ServerSessionObserver
 }
 
 type Server struct {
@@ -46,6 +65,7 @@ type Server struct {
 	advertiseRoutes *netipx.IPSet
 	resolve         func(ctx context.Context, domain string) ([]netip.Addr, error)
 	handler         ServerHandler
+	sessionObserver ServerSessionObserver
 	access          sync.RWMutex
 	addresses       map[netip.Addr]*serverSession
 	advertisements  []*serverSession
@@ -71,12 +91,13 @@ func NewServer(options ServerOptions) (*Server, error) {
 		return nil, E.New("missing address")
 	}
 	server := &Server{
-		ctx:       options.Context,
-		logger:    options.Logger,
-		template:  template,
-		resolve:   options.Resolve,
-		handler:   options.Handler,
-		addresses: make(map[netip.Addr]*serverSession),
+		ctx:             options.Context,
+		logger:          options.Logger,
+		template:        template,
+		resolve:         options.Resolve,
+		handler:         options.Handler,
+		sessionObserver: options.SessionObserver,
+		addresses:       make(map[netip.Addr]*serverSession),
 	}
 	var builder netipx.IPSetBuilder
 	for _, address := range options.Address {
@@ -151,8 +172,38 @@ func (s *Server) NewTunnelRequest(ctx context.Context, request transportHTTP.Tun
 		ctx:    ctx,
 	}
 	current.user, _ = auth.UserFromContext[string](ctx)
+	addressPolicy, _ := s.sessionObserver.(ServerSessionAddressPolicy)
 	for _, pool := range s.pools {
-		address, allocated := pool.allocate()
+		var address netip.Addr
+		var allocated bool
+		if addressPolicy != nil && addressPolicy.SessionAddress(ctx, current.user).IsValid() {
+			address = addressPolicy.SessionAddress(ctx, current.user)
+			pool.access.Lock()
+			_, inUse := pool.allocated[address]
+			if pool.prefix.Contains(address) && pool.usable(address) && !inUse {
+				pool.allocated[address] = struct{}{}
+				allocated = true
+			}
+			pool.access.Unlock()
+		} else {
+			var firstSkipped netip.Addr
+			for attempts := 0; attempts < 65536; attempts++ {
+				address, allocated = pool.allocate()
+				if !allocated || addressPolicy == nil || !addressPolicy.ReservedSessionAddress(address) {
+					break
+				}
+				pool.release(address)
+				allocated = false
+				// An exhausted pool may repeatedly return its only inactive
+				// reserved address. Stop after one full cycle, not 65536 scans.
+				if address == firstSkipped {
+					break
+				}
+				if !firstSkipped.IsValid() {
+					firstSkipped = address
+				}
+			}
+		}
 		if !allocated {
 			continue
 		}
@@ -187,6 +238,20 @@ func (s *Server) NewTunnelRequest(ctx context.Context, request transportHTTP.Tun
 		s.logger.ErrorContext(ctx, "process connection from ", request.Source(), ": requested target is not routable")
 		request.Reject(http.StatusForbidden, nil)
 		return
+	}
+	if s.sessionObserver != nil {
+		peer := request.Source()
+		if actual := M.ParseSocksaddr(request.Request().RemoteAddr).Unwrap(); actual.IsValid() {
+			peer = actual
+		}
+		release, observeErr := s.sessionObserver.OnSessionOpened(ctx, current.user, peer, slices.Clone(current.addresses))
+		if release != nil {
+			defer release()
+		}
+		if observeErr != nil {
+			request.Reject(http.StatusForbidden, nil)
+			return
+		}
 	}
 	stream, err := request.Accept()
 	if err != nil {
@@ -395,6 +460,18 @@ func (s *serverSession) handleAddressRequest(addresses []AssignedAddress) error 
 }
 
 func (s *serverSession) handleRouteAdvertisement(routes []AddressRange) error {
+	if policy, ok := s.server.sessionObserver.(ServerSessionRoutePolicy); ok {
+		var err error
+		routes, err = policy.SessionRoutes(s.ctx, s.user, slices.Clone(routes))
+		if err != nil {
+			return err
+		}
+	}
+	if s.server.sessionObserver != nil {
+		if err := s.server.sessionObserver.AllowPeerRoutes(s.ctx, s.user, slices.Clone(routes)); err != nil {
+			return err
+		}
+	}
 	s.server.access.Lock()
 	s.peerRoutes = routes
 	s.server.advertisements = slices.DeleteFunc(s.server.advertisements, func(it *serverSession) bool {
@@ -442,6 +519,11 @@ func (s *serverSession) handlePacket(buffer *buf.Buffer) {
 		}
 		if !target.accepts(source, protocol) {
 			break
+		}
+		if s.server.sessionObserver != nil {
+			if err := s.server.sessionObserver.AllowPeerForwarding(s.ctx, s.user, destination); err != nil {
+				break
+			}
 		}
 		if !decrementHopLimit(buffer.Bytes()) {
 			errorType = tun.ICMPErrorHopLimitExceeded

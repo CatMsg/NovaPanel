@@ -98,11 +98,12 @@ func (s *URLTest) All() []string {
 }
 
 func (s *URLTest) Selected(network string) adapter.Outbound {
+	tcp, udp := s.group.selectedOutbounds()
 	var outbound adapter.Outbound
 	if network == N.NetworkUDP {
-		outbound = s.group.selectedOutboundUDP
+		outbound = udp
 	} else {
-		outbound = s.group.selectedOutboundTCP
+		outbound = tcp
 	}
 	if outbound == nil {
 		outbound, _ = s.group.Select(network)
@@ -120,12 +121,13 @@ func (s *URLTest) References() []string {
 	if group == nil {
 		return nil
 	}
+	tcp, udp := group.selectedOutbounds()
 	var references []string
-	if group.selectedOutboundTCP != nil {
-		references = append(references, group.selectedOutboundTCP.Tag())
+	if tcp != nil {
+		references = append(references, tcp.Tag())
 	}
-	if group.selectedOutboundUDP != nil && group.selectedOutboundUDP != group.selectedOutboundTCP {
-		references = append(references, group.selectedOutboundUDP.Tag())
+	if udp != nil && udp != tcp {
+		references = append(references, udp.Tag())
 	}
 	return references
 }
@@ -162,12 +164,13 @@ func (s *URLTest) InterfaceUpdated(ctx context.Context) {
 
 func (s *URLTest) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
 	s.group.Touch()
+	tcp, udp := s.group.selectedOutbounds()
 	var outbound adapter.Outbound
 	switch N.NetworkName(network) {
 	case N.NetworkTCP:
-		outbound = s.group.selectedOutboundTCP
+		outbound = tcp
 	case N.NetworkUDP:
-		outbound = s.group.selectedOutboundUDP
+		outbound = udp
 	default:
 		return nil, E.Extend(N.ErrUnknownNetwork, network)
 	}
@@ -188,7 +191,7 @@ func (s *URLTest) DialContext(ctx context.Context, network string, destination M
 
 func (s *URLTest) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
 	s.group.Touch()
-	outbound := s.group.selectedOutboundUDP
+	_, outbound := s.group.selectedOutbounds()
 	if outbound == nil {
 		outbound, _ = s.group.Select(N.NetworkUDP)
 	}
@@ -219,6 +222,7 @@ type URLTestGroup struct {
 	checking                     atomic.Bool
 	selectedOutboundTCP          adapter.Outbound
 	selectedOutboundUDP          adapter.Outbound
+	selectionAccess              sync.RWMutex
 	interruptGroup               *interrupt.Group
 	interruptExternalConnections bool
 	access                       sync.Mutex
@@ -301,21 +305,28 @@ func (g *URLTestGroup) Close() error {
 	return nil
 }
 
+func (g *URLTestGroup) selectedOutbounds() (adapter.Outbound, adapter.Outbound) {
+	g.selectionAccess.RLock()
+	defer g.selectionAccess.RUnlock()
+	return g.selectedOutboundTCP, g.selectedOutboundUDP
+}
+
 func (g *URLTestGroup) Select(network string) (adapter.Outbound, bool) {
+	tcp, udp := g.selectedOutbounds()
 	var minDelay uint16
 	var minOutbound adapter.Outbound
 	switch network {
 	case N.NetworkTCP:
-		if g.selectedOutboundTCP != nil {
-			if history := g.history.LoadURLTestHistory(RealTag(g.selectedOutboundTCP, N.NetworkTCP)); history != nil {
-				minOutbound = g.selectedOutboundTCP
+		if tcp != nil {
+			if history := g.history.LoadURLTestHistory(RealTag(tcp, N.NetworkTCP)); history != nil {
+				minOutbound = tcp
 				minDelay = history.Delay
 			}
 		}
 	case N.NetworkUDP:
-		if g.selectedOutboundUDP != nil {
-			if history := g.history.LoadURLTestHistory(RealTag(g.selectedOutboundUDP, N.NetworkUDP)); history != nil {
-				minOutbound = g.selectedOutboundUDP
+		if udp != nil {
+			if history := g.history.LoadURLTestHistory(RealTag(udp, N.NetworkUDP)); history != nil {
+				minOutbound = udp
 				minDelay = history.Delay
 			}
 		}
@@ -505,14 +516,18 @@ func (g *URLTestGroup) performUpdateCheck() {
 		if g.selectedOutboundTCP != nil {
 			updated = true
 		}
+		g.selectionAccess.Lock()
 		g.selectedOutboundTCP = outbound
+		g.selectionAccess.Unlock()
 		selected = true
 	}
 	if outbound, exists := g.Select(N.NetworkUDP); outbound != nil && (g.selectedOutboundUDP == nil || (exists && outbound != g.selectedOutboundUDP)) {
 		if g.selectedOutboundUDP != nil {
 			updated = true
 		}
+		g.selectionAccess.Lock()
 		g.selectedOutboundUDP = outbound
+		g.selectionAccess.Unlock()
 		selected = true
 	}
 	if updated {

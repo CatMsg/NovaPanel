@@ -4,7 +4,7 @@
     <v-col cols="8" class="main-info-grid__value">
       <v-chip density="compact" color="success" variant="flat" v-if="tilesData?.sbd?.running">{{ $t('yes') }}</v-chip>
       <v-chip density="compact" color="error" variant="flat" v-else>{{ $t('no') }}</v-chip>
-      <v-chip density="compact" color="transparent" v-if="tilesData?.sbd?.running && !loading" class="main-info-grid__restart" @click="emit('restart')">
+      <v-chip density="compact" color="transparent" v-if="tilesData?.sbd?.running && !loading" class="main-info-grid__restart" :disabled="restartDisabled" @click="emit('restart')">
         <v-tooltip activator="parent" location="top">
           {{ $t('actions.restartSb') }}
         </v-tooltip>
@@ -60,6 +60,7 @@ import { HumanReadable } from '@/plugins/utils'
 defineProps<{
   tilesData: any
   loading: boolean
+  restartDisabled: boolean
   onlines: {
     user?: string[]
     inbound?: string[]

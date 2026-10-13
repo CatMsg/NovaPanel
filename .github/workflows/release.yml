@@ -126,6 +126,9 @@ jobs:
       - name: Verify Sing-Box Source And Core Race Regression
         run: bash ./scripts/test-sing-box-race.sh
 
+      - name: Real Mihomo MASQUE Interoperability
+        run: bash ./scripts/test-mihomo-masque.sh
+
   test-fresh-ufw-linux:
     name: Native fresh-UFW acceptance
     needs:

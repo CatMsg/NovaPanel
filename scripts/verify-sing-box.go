@@ -15,10 +15,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
+	"golang.org/x/mod/sumdb/dirhash"
 	"gopkg.in/yaml.v3"
 )
 
@@ -29,7 +32,21 @@ const (
 	singBoxModSum  = "h1:1gZ6h/h1qzAEVu8bQhvtVQWW/gy1EsueQcJ9uCl+vCU="
 	singBoxZipSHA  = "7d6e28f0b3380a92f34f30cd22bca2bc05e88384dfe6f3b6cc19f9848a84414f"
 	singBoxTest    = "route/network_started_test.go"
+	singBoxTestSHA = "2f7b8eb0aa76ccc1348dca086e1ee8bd4eb68d360041a030fc8592b58898c0c2"
+	masquePatch    = "docs/patches/sing-box-v1.15.0-alpha.12-masque-integration.patch"
+	masquePatchSHA = "82a9a1e307fcfdd377034251e5c322cedccee9649e69a9c35e64be6690da04ee"
 )
+
+type sourcePatchPin struct {
+	path, baselineSHA, patchedSHA string
+}
+
+// Only these reviewed hooks and the URLTest selection race fix may differ.
+var masquePatchPins = [3]sourcePatchPin{
+	{"protocol/masque/server.go", "9cd47ca60adbcc0ff440ae4ab04c1b7ba44c1e9ba111812e21d8e7d5b86ea45e", "b8a77ff30e5036999c21702856694e8c1c1d9483179477f42cf587bb45e1cb57"},
+	{"transport/masque/server.go", "75e07c475865fe3539cf1470fe7fa15d019d3261958111c341ebba5f38157086", "14c4a4ed410363f3f19cd261632eda137defa7b6916edfd8a3772547e1277d4d"},
+	{"protocol/group/urltest.go", "fc3d26ed1cecf664f23c870b5caa3f96af868dd4cdbca4d46bc6a309fdaff2c2", "edc7dd0a2a91d19e81b036f65786b3b3a96ab0b5c11fbf543249b0874ee95779"},
+}
 
 type moduleInfo struct {
 	Path, Version, Dir, Zip, Sum, GoModSum string
@@ -75,33 +92,34 @@ func verifySingBox(archiveSource string) error {
 	if err != nil {
 		return err
 	}
-	if baseline.Sum != singBoxSum || baseline.GoModSum != singBoxModSum {
-		return fmt.Errorf("official module checksum mismatch")
-	}
 	zipBytes, err := os.ReadFile(baseline.Zip)
 	if err != nil {
 		return err
 	}
-	if fmt.Sprintf("%x", sha256.Sum256(zipBytes)) != singBoxZipSHA {
-		return fmt.Errorf("official archive SHA-256 mismatch")
-	}
-	reader, err := zip.NewReader(bytes.NewReader(zipBytes), int64(len(zipBytes)))
+	expected, err := verifiedOfficialFiles(baseline, zipBytes)
 	if err != nil {
 		return err
 	}
-	expected := make(map[string][]byte, len(reader.File))
-	prefix := singBoxModule + "@" + singBoxVersion + "/"
-	for _, file := range reader.File {
-		name, ok := strings.CutPrefix(file.Name, prefix)
-		if !ok || !filepath.IsLocal(filepath.FromSlash(name)) || !file.Mode().IsRegular() {
-			return fmt.Errorf("unexpected archive entry %q", file.Name)
-		}
-		data, err := readZipFile(file)
-		if err != nil {
-			return err
-		}
-		expected[name] = data
+	officialCount := len(expected)
+	patchData, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(masquePatch)))
+	if err != nil {
+		return fmt.Errorf("audited MASQUE patch: %w", err)
 	}
+	expected, err = verifyAuditedPatch(expected, patchData, masquePatchSHA, masquePatchPins[:])
+	if err != nil {
+		return err
+	}
+	testData, err := os.ReadFile(filepath.Join(source, filepath.FromSlash(singBoxTest)))
+	if err != nil {
+		return err
+	}
+	if sha256Hex(testData) != singBoxTestSHA {
+		return fmt.Errorf("regression test SHA-256 mismatch: %s", singBoxTest)
+	}
+	if _, exists := expected[singBoxTest]; exists {
+		return fmt.Errorf("local regression test collides with official source")
+	}
+	expected[singBoxTest] = testData
 	if err := verifySourceTree(source, expected); err != nil {
 		return err
 	}
@@ -110,7 +128,7 @@ func verifySingBox(archiveSource string) error {
 	}
 	// Include untracked, non-ignored files so this gate also works before the
 	// initial commit. A fresh checkout has only tracked entries in this list.
-	visible, err := exec.Command("git", "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "third_party/sing-box").Output()
+	visible, err := exec.Command("git", "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "third_party/sing-box", masquePatch).Output()
 	if err != nil {
 		return fmt.Errorf("check Git source visibility: %w", err)
 	}
@@ -126,13 +144,191 @@ func verifySingBox(archiveSource string) error {
 	if !gitFiles[singBoxTest] {
 		return fmt.Errorf("Git ignores or omits %s", singBoxTest)
 	}
+	if !gitFiles[masquePatch] {
+		return fmt.Errorf("Git ignores or omits audited MASQUE patch %s", masquePatch)
+	}
 	if archiveSource != "" {
 		if err := verifySourceTree(archiveSource, expected); err != nil {
 			return fmt.Errorf("Git archive: %w", err)
 		}
 	}
-	fmt.Printf("Verified %s %s: %d official files, no production patches, one regression test; Git-visible source complete; release Cronet pin matches official source and module requirements\n", singBoxModule, singBoxVersion, len(expected))
+	fmt.Printf("Verified %s %s: official module sums and ZIP SHA-256 intact; %d official files, 2 audited MASQUE integration hooks and 1 URLTest race fix, %d byte-identical official files, one hash-pinned regression test; patch SHA-256 and exact replay verified; Git-visible source complete; release Cronet pin matches official source and module requirements\n", singBoxModule, singBoxVersion, officialCount, officialCount-len(masquePatchPins))
 	return nil
+}
+
+func sha256Hex(data []byte) string {
+	return fmt.Sprintf("%x", sha256.Sum256(data))
+}
+
+func verifiedOfficialFiles(info moduleInfo, zipBytes []byte) (map[string][]byte, error) {
+	if info.Path != singBoxModule || info.Version != singBoxVersion || info.Replace != nil || info.Sum != singBoxSum || info.GoModSum != singBoxModSum {
+		return nil, fmt.Errorf("official module checksum or identity mismatch")
+	}
+	if sha256Hex(zipBytes) != singBoxZipSHA {
+		return nil, fmt.Errorf("official archive SHA-256 mismatch")
+	}
+	reader, err := zip.NewReader(bytes.NewReader(zipBytes), int64(len(zipBytes)))
+	if err != nil {
+		return nil, err
+	}
+	expected := make(map[string][]byte, len(reader.File))
+	var names []string
+	prefix := singBoxModule + "@" + singBoxVersion + "/"
+	for _, file := range reader.File {
+		name, ok := strings.CutPrefix(file.Name, prefix)
+		if !ok || !filepath.IsLocal(filepath.FromSlash(name)) || !file.Mode().IsRegular() {
+			return nil, fmt.Errorf("unexpected archive entry %q", file.Name)
+		}
+		if _, exists := expected[name]; exists {
+			return nil, fmt.Errorf("duplicate archive entry %q", file.Name)
+		}
+		data, err := readZipFile(file)
+		if err != nil {
+			return nil, err
+		}
+		expected[name] = data
+		names = append(names, file.Name)
+	}
+	// Recompute both h1 sums from ZIP contents, not just cached download metadata.
+	open := func(name string) (io.ReadCloser, error) {
+		data, exists := expected[strings.TrimPrefix(name, prefix)]
+		if !exists {
+			return nil, fmt.Errorf("missing official archive file %s", name)
+		}
+		return io.NopCloser(bytes.NewReader(data)), nil
+	}
+	sum, err := dirhash.Hash1(names, open)
+	if err != nil || sum != singBoxSum {
+		return nil, fmt.Errorf("official module content checksum mismatch: %q (%v)", sum, err)
+	}
+	modSum, err := dirhash.Hash1([]string{"go.mod"}, open)
+	if err != nil || modSum != singBoxModSum {
+		return nil, fmt.Errorf("official go.mod content checksum mismatch: %q (%v)", modSum, err)
+	}
+	return expected, nil
+}
+
+func verifyAuditedPatch(baseline map[string][]byte, patch []byte, patchSHA string, pins []sourcePatchPin) (map[string][]byte, error) {
+	if sha256Hex(patch) != patchSHA {
+		return nil, fmt.Errorf("audited MASQUE patch SHA-256 mismatch")
+	}
+	if len(pins) != len(masquePatchPins) {
+		return nil, fmt.Errorf("audited integration patch must pin exactly three known files")
+	}
+	for i, pin := range pins {
+		if pin.path != masquePatchPins[i].path {
+			return nil, fmt.Errorf("unknown or reordered audited MASQUE patch path %q", pin.path)
+		}
+		original, exists := baseline[pin.path]
+		if !exists || sha256Hex(original) != pin.baselineSHA {
+			return nil, fmt.Errorf("audited MASQUE baseline SHA-256 mismatch: %s", pin.path)
+		}
+	}
+	return applyExactUnifiedPatch(baseline, patch, pins)
+}
+
+var unifiedHunk = regexp.MustCompile(`^@@ -([0-9]+)(?:,([0-9]+))? \+([0-9]+)(?:,([0-9]+))? @@\n$`)
+
+// Replay a deliberately restricted unified diff: fixed ordered file headers,
+// exact offsets, counts and context, no fuzzy offsets, renames or file creation.
+func applyExactUnifiedPatch(baseline map[string][]byte, patch []byte, pins []sourcePatchPin) (map[string][]byte, error) {
+	if len(patch) == 0 || patch[len(patch)-1] != '\n' {
+		return nil, fmt.Errorf("audited MASQUE patch must end with a newline")
+	}
+	lines := strings.SplitAfter(string(patch), "\n")
+	lines = lines[:len(lines)-1]
+	expected := make(map[string][]byte, len(baseline))
+	for name, data := range baseline {
+		expected[name] = data
+	}
+	index := 0
+	for _, pin := range pins {
+		if index+2 > len(lines) || lines[index] != "--- a/"+pin.path+"\n" || lines[index+1] != "+++ b/"+pin.path+"\n" {
+			return nil, fmt.Errorf("audited MASQUE patch must modify only %s in fixed order", pin.path)
+		}
+		index += 2
+		original := string(baseline[pin.path])
+		if original == "" || !strings.HasSuffix(original, "\n") {
+			return nil, fmt.Errorf("audited MASQUE baseline must be newline-terminated: %s", pin.path)
+		}
+		sourceLines := strings.SplitAfter(original, "\n")
+		sourceLines = sourceLines[:len(sourceLines)-1]
+		var result []string
+		cursor, hunks := 0, 0
+		for index < len(lines) && strings.HasPrefix(lines[index], "@@ ") {
+			match := unifiedHunk.FindStringSubmatch(lines[index])
+			if match == nil {
+				return nil, fmt.Errorf("invalid audited MASQUE hunk header: %s", pin.path)
+			}
+			var numbers [4]int
+			for i, value := range match[1:] {
+				if value == "" {
+					numbers[i] = 1
+					continue
+				}
+				parsed, err := strconv.Atoi(value)
+				if err != nil {
+					return nil, fmt.Errorf("invalid audited MASQUE hunk number: %s", pin.path)
+				}
+				numbers[i] = parsed
+			}
+			oldStart, oldCount, newStart, newCount := numbers[0], numbers[1], numbers[2], numbers[3]
+			if oldCount > 0 {
+				oldStart--
+			}
+			if newCount > 0 {
+				newStart--
+			}
+			if oldStart < cursor || oldStart > len(sourceLines) || oldCount > len(sourceLines)-oldStart {
+				return nil, fmt.Errorf("audited MASQUE hunk offset out of range: %s", pin.path)
+			}
+			result = append(result, sourceLines[cursor:oldStart]...)
+			cursor = oldStart
+			if newStart != len(result) {
+				return nil, fmt.Errorf("audited MASQUE hunk new offset mismatch: %s", pin.path)
+			}
+			index++
+			removed, added := 0, 0
+			for removed < oldCount || added < newCount {
+				if index == len(lines) || len(lines[index]) < 2 {
+					return nil, fmt.Errorf("truncated audited MASQUE hunk: %s", pin.path)
+				}
+				line := lines[index]
+				switch line[0] {
+				case ' ', '-':
+					if removed >= oldCount || cursor >= len(sourceLines) || sourceLines[cursor] != line[1:] {
+						return nil, fmt.Errorf("audited MASQUE hunk context mismatch: %s", pin.path)
+					}
+					cursor++
+					removed++
+					if line[0] == ' ' {
+						result = append(result, line[1:])
+						added++
+					}
+				case '+':
+					result = append(result, line[1:])
+					added++
+				default:
+					return nil, fmt.Errorf("invalid audited MASQUE hunk line: %s", pin.path)
+				}
+				if added > newCount {
+					return nil, fmt.Errorf("audited MASQUE hunk count mismatch: %s", pin.path)
+				}
+				index++
+			}
+			hunks++
+		}
+		result = append(result, sourceLines[cursor:]...)
+		patched := []byte(strings.Join(result, ""))
+		if hunks == 0 || sha256Hex(patched) != pin.patchedSHA || bytes.Equal(patched, baseline[pin.path]) {
+			return nil, fmt.Errorf("audited MASQUE patched SHA-256 mismatch: %s", pin.path)
+		}
+		expected[pin.path] = patched
+	}
+	if index != len(lines) {
+		return nil, fmt.Errorf("unexpected trailing content in audited MASQUE patch")
+	}
+	return expected, nil
 }
 
 func verifyCronetPins(root string) error {
@@ -144,7 +340,7 @@ func verifyCronetPins(root string) error {
 		}
 		return data, nil
 	}
-	// verifySourceTree authenticates the official pin and go.mod before this check.
+	// verifySourceTree authenticates the byte-identical official pin and go.mod.
 	pinData, err := read("third_party/sing-box/.github/CRONET_GO_VERSION")
 	if err != nil {
 		return err
@@ -211,8 +407,15 @@ func readZipFile(file *zip.File) ([]byte, error) {
 }
 
 func verifySourceTree(source string, expected map[string][]byte) error {
+	rootInfo, err := os.Lstat(source)
+	if err != nil {
+		return err
+	}
+	if !rootInfo.IsDir() {
+		return fmt.Errorf("source root must be a real directory: %s", source)
+	}
 	seen := make(map[string]bool, len(expected)+1)
-	err := filepath.WalkDir(source, func(path string, entry fs.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(source, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -235,16 +438,12 @@ func verifySourceTree(source string, expected map[string][]byte) error {
 		if err != nil {
 			return err
 		}
-		if name != singBoxTest {
-			original, ok := expected[name]
-			if !ok {
-				return fmt.Errorf("extra source file %s", name)
-			}
-			if !bytes.Equal(data, original) {
-				return fmt.Errorf("source differs from official archive: %s", name)
-			}
-		} else if len(data) == 0 {
-			return fmt.Errorf("empty regression test %s", name)
+		original, ok := expected[name]
+		if !ok {
+			return fmt.Errorf("extra source file %s", name)
+		}
+		if !bytes.Equal(data, original) {
+			return fmt.Errorf("source differs from audited expectation: %s", name)
 		}
 		seen[name] = true
 		return nil

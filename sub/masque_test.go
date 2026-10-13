@@ -14,9 +14,9 @@ func TestUserSubscriptionInjectsMasqueClientCredential(t *testing.T) {
 	svc := JsonService{}
 	inbound := &model.Inbound{
 		Id: 42, Type: "masque", Tag: "shared-masque", Addrs: json.RawMessage("[]"),
-		OutJson: json.RawMessage(`{"type":"masque","tag":"shared-masque","server":"example.com","server_port":443,"public-key":"server-public","network":"quic","udp":true}`),
+		OutJson: json.RawMessage(`{"type":"masque-client","tag":"shared-masque","server":"example.com","server_port":443,"version":3,"system":false,"tls":{"enabled":true}}`),
 	}
-	config := json.RawMessage(`{"masque":{"42":{"private_key":"alice-private","public_key":"alice-public","ip":"172.16.0.2/32"}}}`)
+	config := json.RawMessage(`{"masque":{"username":"alice","password":"synthetic-native-password"}}`)
 	outbounds, tags, err := svc.getOutbounds(config, []*model.Inbound{inbound})
 	if err != nil {
 		t.Fatalf("build outbounds: %v", err)
@@ -25,8 +25,13 @@ func TestUserSubscriptionInjectsMasqueClientCredential(t *testing.T) {
 		t.Fatalf("unexpected masque subscription: %#v %#v", *outbounds, *tags)
 	}
 	got := (*outbounds)[0]
-	if got["private-key"] != "alice-private" || got["public-key"] != "server-public" || got["ip"] != "172.16.0.2/32" {
-		t.Fatalf("wrong user/server credential split: %#v", got)
+	if got["type"] != "masque-client" || got["username"] != "alice" || got["password"] != "synthetic-native-password" || got["version"] != float64(3) {
+		t.Fatal("native MASQUE subscription did not preserve its authenticated client configuration")
+	}
+	for _, unsupported := range []string{"private-key", "public-key", "ip"} {
+		if _, present := got[unsupported]; present {
+			t.Fatalf("native subscription contains obsolete field %q", unsupported)
+		}
 	}
 }
 

@@ -66,6 +66,19 @@ func (o *EndpointService) GetAllConfig(db *gorm.DB) ([]json.RawMessage, error) {
 		}
 		endpointsJson = append(endpointsJson, endpointJson)
 	}
+	var masqueInbounds []*model.Inbound
+	if err := db.Preload("Tls").Where("type = ?", "masque").Find(&masqueInbounds).Error; err != nil {
+		return nil, err
+	}
+	for _, inbound := range masqueInbounds {
+		config, err := buildMasqueEndpointConfig(db, inbound)
+		if err != nil {
+			return nil, err
+		}
+		if len(config) > 0 {
+			endpointsJson = append(endpointsJson, config)
+		}
+	}
 	return endpointsJson, nil
 }
 
@@ -205,7 +218,7 @@ func (s *EndpointService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 		if endpoint.Type == "mieru" {
 			return nil, common.NewError("请在入站管理中配置 Mieru")
 		}
-		if endpoint.Type == "masque" {
+		if endpoint.Type == "masque" || endpoint.Type == "masque-server" {
 			return nil, common.NewError("请在入站管理中配置 MASQUE")
 		}
 

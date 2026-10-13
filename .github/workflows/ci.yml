@@ -118,6 +118,9 @@ jobs:
       - name: Verify Sing-Box Source And Core Race Regression
         run: bash ./scripts/test-sing-box-race.sh
 
+      - name: Real Mihomo MASQUE Interoperability
+        run: bash ./scripts/test-mihomo-masque.sh
+
       - name: 基础 Go 构建
         run: go build ./...
 

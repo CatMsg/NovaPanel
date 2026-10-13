@@ -39,6 +39,7 @@
             <v-tab value="link">{{ $t('client.links') }}</v-tab>
           </v-tabs>
           <div class="share-content">
+            <v-alert v-if="masqueSubscriptionHint" type="info" variant="tonal" class="mb-3">{{ masqueSubscriptionHint }}</v-alert>
             <template v-if="tab === 'sub'">
               <p class="share-hint">{{ $t('ui.share.formatHint') }}</p>
               <v-btn-toggle v-model="format" mandatory divided class="share-formats" color="primary" :aria-label="$t('ui.share.format')">
@@ -96,6 +97,11 @@ export default defineComponent({
     }
   },
   computed: {
+    masqueSubscriptionHint(): string {
+      const inbounds = Data().inbounds.filter(inbound => inbound.type === 'masque' && !inbound.exclude_from_sub && this.client?.inbounds.includes(inbound.id!))
+      if (!inbounds.length) return ''
+      return this.$t(inbounds.some(inbound => !('mihomo_compatible' in inbound) || !inbound.mihomo_compatible) ? 'ui.share.masqueNativeHint' : 'ui.share.masqueDualHint')
+    },
     clientSub(): string {
       return Data().subURI && this.client?.name ? Data().subURI + encodeURIComponent(this.client.name) : ''
     },

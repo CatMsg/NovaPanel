@@ -29,18 +29,31 @@ type FleetTemplateSections struct {
 }
 
 type FleetTemplateInbound struct {
-	ID      uint            `json:"id"`
-	Type    string          `json:"type"`
-	Tag     string          `json:"tag"`
-	TLSID   uint            `json:"tlsId"`
-	Addrs   json.RawMessage `json:"addrs,omitempty"`
-	Options json.RawMessage `json:"options,omitempty"`
+	ID             uint            `json:"id"`
+	Type           string          `json:"type"`
+	Tag            string          `json:"tag"`
+	TLSID          uint            `json:"tlsId"`
+	ExcludeFromSub bool            `json:"excludeFromSub,omitempty"`
+	Addrs          json.RawMessage `json:"addrs,omitempty"`
+	Options        json.RawMessage `json:"options,omitempty"`
 }
 
 type FleetTemplateOutbound struct {
 	Type    string          `json:"type"`
 	Tag     string          `json:"tag"`
 	Options json.RawMessage `json:"options,omitempty"`
+}
+
+func sanitizeFleetInboundOptions(options json.RawMessage) (json.RawMessage, error) {
+	if len(options) == 0 {
+		return nil, nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(options, &fields); err != nil {
+		return nil, err
+	}
+	delete(fields, "exclude_from_sub")
+	return json.Marshal(fields)
 }
 
 type FleetTemplate struct {
@@ -156,10 +169,15 @@ func (s *FleetService) CaptureFleetTemplate(name string, sections FleetTemplateS
 			return nil, err
 		}
 		for _, inbound := range inbounds {
+			options, err := sanitizeFleetInboundOptions(inbound.Options)
+			if err != nil {
+				return nil, fmt.Errorf("sanitize inbound %q options: %w", inbound.Tag, err)
+			}
 			template.InboundRefs[inbound.Id] = inbound.Tag
 			template.Inbounds = append(template.Inbounds, FleetTemplateInbound{
 				ID: inbound.Id, Type: inbound.Type, Tag: inbound.Tag, TLSID: inbound.TlsId,
-				Addrs: append(json.RawMessage(nil), inbound.Addrs...), Options: append(json.RawMessage(nil), inbound.Options...),
+				ExcludeFromSub: inbound.ExcludeFromSub,
+				Addrs:          append(json.RawMessage(nil), inbound.Addrs...), Options: options,
 			})
 		}
 	}
@@ -580,9 +598,14 @@ func (s *ConfigService) applyFleetTemplateTx(tx *gorm.DB, template FleetTemplate
 		if database.IsNotFound(err) {
 			target = model.Inbound{Tag: source.Tag}
 		}
+		options, err := sanitizeFleetInboundOptions(source.Options)
+		if err != nil {
+			return fmt.Errorf("sanitize inbound %q options: %w", source.Tag, err)
+		}
 		target.Type = source.Type
+		target.ExcludeFromSub = source.ExcludeFromSub
 		target.Addrs = replaceFleetTemplateHost(source.Addrs, template.SourceHost, hostname)
-		target.Options = replaceFleetTemplateHost(source.Options, template.SourceHost, hostname)
+		target.Options = replaceFleetTemplateHost(options, template.SourceHost, hostname)
 		if mapped, ok := tlsIDs[source.TLSID]; ok {
 			target.TlsId = mapped
 		} else if source.TLSID == 0 {

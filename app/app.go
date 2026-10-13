@@ -68,6 +68,9 @@ func (a *APP) Init() error {
 	a.configService = service.NewConfigService(a.core)
 	a.failoverService = service.NewFailoverService(a.configService)
 	service.SetSubServerRestartFunc(a.subServer.Restart)
+	if err := service.GetMaintenanceService().Initialize(); err != nil {
+		logger.Warning("load maintenance mode failed; keeping proxy data plane paused: ", err)
+	}
 
 	return nil
 }
@@ -95,6 +98,7 @@ func (a *APP) Start() error {
 	if err != nil {
 		return err
 	}
+	service.StartRemoteBackupScheduler()
 
 	err = a.configService.StartCore()
 	if err != nil {
@@ -131,6 +135,7 @@ func (a *APP) runDeferredStartupTasks() {
 }
 
 func (a *APP) Stop() {
+	service.StopRemoteBackupScheduler()
 	if a.failoverService != nil {
 		a.failoverService.Stop()
 	}

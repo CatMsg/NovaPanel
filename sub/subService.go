@@ -17,15 +17,19 @@ type SubService struct {
 }
 
 func (s *SubService) GetSubs(subId string) (*string, []string, error) {
-	cacheKey := "plain:" + strings.TrimSpace(subId)
+	client, err := s.getClientBySubId(subId)
+	if err != nil {
+		return nil, nil, err
+	}
+	visibilityKey, err := subscriptionVisibilityCacheKey(client)
+	if err != nil {
+		return nil, nil, err
+	}
+	cacheKey := "plain:" + strings.TrimSpace(subId) + ":" + visibilityKey
 	if body, headers, ok := getCachedSubResult(cacheKey); ok {
 		return body, headers, nil
 	}
-
-	var err error
-
-	client, err := s.getClientBySubId(subId)
-	if err != nil {
+	if err := filterExcludedInboundLinks(client); err != nil {
 		return nil, nil, err
 	}
 

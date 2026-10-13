@@ -38,6 +38,7 @@ func TestClashProxiesFromSourcePreservesMasqueFields(t *testing.T) {
     network: quic
     private-key: client-private
     public-key: server-public
+    uri: https://edge.example.com/.well-known/masque/ip/*/*/
     ip: 172.16.0.2/32
     sni: edge.example.com
     mtu: 1380
@@ -53,7 +54,7 @@ func TestClashProxiesFromSourcePreservesMasqueFields(t *testing.T) {
 	if proxy["type"] != "masque" || proxy["private-key"] != "client-private" || proxy["public-key"] != "server-public" {
 		t.Fatalf("masque credentials were not preserved: %#v", proxy)
 	}
-	if proxy["ip"] != "172.16.0.2/32" || proxy["sni"] != "edge.example.com" {
+	if proxy["ip"] != "172.16.0.2/32" || proxy["sni"] != "edge.example.com" || proxy["uri"] != "https://edge.example.com/.well-known/masque/ip/*/*/" {
 		t.Fatalf("masque connection fields were not preserved: %#v", proxy)
 	}
 }
@@ -64,7 +65,8 @@ func TestConvertRawClashProxiesKeepsMasqueAndDeduplicatesNames(t *testing.T) {
 		{
 			"name": "edge-masque", "type": "masque", "server": "edge.example.com", "port": 443,
 			"network": "quic", "private-key": "client-private", "public-key": "server-public",
-			"ip": "172.16.0.2/32", "sni": "edge.example.com", "mtu": 1380, "udp": true,
+			"uri": "https://edge.example.com/.well-known/masque/ip/*/*/",
+			"ip":  "172.16.0.2/32", "sni": "edge.example.com", "mtu": 1380, "udp": true,
 		},
 		{"name": "edge-masque", "type": "ss", "server": "duplicate.example.com", "port": 8443},
 	}
@@ -83,7 +85,7 @@ func TestConvertRawClashProxiesKeepsMasqueAndDeduplicatesNames(t *testing.T) {
 		t.Fatalf("expected duplicate names to be removed, got %#v", config.Proxies)
 	}
 	proxy := config.Proxies[0]
-	if proxy["type"] != "masque" || proxy["private-key"] != "client-private" || proxy["mtu"] != 1380 {
+	if proxy["type"] != "masque" || proxy["private-key"] != "client-private" || proxy["mtu"] != 1380 || proxy["uri"] != "https://edge.example.com/.well-known/masque/ip/*/*/" {
 		t.Fatalf("raw masque fields were changed: %#v", proxy)
 	}
 }
@@ -420,5 +422,86 @@ func TestAggregateSourceKeyDeduplicatesFormatVariants(t *testing.T) {
 	}
 	if parsed.Query().Get("token") != "private" || parsed.Query().Get("format") != "" {
 		t.Fatalf("canonical source key lost unrelated query values: %s", parsed.Redacted())
+	}
+}
+
+func TestAggregateJSONKeepsMasqueClientEndpointAndDeduplicatesSource(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		_, _ = w.Write([]byte(`{
+			"outbounds": [
+				{"type":"http","tag":"http-proxy","server":"proxy.example","server_port":8080},
+				{"type":"selector","tag":"upstream-selector","outbounds":["http-proxy","masque-client"]}
+			],
+			"endpoints": [
+				{"type":"masque-client","tag":"masque-client","server":"masque.example","server_port":443,"detour":"http-proxy"},
+				{"type":"masque-server","tag":"remote-masque-server","listen":"127.0.0.1","listen_port":4443}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	if err := database.InitDB(filepath.Join(t.TempDir(), "aggregate-masque.db")); err != nil {
+		t.Fatalf("init temporary DB: %v", err)
+	}
+	source := server.URL + "/profile?token=source-token"
+	settings := []model.Setting{
+		{Key: "subMode", Value: "master"},
+		{Key: "subMasterSources", Value: strings.Join([]string{source, source}, "\n")},
+		{Key: "subJsonExt", Value: `{"dns":{"servers":[{"type":"local","tag":"local-dns"}],"rules":[]}}`},
+		{Key: "subUpdates", Value: "24"},
+	}
+	if err := database.GetDB().Create(&settings).Error; err != nil {
+		t.Fatalf("seed aggregate settings: %v", err)
+	}
+
+	result, _, err := (&AggregateService{}).GetAggregate("json", "panel.example")
+	if err != nil {
+		t.Fatalf("build aggregate JSON: %v", err)
+	}
+	if requests.Load() != 1 {
+		t.Fatalf("upstream requests = %d, want one for duplicate source entries", requests.Load())
+	}
+	var config struct {
+		Outbounds []map[string]interface{} `json:"outbounds"`
+		Endpoints []map[string]interface{} `json:"endpoints"`
+	}
+	if err := json.Unmarshal([]byte(*result), &config); err != nil {
+		t.Fatalf("decode aggregate JSON: %v", err)
+	}
+	byTag := make(map[string]map[string]interface{}, len(config.Outbounds))
+	for _, outbound := range config.Outbounds {
+		tag := asString(outbound["tag"])
+		byTag[tag] = outbound
+		if outbound["type"] == "masque-client" || outbound["type"] == "masque-server" {
+			t.Errorf("MASQUE endpoint leaked into outbounds: %#v", outbound)
+		}
+	}
+	if byTag["http-proxy"] == nil || byTag["http-proxy"]["type"] != "http" {
+		t.Fatalf("HTTP outbound was not retained: %#v", byTag)
+	}
+	selector := byTag["proxy"]
+	if selector == nil || selector["type"] != "selector" {
+		t.Fatalf("generated selector is missing: %#v", selector)
+	}
+	var hasMasqueClient bool
+	for _, member := range selector["outbounds"].([]interface{}) {
+		if member == "masque-client" {
+			hasMasqueClient = true
+		}
+	}
+	if !hasMasqueClient {
+		t.Fatalf("generated selector lost MASQUE endpoint tag: %#v", selector["outbounds"])
+	}
+	if len(config.Endpoints) != 1 || config.Endpoints[0]["type"] != "masque-client" {
+		t.Fatalf("aggregated endpoints = %#v, want only the MASQUE client endpoint", config.Endpoints)
+	}
+	endpoint := config.Endpoints[0]
+	if got := asString(endpoint["tag"]); got != "masque-client" {
+		t.Errorf("MASQUE client endpoint tag = %q, want masque-client", got)
+	}
+	if got := asString(endpoint["detour"]); got != "http-proxy" || byTag[got] == nil {
+		t.Errorf("MASQUE client detour = %q, want existing HTTP outbound http-proxy", got)
 	}
 }

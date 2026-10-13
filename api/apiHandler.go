@@ -56,6 +56,12 @@ func (a *APIHandler) postHandler(c *gin.Context) {
 		a.ApiService.ImportDb(c)
 	case "validateBackup":
 		a.ApiService.ValidateDb(c)
+	case "remoteBackupSave":
+		a.ApiService.SaveRemoteBackupSettings(c)
+	case "remoteBackupRun":
+		a.ApiService.RunRemoteBackup(c)
+	case "maintenance":
+		a.ApiService.SetMaintenance(c)
 	case "reconcilePorts":
 		a.ApiService.ReconcilePorts(c)
 	case "repairPortIssue":
@@ -119,6 +125,10 @@ func (a *APIHandler) getHandler(c *gin.Context) {
 		a.ApiService.GetUsers(c)
 	case "settings":
 		a.ApiService.GetSettings(c)
+	case "remote-backup-status":
+		a.ApiService.GetRemoteBackupStatus(c)
+	case "maintenance-status":
+		a.ApiService.GetMaintenanceStatus(c)
 	case "stats":
 		a.ApiService.GetStats(c)
 	case "status":
