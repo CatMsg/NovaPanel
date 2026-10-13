@@ -52,6 +52,7 @@ func parseMasqueInbound(inbound *model.Inbound) (*masqueInboundConfig, error) {
 }
 
 func prepareMasqueInbound(tx *gorm.DB, inbound, oldInbound *model.Inbound, hostname string) error {
+	creating := oldInbound == nil || oldInbound.Type != "masque"
 	if oldInbound != nil && oldInbound.Type == "masque" {
 		if oldInbound.MasqueTLSCertificate == "" || oldInbound.MasqueTLSKey == "" {
 			return fmt.Errorf("MASQUE inbound %s has no dedicated ECDSA identity; delete and recreate it", oldInbound.Tag)
@@ -74,43 +75,45 @@ func prepareMasqueInbound(tx *gorm.DB, inbound, oldInbound *model.Inbound, hostn
 			return fmt.Errorf("legacy MASQUE option %s is not supported; use native server options", key)
 		}
 	}
-	if host, _ := options["server"].(string); strings.TrimSpace(host) == "" {
-		options["server"] = hostname
-	}
-	if _, present := options["system"]; !present {
-		options["system"] = false
-	}
-	if _, present := options["version"]; !present {
-		options["version"] = []int{3}
-	}
-	if _, present := options["mtu"]; !present {
-		options["mtu"] = 1280
-	}
-	if _, present := options["listen"]; !present {
-		options["listen"] = "::"
-	}
-	if _, present := options["address"]; !present {
-		var others []model.Inbound
-		if err := tx.Where("type = ? AND id <> ?", "masque", inbound.Id).Find(&others).Error; err != nil {
-			return err
+	if creating {
+		if host, _ := options["server"].(string); strings.TrimSpace(host) == "" {
+			options["server"] = hostname
 		}
-		for second := 16; second < 32; second++ {
-			candidate := netip.MustParsePrefix(fmt.Sprintf("172.%d.0.1/24", second))
-			conflict := false
-			for _, other := range others {
-				var fields struct {
-					Address []netip.Prefix `json:"address"`
-				}
-				if err := json.Unmarshal(other.Options, &fields); err != nil {
-					return err
-				}
-				for _, address := range fields.Address {
-					conflict = conflict || candidate.Overlaps(address)
-				}
+		if _, present := options["system"]; !present {
+			options["system"] = false
+		}
+		if _, present := options["version"]; !present {
+			options["version"] = []int{3}
+		}
+		if _, present := options["mtu"]; !present {
+			options["mtu"] = 1280
+		}
+		if _, present := options["listen"]; !present {
+			options["listen"] = "::"
+		}
+		if _, present := options["address"]; !present {
+			var others []model.Inbound
+			if err := tx.Where("type = ? AND id <> ?", "masque", inbound.Id).Find(&others).Error; err != nil {
+				return err
 			}
-			if !conflict {
-				options["address"] = []string{candidate.String()}
-				break
+			for second := 16; second < 32; second++ {
+				candidate := netip.MustParsePrefix(fmt.Sprintf("172.%d.0.1/24", second))
+				conflict := false
+				for _, other := range others {
+					var fields struct {
+						Address []netip.Prefix `json:"address"`
+					}
+					if err := json.Unmarshal(other.Options, &fields); err != nil {
+						return err
+					}
+					for _, address := range fields.Address {
+						conflict = conflict || candidate.Overlaps(address)
+					}
+				}
+				if !conflict {
+					options["address"] = []string{candidate.String()}
+					break
+				}
 			}
 		}
 	}

@@ -160,8 +160,8 @@ for (const width of [1280, 390]) {
     await expectNoHorizontalOverflow(page)
   })
 
-  test(`legacy MASQUE compatibility stays native-only until enabled at ${width}px`, async ({ page }) => {
-    const masque = { ...inbound, type: 'masque', tag: 'dual-masque', tls_id: 7, listen_port: 443, version: [3], system: false, mtu: 1280 }
+  test(`native-only MASQUE inbound can enable Mihomo subscriptions at ${width}px`, async ({ page }) => {
+    const masque = { ...inbound, type: 'masque', tag: 'dual-masque', tls_id: 7, listen_port: 443, version: [3], system: false, mtu: 1280, mihomo_compatible: false }
     let saved: Record<string, unknown> | undefined
     await installAppBase(page, () => ({ ...loadData([masque]), tls: [{ id: 7, name: 'ECDSA TLS', server: { enabled: true } }] }))
     await page.route('**/api/inbounds**', route => fulfillJson(route, { inbounds: [masque] }))

@@ -84,7 +84,7 @@ func (s *HealthService) checkSingBoxCompatibility() HealthCheck {
 			ID:      "sing-box-compatibility",
 			Title:   "Sing-Box 配置兼容性",
 			Status:  "error",
-			Summary: "无法归一化旧配置",
+			Summary: "无法生成运行配置",
 			Detail:  err.Error(),
 			Action:  "rules",
 		}
@@ -94,7 +94,7 @@ func (s *HealthService) checkSingBoxCompatibility() HealthCheck {
 			ID:      "sing-box-compatibility",
 			Title:   "Sing-Box 配置兼容性",
 			Status:  "error",
-			Summary: "归一化后的配置校验失败",
+			Summary: "运行配置校验失败",
 			Detail:  err.Error(),
 			Action:  "rules",
 		}

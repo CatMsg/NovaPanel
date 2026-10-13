@@ -73,12 +73,26 @@ func TestMASQUEManagedPrepareDefaultsAndRejectLegacy(t *testing.T) {
 	}
 	stableKey, stableCertificate := inbound.MasqueTLSKey, inbound.MasqueTLSCertificate
 	updated := inbound
-	updated.Options = json.RawMessage(`{"listen_port":443}`)
+	var updatedOptions map[string]json.RawMessage
+	if err := json.Unmarshal(inbound.Options, &updatedOptions); err != nil {
+		t.Fatal(err)
+	}
+	updatedOptions["listen_port"] = json.RawMessage(`444`)
+	encodedOptions, err := json.Marshal(updatedOptions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated.Options = encodedOptions
 	if err := prepareMasqueInbound(db, &updated, &inbound, "localhost"); err != nil {
 		t.Fatal(err)
 	}
 	if updated.MasqueTLSKey != stableKey || updated.MasqueTLSCertificate != stableCertificate {
 		t.Fatal("ordinary MASQUE edit rotated the inbound ECDSA identity")
+	}
+	incompleteUpdate := inbound
+	incompleteUpdate.Options = json.RawMessage(`{"listen":"::","listen_port":443}`)
+	if err := prepareMasqueInbound(db, &incompleteUpdate, &inbound, "localhost"); err == nil {
+		t.Fatal("editing an incomplete MASQUE inbound silently restored missing options")
 	}
 	if err := db.Create(&inbound).Error; err != nil {
 		t.Fatal(err)
@@ -137,7 +151,7 @@ func TestMASQUEManagedPrepareDefaultsAndRejectLegacy(t *testing.T) {
 
 func TestSavingNewMASQUEInboundPersistsDedicatedECDSAIdentity(t *testing.T) {
 	db, service := setupInboundRuntimeTest(t)
-	payload := json.RawMessage(`{"type":"masque","tag":"auto-ecdsa","listen":"::","listen_port":41443,"mihomo_compatible":true}`)
+	payload := json.RawMessage(`{"type":"masque","tag":"auto-ecdsa","listen":"::","listen_port":41443,"server":"","version":[3],"system":false,"mtu":1280,"mihomo_compatible":true}`)
 	var postCommit func() error
 	if err := db.Transaction(func(tx *gorm.DB) error {
 		var err error
@@ -158,6 +172,26 @@ func TestSavingNewMASQUEInboundPersistsDedicatedECDSAIdentity(t *testing.T) {
 	}
 	if stored.TlsId != 0 {
 		t.Fatalf("MASQUE unexpectedly retained a shared TLS template: %d", stored.TlsId)
+	}
+	config, err := parseMasqueInbound(&stored)
+	if err != nil {
+		t.Fatalf("parse saved MASQUE options: %v", err)
+	}
+	if config.Host != "masque.example" || config.Port != 41443 || config.Address == (netip.Prefix{}) {
+		t.Fatalf("new MASQUE inbound defaults were not persisted: %+v", config)
+	}
+	var savedOptions struct {
+		Listen           string `json:"listen"`
+		Version          []int  `json:"version"`
+		System           bool   `json:"system"`
+		MTU              int    `json:"mtu"`
+		MihomoCompatible bool   `json:"mihomo_compatible"`
+	}
+	if err := json.Unmarshal(stored.Options, &savedOptions); err != nil {
+		t.Fatal(err)
+	}
+	if savedOptions.Listen != "::" || len(savedOptions.Version) != 1 || savedOptions.Version[0] != 3 || savedOptions.System || savedOptions.MTU != 1280 || !savedOptions.MihomoCompatible {
+		t.Fatalf("new MASQUE inbound settings = %+v", savedOptions)
 	}
 	if _, err := validateMasqueTLSMaterial(&stored, "masque.example"); err != nil {
 		t.Fatalf("saved MASQUE ECDSA identity is invalid: %v", err)

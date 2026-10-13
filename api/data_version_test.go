@@ -244,7 +244,7 @@ func testAPIDataWaitsForSnapshotGate(t *testing.T, partial bool) {
 	a := setupDataVersionTest(t)
 	start := service.CurrentDataVersion()
 	// Synthetic credentials exist only in the temporary test database.
-	inbound := model.Inbound{Type: "http", Tag: "stable-inbound", Options: json.RawMessage(`{"listen":"127.0.0.1","listen_port":12345,"password":"stable-test-password"}`)}
+	inbound := model.Inbound{Type: "http", Tag: "stable-inbound", Options: json.RawMessage(`{"listen":"127.0.0.1","listen_port":12345,"version":1,"password":"stable-test-password"}`)}
 	if err := database.GetDB().Create(&inbound).Error; err != nil {
 		t.Fatal(err)
 	}
