@@ -28,7 +28,19 @@ func restoreReviewSnapshot(t *testing.T, fleet string) string {
 	}
 	defer sqlDB.Close()
 	createCompleteTestSchema(t, conn)
-	if err := conn.Create(&model.Setting{Key: "fleetServers", Value: fleet}).Error; err != nil {
+	if err := conn.Create(&[]model.Setting{
+		{Key: "fleetServers", Value: fleet},
+		{Key: "remoteBackupConfig", Value: ""},
+		{Key: "remoteBackupOwner", Value: ""},
+		{Key: "remoteBackupState", Value: ""},
+		{Key: "webCertFile", Value: ""},
+		{Key: "webKeyFile", Value: ""},
+		{Key: "webDomain", Value: ""},
+		{Key: "subCertFile", Value: ""},
+		{Key: "subKeyFile", Value: ""},
+		{Key: "subDomain", Value: ""},
+		{Key: "maintenanceMode", Value: "false"},
+	}).Error; err != nil {
 		t.Fatal(err)
 	}
 	return path
@@ -72,6 +84,40 @@ func TestRestoreReviewFleetValidationParity(t *testing.T) {
 	}
 }
 
+func TestRestoreRejectsMissingCurrentSettingsWithoutBackfill(t *testing.T) {
+	path := restoreReviewSnapshot(t, "[]")
+	conn, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Where("key = ?", "remoteBackupState").Delete(&model.Setting{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, _ := conn.DB()
+	if err := sqlDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RehearseDB(context.Background(), path); err == nil || !strings.Contains(err.Error(), "settings are incomplete") {
+		t.Fatalf("missing required setting should be rejected during rehearsal, got %v", err)
+	}
+	if err := validateAndSanitizeRestoreDB(path); err == nil {
+		t.Fatal("restore accepted a snapshot missing a required current setting")
+	}
+	check, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	if err := check.Model(&model.Setting{}).Where("key = ?", "remoteBackupState").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	checkSQL, _ := check.DB()
+	_ = checkSQL.Close()
+	if count != 0 {
+		t.Fatal("restore validation silently recreated a missing setting")
+	}
+}
+
 func TestRestoreReviewRehearsalDoesNotSanitizeTLS(t *testing.T) {
 	path := restoreReviewSnapshot(t, "[]")
 	conn, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
@@ -83,9 +129,11 @@ func TestRestoreReviewRehearsalDoesNotSanitizeTLS(t *testing.T) {
 		t.Fatal(err)
 	}
 	missing := filepath.Join(t.TempDir(), "missing.pem")
-	if err := conn.Create(&[]model.Setting{{Key: "webCertFile", Value: missing}, {Key: "webKeyFile", Value: missing}, {Key: "webDomain", Value: "test.invalid"}}).Error; err != nil {
-		_ = sqlDB.Close()
-		t.Fatal(err)
+	for key, value := range map[string]string{"webCertFile": missing, "webKeyFile": missing, "webDomain": "test.invalid"} {
+		if err := conn.Model(&model.Setting{}).Where("key = ?", key).Update("value", value).Error; err != nil {
+			_ = sqlDB.Close()
+			t.Fatal(err)
+		}
 	}
 	if err := sqlDB.Close(); err != nil {
 		t.Fatal(err)

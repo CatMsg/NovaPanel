@@ -20,7 +20,7 @@ func TestNativeMASQUEUserJSONVisibilityAndUnsupportedFormats(t *testing.T) {
 	inbounds := []model.Inbound{
 		{Type: "masque", Tag: "native-visible", Addrs: json.RawMessage(`[]`), OutJson: json.RawMessage(`{"type":"masque-client","tag":"native-visible","server":"127.0.0.1","server_port":14443,"version":3,"system":false,"on_demand":true,"disable_version_fallback":true,"tls":{"enabled":true,"alpn":["h3"]}}`)},
 		{Type: "masque", Tag: "native-hidden", ExcludeFromSub: true, Addrs: json.RawMessage(`[]`), OutJson: json.RawMessage(`{"type":"masque-client","tag":"native-hidden","server":"127.0.0.1","server_port":24443,"version":3,"tls":{"enabled":true}}`)},
-		{Type: "http", Tag: "plain-http", Addrs: json.RawMessage(`[]`), Options: json.RawMessage(`{"version":[1]}`), OutJson: json.RawMessage(`{"type":"http","tag":"plain-http","server":"127.0.0.1","server_port":18880,"version":1}`)},
+		{Type: "http", Tag: "plain-http", Addrs: json.RawMessage(`[]`), Options: json.RawMessage(`{"version":1}`), OutJson: json.RawMessage(`{"type":"http","tag":"plain-http","server":"127.0.0.1","server_port":18880,"version":1}`)},
 	}
 	if err := db.Create(&inbounds).Error; err != nil {
 		t.Fatal(err)

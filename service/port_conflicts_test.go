@@ -180,10 +180,13 @@ func TestHTTPInboundManagedPortProtocolsFollowServedVersions(t *testing.T) {
 		t.Fatalf("init db: %v", err)
 	}
 	db := database.GetDB()
+	tls := model.Tls{Name: "http3 tls", Server: json.RawMessage(`{"enabled":true}`), Client: json.RawMessage(`{"enabled":true}`)}
+	if err := db.Create(&tls).Error; err != nil {
+		t.Fatalf("create TLS: %v", err)
+	}
 	inbounds := []model.Inbound{
-		{Type: "http", Tag: "http3-only", Options: json.RawMessage(`{"listen_port":443,"version":3}`)},
-		{Type: "http", Tag: "http-default", Options: json.RawMessage(`{"listen_port":444,"version":[]}`)},
-		{Type: "http", Tag: "http-combined", Options: json.RawMessage(`{"listen_port":445,"version":[1,3]}`)},
+		{Type: "http", Tag: "http3-only", TlsId: tls.Id, Options: json.RawMessage(`{"listen_port":443,"version":3}`)},
+		{Type: "http", Tag: "http1-only", Options: json.RawMessage(`{"listen_port":444,"version":1}`)},
 	}
 	if err := db.Create(&inbounds).Error; err != nil {
 		t.Fatalf("create HTTP inbounds: %v", err)
@@ -199,7 +202,7 @@ func TestHTTPInboundManagedPortProtocolsFollowServedVersions(t *testing.T) {
 	for _, entry := range entries {
 		protocolByTag[entry.OwnerTag] = entry.Protocols
 	}
-	want := map[string]string{"http3-only": "udp", "http-default": "tcp", "http-combined": "tcp,udp"}
+	want := map[string]string{"http3-only": "udp", "http1-only": "tcp"}
 	for tag, protocols := range want {
 		if protocolByTag[tag] != protocols {
 			t.Errorf("%s protocols = %q, want %q", tag, protocolByTag[tag], protocols)

@@ -192,7 +192,7 @@ func setupRejectedConfigSaveFixture(t *testing.T) (*gorm.DB, *ConfigService, mod
 		TlsId:   tls.Id,
 		Addrs:   json.RawMessage(`[]`),
 		OutJson: json.RawMessage(`{"type":"http","version":1}`),
-		Options: json.RawMessage(`{"listen":"127.0.0.1","listen_port":43871,"version":[1]}`),
+		Options: json.RawMessage(`{"listen":"127.0.0.1","listen_port":43871,"version":1}`),
 	}
 	if err := db.Create(&inbound).Error; err != nil {
 		t.Fatalf("seed inbound: %v", err)

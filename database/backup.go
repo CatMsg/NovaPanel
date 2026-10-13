@@ -81,7 +81,7 @@ func CreateDBBackupContext(ctx context.Context, exclude string) (string, func(),
 	backupDb = backupDb.WithContext(ctx)
 	// Never export credentials capable of uploading or deleting remote backups.
 	// VACUUM below also removes deleted values from SQLite free pages.
-	if err := backupDb.Exec("DELETE FROM settings WHERE key LIKE 'remoteBackup%'").Error; err != nil {
+	if err := backupDb.Exec("UPDATE settings SET value = '' WHERE key LIKE 'remoteBackup%'").Error; err != nil {
 		closeAndCleanup()
 		return "", nil, err
 	}
@@ -214,6 +214,35 @@ func RehearseDB(ctx context.Context, path string) (map[string]int64, error) {
 			return nil, errors.New("backup row count failed")
 		}
 		report[table] = count
+	}
+	settingRows, err := conn.QueryContext(ctx, "SELECT key FROM settings")
+	if err != nil {
+		return nil, errors.New("backup settings inspection failed")
+	}
+	presentSettings := make(map[string]struct{})
+	for settingRows.Next() {
+		var key string
+		if err := settingRows.Scan(&key); err != nil {
+			_ = settingRows.Close()
+			return nil, errors.New("backup settings inspection failed")
+		}
+		presentSettings[key] = struct{}{}
+	}
+	if err := settingRows.Err(); err != nil {
+		_ = settingRows.Close()
+		return nil, errors.New("backup settings inspection failed")
+	}
+	if err := settingRows.Close(); err != nil {
+		return nil, errors.New("backup settings inspection failed")
+	}
+	for _, key := range []string{
+		"remoteBackupConfig", "remoteBackupOwner", "remoteBackupState",
+		"webCertFile", "webKeyFile", "webDomain", "subCertFile", "subKeyFile", "subDomain",
+		"maintenanceMode",
+	} {
+		if _, exists := presentSettings[key]; !exists {
+			return nil, fmt.Errorf("backup settings are incomplete: missing %s", key)
+		}
 	}
 	rows, err := conn.QueryContext(ctx, "SELECT value FROM settings WHERE key = ?", "fleetServers")
 	if err != nil {
@@ -396,7 +425,7 @@ func preserveRestoreMaintenance(conn *gorm.DB) error {
 			return result.Error
 		}
 		if result.RowsAffected == 0 {
-			return tx.Create(&model.Setting{Key: "maintenanceMode", Value: "true"}).Error
+			return errors.New("backup settings are incomplete: missing maintenanceMode")
 		}
 		return nil
 	})
@@ -460,11 +489,6 @@ func validateAndSanitizeRestoreDB(path string) error {
 		values[setting.Key] = setting.Value
 	}
 	updates := make(map[string]string)
-	for _, key := range []string{"remoteBackupConfig", "remoteBackupOwner", "remoteBackupState"} {
-		if _, exists := values[key]; !exists {
-			updates[key] = ""
-		}
-	}
 	for _, pair := range [][2]string{
 		{"webCertFile", "webKeyFile"},
 		{"subCertFile", "subKeyFile"},
@@ -494,9 +518,7 @@ func validateAndSanitizeRestoreDB(path string) error {
 				return result.Error
 			}
 			if result.RowsAffected == 0 {
-				if err := tx.Create(&model.Setting{Key: key, Value: value}).Error; err != nil {
-					return err
-				}
+				return fmt.Errorf("backup settings are incomplete: missing %s", key)
 			}
 		}
 		return nil

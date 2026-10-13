@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/CatMsg/NovaPanel/database/model"
@@ -16,7 +17,10 @@ func TestBackupStripsRemoteSecretsAndRehearsalIsReadOnly(t *testing.T) {
 	if err := InitDB(filepath.Join(t.TempDir(), "snapshot-source.db")); err != nil {
 		t.Fatal(err)
 	}
-	for key, value := range map[string]string{"remoteBackupConfig": `{"password":"synthetic-never-export"}`, "remoteBackupOwner": "synthetic-owner", "remoteBackupState": "synthetic-state", "test-marker": "preserve"} {
+	for key, value := range map[string]string{
+		"remoteBackupConfig": `{"password":"synthetic-never-export"}`, "remoteBackupOwner": "synthetic-owner", "remoteBackupState": "synthetic-state",
+		"webCertFile": "", "webKeyFile": "", "webDomain": "", "subCertFile": "", "subKeyFile": "", "subDomain": "", "maintenanceMode": "false", "test-marker": "preserve",
+	} {
 		if err := GetDB().Create(&model.Setting{Key: key, Value: value}).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -36,6 +40,24 @@ func TestBackupStripsRemoteSecretsAndRehearsalIsReadOnly(t *testing.T) {
 	}
 	if bytes.Contains(before, []byte("synthetic-never-export")) || bytes.Contains(before, []byte("synthetic-owner")) {
 		t.Fatal("snapshot contains removed secret or ownership bytes")
+	}
+	backupDB, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var backupSettings []model.Setting
+	if err := backupDB.Where("key LIKE ?", "remoteBackup%").Find(&backupSettings).Error; err != nil {
+		t.Fatal(err)
+	}
+	backupSQL, _ := backupDB.DB()
+	_ = backupSQL.Close()
+	if len(backupSettings) != 3 {
+		t.Fatalf("snapshot contains %d remote backup setting keys, want 3", len(backupSettings))
+	}
+	for _, setting := range backupSettings {
+		if setting.Value != "" {
+			t.Fatalf("snapshot retained sensitive setting %s", setting.Key)
+		}
 	}
 	counts, err := RehearseDB(context.Background(), path)
 	if err != nil || counts["users"] != 1 {
@@ -61,7 +83,7 @@ func stringsContainsSynthetic(value string) bool {
 }
 
 func TestPreserveRestoreMaintenanceBeforeSwap(t *testing.T) {
-	for _, existing := range []bool{false, true} {
+	for _, value := range []string{"false", "true"} {
 		path := filepath.Join(t.TempDir(), "replacement.db")
 		conn, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
 		if err != nil {
@@ -70,10 +92,8 @@ func TestPreserveRestoreMaintenanceBeforeSwap(t *testing.T) {
 		if err := conn.Migrator().CreateTable(&model.Setting{}); err != nil {
 			t.Fatal(err)
 		}
-		if existing {
-			if err := conn.Create(&model.Setting{Key: "maintenanceMode", Value: "false"}).Error; err != nil {
-				t.Fatal(err)
-			}
+		if err := conn.Create(&model.Setting{Key: "maintenanceMode", Value: value}).Error; err != nil {
+			t.Fatal(err)
 		}
 		if err := preserveRestoreMaintenance(conn); err != nil {
 			t.Fatal(err)
@@ -85,6 +105,19 @@ func TestPreserveRestoreMaintenanceBeforeSwap(t *testing.T) {
 		sqlDB, _ := conn.DB()
 		_ = sqlDB.Close()
 	}
+	path := filepath.Join(t.TempDir(), "missing-maintenance.db")
+	conn, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Migrator().CreateTable(&model.Setting{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := preserveRestoreMaintenance(conn); err == nil || !strings.Contains(err.Error(), "missing maintenanceMode") {
+		t.Fatalf("missing current setting should fail rather than be created, got %v", err)
+	}
+	sqlDB, _ := conn.DB()
+	_ = sqlDB.Close()
 }
 
 func TestValidateAndSanitizeRestoreDB(t *testing.T) {
@@ -95,6 +128,10 @@ func TestValidateAndSanitizeRestoreDB(t *testing.T) {
 	}
 	createCompleteTestSchema(t, conn)
 	settings := []model.Setting{
+		{Key: "maintenanceMode", Value: "false"},
+		{Key: "remoteBackupConfig", Value: ""},
+		{Key: "remoteBackupOwner", Value: ""},
+		{Key: "remoteBackupState", Value: ""},
 		{Key: "webCertFile", Value: "/missing/web.crt"},
 		{Key: "webKeyFile", Value: "/missing/web.key"},
 		{Key: "webDomain", Value: "example.com"},

@@ -63,7 +63,7 @@ func filterClashHTTPOutbounds(inbounds []*model.Inbound, outbounds []map[string]
 		if err != nil {
 			return nil, nil, fmt.Errorf("HTTP inbound %q: %w", inbound.Tag, err)
 		}
-		if !hasHTTPVersion(versions, 1) {
+		if versions[0] != 1 {
 			continue
 		}
 		if !clashHTTPVersionIsHTTP1(outbound) {
@@ -134,15 +134,6 @@ func filterRawClashHTTPProxies(proxies []map[string]interface{}) ([]map[string]i
 		filtered = append(filtered, copy)
 	}
 	return filtered, nil
-}
-
-func hasHTTPVersion(versions []int, wanted int) bool {
-	for _, version := range versions {
-		if version == wanted {
-			return true
-		}
-	}
-	return false
 }
 
 func clashHTTPVersionIsHTTP1(outbound map[string]interface{}) bool {

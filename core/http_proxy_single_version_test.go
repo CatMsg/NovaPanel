@@ -52,7 +52,7 @@ func TestHTTPProxyGeneratedSingletonVersionLoopback(t *testing.T) {
 			inboundOptions, err := json.Marshal(map[string]any{
 				"listen":      "127.0.0.1",
 				"listen_port": serverPort,
-				"version":     []int{version},
+				"version":     version,
 			})
 			if err != nil {
 				t.Fatalf("marshal singleton HTTP inbound fixture: %v", err)

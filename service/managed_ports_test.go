@@ -121,13 +121,13 @@ func TestCollectInboundForwardProtocolsMatchesListenerTransport(t *testing.T) {
 		typeName string
 		options  string
 		want     []string
+		tls      bool
 	}{
 		{name: "mixed", typeName: "mixed", want: []string{"tcp"}},
 		{name: "socks ignores proxy network", typeName: "socks", options: `,"network":"udp"`, want: []string{"tcp"}},
-		{name: "http defaults to HTTP1 and HTTP2", typeName: "http", want: []string{"tcp"}},
-		{name: "http empty version list defaults to HTTP1 and HTTP2", typeName: "http", options: `,"version":[]`, want: []string{"tcp"}},
-		{name: "http3 uses UDP", typeName: "http", options: `,"version":3`, want: []string{"udp"}},
-		{name: "combined HTTP1 and HTTP3 uses both protocols", typeName: "http", options: `,"version":[1,3]`, want: []string{"tcp", "udp"}},
+		{name: "http1 uses TCP", typeName: "http", options: `,"version":1`, want: []string{"tcp"}},
+		{name: "http2 uses TCP", typeName: "http", options: `,"version":2`, want: []string{"tcp"}, tls: true},
+		{name: "http3 uses UDP", typeName: "http", options: `,"version":3`, want: []string{"udp"}, tls: true},
 		{name: "shadowsocks default", typeName: "shadowsocks", want: []string{"tcp", "udp"}},
 		{name: "shadowsocks tcp", typeName: "shadowsocks", options: `,"network":"tcp"`, want: []string{"tcp"}},
 		{name: "shadowsocks udp array", typeName: "shadowsocks", options: `,"network":["udp"]`, want: []string{"udp"}},
@@ -155,6 +155,10 @@ func TestCollectInboundForwardProtocolsMatchesListenerTransport(t *testing.T) {
 				Type:    tt.typeName,
 				Tag:     tt.name,
 				Options: json.RawMessage(`{"listen_port":24000` + tt.options + `}`),
+			}
+			if tt.tls {
+				inbound.TlsId = 1
+				inbound.Tls = &model.Tls{Server: json.RawMessage(`{"enabled":true}`)}
 			}
 			got, err := collectInboundForwardProtocols(inbound)
 			if err != nil {

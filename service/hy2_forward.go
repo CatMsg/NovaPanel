@@ -184,26 +184,14 @@ func collectInboundForwardProtocols(inbound *model.Inbound) ([]string, error) {
 	case "mixed", "socks", "shadowtls", "anytls":
 		return []string{"tcp"}, nil
 	case "http":
-		versions, err := util.HTTPInboundVersions(inbound.Options)
+		version, err := util.SelectedHTTPInboundVersion(inbound.Options)
 		if err != nil {
 			return nil, err
 		}
-		tcp, udp := false, false
-		for _, version := range versions {
-			if version == 1 || version == 2 {
-				tcp = true
-			} else if version == 3 {
-				udp = true
-			}
+		if version == 3 {
+			return []string{"udp"}, nil
 		}
-		protocols := make([]string, 0, 2)
-		if tcp {
-			protocols = append(protocols, "tcp")
-		}
-		if udp {
-			protocols = append(protocols, "udp")
-		}
-		return protocols, nil
+		return []string{"tcp"}, nil
 	case "vmess", "trojan", "vless":
 		quic, err := inboundUsesQUICTransport(inbound)
 		if err != nil {

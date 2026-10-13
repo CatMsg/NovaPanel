@@ -215,7 +215,7 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 		} else { // Other protocols
 			config, _ := configs[protocol].(map[string]interface{})
 			if protocol == "http" {
-				if err := mergeHTTPClientOverrides(outbound, config, inData.TlsId == 0, len(httpVersions) == 1); err != nil {
+				if err := mergeHTTPClientOverrides(outbound, config, inData.TlsId == 0); err != nil {
 					return nil, nil, fmt.Errorf("HTTP inbound %q client configuration: %w", inData.Tag, err)
 				}
 			} else {
@@ -228,24 +228,8 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 			}
 		}
 		if protocol == "http" {
-			version := 0
-			if len(httpVersions) == 1 {
-				version = httpVersions[0]
-			} else {
-				version, err = util.ResolveHTTPOutboundVersion(outbound, httpVersions)
-				if err != nil {
-					return nil, nil, fmt.Errorf("HTTP inbound %q subscription: %w", inData.Tag, err)
-				}
-			}
-			if version == 0 {
-				return nil, nil, fmt.Errorf("HTTP inbound %q has no supported version", inData.Tag)
-			}
-			if len(httpVersions) == 1 {
-				if err := util.SetHTTPOutboundVersion(outbound, version); err != nil {
-					return nil, nil, fmt.Errorf("HTTP inbound %q subscription: %w", inData.Tag, err)
-				}
-			} else {
-				outbound["version"] = version
+			if err := util.SetHTTPOutboundVersion(outbound, httpVersions[0]); err != nil {
+				return nil, nil, fmt.Errorf("HTTP inbound %q subscription: %w", inData.Tag, err)
 			}
 			if _, err := util.ResolveHTTPOutboundVersion(outbound, httpVersions); err != nil {
 				return nil, nil, fmt.Errorf("HTTP inbound %q subscription: %w", inData.Tag, err)
@@ -299,21 +283,8 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 					newOut["tls"] = outTls
 				}
 				if protocol == "http" {
-					version := 0
-					if len(httpVersions) == 1 {
-						version = httpVersions[0]
-					} else {
-						version, err = util.ResolveHTTPOutboundVersion(newOut, httpVersions)
-						if err != nil {
-							return nil, nil, fmt.Errorf("HTTP inbound %q address %d subscription: %w", inData.Tag, index+1, err)
-						}
-					}
-					if len(httpVersions) == 1 {
-						if err := util.SetHTTPOutboundVersion(newOut, version); err != nil {
-							return nil, nil, fmt.Errorf("HTTP inbound %q address %d subscription: %w", inData.Tag, index+1, err)
-						}
-					} else {
-						newOut["version"] = version
+					if err := util.SetHTTPOutboundVersion(newOut, httpVersions[0]); err != nil {
+						return nil, nil, fmt.Errorf("HTTP inbound %q address %d subscription: %w", inData.Tag, index+1, err)
 					}
 					if _, resolveErr := util.ResolveHTTPOutboundVersion(newOut, httpVersions); resolveErr != nil {
 						return nil, nil, fmt.Errorf("HTTP inbound %q address %d subscription: %w", inData.Tag, index+1, resolveErr)
@@ -373,14 +344,12 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 	return &outbounds, &outTags, nil
 }
 
-func mergeHTTPClientOverrides(outbound, clientHTTP map[string]interface{}, hasNoTLS bool, ignoreVersion bool) error {
-	if ignoreVersion {
-		if err := util.ValidateHTTPClientVersionOverride(clientHTTP); err != nil {
-			return err
-		}
+func mergeHTTPClientOverrides(outbound, clientHTTP map[string]interface{}, hasNoTLS bool) error {
+	if err := util.ValidateHTTPClientVersionOverride(clientHTTP); err != nil {
+		return err
 	}
 	for key, value := range clientHTTP {
-		if key == "name" || key == "alterId" || (key == "flow" && hasNoTLS) || (ignoreVersion && key == "version") {
+		if key == "name" || key == "alterId" || key == "version" || (key == "flow" && hasNoTLS) {
 			continue
 		}
 		outbound[key] = value

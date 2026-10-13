@@ -439,10 +439,7 @@ func TestCaptureFleetTemplateOutboundsKeepsOptionsAfterStorage(t *testing.T) {
 }
 
 func TestFleetTemplatePreservesInboundSubscriptionVisibility(t *testing.T) {
-	commands := testutil.NewManagedPortSandbox(t,
-		[]string{"scripts/hy2-forward.sh", "apply", "fleet-hidden-inbound", "1080", "1080", "tcp"},
-		[]string{"scripts/hy2-forward.sh", "apply", "fleet-visible-inbound", "1081", "1081", "tcp"},
-	)
+	commands := testutil.NewManagedPortSandbox(t)
 	if err := database.InitDB(filepath.Join(t.TempDir(), "fleet-inbound-visibility.db")); err != nil {
 		t.Fatal(err)
 	}
@@ -551,14 +548,9 @@ func TestFleetTemplatePreservesInboundSubscriptionVisibility(t *testing.T) {
 	if len(applied) != len(inbounds) || !assertApplied["fleet-hidden-inbound"] || assertApplied["fleet-visible-inbound"] {
 		t.Fatalf("fleet template apply did not restore both visibility states: %+v", applied)
 	}
-	var wantCalls [][]string
-	if runtime.GOOS == "linux" {
-		wantCalls = testutil.ManagedPortRebuildCalls(
-			[]string{"scripts/hy2-forward.sh", "apply", "fleet-hidden-inbound", "1080", "1080", "tcp"},
-			[]string{"scripts/hy2-forward.sh", "apply", "fleet-visible-inbound", "1081", "1081", "tcp"},
-		)
-	}
-	commands.AssertCalls(t, wantCalls)
+	// This test exercises the database transaction helper directly. Host-side
+	// port-forwarding belongs to ApplyFleetTemplate, not applyFleetTemplateTx.
+	commands.AssertCalls(t, nil)
 }
 
 func TestFleetTemplateOutboundPreviewAndMerge(t *testing.T) {

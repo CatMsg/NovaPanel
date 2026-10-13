@@ -46,20 +46,10 @@ func FillOutJson(i *model.Inbound, hostname string) error {
 		if err != nil {
 			return err
 		}
-		version := 0
-		if len(versions) == 1 {
-			version = versions[0]
-			if err := SetHTTPOutboundVersion(outJson, version); err != nil {
-				return err
-			}
-			_, err = ResolveHTTPOutboundVersion(outJson, versions)
-		} else {
-			version, err = ResolveHTTPOutboundVersion(outJson, versions)
-			if err == nil {
-				outJson["version"] = version
-			}
+		if err := SetHTTPOutboundVersion(outJson, versions[0]); err != nil {
+			return err
 		}
-		if err != nil {
+		if _, err := ResolveHTTPOutboundVersion(outJson, versions); err != nil {
 			return err
 		}
 	case "socks", "mixed", "anytls":

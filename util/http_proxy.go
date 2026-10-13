@@ -66,14 +66,29 @@ func ValidateHTTPInbound(inbound *model.Inbound) ([]int, error) {
 	if inbound == nil || inbound.Type != "http" {
 		return nil, nil
 	}
-	versions, err := HTTPInboundVersions(inbound.Options)
+	version, err := SelectedHTTPInboundVersion(inbound.Options)
 	if err != nil {
 		return nil, err
 	}
-	if containsHTTPVersion(versions, 3) && !HTTPInboundTLSEnabled(inbound) {
+	if version == 3 && !HTTPInboundTLSEnabled(inbound) {
 		return nil, fmt.Errorf("HTTP inbound version 3 requires an enabled TLS server configuration")
 	}
-	return versions, nil
+	return []int{version}, nil
+}
+
+// SelectedHTTPInboundVersion reads the panel's single-version inbound contract.
+// HTTPInboundVersions remains available for validating raw Sing-Box configs.
+func SelectedHTTPInboundVersion(options json.RawMessage) (int, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(options, &fields); err != nil || fields == nil {
+		return 0, fmt.Errorf("HTTP inbound requires exactly one version choice (1, 2, or 3)")
+	}
+	rawVersion, exists := fields["version"]
+	var version int
+	if !exists || json.Unmarshal(rawVersion, &version) != nil || version < 1 || version > 3 {
+		return 0, fmt.Errorf("HTTP inbound requires exactly one version choice (1, 2, or 3)")
+	}
+	return version, nil
 }
 
 // ValidateHTTPClientVersionOverride validates the shape of a per-user HTTP
@@ -240,25 +255,17 @@ func HTTPInboundURICompatible(clientConfig json.RawMessage, inbound *model.Inbou
 		}
 	}
 	if httpConfig, ok := configs["http"].(map[string]interface{}); ok {
-		if len(versions) == 1 {
-			if err := ValidateHTTPClientVersionOverride(httpConfig); err != nil {
-				return false, err
-			}
-			for key, value := range httpConfig {
-				if key != "version" {
-					outbound[key] = value
-				}
-			}
-		} else {
-			for key, value := range httpConfig {
+		if err := ValidateHTTPClientVersionOverride(httpConfig); err != nil {
+			return false, err
+		}
+		for key, value := range httpConfig {
+			if key != "version" {
 				outbound[key] = value
 			}
 		}
 	}
-	if len(versions) == 1 {
-		if err := SetHTTPOutboundVersion(outbound, 1); err != nil {
-			return false, err
-		}
+	if err := SetHTTPOutboundVersion(outbound, 1); err != nil {
+		return false, err
 	}
 	version, err := ResolveHTTPOutboundVersion(outbound, versions)
 	if err != nil {

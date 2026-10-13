@@ -129,22 +129,19 @@ func TestSetHTTPOutboundVersionUsesProtocolSpecificTLSSettings(t *testing.T) {
 	}
 }
 
-func TestHTTPInboundURICompatibilityPreservesLegacyVersionChecks(t *testing.T) {
+func TestHTTPInboundURICompatibilityUsesSelectedVersion(t *testing.T) {
 	inbound := &model.Inbound{
 		Type:    "http",
-		Options: json.RawMessage(`{"version":[1,2]}`),
+		Options: json.RawMessage(`{"version":1}`),
 		OutJson: json.RawMessage(`{"type":"http","version":1}`),
 	}
 	compatible, err := HTTPInboundURICompatible(json.RawMessage(`{"http":{"version":2}}`), inbound)
-	if err != nil || compatible {
-		t.Fatalf("explicit H2 cannot be represented by a standard HTTP/1 URI: compatible=%t err=%v", compatible, err)
-	}
-	if _, err := HTTPInboundURICompatible(json.RawMessage(`{"http":{"version":3}}`), inbound); err == nil || !strings.Contains(err.Error(), "is not served") {
-		t.Fatalf("legacy unsupported explicit version should retain mismatch validation, got %v", err)
+	if err != nil || !compatible {
+		t.Fatalf("the selected HTTP/1 listener should produce a compatible URI: compatible=%t err=%v", compatible, err)
 	}
 }
 
-func TestFillOutJsonUsesSingletonVersionAndPreservesLegacyMultiVersionConfig(t *testing.T) {
+func TestFillOutJsonUsesSelectedVersion(t *testing.T) {
 	tests := []struct {
 		name         string
 		options      string
@@ -156,7 +153,7 @@ func TestFillOutJsonUsesSingletonVersionAndPreservesLegacyMultiVersionConfig(t *
 	}{
 		{
 			name:        "singleton H1 replaces stale H3",
-			options:     `{"version":[1]}`,
+			options:     `{"version":1}`,
 			outbound:    `{"type":"http","version":3,"disable_version_fallback":true}`,
 			wantVersion: 1,
 		},
@@ -171,27 +168,11 @@ func TestFillOutJsonUsesSingletonVersionAndPreservesLegacyMultiVersionConfig(t *
 		},
 		{
 			name:        "singleton H3 replaces stale H2",
-			options:     `{"version":[3]}`,
+			options:     `{"version":3}`,
 			outbound:    `{"type":"http","version":2}`,
 			tls:         &model.Tls{Server: json.RawMessage(`{"enabled":true,"alpn":["h2","h3"]}`), Client: json.RawMessage(`{"enabled":true}`)},
 			wantVersion: 3,
 			wantALPN:    []interface{}{"h3"},
-		},
-		{
-			name:         "legacy H2C retains old fallback behavior",
-			options:      `{"version":[1,2]}`,
-			outbound:     `{"type":"http","version":2}`,
-			wantVersion:  2,
-			wantFallback: nil,
-		},
-		{
-			name:         "legacy TLS ALPN and fallback remain unchanged",
-			options:      `{"version":[1,2]}`,
-			outbound:     `{"type":"http","version":2,"disable_version_fallback":false}`,
-			tls:          &model.Tls{Server: json.RawMessage(`{"enabled":true,"alpn":["h2","http/1.1"]}`), Client: json.RawMessage(`{"enabled":true}`)},
-			wantVersion:  2,
-			wantALPN:     []interface{}{"h2", "http/1.1"},
-			wantFallback: false,
 		},
 	}
 	for _, test := range tests {
@@ -252,11 +233,31 @@ func TestValidateHTTPInboundRequiresEnabledTLSForHTTP3(t *testing.T) {
 	}
 }
 
+func TestValidateHTTPInboundRequiresOneScalarVersion(t *testing.T) {
+	for _, options := range []string{`{}`, `{"version":null}`, `{"version":[]}`, `{"version":[1]}`, `{"version":[1,2]}`} {
+		inbound := &model.Inbound{Type: "http", Options: json.RawMessage(options)}
+		if _, err := ValidateHTTPInbound(inbound); err == nil || !strings.Contains(err.Error(), "exactly one version choice") {
+			t.Errorf("options %s should be rejected as a legacy/missing version, got %v", options, err)
+		}
+	}
+	for _, version := range []int{1, 2, 3} {
+		inbound := &model.Inbound{Type: "http", Options: json.RawMessage(fmt.Sprintf(`{"version":%d}`, version))}
+		if version == 3 {
+			inbound.TlsId = 1
+			inbound.Tls = &model.Tls{Server: json.RawMessage(`{"enabled":true}`)}
+		}
+		got, err := ValidateHTTPInbound(inbound)
+		if err != nil || !reflect.DeepEqual(got, []int{version}) {
+			t.Errorf("scalar version %d returned %#v, %v", version, got, err)
+		}
+	}
+}
+
 func TestFillOutJsonRejectsH2CPanelInboundWithoutCompatibleClient(t *testing.T) {
 	inbound := &model.Inbound{
 		Type:    "http",
 		Tag:     "h2c-only",
-		Options: json.RawMessage(`{"listen_port":8080,"version":[2]}`),
+		Options: json.RawMessage(`{"listen_port":8080,"version":2}`),
 		OutJson: json.RawMessage(`{"type":"http","version":2}`),
 	}
 	if _, err := ValidateHTTPInbound(inbound); err != nil {
@@ -306,9 +307,9 @@ func TestLinkGeneratorSkipsHTTPNonH1AndKeepsH1Variant(t *testing.T) {
 		tls       *model.Tls
 		wantLinks int
 	}{
-		{name: "H2 only", options: `{"listen_port":8080,"version":[2]}`, outbound: `{"type":"http","version":2}`, wantLinks: 0},
+		{name: "H2 only", options: `{"listen_port":8080,"version":2}`, outbound: `{"type":"http","version":2}`, wantLinks: 0},
 		{name: "H3 only", options: `{"listen_port":8443,"version":3}`, outbound: `{"type":"http","version":3,"tls":{"enabled":true}}`, tls: &model.Tls{Server: json.RawMessage(`{"enabled":true}`), Client: json.RawMessage(`{"enabled":true}`)}, wantLinks: 0},
-		{name: "H1 and H3", options: `{"listen_port":8444,"version":[1,3]}`, outbound: `{"type":"http","version":1}`, tls: &model.Tls{Server: json.RawMessage(`{"enabled":true}`), Client: json.RawMessage(`{"enabled":true}`)}, wantLinks: 1},
+		{name: "H1 only", options: `{"listen_port":8444,"version":1}`, outbound: `{"type":"http","version":1}`, wantLinks: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			inbound := &model.Inbound{Type: "http", Tag: test.name, Options: json.RawMessage(test.options), Addrs: json.RawMessage(`[{"server":"proxy.example","server_port":8080}]`), OutJson: json.RawMessage(test.outbound), Tls: test.tls}
