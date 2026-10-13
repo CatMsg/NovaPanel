@@ -1,8 +1,17 @@
 import { expect, test } from '@playwright/test'
-import { installBaseMocks } from './mockApi'
+import { installBaseMocks, json } from './mockApi'
 
 test('command palette opens by shortcut and navigates to a filtered page', async ({ page }) => {
   await installBaseMocks(page, true)
+  await page.route('**/api/load**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json({
+      config: { dns: { servers: [], rules: [] } },
+      lastUpdate: 1,
+      onlines: { inbound: [], outbound: [], user: [] },
+    }),
+  }))
   await page.goto('/app/')
 
   const dialog = page.getByRole('dialog')

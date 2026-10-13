@@ -46,7 +46,7 @@ func filterClashHTTPOutbounds(inbounds []*model.Inbound, outbounds []map[string]
 		}
 		inbound := inboundByTag[tag]
 		if inbound == nil {
-			if !clashHTTPVersionIsH1OrLegacy(outbound) {
+			if !clashHTTPVersionIsHTTP1(outbound) {
 				continue
 			}
 			filtered, err := util.CloneJSONMap(outbound)
@@ -66,7 +66,7 @@ func filterClashHTTPOutbounds(inbounds []*model.Inbound, outbounds []map[string]
 		if !hasHTTPVersion(versions, 1) {
 			continue
 		}
-		if !clashHTTPVersionIsH1OrLegacy(outbound) {
+		if !clashHTTPVersionIsHTTP1(outbound) {
 			continue
 		}
 		version, err := util.ResolveHTTPOutboundVersion(outbound, versions)
@@ -125,7 +125,7 @@ func filterRawClashHTTPProxies(proxies []map[string]interface{}) ([]map[string]i
 			return nil, fmt.Errorf("copy raw Clash proxy: %w", err)
 		}
 		if strings.EqualFold(strings.TrimSpace(asString(copy["type"])), "http") {
-			if !clashHTTPVersionIsH1OrLegacy(copy) {
+			if !clashHTTPVersionIsHTTP1(copy) {
 				continue
 			}
 			delete(copy, "version")
@@ -145,7 +145,7 @@ func hasHTTPVersion(versions []int, wanted int) bool {
 	return false
 }
 
-func clashHTTPVersionIsH1OrLegacy(outbound map[string]interface{}) bool {
+func clashHTTPVersionIsHTTP1(outbound map[string]interface{}) bool {
 	raw, exists := outbound["version"]
 	if !exists || raw == nil {
 		return true

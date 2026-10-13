@@ -1,4 +1,14 @@
 <template>
+  <v-alert
+    v-if="configLoaded && !dnsConfigValid"
+    class="ma-4"
+    type="error"
+    variant="tonal"
+    :title="$t('dns.invalidConfig.title')"
+  >
+    {{ $t('dns.invalidConfig.description') }}
+  </v-alert>
+  <template v-else-if="dnsConfigValid">
   <DnsVue
     v-model="dnsModal.visible"
     :visible="dnsModal.visible"
@@ -161,6 +171,7 @@
       </v-card-actions>
     </v-card>
   </v-dialog>
+  </template>
 </template>
 
 <script lang="ts" setup>
@@ -184,12 +195,13 @@ const appConfig = computed((): Config => {
   return <Config> Data().config
 })
 
-onBeforeMount( async () => {
-  // fix old configs
-  if (!appConfig.value.dns) appConfig.value.dns = { servers: [], rules: [] }
-  if (!appConfig.value.dns.servers) appConfig.value.dns.servers = []
-  if (!appConfig.value.dns.rules) appConfig.value.dns.rules = []
+const configLoaded = computed(() => Data().lastLoad > 0)
+const dnsConfigValid = computed(() => {
+  const dns = appConfig.value?.dns
+  return !!dns && Array.isArray(dns.servers) && Array.isArray(dns.rules)
+})
 
+onBeforeMount( async () => {
   loading.value = true
   while (Data().lastLoad == 0) {
     await new Promise(resolve => setTimeout(resolve, 100))

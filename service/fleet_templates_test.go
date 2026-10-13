@@ -24,6 +24,9 @@ func TestApplyFleetTemplateFailurePreservesPostCommitOperations(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "fleet-compensation.db")); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := (&SettingService{}).GetAllSetting(); err != nil {
+		t.Fatal(err)
+	}
 	db := database.GetDB()
 	previousCore, previousMasque, previousMieru := corePtr, masquePtr, mieruPtr
 	corePtr, masquePtr, mieruPtr = core.NewCore(), NewMasqueService(), nil
@@ -31,8 +34,7 @@ func TestApplyFleetTemplateFailurePreservesPostCommitOperations(t *testing.T) {
 		_ = corePtr.Stop()
 		corePtr, masquePtr, mieruPtr = previousCore, previousMasque, previousMieru
 	})
-	config := model.Setting{Key: "config", Value: `{"log":{"disabled":true},"route":{"final":"direct"}}`}
-	if err := db.Create(&config).Error; err != nil {
+	if err := db.Model(&model.Setting{}).Where("key = ?", "config").Update("value", `{"log":{"disabled":true},"route":{"final":"direct"}}`).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := corePtr.Start([]byte(`{"log":{"disabled":true},"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}`)); err != nil {
@@ -155,6 +157,9 @@ func TestApplyFleetTemplateCoreStartFailureRestoresRealCoreAndPostCommitOperatio
 	if err := database.InitDB(filepath.Join(dir, "fleet-core-compensation.db")); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := (&SettingService{}).GetAllSetting(); err != nil {
+		t.Fatal(err)
+	}
 	db := database.GetDB()
 	t.Cleanup(func() {
 		if sqlDB, err := db.DB(); err == nil {
@@ -176,7 +181,10 @@ func TestApplyFleetTemplateCoreStartFailureRestoresRealCoreAndPostCommitOperatio
 		Inbounds: json.RawMessage(`[]`), Links: json.RawMessage(`[]`), Desc: "before", Group: "keep",
 		Up: 100, Down: 200, TotalUp: 300, TotalDown: 400,
 		History: json.RawMessage(`[{"dateTime":1,"domain":"old","future":9007199254740993}]`)}
-	for _, row := range []interface{}{&config, &stableOutbound, &client} {
+	if err := db.Model(&model.Setting{}).Where("key = ?", config.Key).Update("value", config.Value).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []interface{}{&stableOutbound, &client} {
 		if err := db.Create(row).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -431,22 +439,31 @@ func TestCaptureFleetTemplateOutboundsKeepsOptionsAfterStorage(t *testing.T) {
 }
 
 func TestFleetTemplatePreservesInboundSubscriptionVisibility(t *testing.T) {
+	commands := testutil.NewManagedPortSandbox(t,
+		[]string{"scripts/hy2-forward.sh", "apply", "fleet-hidden-inbound", "1080", "1080", "tcp"},
+		[]string{"scripts/hy2-forward.sh", "apply", "fleet-visible-inbound", "1081", "1081", "tcp"},
+	)
 	if err := database.InitDB(filepath.Join(t.TempDir(), "fleet-inbound-visibility.db")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (&SettingService{}).GetAllSetting(); err != nil {
 		t.Fatal(err)
 	}
 	db := database.GetDB()
 	inbounds := []model.Inbound{
 		{
-			Type:           "direct",
+			Type:           "socks",
 			Tag:            "fleet-hidden-inbound",
 			ExcludeFromSub: true,
 			Addrs:          json.RawMessage(`[]`),
+			OutJson:        json.RawMessage(`{}`),
 			Options:        json.RawMessage(`{"listen":"::","listen_port":1080,"exclude_from_sub":false}`),
 		},
 		{
-			Type:    "direct",
+			Type:    "socks",
 			Tag:     "fleet-visible-inbound",
 			Addrs:   json.RawMessage(`[]`),
+			OutJson: json.RawMessage(`{}`),
 			Options: json.RawMessage(`{"listen":"::","listen_port":1081}`),
 		},
 	}
@@ -454,7 +471,7 @@ func TestFleetTemplatePreservesInboundSubscriptionVisibility(t *testing.T) {
 	if err := db.Create(&inbounds).Error; err != nil {
 		t.Fatalf("create test inbound: %v", err)
 	}
-	if err := db.Create(&config).Error; err != nil {
+	if err := db.Model(&model.Setting{}).Where("key = ?", config.Key).Update("value", config.Value).Error; err != nil {
 		t.Fatalf("create test config: %v", err)
 	}
 	template, err := (&FleetService{}).CaptureFleetTemplate("visibility", FleetTemplateSections{Inbounds: true}, "panel.example")
@@ -534,6 +551,14 @@ func TestFleetTemplatePreservesInboundSubscriptionVisibility(t *testing.T) {
 	if len(applied) != len(inbounds) || !assertApplied["fleet-hidden-inbound"] || assertApplied["fleet-visible-inbound"] {
 		t.Fatalf("fleet template apply did not restore both visibility states: %+v", applied)
 	}
+	var wantCalls [][]string
+	if runtime.GOOS == "linux" {
+		wantCalls = testutil.ManagedPortRebuildCalls(
+			[]string{"scripts/hy2-forward.sh", "apply", "fleet-hidden-inbound", "1080", "1080", "tcp"},
+			[]string{"scripts/hy2-forward.sh", "apply", "fleet-visible-inbound", "1081", "1081", "tcp"},
+		)
+	}
+	commands.AssertCalls(t, wantCalls)
 }
 
 func TestFleetTemplateOutboundPreviewAndMerge(t *testing.T) {

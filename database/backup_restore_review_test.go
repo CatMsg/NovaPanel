@@ -27,9 +27,7 @@ func restoreReviewSnapshot(t *testing.T, fleet string) string {
 		t.Fatal(err)
 	}
 	defer sqlDB.Close()
-	if err := conn.AutoMigrate(&model.Setting{}, &model.User{}, &model.Inbound{}, &model.Outbound{}, &model.Endpoint{}, &model.Client{}); err != nil {
-		t.Fatal(err)
-	}
+	createCompleteTestSchema(t, conn)
 	if err := conn.Create(&model.Setting{Key: "fleetServers", Value: fleet}).Error; err != nil {
 		t.Fatal(err)
 	}

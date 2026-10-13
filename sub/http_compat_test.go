@@ -22,7 +22,7 @@ func TestJSONSubscriptionDerivesAndPreservesHTTPVersionFields(t *testing.T) {
 		wantErr  string
 	}{
 		{
-			name:     "legacy omitted version defaults to H1 for H1 and H2 server",
+			name:     "omitted version defaults to H1 for H1 and H2 server",
 			options:  `{"listen_port":8080}`,
 			outbound: `{"type":"http","tag":"http-default","path":"/proxy","headers":{"X-Test":["kept"]},"transport":{"type":"ws","path":"/kept"}}`,
 			want:     1,
@@ -39,7 +39,7 @@ func TestJSONSubscriptionDerivesAndPreservesHTTPVersionFields(t *testing.T) {
 			options: `{"listen_port":8083,"version":[2]}`,
 		},
 		{
-			name:     "legacy multi-version explicit H2 remains unchanged",
+			name:     "multi-version explicit H2 remains unchanged",
 			options:  `{"listen_port":8083,"version":[1,2]}`,
 			outbound: `{"type":"http","tag":"legacy-h2","version":2}`,
 			want:     2,
@@ -108,10 +108,10 @@ func TestJSONSubscriptionDerivesAndPreservesHTTPVersionFields(t *testing.T) {
 			if version, ok := outbound["version"].(int); !ok || version != test.want {
 				t.Fatalf("version = %#v, want %d", version, test.want)
 			}
-			if fallback, _ := outbound["disable_version_fallback"].(bool); test.name == "legacy multi-version explicit H2 remains unchanged" && fallback {
+			if fallback, _ := outbound["disable_version_fallback"].(bool); test.name == "multi-version explicit H2 remains unchanged" && fallback {
 				t.Fatalf("legacy H2 without TLS was forced to disable HTTP/1 fallback: %#v", outbound)
 			}
-			if test.name == "legacy omitted version defaults to H1 for H1 and H2 server" {
+			if test.name == "omitted version defaults to H1 for H1 and H2 server" {
 				if outbound["path"] != "/proxy" || outbound["headers"] == nil || outbound["transport"] == nil {
 					t.Fatalf("HTTP outbound fields were not preserved: %#v", outbound)
 				}

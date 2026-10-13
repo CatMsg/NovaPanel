@@ -167,6 +167,7 @@ func TestUserCenterBuildUsesConfiguredResetTimezone(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "user-center.db")); err != nil {
 		t.Fatalf("init database: %v", err)
 	}
+	seedSubscriptionTestSettings(t, model.Setting{Key: "timeLocation", Value: "Asia/Tokyo"})
 	location, err := time.LoadLocation("Asia/Tokyo")
 	if err != nil {
 		t.Fatalf("load reset timezone: %v", err)
@@ -177,9 +178,6 @@ func TestUserCenterBuildUsesConfiguredResetTimezone(t *testing.T) {
 	}
 	if err := database.GetDB().Create(&client).Error; err != nil {
 		t.Fatalf("create client: %v", err)
-	}
-	if err := database.GetDB().Create(&model.Setting{Key: "timeLocation", Value: "Asia/Tokyo"}).Error; err != nil {
-		t.Fatalf("create timezone setting: %v", err)
 	}
 
 	view, _, err := (&UserCenterService{}).Build(client.Name, time.Date(2026, time.October, 30, 0, 0, 0, 0, time.UTC))

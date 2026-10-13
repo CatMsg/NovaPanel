@@ -523,28 +523,39 @@ func TestBoxCloseBeforeStartDoesNotReopenLogger(t *testing.T) {
 	}
 }
 
-func TestCoreImplicitDirectTagCompatibility(t *testing.T) {
+func TestCoreRequiresDeclaredDirectOutboundForNamedRoute(t *testing.T) {
 	panelLog.InitLogger(logging.ERROR)
 	if err := database.InitDB(filepath.Join(t.TempDir(), "implicit-direct.db")); err != nil {
 		t.Fatal(err)
 	}
+	implicitRuntime := NewCore()
+	if err := implicitRuntime.Start([]byte(`{"log":{"disabled":true},"route":{"rules":[{"network":"tcp","outbound":"direct"}]}}`)); err != nil {
+		t.Fatalf("start with unnamed runtime fallback: %v", err)
+	}
+	if implicitRuntime.GetInstance().Outbound().Default().Tag() != "" {
+		t.Fatal("implicit runtime fallback retained the removed legacy direct tag")
+	}
+	if err := implicitRuntime.Stop(); err != nil {
+		t.Fatalf("stop implicit runtime: %v", err)
+	}
+
 	runtime := NewCore()
 	t.Cleanup(func() { _ = runtime.Stop() })
-	if err := runtime.Start([]byte(`{"log":{"disabled":true},"route":{"rules":[{"network":"tcp","outbound":"direct"}]}}`)); err != nil {
-		t.Fatalf("legacy implicit direct reference: %v", err)
+	if err := runtime.Start([]byte(`{"log":{"disabled":true},"outbounds":[{"type":"direct","tag":"direct"}],"route":{"rules":[{"network":"tcp","outbound":"direct"}]}}`)); err != nil {
+		t.Fatalf("declared direct outbound: %v", err)
 	}
 	manager := runtime.GetInstance().Outbound()
 	if manager.Default() == nil || manager.Default().Tag() != "direct" {
-		t.Fatal("initial implicit default lost its legacy tag")
+		t.Fatal("declared default outbound tag was not preserved")
 	}
 	if err := runtime.RemoveOutbound("direct"); err != nil {
 		t.Fatal(err)
 	}
 	if manager.Default() == nil || manager.Default().Tag() != "" {
-		t.Fatal("last removal did not reserve a collision-free runtime fallback")
+		t.Fatal("last removal did not retain the unnamed runtime fallback")
 	}
 	if err := runtime.AddOutbound([]byte(`{"type":"direct","tag":"direct"}`)); err != nil {
-		t.Fatalf("cannot reuse a removed user tag: %v", err)
+		t.Fatalf("cannot reuse the removed outbound tag: %v", err)
 	}
 }
 

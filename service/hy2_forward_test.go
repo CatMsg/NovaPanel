@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/CatMsg/NovaPanel/database/model"
 )
 
 func TestGetHy2ServerPorts(t *testing.T) {
@@ -51,6 +53,13 @@ func TestGetHy2ServerPortsRejectsExcessiveFragments(t *testing.T) {
 	}
 	if _, err := getHy2ServerPortRanges(payload); err == nil {
 		t.Fatal("expected excessive fragmented ranges to be rejected")
+	}
+}
+
+func TestCollectInboundForwardProtocolsRejectsUnknownType(t *testing.T) {
+	_, err := collectInboundForwardProtocols(&model.Inbound{Type: "unregistered", Tag: "unknown"})
+	if err == nil || !strings.Contains(err.Error(), "unsupported inbound type") {
+		t.Fatalf("unknown inbound type must not silently open both protocols: %v", err)
 	}
 }
 

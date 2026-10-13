@@ -527,7 +527,7 @@ func (m *outboundManager) ensureFallback(removingTag string) error {
 		return err
 	}
 	// Keep a usable direct default when deleting the last selectable outbound.
-	// The legacy manager could leave Default nil, which is unsafe for routing.
+	// Keep a default outbound available so routing remains safe after removals.
 	if removingTag == "" {
 		return fmt.Errorf("cannot remove the last implicit fallback outbound")
 	}

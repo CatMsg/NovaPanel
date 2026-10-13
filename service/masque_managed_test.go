@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/netip"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,7 +36,7 @@ func masqueManagedConfigFixture(t *testing.T) (*gorm.DB, model.Inbound) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { sqlDB.Close() })
-	if err := db.AutoMigrate(&model.Tls{}, &model.Inbound{}, &model.Client{}); err != nil {
+	if err := db.Migrator().CreateTable(&model.Tls{}, &model.Inbound{}, &model.Client{}); err != nil {
 		t.Fatal(err)
 	}
 	tls := masqueManagedTestTLS(t)
@@ -123,6 +124,43 @@ func TestMASQUEManagedPrepareDefaultsAndRejectLegacy(t *testing.T) {
 				t.Fatal("MASQUE did not replace the shared TLS dependency with its own identity")
 			}
 		})
+	}
+	missingIdentity := inbound
+	missingIdentity.MasqueTLSCertificate, missingIdentity.MasqueTLSKey = "", ""
+	if err := prepareMasqueInbound(db, &missingIdentity, &missingIdentity, "localhost"); err == nil || !strings.Contains(err.Error(), "delete and recreate") {
+		t.Fatalf("editing an identity-less existing inbound should reject migration: %v", err)
+	}
+	if missingIdentity.MasqueTLSCertificate != "" || missingIdentity.MasqueTLSKey != "" {
+		t.Fatal("editing an identity-less existing inbound generated a compatibility certificate")
+	}
+}
+
+func TestSavingNewMASQUEInboundPersistsDedicatedECDSAIdentity(t *testing.T) {
+	db, service := setupInboundRuntimeTest(t)
+	payload := json.RawMessage(`{"type":"masque","tag":"auto-ecdsa","listen":"::","listen_port":41443,"mihomo_compatible":true}`)
+	var postCommit func() error
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		var err error
+		postCommit, err = service.Save(tx, "new", payload, "", "masque.example")
+		return err
+	}); err != nil {
+		t.Fatalf("save new MASQUE inbound: %v", err)
+	}
+	if postCommit == nil {
+		t.Fatal("creating MASQUE inbound returned no post-commit action")
+	}
+	var stored model.Inbound
+	if err := db.Where("tag = ?", "auto-ecdsa").First(&stored).Error; err != nil {
+		t.Fatalf("load saved MASQUE inbound: %v", err)
+	}
+	if stored.MasqueTLSCertificate == "" || stored.MasqueTLSKey == "" {
+		t.Fatal("saving a new MASQUE inbound did not persist its dedicated TLS identity")
+	}
+	if stored.TlsId != 0 {
+		t.Fatalf("MASQUE unexpectedly retained a shared TLS template: %d", stored.TlsId)
+	}
+	if _, err := validateMasqueTLSMaterial(&stored, "masque.example"); err != nil {
+		t.Fatalf("saved MASQUE ECDSA identity is invalid: %v", err)
 	}
 }
 

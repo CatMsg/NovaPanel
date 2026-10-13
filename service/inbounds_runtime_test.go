@@ -43,6 +43,9 @@ func setupInboundRuntimeTest(t *testing.T, hostCalls ...[]string) (*gorm.DB, *In
 	if err := database.InitDB(filepath.Join(t.TempDir(), "inbound-runtime.db")); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := (&SettingService{}).GetAllSetting(); err != nil {
+		t.Fatal(err)
+	}
 	previousCore := corePtr
 	corePtr = core.NewCore()
 	runtime := corePtr

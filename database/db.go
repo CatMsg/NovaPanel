@@ -3,6 +3,7 @@ package database
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path"
 	"strings"
@@ -18,20 +19,47 @@ import (
 
 var db *gorm.DB
 
-func initUser() error {
-	var count int64
-	err := db.Model(&model.User{}).Count(&count).Error
-	if err != nil {
-		return err
-	}
-	if count == 0 {
-		user := &model.User{
-			Username: "admin",
-			Password: "admin",
-		}
-		return db.Create(user).Error
-	}
-	return nil
+var schemaModels = []any{
+	&model.Setting{},
+	&model.Tls{},
+	&model.Inbound{},
+	&model.Outbound{},
+	&model.Service{},
+	&model.Endpoint{},
+	&model.ManagedPortEntry{},
+	&model.User{},
+	&model.Tokens{},
+	&model.Stats{},
+	&model.TrafficBudgetSample{},
+	&model.Client{},
+	&model.Changes{},
+}
+
+type schemaIndex struct {
+	model any
+	name  string
+	sql   string
+}
+
+var schemaIndexes = []schemaIndex{
+	{&model.Setting{}, "idx_settings_key", `CREATE UNIQUE INDEX idx_settings_key ON settings(key)`},
+	{&model.User{}, "idx_users_username", `CREATE UNIQUE INDEX idx_users_username ON users(username)`},
+	{&model.Client{}, "idx_clients_name", `CREATE INDEX idx_clients_name ON clients(name)`},
+	{&model.Client{}, "idx_clients_enable_name", `CREATE INDEX idx_clients_enable_name ON clients(enable, name)`},
+	{&model.Inbound{}, "idx_inbounds_tag", `CREATE INDEX idx_inbounds_tag ON inbounds(tag)`},
+	{&model.Outbound{}, "idx_outbounds_tag", `CREATE INDEX idx_outbounds_tag ON outbounds(tag)`},
+	{&model.Endpoint{}, "idx_endpoints_tag", `CREATE INDEX idx_endpoints_tag ON endpoints(tag)`},
+	{&model.ManagedPortEntry{}, "idx_managed_port_lookup", `CREATE INDEX idx_managed_port_lookup ON managed_port_entries(port, scope, owner_id)`},
+	{&model.ManagedPortEntry{}, "idx_managed_port_range_lookup", `CREATE INDEX idx_managed_port_range_lookup ON managed_port_entries(port, end_port, scope, owner_id)`},
+	{&model.ManagedPortEntry{}, "idx_managed_port_owner_port", `CREATE UNIQUE INDEX idx_managed_port_owner_port ON managed_port_entries(scope, owner_id, port)`},
+	{&model.Service{}, "idx_services_tag", `CREATE INDEX idx_services_tag ON services(tag)`},
+	{&model.Tokens{}, "idx_tokens_expiry", `CREATE INDEX idx_tokens_expiry ON tokens(expiry)`},
+	{&model.Tokens{}, "idx_tokens_user_id", `CREATE INDEX idx_tokens_user_id ON tokens(user_id)`},
+	{&model.Changes{}, "idx_changes_date_time", `CREATE INDEX idx_changes_date_time ON changes(date_time)`},
+	{&model.Changes{}, "idx_changes_actor_key_date_time", `CREATE INDEX idx_changes_actor_key_date_time ON changes(actor, key, date_time)`},
+	{&model.Stats{}, "idx_stats_lookup", `CREATE INDEX idx_stats_lookup ON stats(resource, tag, date_time)`},
+	{&model.TrafficBudgetSample{}, "idx_traffic_budget_samples_period_time", `CREATE UNIQUE INDEX idx_traffic_budget_samples_period_time ON traffic_budget_samples(period_start, date_time)`},
+	{&model.TrafficBudgetSample{}, "idx_traffic_budget_samples_time", `CREATE INDEX idx_traffic_budget_samples_time ON traffic_budget_samples(date_time)`},
 }
 
 func OpenDB(dbPath string) error {
@@ -81,75 +109,81 @@ func InitDB(dbPath string) error {
 	if err != nil {
 		return err
 	}
-
-	// Default Outbounds
-	if !db.Migrator().HasTable(&model.Outbound{}) {
-		if err := db.Migrator().CreateTable(&model.Outbound{}); err != nil {
+	return db.Transaction(func(tx *gorm.DB) error {
+		existingTables := 0
+		for _, schemaModel := range schemaModels {
+			if tx.Migrator().HasTable(schemaModel) {
+				existingTables++
+			}
+		}
+		if existingTables == 0 {
+			var userTables int64
+			if err := tx.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").Scan(&userTables).Error; err != nil {
+				return fmt.Errorf("inspect database before initialization: %w", err)
+			}
+			if userTables != 0 {
+				return errors.New("database is not empty and contains no NovaPanel schema; refusing to initialize it")
+			}
+			if err := tx.Migrator().CreateTable(schemaModels...); err != nil {
+				return fmt.Errorf("create fresh database schema: %w", err)
+			}
+			if err := createIndexes(tx); err != nil {
+				return err
+			}
+			return seedFreshDatabase(tx)
+		}
+		if existingTables != len(schemaModels) {
+			return fmt.Errorf("database schema is incomplete (%d/%d tables); automatic schema migration is not supported", existingTables, len(schemaModels))
+		}
+		if err := validateSchema(tx); err != nil {
 			return err
 		}
-		defaultOutbound := []model.Outbound{
-			{Type: "direct", Tag: "direct", Options: json.RawMessage(`{}`)},
-		}
-		if err := db.Create(&defaultOutbound).Error; err != nil {
-			return err
-		}
-	}
+		return validateIndexes(tx)
+	})
+}
 
-	err = db.AutoMigrate(
-		&model.Setting{},
-		&model.Tls{},
-		&model.Inbound{},
-		&model.Outbound{},
-		&model.Service{},
-		&model.Endpoint{},
-		&model.ManagedPortEntry{},
-		&model.User{},
-		&model.Tokens{},
-		&model.Stats{},
-		&model.TrafficBudgetSample{},
-		&model.Client{},
-		&model.Changes{},
-	)
-	if err != nil {
-		return err
+func createIndexes(tx *gorm.DB) error {
+	for _, index := range schemaIndexes {
+		if err := tx.Exec(index.sql).Error; err != nil {
+			return fmt.Errorf("create database index %s: %w", index.name, err)
+		}
 	}
-	if err := ensureIndexes(); err != nil {
-		return err
-	}
-	err = initUser()
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 
-func ensureIndexes() error {
-	indexes := []string{
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_key ON settings(key)`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)`,
-		`CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name)`,
-		`CREATE INDEX IF NOT EXISTS idx_clients_enable_name ON clients(enable, name)`,
-		`CREATE INDEX IF NOT EXISTS idx_inbounds_tag ON inbounds(tag)`,
-		`CREATE INDEX IF NOT EXISTS idx_outbounds_tag ON outbounds(tag)`,
-		`CREATE INDEX IF NOT EXISTS idx_endpoints_tag ON endpoints(tag)`,
-		`CREATE INDEX IF NOT EXISTS idx_managed_port_lookup ON managed_port_entries(port, scope, owner_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_managed_port_range_lookup ON managed_port_entries(port, end_port, scope, owner_id)`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_managed_port_owner_port ON managed_port_entries(scope, owner_id, port)`,
-		`CREATE INDEX IF NOT EXISTS idx_services_tag ON services(tag)`,
-		`CREATE INDEX IF NOT EXISTS idx_tokens_expiry ON tokens(expiry)`,
-		`CREATE INDEX IF NOT EXISTS idx_tokens_user_id ON tokens(user_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_changes_date_time ON changes(date_time)`,
-		`CREATE INDEX IF NOT EXISTS idx_changes_actor_key_date_time ON changes(actor, key, date_time)`,
-		`CREATE INDEX IF NOT EXISTS idx_stats_lookup ON stats(resource, tag, date_time)`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_traffic_budget_samples_period_time ON traffic_budget_samples(period_start, date_time)`,
-		`CREATE INDEX IF NOT EXISTS idx_traffic_budget_samples_time ON traffic_budget_samples(date_time)`,
-	}
-
-	for _, stmt := range indexes {
-		if err := db.Exec(stmt).Error; err != nil {
+func validateSchema(tx *gorm.DB) error {
+	for _, schemaModel := range schemaModels {
+		statement := &gorm.Statement{DB: tx}
+		if err := statement.Parse(schemaModel); err != nil {
 			return err
 		}
+		if !tx.Migrator().HasTable(schemaModel) {
+			return fmt.Errorf("database schema is missing table %s; automatic schema migration is not supported", statement.Schema.Table)
+		}
+		for _, field := range statement.Schema.Fields {
+			if field.DBName != "" && !tx.Migrator().HasColumn(schemaModel, field.DBName) {
+				return fmt.Errorf("database schema is missing column %s.%s; automatic schema migration is not supported", statement.Schema.Table, field.DBName)
+			}
+		}
+	}
+	return nil
+}
+
+func validateIndexes(tx *gorm.DB) error {
+	for _, index := range schemaIndexes {
+		if !tx.Migrator().HasIndex(index.model, index.name) {
+			return fmt.Errorf("database schema is missing index %s; automatic schema migration is not supported", index.name)
+		}
+	}
+	return nil
+}
+
+func seedFreshDatabase(tx *gorm.DB) error {
+	if err := tx.Create(&model.Outbound{Type: "direct", Tag: "direct", Options: json.RawMessage(`{}`)}).Error; err != nil {
+		return fmt.Errorf("seed default direct outbound: %w", err)
+	}
+	if err := tx.Create(&model.User{Username: "admin", Password: "admin"}).Error; err != nil {
+		return fmt.Errorf("seed initial administrator: %w", err)
 	}
 	return nil
 }

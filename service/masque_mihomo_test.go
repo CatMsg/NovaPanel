@@ -164,3 +164,22 @@ func TestMASQUEMihomoTemplateUsesDedicatedECDSAIdentity(t *testing.T) {
 		t.Fatal("Mihomo pin does not match the dedicated server certificate")
 	}
 }
+
+func TestMASQUEOutboundRefreshDoesNotCreateMissingIdentity(t *testing.T) {
+	db, inbound := masqueManagedConfigFixture(t)
+	inbound.Options = json.RawMessage(`{"server":"localhost","listen":"::","listen_port":443,"version":[3],"system":false,"mtu":1280,"address":["172.16.0.1/24"]}`)
+	inbound.MasqueTLSCertificate, inbound.MasqueTLSKey = "", ""
+	if err := db.Create(&inbound).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := (&InboundService{}).UpdateOutJsons(db, []uint{inbound.Id}, "localhost"); err == nil || !bytes.Contains([]byte(err.Error()), []byte("no dedicated ECDSA identity")) {
+		t.Fatalf("outbound refresh should reject missing identity instead of migrating it: %v", err)
+	}
+	var stored model.Inbound
+	if err := db.First(&stored, inbound.Id).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.MasqueTLSCertificate != "" || stored.MasqueTLSKey != "" {
+		t.Fatal("outbound refresh silently initialized a MASQUE identity")
+	}
+}

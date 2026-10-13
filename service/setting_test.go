@@ -328,7 +328,7 @@ printf 'login-guard %s\n' "$*" >> "${HY2_MOCK_LOG:?}"
 	}
 }
 
-func TestGetAllSettingPersistsMissingDefaults(t *testing.T) {
+func TestGetAllSettingInitializesAnEmptySettingsTable(t *testing.T) {
 	workDir := t.TempDir()
 	if err := database.InitDB(filepath.Join(workDir, "defaults.db")); err != nil {
 		t.Fatalf("init db: %v", err)
@@ -352,7 +352,42 @@ func TestGetAllSettingPersistsMissingDefaults(t *testing.T) {
 		t.Fatalf("count settings: %v", err)
 	}
 	if count == 0 {
-		t.Fatal("expected missing defaults to be persisted")
+		t.Fatal("expected fresh settings defaults to be initialized")
+	}
+}
+
+func TestGetAllSettingRejectsPartialSettingsWithoutRepairing(t *testing.T) {
+	if err := database.InitDB(filepath.Join(t.TempDir(), "partial-settings.db")); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.GetDB().Create(&model.Setting{Key: "webPort", Value: "2095"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (&SettingService{}).GetAllSetting(); err == nil || !strings.Contains(err.Error(), "settings are incomplete") {
+		t.Fatalf("partial settings should fail explicitly, got %v", err)
+	}
+	var count int64
+	if err := database.GetDB().Model(&model.Setting{}).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("partial settings were silently filled; row count=%d", count)
+	}
+}
+
+func TestGetStringRejectsDeletedDefaultInsteadOfFallingBack(t *testing.T) {
+	if err := database.InitDB(filepath.Join(t.TempDir(), "deleted-setting.db")); err != nil {
+		t.Fatal(err)
+	}
+	svc := &SettingService{}
+	if _, err := svc.GetAllSetting(); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.GetDB().Where("key = ?", "webPort").Delete(&model.Setting{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.GetPort(); err == nil || !strings.Contains(err.Error(), "settings are incomplete") {
+		t.Fatalf("missing persisted setting should fail rather than return a fallback: %v", err)
 	}
 }
 

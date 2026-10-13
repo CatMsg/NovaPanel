@@ -90,11 +90,9 @@ func CreateDBBackupContext(ctx context.Context, exclude string) (string, func(),
 			closeAndCleanup()
 			return "", nil, err
 		}
-		if backupDb.Migrator().HasTable(&model.TrafficBudgetSample{}) {
-			if err := backupDb.Exec("DELETE FROM traffic_budget_samples").Error; err != nil {
-				closeAndCleanup()
-				return "", nil, err
-			}
+		if err := backupDb.Exec("DELETE FROM traffic_budget_samples").Error; err != nil {
+			closeAndCleanup()
+			return "", nil, err
 		}
 	}
 	if exclude_changes {
@@ -139,6 +137,22 @@ func RehearseDB(ctx context.Context, path string) (map[string]int64, error) {
 	// artifact that import rejects after it has displaced older recovery points.
 	if err := conn.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&integrity); err != nil || integrity != "ok" {
 		return nil, errors.New("SQLite integrity_check failed")
+	}
+	schemaDB, err := gorm.Open(sqlite.Open(u.String()), &gorm.Config{DisableAutomaticPing: true})
+	if err != nil {
+		return nil, errors.New("cannot open backup schema read-only")
+	}
+	schemaSQL, err := schemaDB.DB()
+	if err != nil {
+		return nil, errors.New("cannot inspect backup schema")
+	}
+	schemaSQL.SetMaxOpenConns(1)
+	defer schemaSQL.Close()
+	if err := validateSchema(schemaDB.WithContext(ctx)); err != nil {
+		return nil, fmt.Errorf("backup schema is not current: %w", err)
+	}
+	if err := validateIndexes(schemaDB.WithContext(ctx)); err != nil {
+		return nil, fmt.Errorf("backup indexes are not current: %w", err)
 	}
 	required := map[string]string{
 		"settings": "id,key,value", "users": "id,username,password",
@@ -446,6 +460,11 @@ func validateAndSanitizeRestoreDB(path string) error {
 		values[setting.Key] = setting.Value
 	}
 	updates := make(map[string]string)
+	for _, key := range []string{"remoteBackupConfig", "remoteBackupOwner", "remoteBackupState"} {
+		if _, exists := values[key]; !exists {
+			updates[key] = ""
+		}
+	}
 	for _, pair := range [][2]string{
 		{"webCertFile", "webKeyFile"},
 		{"subCertFile", "subKeyFile"},

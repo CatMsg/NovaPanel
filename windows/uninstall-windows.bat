@@ -97,6 +97,6 @@ if /i "%keep_data%"=="y" (
     echo You can safely delete this directory if you no longer need the data.
 )
 echo.
-echo Thank you for using NovaPanel! (compatibility files are cleaned, core data may be preserved if you chose to keep it)
+echo Thank you for using NovaPanel! Temporary and service files are removed; core data is preserved only if you chose to keep it.
 echo.
 pause

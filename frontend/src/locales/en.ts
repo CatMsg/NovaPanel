@@ -629,6 +629,10 @@ export default {
     independentCache: "Independent Cache",
     reverseMapping: "Reverse Mapping",
     domainStrategy: "Domain Strategy",
+    invalidConfig: {
+      title: "DNS configuration is incomplete",
+      description: "The current Sing-box config does not contain valid DNS server and rule lists. It was not rewritten automatically. Repair the config in Basic Info before editing DNS here.",
+    },
     condition: {
       advanced: "Advanced DNS conditions",
       serverAddress: "DNS server address",

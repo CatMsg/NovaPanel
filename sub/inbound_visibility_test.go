@@ -100,19 +100,16 @@ func TestExcludedInboundIsHiddenFromUserAndAggregateSubscriptions(t *testing.T) 
 	NewSubHandler(router.Group("/sub"))
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
-	settings := []model.Setting{
-		{Key: "subEncode", Value: "false"},
-		{Key: "subShowInfo", Value: "false"},
-		{Key: "subUpdates", Value: "24"},
-		{Key: "subJsonExt", Value: "{}"},
-		{Key: "subClashExt", Value: ""},
-		{Key: "subMode", Value: "master"},
-		{Key: "subMasterSources", Value: server.URL + "/sub/" + client.Name},
-		{Key: "subURI", Value: server.URL + "/sub/"},
-	}
-	if err := db.Create(&settings).Error; err != nil {
-		t.Fatalf("create subscription settings: %v", err)
-	}
+	seedSubscriptionTestSettings(t,
+		model.Setting{Key: "subEncode", Value: "false"},
+		model.Setting{Key: "subShowInfo", Value: "false"},
+		model.Setting{Key: "subUpdates", Value: "24"},
+		model.Setting{Key: "subJsonExt", Value: "{}"},
+		model.Setting{Key: "subClashExt", Value: ""},
+		model.Setting{Key: "subMode", Value: "master"},
+		model.Setting{Key: "subMasterSources", Value: server.URL + "/sub/" + client.Name},
+		model.Setting{Key: "subURI", Value: server.URL + "/sub/"},
+	)
 
 	plain, _, err := (&SubService{}).GetSubs(client.Name)
 	if err != nil {
@@ -209,6 +206,7 @@ func TestLegacyLocalLinkRemainsWhenNoInboundIsExcluded(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "legacy-local-link.db")); err != nil {
 		t.Fatalf("initialize temporary database: %v", err)
 	}
+	seedSubscriptionTestSettings(t)
 	if sqlDB, err := database.GetDB().DB(); err == nil {
 		t.Cleanup(func() { _ = sqlDB.Close() })
 	}

@@ -141,7 +141,8 @@ func SetHTTPOutboundVersion(outbound map[string]interface{}, version int) error 
 
 // ResolveHTTPOutboundVersion applies sing-box HTTP outbound validation and, when
 // supportedVersions is non-nil, selects a version served by the corresponding
-// HTTP inbound. For subscriptions, HTTP/1 is preferred for legacy clients.
+// HTTP inbound. For ordinary Clash type:http subscriptions, HTTP/1 is the
+// only representable version and is preferred when no version is specified.
 func ResolveHTTPOutboundVersion(outbound map[string]interface{}, supportedVersions []int) (int, error) {
 	if outbound == nil {
 		return 0, fmt.Errorf("HTTP outbound options must be an object")
@@ -210,7 +211,7 @@ func ValidateHTTPOutboundTLSForInbound(outbound map[string]interface{}, inbound 
 	return nil
 }
 
-// HTTPInboundURICompatible reports whether a legacy HTTP proxy URI can encode
+// HTTPInboundURICompatible reports whether a standard HTTP proxy URI can encode
 // the configured client version. Such URIs represent HTTP/1 only.
 func HTTPInboundURICompatible(clientConfig json.RawMessage, inbound *model.Inbound) (bool, error) {
 	versions, err := ValidateHTTPInbound(inbound)
@@ -266,7 +267,7 @@ func HTTPInboundURICompatible(clientConfig json.RawMessage, inbound *model.Inbou
 	return version == 1 && !HTTPOutboundHasPathOrHost(outbound), nil
 }
 
-// HTTPOutboundHasPathOrHost reports options a legacy HTTP proxy URI or Clash
+// HTTPOutboundHasPathOrHost reports options a standard HTTP proxy URI or Clash
 // HTTP proxy entry cannot faithfully represent.
 func HTTPOutboundHasPathOrHost(outbound map[string]interface{}) bool {
 	return outbound != nil && (hasHTTPPath(outbound["path"]) || hasHTTPHostHeader(outbound["headers"]))

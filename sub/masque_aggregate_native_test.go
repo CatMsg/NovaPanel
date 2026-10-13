@@ -32,10 +32,11 @@ func TestAggregateNativeMASQUEEndpointsAndSourceReferences(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "native-aggregate.db")); err != nil {
 		t.Fatal(err)
 	}
-	settings := []model.Setting{{Key: "subMode", Value: "master"}, {Key: "subMasterSources", Value: server.URL + "/native-only\n" + server.URL + "/mixed"}, {Key: "subUpdates", Value: "24"}}
-	if err := database.GetDB().Create(&settings).Error; err != nil {
-		t.Fatal(err)
-	}
+	seedSubscriptionTestSettings(t,
+		model.Setting{Key: "subMode", Value: "master"},
+		model.Setting{Key: "subMasterSources", Value: server.URL + "/native-only\n" + server.URL + "/mixed"},
+		model.Setting{Key: "subUpdates", Value: "24"},
+	)
 	result, headers, err := (&AggregateService{}).GetAggregate("json", "panel.invalid")
 	if err != nil {
 		t.Fatal(err)

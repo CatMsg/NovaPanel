@@ -52,7 +52,7 @@ func TestResolveHTTPOutboundVersionCompatibility(t *testing.T) {
 		want      int
 		wantErr   string
 	}{
-		{name: "legacy prefers H1", outbound: map[string]interface{}{}, supported: []int{1, 2}, want: 1},
+		{name: "ordinary Clash HTTP prefers H1", outbound: map[string]interface{}{}, supported: []int{1, 2}, want: 1},
 		{name: "H2 when H1 unavailable", outbound: map[string]interface{}{"tls": map[string]interface{}{"enabled": true}}, supported: []int{2, 3}, want: 2},
 		{name: "H2 without TLS is rejected when H1 is unavailable", outbound: map[string]interface{}{"version": float64(2)}, supported: []int{2}, wantErr: "falls back to HTTP/1, which the inbound does not serve"},
 		{name: "H2 without TLS can fall back to served H1", outbound: map[string]interface{}{"version": float64(2)}, supported: []int{1, 2}, want: 2},
@@ -137,7 +137,7 @@ func TestHTTPInboundURICompatibilityPreservesLegacyVersionChecks(t *testing.T) {
 	}
 	compatible, err := HTTPInboundURICompatible(json.RawMessage(`{"http":{"version":2}}`), inbound)
 	if err != nil || compatible {
-		t.Fatalf("legacy explicit H2 cannot be represented by an HTTP/1 URI: compatible=%t err=%v", compatible, err)
+		t.Fatalf("explicit H2 cannot be represented by a standard HTTP/1 URI: compatible=%t err=%v", compatible, err)
 	}
 	if _, err := HTTPInboundURICompatible(json.RawMessage(`{"http":{"version":3}}`), inbound); err == nil || !strings.Contains(err.Error(), "is not served") {
 		t.Fatalf("legacy unsupported explicit version should retain mismatch validation, got %v", err)

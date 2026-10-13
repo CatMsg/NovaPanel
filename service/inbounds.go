@@ -466,6 +466,9 @@ func (s *InboundService) UpdateOutJsons(tx *gorm.DB, inboundIds []uint, hostname
 			if parseErr != nil {
 				return parseErr
 			}
+			if inbound.MasqueTLSCertificate == "" || inbound.MasqueTLSKey == "" {
+				return fmt.Errorf("MASQUE inbound %s has no dedicated ECDSA identity; save the inbound to initialize it", inbound.Tag)
+			}
 			if _, err = ensureMasqueTLSMaterial(&inbound, config.Host); err != nil {
 				return err
 			}

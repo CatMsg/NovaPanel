@@ -602,6 +602,10 @@ export default {
     independentCache: "Независимый кэш",
     reverseMapping: "Обратное отображение",
     domainStrategy: "Стратегия домена",
+    invalidConfig: {
+      title: "Конфигурация DNS неполная",
+      description: "В текущей конфигурации Sing-box нет корректных списков DNS-серверов или правил. Она не была изменена автоматически; сначала исправьте её в разделе основных настроек.",
+    },
     condition: {
       advanced: "Дополнительные условия DNS",
       serverAddress: "Адрес DNS-сервера",

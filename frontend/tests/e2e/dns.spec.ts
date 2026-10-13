@@ -51,6 +51,28 @@ async function installDnsMocks(page: Page, externalReference = false) {
 
 const card = (page: Page, tag: string) => page.locator('.np-resource-card').filter({ has: page.getByText(tag, { exact: true }) })
 
+test('DNS page reports incomplete config without synthesizing or saving it', async ({ page }) => {
+  await installBaseMocks(page)
+  await page.route('**/api/load**', route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: json({
+      config: { route: { rules: [] } }, lastUpdate: 1,
+      onlines: { inbound: [], outbound: [], user: [] },
+      inbounds: [], clients: [], endpoints: [], services: [], tls: [], outbounds: [],
+    }),
+  }))
+  let saveRequests = 0
+  await page.route('**/api/save**', async route => {
+    saveRequests++
+    await route.fulfill({ status: 200, contentType: 'application/json', body: json({}) })
+  })
+  await page.goto('/app/dns')
+  await expect(page.getByText('DNS 配置不完整', { exact: true })).toBeVisible()
+  await expect(page.getByText(/页面不会自动改写配置/)).toBeVisible()
+  await expect(page.getByRole('button', { name: '保存', exact: true })).toHaveCount(0)
+  expect(saveRequests).toBe(0)
+})
+
 for (const width of [1280, 390]) {
   test(`DNS dependency confirmation blocks deletion at ${width}px`, async ({ page }) => {
     await installDnsMocks(page)

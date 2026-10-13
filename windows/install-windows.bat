@@ -189,7 +189,7 @@ for /f "tokens=2 delims=:" %%i in ('ipconfig ^| findstr /i "IPv4"') do (
     echo   Subscription: http://!ip!:%sub_port%%sub_path%
 )
 echo.
-echo Service name: %SERVICE_NAME% (compatibility alias)
+echo Service name: %SERVICE_NAME%
 echo.
 echo Useful commands:
 echo   net start %SERVICE_NAME%    - Start the service

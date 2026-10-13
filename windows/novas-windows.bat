@@ -129,7 +129,7 @@ goto menu
 :service_management
 cls
 echo ========================================
-echo Service Management (compatibility alias)
+echo Windows Service Management
 echo ========================================
 echo.
 echo 1. Install Windows Service
@@ -191,7 +191,7 @@ goto menu
 :show_config
 echo.
 echo ========================================
-echo NovaPanel Configuration (compatibility commands)
+echo NovaPanel Configuration
 echo ========================================
 if exist "%INSTALL_DIR%\novas.exe" (
     cd /d "%INSTALL_DIR%"

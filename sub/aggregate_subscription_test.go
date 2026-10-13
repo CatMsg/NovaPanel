@@ -164,20 +164,17 @@ func TestAggregateJSONPreservesStructuredHTTPAndFallsBackForPlainSource(t *testi
 		t.Fatalf("init temporary DB: %v", err)
 	}
 	structuredSource := server.URL + "/structured?token=source-token"
-	settings := []model.Setting{
-		{Key: "subMode", Value: "master"},
-		{Key: "subMasterSources", Value: strings.Join([]string{
+	seedSubscriptionTestSettings(t,
+		model.Setting{Key: "subMode", Value: "master"},
+		model.Setting{Key: "subMasterSources", Value: strings.Join([]string{
 			structuredSource,
 			structuredSource + "&format=clash",
 			server.URL + "/collision",
 			server.URL + "/plain",
 		}, "\n")},
-		{Key: "subJsonExt", Value: `{"dns":{"servers":[{"type":"local","tag":"local-dns"}],"rules":[]}}`},
-		{Key: "subUpdates", Value: "24"},
-	}
-	if err := database.GetDB().Create(&settings).Error; err != nil {
-		t.Fatalf("seed aggregate settings: %v", err)
-	}
+		model.Setting{Key: "subJsonExt", Value: `{"dns":{"servers":[{"type":"local","tag":"local-dns"}],"rules":[]}}`},
+		model.Setting{Key: "subUpdates", Value: "24"},
+	)
 
 	result, headers, err := (&AggregateService{}).GetAggregate("json", "panel.example")
 	if err != nil {
@@ -446,15 +443,12 @@ func TestAggregateJSONKeepsMasqueClientEndpointAndDeduplicatesSource(t *testing.
 		t.Fatalf("init temporary DB: %v", err)
 	}
 	source := server.URL + "/profile?token=source-token"
-	settings := []model.Setting{
-		{Key: "subMode", Value: "master"},
-		{Key: "subMasterSources", Value: strings.Join([]string{source, source}, "\n")},
-		{Key: "subJsonExt", Value: `{"dns":{"servers":[{"type":"local","tag":"local-dns"}],"rules":[]}}`},
-		{Key: "subUpdates", Value: "24"},
-	}
-	if err := database.GetDB().Create(&settings).Error; err != nil {
-		t.Fatalf("seed aggregate settings: %v", err)
-	}
+	seedSubscriptionTestSettings(t,
+		model.Setting{Key: "subMode", Value: "master"},
+		model.Setting{Key: "subMasterSources", Value: strings.Join([]string{source, source}, "\n")},
+		model.Setting{Key: "subJsonExt", Value: `{"dns":{"servers":[{"type":"local","tag":"local-dns"}],"rules":[]}}`},
+		model.Setting{Key: "subUpdates", Value: "24"},
+	)
 
 	result, _, err := (&AggregateService{}).GetAggregate("json", "panel.example")
 	if err != nil {

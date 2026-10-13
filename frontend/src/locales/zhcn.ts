@@ -630,6 +630,10 @@ export default {
     independentCache: "独立缓存",
     reverseMapping: "反向映射",
     domainStrategy: "域名解析策略",
+    invalidConfig: {
+      title: "DNS 配置不完整",
+      description: "当前 Sing-box 配置缺少有效的 DNS 服务器或规则列表。页面不会自动改写配置，请先在基础信息中修复，再返回管理 DNS。",
+    },
     condition: {
       advanced: "DNS 高级条件",
       serverAddress: "DNS 服务器地址",

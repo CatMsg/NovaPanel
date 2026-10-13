@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -15,7 +17,6 @@ import (
 	"github.com/CatMsg/NovaPanel/config"
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
-	"github.com/CatMsg/NovaPanel/logger"
 	"github.com/CatMsg/NovaPanel/util/common"
 
 	"gorm.io/gorm"
@@ -128,6 +129,9 @@ type settingPortChange struct {
 
 func (s *SettingService) GetAllSetting() (*map[string]string, error) {
 	db := database.GetDB()
+	if err := s.ensureDefaultSettings(db); err != nil {
+		return nil, err
+	}
 	settings := make([]*model.Setting, 0)
 	err := db.Model(model.Setting{}).Find(&settings).Error
 	if err != nil {
@@ -137,25 +141,6 @@ func (s *SettingService) GetAllSetting() (*map[string]string, error) {
 
 	for _, setting := range settings {
 		allSetting[setting.Key] = setting.Value
-	}
-	missingDefaults := make(map[string]string)
-	for key, defaultValue := range defaultValueMap {
-		if _, exists := allSetting[key]; !exists {
-			missingDefaults[key] = defaultValue
-			allSetting[key] = defaultValue
-		}
-	}
-	if len(missingDefaults) > 0 {
-		if err := retryWriteTx(func(tx *gorm.DB) error {
-			for key, value := range missingDefaults {
-				if err := s.saveSettingTx(tx, key, value); err != nil {
-					return err
-				}
-			}
-			return nil
-		}); err != nil {
-			return nil, err
-		}
 	}
 
 	s.fillSubCertFiles(allSetting)
@@ -187,6 +172,51 @@ func (s *SettingService) GetAllSetting() (*map[string]string, error) {
 	}
 
 	return &allSetting, nil
+}
+
+func (s *SettingService) ensureDefaultSettings(db *gorm.DB) error {
+	return database.RetryOnLocked(3, 50*time.Millisecond, func() error {
+		return db.Transaction(ensureDefaultSettingsTx)
+	})
+}
+
+func ensureDefaultSettingsTx(tx *gorm.DB) error {
+	var count int64
+	if err := tx.Model(&model.Setting{}).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		keys := make([]string, 0, len(defaultValueMap))
+		for key := range defaultValueMap {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		settings := make([]model.Setting, 0, len(keys))
+		for _, key := range keys {
+			settings = append(settings, model.Setting{Key: key, Value: defaultValueMap[key]})
+		}
+		return tx.Create(&settings).Error
+	}
+
+	var keys []string
+	if err := tx.Model(&model.Setting{}).Pluck("key", &keys).Error; err != nil {
+		return err
+	}
+	present := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		present[key] = struct{}{}
+	}
+	missing := make([]string, 0)
+	for key := range defaultValueMap {
+		if _, ok := present[key]; !ok {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return fmt.Errorf("settings are incomplete; missing keys: %s", strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 func (s *SettingService) fillSubCertFiles(allSetting map[string]string) {
@@ -246,29 +276,23 @@ func (s *SettingService) getSetting(key string) (*model.Setting, error) {
 }
 
 func (s *SettingService) getString(key string) (string, error) {
+	if err := s.ensureDefaultSettings(database.GetDB()); err != nil {
+		return "", err
+	}
 	setting, err := s.getSetting(key)
-	if database.IsNotFound(err) {
-		value, ok := defaultValueMap[key]
-		if !ok {
-			return "", common.NewErrorf("key <%v> not in defaultValueMap", key)
-		}
-		return value, nil
-	} else if err != nil {
+	if err != nil {
 		return "", err
 	}
 	return setting.Value, nil
 }
 
 func (s *SettingService) getStringTx(tx *gorm.DB, key string) (string, error) {
+	if err := ensureDefaultSettingsTx(tx); err != nil {
+		return "", err
+	}
 	setting := &model.Setting{}
 	err := tx.Model(model.Setting{}).Where("key = ?", key).First(setting).Error
-	if database.IsNotFound(err) {
-		value, ok := defaultValueMap[key]
-		if !ok {
-			return "", common.NewErrorf("key <%v> not in defaultValueMap", key)
-		}
-		return value, nil
-	} else if err != nil {
+	if err != nil {
 		return "", err
 	}
 	return setting.Value, nil
@@ -385,12 +409,6 @@ func (s *SettingService) SetWebPath(webPath string) error {
 
 func (s *SettingService) GetSecret() ([]byte, error) {
 	secret, err := s.getString("secret")
-	if secret == defaultValueMap["secret"] {
-		err := s.saveSetting("secret", secret)
-		if err != nil {
-			logger.Warning("save secret failed:", err)
-		}
-	}
 	return []byte(secret), err
 }
 
@@ -408,9 +426,7 @@ func (s *SettingService) GetTimeLocation() (*time.Location, error) {
 	}
 	location, err := time.LoadLocation(l)
 	if err != nil {
-		defaultLocation := defaultValueMap["timeLocation"]
-		logger.Errorf("location <%v> not exist, using default location: %v", l, defaultLocation)
-		return time.LoadLocation(defaultLocation)
+		return nil, fmt.Errorf("invalid time location %q: %w", l, err)
 	}
 	return location, nil
 }
@@ -424,12 +440,10 @@ func (s *SettingService) getTimeLocationTx(tx *gorm.DB) (*time.Location, error) 
 		l = "Local"
 	}
 	location, err := time.LoadLocation(l)
-	if err == nil {
-		return location, nil
+	if err != nil {
+		return nil, fmt.Errorf("invalid time location %q: %w", l, err)
 	}
-	defaultLocation := defaultValueMap["timeLocation"]
-	logger.Errorf("location <%v> not exist, using default location: %v", l, defaultLocation)
-	return time.LoadLocation(defaultLocation)
+	return location, nil
 }
 
 func (s *SettingService) GetSubListen() (string, error) {
@@ -527,7 +541,7 @@ func (s *SettingService) getMode(key string) (string, error) {
 	case "master", "slave":
 		return mode, nil
 	default:
-		return "slave", nil
+		return "", fmt.Errorf("invalid %s %q; expected master or slave", key, mode)
 	}
 }
 

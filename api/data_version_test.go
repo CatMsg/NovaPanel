@@ -83,9 +83,9 @@ func interleaveSettingsRead(t *testing.T, a *ApiService) *bool {
 	db := database.GetDB()
 	const callback = "api:test_interleaved_settings_write"
 	if err := db.Callback().Query().After("gorm:query").Register(callback, func(tx *gorm.DB) {
-		// GetAllSetting has already materialized the old rows. Do not trigger on
-		// individual setting lookups or recursively inside Save's snapshot.
-		if fired || tx.Statement.Table != "settings" || strings.Contains(tx.Statement.SQL.String(), "WHERE") {
+		// Trigger only after GetAllSetting materializes the settings slice, not
+		// during its fresh-install completeness checks or individual lookups.
+		if _, ok := tx.Statement.Dest.(*[]*model.Setting); fired || !ok || tx.Statement.Table != "settings" {
 			return
 		}
 		fired = true

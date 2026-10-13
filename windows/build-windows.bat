@@ -41,10 +41,10 @@ if errorlevel 1 (
 
 cd ..
 
-echo Verifying sing-box Windows compatibility (read-only)...
-go run -mod=readonly .\scripts\patch-sing-box-windows.go
+echo Verifying sing-box Windows interface contract (read-only)...
+go run -mod=readonly .\scripts\verify-sing-box-windows.go
 if errorlevel 1 (
-    echo Error: Failed to verify sing-box compatibility
+	echo Error: Failed to verify sing-box Windows interface contract
     pause
     exit /b 1
 )

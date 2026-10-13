@@ -69,10 +69,10 @@ try {
 Pop-Location
 
 # Verify the pinned dependency without changing source or the module cache.
-Write-Host "Verifying sing-box Windows compatibility (read-only)..." -ForegroundColor Yellow
-go run -mod=readonly .\scripts\patch-sing-box-windows.go
+Write-Host "Verifying sing-box Windows interface contract (read-only)..." -ForegroundColor Yellow
+go run -mod=readonly .\scripts\verify-sing-box-windows.go
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "Error: Failed to verify sing-box compatibility" -ForegroundColor Red
+	Write-Host "Error: Failed to verify sing-box Windows interface contract" -ForegroundColor Red
     Read-Host "Press Enter to exit"
     exit 1
 }

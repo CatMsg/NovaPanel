@@ -11,15 +11,13 @@ import (
 const modulePath = "github.com/sagernet/sing-box"
 
 func main() {
-	if err := checkSingBoxWindowsCompat(); err != nil {
+	if err := verifySingBoxWindowsInterface(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
 
-// Retain the legacy script filename for existing build callers, but never edit
-// the replacement or the global module cache. Alpha.12 already uses MyInterfaces.
-func checkSingBoxWindowsCompat() error {
+func verifySingBoxWindowsInterface() error {
 	verify := exec.Command("go", "run", "-mod=readonly", "./scripts/verify-sing-box.go")
 	verify.Stdout = os.Stdout
 	verify.Stderr = os.Stderr
@@ -33,11 +31,11 @@ func checkSingBoxWindowsCompat() error {
 	}
 
 	target := filepath.Join(moduleDir, "dns", "transport", "local", "systemconfig", "source_windows.go")
-	if err := checkWindowsCompatFile(target); err != nil {
+	if err := checkWindowsInterfaceFile(target); err != nil {
 		return err
 	}
 
-	fmt.Println("verified sing-box Windows compatibility (read-only):", target)
+	fmt.Println("verified sing-box Windows interface contract (read-only):", target)
 	return nil
 }
 
@@ -55,7 +53,7 @@ func moduleDir(path string) (string, error) {
 	return dir, nil
 }
 
-func checkWindowsCompatFile(target string) error {
+func checkWindowsInterfaceFile(target string) error {
 	data, err := os.ReadFile(target)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", target, err)

@@ -112,6 +112,10 @@ func TestSubscriptionHandlerBrowserAndLegacyFormats(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "subscription-handler.db")); err != nil {
 		t.Fatalf("init database: %v", err)
 	}
+	seedSubscriptionTestSettings(t,
+		model.Setting{Key: "subEncode", Value: "false"},
+		model.Setting{Key: "subShowInfo", Value: "false"},
+	)
 	client := model.Client{
 		Enable:   true,
 		Name:     "alice",
@@ -124,9 +128,6 @@ func TestSubscriptionHandlerBrowserAndLegacyFormats(t *testing.T) {
 	}
 	if err := database.GetDB().Create(&client).Error; err != nil {
 		t.Fatalf("create client: %v", err)
-	}
-	if err := database.GetDB().Create(&[]model.Setting{{Key: "subEncode", Value: "false"}, {Key: "subShowInfo", Value: "false"}}).Error; err != nil {
-		t.Fatalf("create subscription settings: %v", err)
 	}
 	disabled := model.Client{Enable: false, Name: "disabled", Config: []byte(`{}`), Inbounds: []byte(`[]`), Links: []byte(`[]`)}
 	if err := database.GetDB().Create(&disabled).Error; err != nil {

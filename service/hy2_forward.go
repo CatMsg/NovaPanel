@@ -224,8 +224,7 @@ func collectInboundForwardProtocols(inbound *model.Inbound) ([]string, error) {
 		}
 		return []string{strings.ToLower(config.Transport)}, nil
 	default:
-		// Preserve compatibility for uncommon or externally imported inbound types.
-		return []string{"tcp", "udp"}, nil
+		return nil, fmt.Errorf("unsupported inbound type %q for managed port forwarding", inbound.Type)
 	}
 }
 

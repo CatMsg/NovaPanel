@@ -40,6 +40,9 @@ func newConfigSnapshotTestDB(t *testing.T) *gorm.DB {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "snapshot.db")); err != nil {
 		t.Fatalf("init database: %v", err)
 	}
+	if _, err := (&SettingService{}).GetAllSetting(); err != nil {
+		t.Fatalf("initialize settings: %v", err)
+	}
 	return database.GetDB()
 }
 
@@ -708,8 +711,7 @@ func TestConfigSnapshotSaveAfterImageFailureRollsBackWriteTransaction(t *testing
 	previousCore := corePtr
 	corePtr = nil
 	t.Cleanup(func() { corePtr = previousCore })
-	setting := model.Setting{Key: "subUpdates", Value: "12"}
-	if err := db.Create(&setting).Error; err != nil {
+	if err := db.Model(&model.Setting{}).Where("key = ?", "subUpdates").Update("value", "12").Error; err != nil {
 		t.Fatal(err)
 	}
 	injected := errors.New("after-image read failed")
@@ -731,7 +733,7 @@ func TestConfigSnapshotSaveAfterImageFailureRollsBackWriteTransaction(t *testing
 		t.Fatalf("Save did not capture before commit: changed=%v reads=%d err=%v", changed, clientReads, err)
 	}
 	var stored model.Setting
-	if err := db.First(&stored, setting.Id).Error; err != nil {
+	if err := db.Where("key = ?", "subUpdates").First(&stored).Error; err != nil {
 		t.Fatal(err)
 	}
 	var changes int64

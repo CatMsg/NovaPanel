@@ -601,6 +601,10 @@ export default {
     independentCache: "獨立快取",
     reverseMapping: "反向映射",
     domainStrategy: "域名策略",
+    invalidConfig: {
+      title: "DNS 設定不完整",
+      description: "目前的 Sing-box 設定缺少有效的 DNS 伺服器或規則清單。頁面不會自動改寫設定，請先在基本資訊中修復，再返回管理 DNS。",
+    },
     condition: {
       advanced: "DNS 進階條件",
       serverAddress: "DNS 伺服器位址",

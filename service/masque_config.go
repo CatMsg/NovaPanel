@@ -53,6 +53,9 @@ func parseMasqueInbound(inbound *model.Inbound) (*masqueInboundConfig, error) {
 
 func prepareMasqueInbound(tx *gorm.DB, inbound, oldInbound *model.Inbound, hostname string) error {
 	if oldInbound != nil && oldInbound.Type == "masque" {
+		if oldInbound.MasqueTLSCertificate == "" || oldInbound.MasqueTLSKey == "" {
+			return fmt.Errorf("MASQUE inbound %s has no dedicated ECDSA identity; delete and recreate it", oldInbound.Tag)
+		}
 		inbound.MasqueTLSCertificate = oldInbound.MasqueTLSCertificate
 		inbound.MasqueTLSKey = oldInbound.MasqueTLSKey
 	}

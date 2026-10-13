@@ -601,6 +601,10 @@ export default {
     independentCache: "Bộ nhớ rẽ",
     reverseMapping: "Màm mạng tên lập",
     domainStrategy: "Chiến lược Domain",
+    invalidConfig: {
+      title: "Cấu hình DNS chưa đầy đủ",
+      description: "Cấu hình Sing-box hiện tại không có danh sách máy chủ hoặc quy tắc DNS hợp lệ. Cấu hình không được tự động ghi lại; hãy sửa trong Thông tin cơ bản trước.",
+    },
     condition: {
       advanced: "Điều kiện DNS nâng cao",
       serverAddress: "Địa chỉ máy chủ DNS",

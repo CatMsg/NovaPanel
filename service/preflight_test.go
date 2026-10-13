@@ -24,6 +24,9 @@ func TestPreflightRejectsDeletingReferencedOutbound(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "referenced-outbound.db")); err != nil {
 		t.Fatalf("init db: %v", err)
 	}
+	if _, err := (&SettingService{}).GetAllSetting(); err != nil {
+		t.Fatalf("initialize settings: %v", err)
+	}
 	db := database.GetDB()
 	outbound := model.Outbound{Type: "direct", Tag: "proxy-a", Options: json.RawMessage(`{}`)}
 	if err := db.Create(&outbound).Error; err != nil {
@@ -79,6 +82,9 @@ func TestPreflightRejectsDeletingReferencedDNSWithoutChangingDatabase(t *testing
 		t.Fatalf("init db: %v", err)
 	}
 	settings := &SettingService{}
+	if _, err := settings.GetAllSetting(); err != nil {
+		t.Fatalf("initialize settings: %v", err)
+	}
 	before := `{"dns":{"servers":[{"type":"local","tag":"dns-main"}],"rules":[{"domain":"example.invalid","server":"dns-main"}]},"route":{"rules":[]}}`
 	if err := settings.SetConfig(before); err != nil {
 		t.Fatalf("set config: %v", err)

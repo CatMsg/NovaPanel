@@ -67,7 +67,7 @@ func TestPreserveRestoreMaintenanceBeforeSwap(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := conn.AutoMigrate(&model.Setting{}); err != nil {
+		if err := conn.Migrator().CreateTable(&model.Setting{}); err != nil {
 			t.Fatal(err)
 		}
 		if existing {
@@ -93,12 +93,7 @@ func TestValidateAndSanitizeRestoreDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := conn.AutoMigrate(
-		&model.Setting{}, &model.Tls{}, &model.Inbound{}, &model.Outbound{},
-		&model.Endpoint{}, &model.User{}, &model.Client{},
-	); err != nil {
-		t.Fatal(err)
-	}
+	createCompleteTestSchema(t, conn)
 	settings := []model.Setting{
 		{Key: "webCertFile", Value: "/missing/web.crt"},
 		{Key: "webKeyFile", Value: "/missing/web.key"},
@@ -228,9 +223,7 @@ func TestValidateAndSanitizeRestoreDBRejectsInvalidFleetConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := conn.AutoMigrate(&model.Setting{}, &model.Tls{}, &model.Inbound{}, &model.Outbound{}, &model.Endpoint{}, &model.User{}, &model.Client{}); err != nil {
-		t.Fatal(err)
-	}
+	createCompleteTestSchema(t, conn)
 	if err := conn.Create(&model.Setting{Key: "fleetServers", Value: "not-json"}).Error; err != nil {
 		t.Fatal(err)
 	}

@@ -2,12 +2,8 @@ package model
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"strings"
 	"testing"
-
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
 
 func TestInboundExcludeFromSubIsPanelMetadata(t *testing.T) {
@@ -90,48 +86,6 @@ func TestInboundMarshalJSONStripsExcludeFromOptions(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "exclude_from_sub") {
 		t.Fatalf("legacy panel key leaked from stored options: %s", raw)
-	}
-}
-
-func TestInboundExcludeFromSubDatabaseMigrationDefaultsFalse(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "inbound-legacy.db")), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open temporary database: %v", err)
-	}
-	if err := db.Exec(`CREATE TABLE inbounds (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		type TEXT,
-		tag TEXT,
-		tls_id INTEGER,
-		addrs BLOB,
-		out_json BLOB,
-		options BLOB
-	)`).Error; err != nil {
-		t.Fatalf("create legacy inbound table: %v", err)
-	}
-	if err := db.Exec(`INSERT INTO inbounds (type, tag, options) VALUES (?, ?, ?)`, "socks", "legacy", []byte(`{}`)).Error; err != nil {
-		t.Fatalf("insert legacy inbound: %v", err)
-	}
-	if err := db.AutoMigrate(&Inbound{}); err != nil {
-		t.Fatalf("migrate inbound table: %v", err)
-	}
-	var migrated Inbound
-	if err := db.Where("tag = ?", "legacy").First(&migrated).Error; err != nil {
-		t.Fatalf("read migrated inbound: %v", err)
-	}
-	if migrated.ExcludeFromSub {
-		t.Fatal("migrated inbound without the new column must default to visible")
-	}
-	migrated.ExcludeFromSub = true
-	if err := db.Save(&migrated).Error; err != nil {
-		t.Fatalf("update migrated inbound flag: %v", err)
-	}
-	var updated Inbound
-	if err := db.First(&updated, migrated.Id).Error; err != nil {
-		t.Fatalf("reload updated inbound: %v", err)
-	}
-	if !updated.ExcludeFromSub {
-		t.Fatal("updated exclude_from_sub did not persist")
 	}
 }
 

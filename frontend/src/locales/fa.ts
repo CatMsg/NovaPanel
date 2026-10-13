@@ -601,6 +601,10 @@ export default {
     independentCache: "استقلال cache",
     reverseMapping: "نگاشت معکوس",
     domainStrategy: "استراتژی دامنه",
+    invalidConfig: {
+      title: "پیکربندی DNS ناقص است",
+      description: "پیکربندی فعلی Sing-box فهرست معتبر سرور یا قانون DNS ندارد. پیکربندی به‌طور خودکار بازنویسی نشد؛ ابتدا آن را در اطلاعات پایه اصلاح کنید.",
+    },
     condition: {
       advanced: "شرط‌های پیشرفته DNS",
       serverAddress: "نشانی سرور DNS",

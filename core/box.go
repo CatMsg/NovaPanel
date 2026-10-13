@@ -408,19 +408,11 @@ func NewBox(options Options) (result *Box, err error) {
 		}
 	}
 	outboundManager.Initialize(func(ctx context.Context) (adapter.Outbound, error) {
-		fallbackTag := ""
-		// Retain legacy route references to the initial implicit "direct".
-		// Runtime recovery uses a reserved tag so removed user tags can return.
-		if outboundManager.scope == nil {
-			if _, occupied := endpointManager.Get("direct"); !occupied {
-				fallbackTag = "direct"
-			}
-		}
 		return direct.NewOutbound(
 			ctx,
 			router,
 			logFactory.NewLogger("outbound/direct"),
-			fallbackTag,
+			"",
 			option.DirectOutboundOptions{},
 		)
 	})
