@@ -113,34 +113,26 @@ export default {
   },
   computed: {
     disablePathMTUDiscovery: {
-      get(): boolean { return this.$props.data.disable_path_mtu_discovery ?? this.$props.data.disable_mtu_discovery ?? false },
+      get(): boolean { return this.$props.data.disable_path_mtu_discovery ?? false },
       set(v:boolean) {
-        delete this.$props.data.disable_mtu_discovery
         this.$props.data.disable_path_mtu_discovery = v || undefined
       }
     },
     connectionReceiveWindow: {
-      get() { return this.$props.data.connection_receive_window ?? this.$props.data.recv_window_conn },
+      get() { return this.$props.data.connection_receive_window },
       set(v:number|undefined) {
-        delete this.$props.data.recv_window_conn
         this.$props.data.connection_receive_window = v
       }
     },
     streamReceiveWindow: {
-      get() {
-        const legacy = this.$props.direction == 'in' ? this.$props.data.recv_window_client : this.$props.data.recv_window
-        return this.$props.data.stream_receive_window ?? legacy
-      },
+      get() { return this.$props.data.stream_receive_window },
       set(v:number|undefined) {
-        delete this.$props.data.recv_window
-        delete this.$props.data.recv_window_client
         this.$props.data.stream_receive_window = v
       }
     },
     maxConcurrentStreams: {
-      get() { return this.$props.data.max_concurrent_streams ?? this.$props.data.max_conn_client },
+      get() { return this.$props.data.max_concurrent_streams },
       set(v:number|undefined) {
-        delete this.$props.data.max_conn_client
         this.$props.data.max_concurrent_streams = v
       }
     },

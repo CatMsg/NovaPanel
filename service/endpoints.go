@@ -50,9 +50,6 @@ func (o *EndpointService) GetAll() (*[]map[string]interface{}, error) {
 }
 
 func (o *EndpointService) GetAllConfig(db *gorm.DB) ([]json.RawMessage, error) {
-	if err := MigrateMasqueTLSInbounds(db); err != nil {
-		return nil, err
-	}
 	var endpointsJson []json.RawMessage
 	var endpoints []*model.Endpoint
 	err := db.Model(model.Endpoint{}).Scan(&endpoints).Error

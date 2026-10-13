@@ -342,6 +342,9 @@ func normalizeClientResetSchedule(client *model.Client, now int64, location *tim
 		location = time.UTC
 	}
 	if client.NextReset <= 0 || !isClientMonthlyReset(client.NextReset, location) {
+		if client.Id != 0 {
+			return common.NewError("auto-reset clients must use a calendar-month reset date")
+		}
 		client.NextReset = nextClientMonthlyReset(now, location)
 	}
 	return nil
@@ -756,8 +759,6 @@ func (s *ClientService) ResetClients(tx *gorm.DB, dt int64) ([]uint, bool, error
 	}
 	allClients = append(allClients, resetClients...)
 
-	// Align legacy day-based schedules to the next calendar-month boundary without
-	// unexpectedly clearing usage during migration.
 	resetClients = nil
 	err = tx.Model(model.Client{}).
 		Where("delay_start = false AND auto_reset = true").Find(&resetClients).Error
@@ -766,9 +767,7 @@ func (s *ClientService) ResetClients(tx *gorm.DB, dt int64) ([]uint, bool, error
 	}
 	for _, client := range resetClients {
 		if client.NextReset <= 0 || !isClientMonthlyReset(client.NextReset, resetLocation) {
-			client.NextReset = nextClientMonthlyReset(dt, resetLocation)
-			allClients = append(allClients, client)
-			continue
+			return nil, false, common.NewErrorf("用户 %s 的每月重置时间无效，请编辑后重新保存", client.Name)
 		}
 		if client.NextReset > dt {
 			continue

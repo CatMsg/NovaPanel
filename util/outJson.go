@@ -207,8 +207,12 @@ func hysteriaOut(out *map[string]interface{}, inbound map[string]interface{}) {
 	delete(*out, "down_mbps")
 	delete(*out, "up_mbps")
 	delete(*out, "obfs")
-	delete(*out, "recv_window_conn")
-	delete(*out, "disable_mtu_discovery")
+	for _, field := range []string{
+		"recv_window_conn", "recv_window", "recv_window_client", "max_conn_client", "disable_mtu_discovery",
+		"connection_receive_window", "stream_receive_window", "max_concurrent_streams", "disable_path_mtu_discovery",
+	} {
+		delete(*out, field)
+	}
 
 	if upMbps, ok := inbound["down_mbps"]; ok {
 		(*out)["up_mbps"] = upMbps
@@ -219,11 +223,12 @@ func hysteriaOut(out *map[string]interface{}, inbound map[string]interface{}) {
 	if obfs, ok := inbound["obfs"]; ok {
 		(*out)["obfs"] = obfs
 	}
-	if recvWindow, ok := inbound["recv_window_conn"]; ok {
-		(*out)["recv_window_conn"] = recvWindow
-	}
-	if disableMTU, ok := inbound["disable_mtu_discovery"]; ok {
-		(*out)["disable_mtu_discovery"] = disableMTU
+	for _, field := range []string{
+		"connection_receive_window", "stream_receive_window", "max_concurrent_streams", "disable_path_mtu_discovery",
+	} {
+		if value, ok := inbound[field]; ok {
+			(*out)[field] = value
+		}
 	}
 }
 

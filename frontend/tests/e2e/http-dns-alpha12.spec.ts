@@ -134,11 +134,11 @@ test('new HTTP inbound defaults to scalar HTTP/1.1 and synchronizes the client p
   expect(savedInbound.out_json).not.toHaveProperty('disable_version_fallback')
 })
 
-test('legacy multi-version inbound stays unset until an explicit single-version migration', async ({ page }) => {
+test('multi-version panel inbound blocks saving until one version is selected', async ({ page }) => {
   const inbound = {
     id: 42,
     type: 'http',
-    tag: 'legacy-http',
+    tag: 'multi-http',
     listen: '127.0.0.1',
     listen_port: 8081,
     tls_id: 0,
@@ -148,14 +148,13 @@ test('legacy multi-version inbound stays unset until an explicit single-version 
   }
   const api = await installHttpMocks(page, { inbounds: [inbound] })
   await page.goto('/app/inbounds')
-  await page.getByRole('row', { name: /legacy-http/ }).getByRole('button', { name: '编辑' }).click()
+  await page.getByRole('row', { name: /multi-http/ }).getByRole('button', { name: '编辑' }).click()
 
   const editor = page.getByRole('dialog').last()
   const version = editor.getByRole('combobox', { name: 'HTTP 版本' })
   const save = editor.getByRole('button', { name: '保存', exact: true })
   await expect(version).toHaveValue('')
-  await expect(editor.getByText(/此旧版入站未保存为单一 HTTP 版本/)).toBeVisible()
-  await expect(editor.getByText(/保存此入站前，请明确选择一个 HTTP 版本/)).toBeVisible()
+  await expect(editor.getByText(/保存此入站前，请明确选择一个 HTTP 版本/).first()).toBeVisible()
   await expect(save).toBeDisabled()
   expect(api.preflightPayloads()).toHaveLength(0)
   expect(api.savedPayloads()).toHaveLength(0)

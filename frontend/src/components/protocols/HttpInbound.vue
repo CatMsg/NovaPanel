@@ -11,7 +11,7 @@
       </v-col>
     </v-row>
     <v-alert v-if="requiresChoice" type="warning" variant="tonal" class="mt-3">
-      {{ $t('types.http.legacyVersionWarning') }}
+      {{ $t('types.http.errors.singleVersionRequired') }}
     </v-alert>
     <p class="http-inbound__hint">{{ $t('types.http.serverDefaultHint') }}</p>
     <v-alert v-if="needsTls && !tlsEnabled" type="error" variant="tonal" class="mt-3">

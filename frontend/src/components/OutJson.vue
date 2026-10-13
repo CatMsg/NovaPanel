@@ -48,11 +48,11 @@
       </template>
       <v-col cols="12" sm="6" md="4" v-if="type == inTypes.Hysteria">
         <v-text-field
-        label="Recv window"
+        label="Stream receive window"
         hide-details
         type="number"
         min="0"
-        v-model.number="inData.out_json.recv_window">
+        v-model.number="inData.out_json.stream_receive_window">
         </v-text-field>
       </v-col>
       <template v-if="type == inTypes.TUIC">

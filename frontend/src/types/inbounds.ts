@@ -72,7 +72,7 @@ export interface Direct extends InboundBasics {
 export interface Mixed extends InboundBasics {}
 export interface SOCKS extends InboundBasics {}
 export interface HTTP extends InboundBasics {
-  version?: number | number[]
+  version?: number
 }
 export interface Shadowsocks extends InboundBasics {
   method: string
@@ -103,10 +103,6 @@ export interface Hysteria extends InboundBasics {
   up_mbps: number
   down_mbps: number
   obfs?: string
-  recv_window_conn?: number
-  recv_window_client?: number
-  max_conn_client?: number
-  disable_mtu_discovery?: boolean
   idle_timeout?: string
   keep_alive_period?: string
   stream_receive_window?: string | number

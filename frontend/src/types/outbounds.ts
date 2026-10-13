@@ -127,9 +127,6 @@ export interface Hysteria extends OutboundBasics, Dial {
   down_mbps: number
   obfs?: string
   auth_str?: string
-  recv_window_conn?: number
-  recv_window?: number
-  disable_mtu_discovery?: boolean
   idle_timeout?: string
   keep_alive_period?: string
   stream_receive_window?: string | number

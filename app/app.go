@@ -49,10 +49,6 @@ func (a *APP) Init() error {
 	if _, err := a.SettingService.GetAllSetting(); err != nil {
 		return err
 	}
-	if err := service.MigrateMasqueTLSInbounds(database.GetDB()); err != nil {
-		logger.Warning("migrate MASQUE TLS identities failed:", err)
-	}
-
 	if err := service.RebuildManagedPortEntries(); err != nil {
 		return err
 	}

@@ -24,9 +24,9 @@ const budget = (overrides: Partial<FleetTrafficBudget> = {}): FleetTrafficBudget
 })
 
 describe('traffic budget helpers', () => {
-  it('uses the client pool as the effective cap and falls back for legacy servers', () => {
+	it('uses only the reported client pool as the effective cap', () => {
     expect(trafficBudgetCap(budget())).toBe(450)
-    expect(trafficBudgetCap(budget({ clientPoolBytes: undefined }))).toBe(500)
+		expect(trafficBudgetCap(budget({ clientPoolBytes: undefined as unknown as number }))).toBe(0)
   })
 
   it('calculates a clamped percentage and rejects unreadable states', () => {

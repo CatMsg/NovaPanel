@@ -33,14 +33,7 @@ func validateHTTPInboundWrite(inbound *model.Inbound, action string) error {
 	}
 
 	version := 0
-	trimmedVersion := bytes.TrimSpace(rawVersion)
-	if len(trimmedVersion) > 0 && trimmedVersion[0] == '[' {
-		var versions []int
-		if err := json.Unmarshal(trimmedVersion, &versions); err != nil || len(versions) != 1 {
-			return fmt.Errorf("HTTP inbound requires exactly one version choice (1, 2, or 3)")
-		}
-		version = versions[0]
-	} else if err := json.Unmarshal(trimmedVersion, &version); err != nil {
+	if err := json.Unmarshal(bytes.TrimSpace(rawVersion), &version); err != nil {
 		return fmt.Errorf("HTTP inbound requires exactly one version choice (1, 2, or 3)")
 	}
 	if version < 1 || version > 3 {

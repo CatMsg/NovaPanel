@@ -104,7 +104,8 @@ func TestApplyFleetTemplateFailurePreservesPostCommitOperations(t *testing.T) {
 	}
 	t.Cleanup(func() { db.Callback().Query().Remove(callback) })
 	template := FleetTemplate{
-		Sections: FleetTemplateSections{Clients: true, Outbounds: true},
+		FormatVersion: fleetTemplateFormatVersion,
+		Sections:      FleetTemplateSections{Clients: true, Outbounds: true},
 		Clients: []model.Client{
 			{Name: client.Name, Enable: false, Config: json.RawMessage(`{}`), Inbounds: json.RawMessage(`[]`), Desc: "template intent"},
 			{Name: "failed-new-user", Enable: true, Config: json.RawMessage(`{}`), Inbounds: json.RawMessage(`[]`)},
@@ -256,7 +257,8 @@ func TestApplyFleetTemplateCoreStartFailureRestoresRealCoreAndPostCommitOperatio
 	// No inbound, listener, or TUN device is configured. Typed parsing accepts
 	// these options; outbound construction fails before any connection attempt.
 	template := FleetTemplate{
-		Sections: FleetTemplateSections{Clients: true, Outbounds: true},
+		FormatVersion: fleetTemplateFormatVersion,
+		Sections:      FleetTemplateSections{Clients: true, Outbounds: true},
 		Clients: []model.Client{
 			{Name: client.Name, Enable: false, Config: json.RawMessage(`{}`), Inbounds: json.RawMessage(`[]`), Desc: "template intent"},
 			{Name: "failed-new-core-user", Enable: true, Config: json.RawMessage(`{}`), Inbounds: json.RawMessage(`[]`)},
@@ -347,12 +349,27 @@ func TestFleetTemplateHostname(t *testing.T) {
 	}
 }
 
+func TestGetFleetTemplatesRejectsUnversionedStoredTemplate(t *testing.T) {
+	if err := database.InitDB(filepath.Join(t.TempDir(), "fleet-unversioned.db")); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.GetDB().Create(&model.Setting{
+		Key: fleetTemplatesSettingKey, Value: `[{"id":"old","name":"old"}]`,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (&FleetService{}).GetFleetTemplates(); err == nil || !strings.Contains(err.Error(), "格式版本") {
+		t.Fatalf("unversioned stored template error = %v", err)
+	}
+}
+
 func TestFleetTemplateSummaryDoesNotExposeTemplatePayload(t *testing.T) {
 	template := FleetTemplate{
-		ID:        "template-id",
-		Name:      "production",
-		CreatedAt: time.Unix(10, 0),
-		Sections:  FleetTemplateSections{Clients: true},
+		FormatVersion: fleetTemplateFormatVersion,
+		ID:            "template-id",
+		Name:          "production",
+		CreatedAt:     time.Unix(10, 0),
+		Sections:      FleetTemplateSections{Clients: true},
 		Clients: []model.Client{{
 			Name:   "alice",
 			Config: json.RawMessage(`{"vless":{"uuid":"secret-value"}}`),
@@ -455,6 +472,9 @@ func TestFleetTemplatePreservesInboundSubscriptionVisibility(t *testing.T) {
 		}
 	}
 	assertFleetInboundVisibility("captured", template.Inbounds)
+	if template.FormatVersion != fleetTemplateFormatVersion {
+		t.Fatalf("captured template format version = %d, want %d", template.FormatVersion, fleetTemplateFormatVersion)
+	}
 	if len(template.Inbounds) != len(inbounds) {
 		t.Fatalf("captured %d inbounds, want %d", len(template.Inbounds), len(inbounds))
 	}
@@ -472,12 +492,18 @@ func TestFleetTemplatePreservesInboundSubscriptionVisibility(t *testing.T) {
 		t.Fatalf("unmarshal fleet template: %v", err)
 	}
 	assertFleetInboundVisibility("serialized", decoded.Inbounds)
-	var legacy FleetTemplate
-	if err := json.Unmarshal([]byte(`{"inbounds":[{"id":1,"type":"direct","tag":"legacy"}]}`), &legacy); err != nil {
-		t.Fatalf("unmarshal legacy fleet template: %v", err)
+	if decoded.FormatVersion != fleetTemplateFormatVersion {
+		t.Fatalf("serialized template format version = %d, want %d", decoded.FormatVersion, fleetTemplateFormatVersion)
 	}
-	if legacy.Inbounds[0].ExcludeFromSub {
-		t.Fatal("legacy fleet template without visibility metadata must default to visible")
+	var unversioned FleetTemplate
+	if err := json.Unmarshal([]byte(`{"inbounds":[{"id":1,"type":"direct","tag":"unversioned"}]}`), &unversioned); err != nil {
+		t.Fatalf("unmarshal unversioned fleet template: %v", err)
+	}
+	if err := validateFleetTemplateFormat(unversioned); err == nil {
+		t.Fatal("fleet template without a format version must be rejected")
+	}
+	if err := validateFleetTemplateFormat(decoded); err != nil {
+		t.Fatalf("current fleet template format was rejected: %v", err)
 	}
 
 	if err := db.Model(&model.Inbound{}).Where("id = ?", inbounds[0].Id).Update("exclude_from_sub", false).Error; err != nil {
@@ -521,8 +547,9 @@ func TestFleetTemplateOutboundPreviewAndMerge(t *testing.T) {
 		t.Fatal(err)
 	}
 	template := FleetTemplate{
-		SourceHost: "la.mile.news",
-		Sections:   FleetTemplateSections{Outbounds: true, Route: true},
+		FormatVersion: fleetTemplateFormatVersion,
+		SourceHost:    "la.mile.news",
+		Sections:      FleetTemplateSections{Outbounds: true, Route: true},
 		Outbounds: []FleetTemplateOutbound{
 			{Type: "socks", Tag: "media", Options: json.RawMessage(`{"server":"la.mile.news","server_port":1080}`)},
 			{Type: "socks", Tag: "stream", Options: json.RawMessage(`{"server":"stream.example","server_port":1081}`)},
@@ -584,7 +611,8 @@ func TestFleetTemplatePreviewRollsBackInvalidOutboundReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	template := FleetTemplate{
-		Sections: FleetTemplateSections{Outbounds: true},
+		FormatVersion: fleetTemplateFormatVersion,
+		Sections:      FleetTemplateSections{Outbounds: true},
 		Outbounds: []FleetTemplateOutbound{{
 			Type: "selector", Tag: "media", Options: json.RawMessage(`{"outbounds":["missing"]}`),
 		}},
@@ -599,7 +627,7 @@ func TestFleetTemplatePreviewRollsBackInvalidOutboundReferences(t *testing.T) {
 }
 
 func TestFleetTemplatePreviewRejectsOlderRemoteWithoutOutboundCounts(t *testing.T) {
-	template := FleetTemplate{Outbounds: []FleetTemplateOutbound{{Type: "direct", Tag: "direct"}}}
+	template := FleetTemplate{FormatVersion: fleetTemplateFormatVersion, Outbounds: []FleetTemplateOutbound{{Type: "direct", Tag: "direct"}}}
 	if err := validateFleetTemplatePreviewSupport(template, &FleetTemplatePreview{}); err == nil {
 		t.Fatal("expected old remote preview to be rejected")
 	}

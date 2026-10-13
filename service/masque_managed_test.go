@@ -126,63 +126,6 @@ func TestMASQUEManagedPrepareDefaultsAndRejectLegacy(t *testing.T) {
 	}
 }
 
-func TestMASQUETLSMigrationRefreshesSubscriptionAndIsIdempotent(t *testing.T) {
-	db, template := masqueManagedConfigFixture(t)
-	legacy := model.Inbound{
-		Type: "masque", Tag: "legacy-masque", TlsId: template.TlsId, Tls: template.Tls,
-		Options: json.RawMessage(`{"server":"legacy.example","listen_port":443,"version":[3],"system":false,"mtu":1280,"address":["172.20.0.1/24"],"mihomo_compatible":true}`),
-		OutJson: json.RawMessage(`{"type":"masque-client","tls":{"enabled":true}}`),
-	}
-	if err := db.Create(&legacy).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := MigrateMasqueTLSInbounds(db); err != nil {
-		t.Fatal(err)
-	}
-	var migrated model.Inbound
-	if err := db.First(&migrated, legacy.Id).Error; err != nil {
-		t.Fatal(err)
-	}
-	if migrated.TlsId != 0 || migrated.MasqueTLSCertificate == "" || migrated.MasqueTLSKey == "" {
-		t.Fatal("legacy MASQUE TLS identity was not migrated away from the shared template")
-	}
-	if _, err := validateMasqueTLSMaterial(&migrated, "legacy.example"); err != nil {
-		t.Fatalf("migrated TLS identity is invalid: %v", err)
-	}
-	var outbound map[string]any
-	if err := json.Unmarshal(migrated.OutJson, &outbound); err != nil {
-		t.Fatal(err)
-	}
-	tls, ok := outbound["tls"].(map[string]any)
-	certificates, certOK := tls["certificate"].([]any)
-	if !ok || !certOK || len(certificates) != 1 || certificates[0] != migrated.MasqueTLSCertificate {
-		t.Fatal("sing-box subscription does not trust the exact MASQUE server certificate")
-	}
-	if _, exists := tls["key"]; exists {
-		t.Fatal("server private key leaked into the client subscription")
-	}
-	novaMihomo, ok := outbound["nova_mihomo"].(map[string]any)
-	if !ok || novaMihomo["public-key"] == "" {
-		t.Fatal("Mihomo pin was not generated from the dedicated certificate")
-	}
-	for _, value := range []any{migrated, func() any { raw, _ := migrated.MarshalFull(); return raw }()} {
-		encoded, err := json.Marshal(value)
-		if err != nil || bytes.Contains(encoded, []byte(migrated.MasqueTLSKey)) || bytes.Contains(encoded, []byte("masque_tls_key")) {
-			t.Fatal("MASQUE private key escaped through an API JSON representation")
-		}
-	}
-	keyBefore, certBefore, outBefore := migrated.MasqueTLSKey, migrated.MasqueTLSCertificate, bytes.Clone(migrated.OutJson)
-	if err := MigrateMasqueTLSInbounds(db); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.First(&migrated, legacy.Id).Error; err != nil {
-		t.Fatal(err)
-	}
-	if migrated.MasqueTLSKey != keyBefore || migrated.MasqueTLSCertificate != certBefore || !bytes.Equal(migrated.OutJson, outBefore) {
-		t.Fatal("repeated startup migration rotated the identity or rewrote subscriptions")
-	}
-}
-
 func TestMASQUEManagedNormalizeCredentialsAcrossSaves(t *testing.T) {
 	db, inbound := masqueManagedConfigFixture(t)
 	if err := db.Create(&inbound).Error; err != nil {

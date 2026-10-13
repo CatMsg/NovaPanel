@@ -3,7 +3,7 @@ export type FleetTrafficBudget = {
   supported: boolean
   limitBytes: number
   reserveBytes?: number
-  clientPoolBytes?: number
+  clientPoolBytes: number
   usedBytes: number
   meteredRxBytes: number
   meteredTxBytes: number
@@ -34,9 +34,7 @@ export type TrafficBudgetHistory = {
 export const trafficBudgetCap = (budget?: FleetTrafficBudget) => {
   if (!budget) return 0
   const clientPool = Number(budget.clientPoolBytes)
-  if (Number.isFinite(clientPool) && clientPool > 0) return clientPool
-  const providerLimit = Number(budget.limitBytes)
-  return Number.isFinite(providerLimit) && providerLimit > 0 ? providerLimit : 0
+  return Number.isFinite(clientPool) && clientPool > 0 ? clientPool : 0
 }
 
 export const trafficBudgetPercent = (budget?: FleetTrafficBudget) => {

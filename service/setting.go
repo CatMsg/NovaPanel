@@ -138,15 +138,6 @@ func (s *SettingService) GetAllSetting() (*map[string]string, error) {
 	for _, setting := range settings {
 		allSetting[setting.Key] = setting.Value
 	}
-	if _, exists := allSetting["trafficAge"]; exists {
-		if err := retryWriteTx(func(tx *gorm.DB) error {
-			return tx.Where("key = ?", "trafficAge").Delete(&model.Setting{}).Error
-		}); err != nil {
-			return nil, err
-		}
-		delete(allSetting, "trafficAge")
-	}
-
 	missingDefaults := make(map[string]string)
 	for key, defaultValue := range defaultValueMap {
 		if _, exists := allSetting[key]; !exists {
@@ -591,7 +582,7 @@ func (s *SettingService) GetConfig() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	normalized, err := NormalizeSingBoxConfig([]byte(config))
+	normalized, err := ValidateSingBoxConfig([]byte(config))
 	if err != nil {
 		return "", err
 	}
@@ -599,7 +590,7 @@ func (s *SettingService) GetConfig() (string, error) {
 }
 
 func (s *SettingService) SetConfig(config string) error {
-	normalized, err := NormalizeSingBoxConfig([]byte(config))
+	normalized, err := ValidateSingBoxConfig([]byte(config))
 	if err != nil {
 		return err
 	}
@@ -607,7 +598,7 @@ func (s *SettingService) SetConfig(config string) error {
 }
 
 func (s *SettingService) SaveConfig(tx *gorm.DB, config json.RawMessage) error {
-	configs, err := NormalizeSingBoxConfig(config)
+	configs, err := ValidateSingBoxConfig(config)
 	if err != nil {
 		return err
 	}
@@ -776,7 +767,6 @@ func (s *SettingService) Save(tx *gorm.DB, data json.RawMessage) (func() error, 
 	if err := json.Unmarshal(data, &settings); err != nil {
 		return nil, err
 	}
-	delete(settings, "trafficAge")
 	s.fillSubCertFiles(settings)
 
 	changedSettings := make(map[string]string, len(settings))

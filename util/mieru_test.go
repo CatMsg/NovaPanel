@@ -17,7 +17,6 @@ func TestMieruLinkGeneratorUsesClientCredentialAndInboundSettings(t *testing.T) 
 		Options: json.RawMessage(`{
 			"listen":"::",
 			"listen_port":22000,
-			"port_range":"22000-22010",
 			"transport":"TCP",
 			"multiplexing":"MULTIPLEXING_MIDDLE",
 			"handshake_mode":"HANDSHAKE_NO_WAIT",

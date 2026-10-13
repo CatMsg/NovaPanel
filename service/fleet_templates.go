@@ -18,6 +18,7 @@ import (
 )
 
 const fleetTemplatesSettingKey = "fleetTemplates"
+const fleetTemplateFormatVersion = 1
 
 type FleetTemplateSections struct {
 	TLS       bool `json:"tls"`
@@ -33,7 +34,7 @@ type FleetTemplateInbound struct {
 	Type           string          `json:"type"`
 	Tag            string          `json:"tag"`
 	TLSID          uint            `json:"tlsId"`
-	ExcludeFromSub bool            `json:"excludeFromSub,omitempty"`
+	ExcludeFromSub bool            `json:"excludeFromSub"`
 	Addrs          json.RawMessage `json:"addrs,omitempty"`
 	Options        json.RawMessage `json:"options,omitempty"`
 }
@@ -57,18 +58,19 @@ func sanitizeFleetInboundOptions(options json.RawMessage) (json.RawMessage, erro
 }
 
 type FleetTemplate struct {
-	ID          string                     `json:"id"`
-	Name        string                     `json:"name"`
-	SourceHost  string                     `json:"sourceHost,omitempty"`
-	CreatedAt   time.Time                  `json:"createdAt"`
-	Sections    FleetTemplateSections      `json:"sections"`
-	TLS         []model.Tls                `json:"tls,omitempty"`
-	Inbounds    []FleetTemplateInbound     `json:"inbounds,omitempty"`
-	Outbounds   []FleetTemplateOutbound    `json:"outbounds,omitempty"`
-	TLSRefs     map[uint]string            `json:"tlsRefs,omitempty"`
-	InboundRefs map[uint]string            `json:"inboundRefs,omitempty"`
-	Clients     []model.Client             `json:"clients,omitempty"`
-	Config      map[string]json.RawMessage `json:"config,omitempty"`
+	FormatVersion int                        `json:"formatVersion"`
+	ID            string                     `json:"id"`
+	Name          string                     `json:"name"`
+	SourceHost    string                     `json:"sourceHost,omitempty"`
+	CreatedAt     time.Time                  `json:"createdAt"`
+	Sections      FleetTemplateSections      `json:"sections"`
+	TLS           []model.Tls                `json:"tls,omitempty"`
+	Inbounds      []FleetTemplateInbound     `json:"inbounds,omitempty"`
+	Outbounds     []FleetTemplateOutbound    `json:"outbounds,omitempty"`
+	TLSRefs       map[uint]string            `json:"tlsRefs,omitempty"`
+	InboundRefs   map[uint]string            `json:"inboundRefs,omitempty"`
+	Clients       []model.Client             `json:"clients,omitempty"`
+	Config        map[string]json.RawMessage `json:"config,omitempty"`
 }
 
 type FleetTemplateSummary struct {
@@ -114,7 +116,19 @@ func (s *FleetService) GetFleetTemplates() ([]FleetTemplate, error) {
 	if err := json.Unmarshal([]byte(setting.Value), &templates); err != nil {
 		return nil, fmt.Errorf("配置模板数据损坏: %w", err)
 	}
+	for _, template := range templates {
+		if err := validateFleetTemplateFormat(template); err != nil {
+			return nil, err
+		}
+	}
 	return templates, nil
+}
+
+func validateFleetTemplateFormat(template FleetTemplate) error {
+	if template.FormatVersion != fleetTemplateFormatVersion {
+		return common.NewErrorf("配置模板格式不受支持（需要格式版本 %d）", fleetTemplateFormatVersion)
+	}
+	return nil
 }
 
 func (s *FleetService) GetFleetTemplateSummaries() ([]FleetTemplateSummary, error) {
@@ -148,14 +162,15 @@ func (s *FleetService) CaptureFleetTemplate(name string, sections FleetTemplateS
 	}
 
 	template := FleetTemplate{
-		ID:          common.Random(16),
-		Name:        name,
-		SourceHost:  fleetTemplateHostname(hostname),
-		CreatedAt:   time.Now(),
-		Sections:    sections,
-		Config:      make(map[string]json.RawMessage),
-		TLSRefs:     make(map[uint]string),
-		InboundRefs: make(map[uint]string),
+		FormatVersion: fleetTemplateFormatVersion,
+		ID:            common.Random(16),
+		Name:          name,
+		SourceHost:    fleetTemplateHostname(hostname),
+		CreatedAt:     time.Now(),
+		Sections:      sections,
+		Config:        make(map[string]json.RawMessage),
+		TLSRefs:       make(map[uint]string),
+		InboundRefs:   make(map[uint]string),
 	}
 	db := database.GetDB()
 	if sections.TLS {
@@ -456,6 +471,9 @@ func orderFleetTemplateTargets(targetIDs []string, canaryID string) []string {
 }
 
 func (s *ConfigService) PreviewFleetTemplate(template FleetTemplate, hostname string) (*FleetTemplatePreview, error) {
+	if err := validateFleetTemplateFormat(template); err != nil {
+		return nil, err
+	}
 	preview := &FleetTemplatePreview{}
 	db := database.GetDB()
 	if err := validateFleetTemplateOutbounds(template.Outbounds); err != nil {
@@ -566,6 +584,9 @@ func (s *ConfigService) ApplyFleetTemplate(template FleetTemplate, hostname stri
 }
 
 func (s *ConfigService) applyFleetTemplateTx(tx *gorm.DB, template FleetTemplate, hostname string) error {
+	if err := validateFleetTemplateFormat(template); err != nil {
+		return err
+	}
 	if err := validateFleetTemplateOutbounds(template.Outbounds); err != nil {
 		return err
 	}
@@ -621,13 +642,7 @@ func (s *ConfigService) applyFleetTemplateTx(tx *gorm.DB, template FleetTemplate
 			}
 			target.TlsId = existingTLS.Id
 		}
-		if err := normalizeInboundCompatibility(&target); err != nil {
-			return err
-		}
 		if target.Type == "mieru" {
-			if err := removeMieruLegacyPortRange(&target); err != nil {
-				return err
-			}
 			if _, err := parseMieruInbound(&target); err != nil {
 				return err
 			}

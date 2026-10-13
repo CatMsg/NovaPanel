@@ -192,23 +192,6 @@ func TestCollectRestoreHy2LargeRangeStaysCompressed(t *testing.T) {
 	}
 }
 
-func TestCollectRestoreMieruIgnoresLegacyPortRange(t *testing.T) {
-	inbound := model.Inbound{
-		Type:    "mieru",
-		Tag:     "mieru-low-range",
-		Options: json.RawMessage(`{"listen_port":24000,"port_range":"443-445","transport":"TCP"}`),
-	}
-
-	ranges, active, err := collectInboundPortRangesForRestore(&inbound)
-	if err != nil {
-		t.Fatalf("collect Mieru restore ranges: %v", err)
-	}
-	if !active || len(ranges) != 1 ||
-		ranges[0] != (restorePortRange{start: 24000, end: 24000}) {
-		t.Fatalf("unexpected Mieru restore ranges: %#v", ranges)
-	}
-}
-
 func TestPruneHy2InboundServerPortsConflictDeduplicatesMixedTokens(t *testing.T) {
 	logger.InitLogger(logging.ERROR)
 

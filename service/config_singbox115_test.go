@@ -31,7 +31,7 @@ func TestSingBoxConfigPreservesExtendedTopLevelOptions(t *testing.T) {
 	}
 }
 
-func TestNormalizeSingBoxConfigFor115RemovesTunStackAndPreservesEndpointOptions(t *testing.T) {
+func TestValidateSingBoxConfigPreservesTunStackAndEndpointOptions(t *testing.T) {
 	raw := []byte(`{
 		"inbounds":[{
 			"type":"tun",
@@ -47,20 +47,20 @@ func TestNormalizeSingBoxConfigFor115RemovesTunStackAndPreservesEndpointOptions(
 		"route":{}
 	}`)
 
-	normalized, err := NormalizeSingBoxConfig(raw)
+	validated, err := ValidateSingBoxConfig(raw)
 	if err != nil {
-		t.Fatalf("normalize 1.15 config: %v", err)
+		t.Fatalf("validate config: %v", err)
 	}
 	var result map[string]interface{}
-	if err := json.Unmarshal(normalized, &result); err != nil {
-		t.Fatalf("decode normalized config: %v", err)
+	if err := json.Unmarshal(validated, &result); err != nil {
+		t.Fatalf("decode validated config: %v", err)
 	}
 	inbounds := objectList(result["inbounds"])
 	if len(inbounds) != 1 {
 		t.Fatalf("unexpected inbounds: %#v", result["inbounds"])
 	}
-	if _, exists := inbounds[0]["stack"]; exists {
-		t.Fatalf("deprecated TUN stack was retained: %#v", inbounds[0])
+	if inbounds[0]["stack"] != "system" {
+		t.Fatalf("validation rewrote the TUN stack: %#v", inbounds[0])
 	}
 	endpoints := objectList(result["endpoints"])
 	if len(endpoints) != 1 || !boolValue(endpoints[0]["on_demand"]) {

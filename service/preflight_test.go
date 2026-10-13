@@ -120,7 +120,7 @@ func TestSaveRejectsHTTP3WithoutEnabledTLSWithoutChangingRows(t *testing.T) {
 		"tls_id":      beforeInbound.TlsId,
 		"listen":      "127.0.0.1",
 		"listen_port": 43871,
-		"version":     []int{3},
+		"version":     3,
 	})
 	if err != nil {
 		t.Fatalf("marshal HTTP/3 inbound payload: %v", err)
@@ -149,7 +149,7 @@ func TestSaveRejectsH2CPanelInboundWithoutChangingRows(t *testing.T) {
 		"tag":         beforeInbound.Tag,
 		"listen":      "127.0.0.1",
 		"listen_port": 43871,
-		"version":     []int{2},
+		"version":     2,
 	})
 	if err != nil {
 		t.Fatalf("marshal H2C inbound payload: %v", err)

@@ -105,7 +105,7 @@ func (j *JsonService) GetJson(subId string, format string) (*string, []string, e
 	if err != nil {
 		return nil, nil, err
 	}
-	result, err = service.NormalizeSingBoxConfig(result)
+	result, err = service.ValidateSingBoxConfig(result)
 	if err != nil {
 		return nil, nil, err
 	}

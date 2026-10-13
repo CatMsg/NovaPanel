@@ -262,6 +262,11 @@ func trojan(u *url.URL, i int) (*map[string]interface{}, string, error) {
 
 func hy(u *url.URL, i int) (*map[string]interface{}, string, error) {
 	query, _ := url.ParseQuery(u.RawQuery)
+	for _, key := range []string{"recv_window_conn", "recv_window"} {
+		if query.Has(key) {
+			return nil, "", fmt.Errorf("hysteria query option %s is no longer supported", key)
+		}
+	}
 	host, portStr, _ := net.SplitHostPort(u.Host)
 	port := 443
 	if len(portStr) > 0 {
@@ -288,19 +293,11 @@ func hy(u *url.URL, i int) (*map[string]interface{}, string, error) {
 	}
 	down, _ := strconv.Atoi(query.Get("downmbps"))
 	up, _ := strconv.Atoi(query.Get("upmbps"))
-	recv_window_conn, _ := strconv.Atoi(query.Get("recv_window_conn"))
-	recv_window, _ := strconv.Atoi(query.Get("recv_window"))
 	if down > 0 {
 		hy["down_mbps"] = down
 	}
 	if up > 0 {
 		hy["up_mbps"] = up
-	}
-	if recv_window_conn > 0 {
-		hy["recv_window_conn"] = recv_window_conn
-	}
-	if recv_window > 0 {
-		hy["recv_window"] = recv_window
 	}
 	return &hy, tag, nil
 }

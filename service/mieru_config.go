@@ -118,6 +118,15 @@ func parseMieruInbound(inbound *model.Inbound) (*mieruInboundConfig, error) {
 	if inbound == nil {
 		return nil, common.NewError("missing mieru inbound")
 	}
+	var options map[string]json.RawMessage
+	if strings.TrimSpace(string(inbound.Options)) != "" {
+		if err := json.Unmarshal(inbound.Options, &options); err != nil {
+			return nil, fmt.Errorf("parse Mieru inbound options: %w", err)
+		}
+	}
+	if _, exists := options["port_range"]; exists {
+		return nil, common.NewError("Mieru supports one listen port; port_range is not supported")
+	}
 	full, err := inbound.MarshalFull()
 	if err != nil {
 		return nil, err
@@ -153,26 +162,6 @@ func parseMieruInbound(inbound *model.Inbound) (*mieruInboundConfig, error) {
 		return nil, err
 	}
 	return config, nil
-}
-
-func removeMieruLegacyPortRange(inbound *model.Inbound) error {
-	if inbound == nil || len(inbound.Options) == 0 {
-		return nil
-	}
-	var options map[string]json.RawMessage
-	if err := json.Unmarshal(inbound.Options, &options); err != nil {
-		return err
-	}
-	if _, exists := options["port_range"]; !exists {
-		return nil
-	}
-	delete(options, "port_range")
-	cleaned, err := json.Marshal(options)
-	if err != nil {
-		return err
-	}
-	inbound.Options = cleaned
-	return nil
 }
 
 func parseMieruClientCredential(client *model.Client) (mieruClientCredential, error) {

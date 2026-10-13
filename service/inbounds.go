@@ -168,7 +168,7 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		if err != nil {
 			return nil, err
 		}
-		if err = normalizeInboundCompatibility(&inbound); err != nil {
+		if err := validateDeprecatedHysteriaProtocolOptions(inbound.Type, inbound.Options); err != nil {
 			return nil, err
 		}
 		if inbound.TlsId > 0 {
@@ -206,9 +206,6 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 			}
 		}
 		if inbound.Type == "mieru" {
-			if err := removeMieruLegacyPortRange(&inbound); err != nil {
-				return nil, err
-			}
 			if _, err := parseMieruInbound(&inbound); err != nil {
 				return nil, err
 			}

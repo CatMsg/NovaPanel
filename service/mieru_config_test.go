@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/CatMsg/NovaPanel/core"
@@ -41,7 +42,7 @@ func TestParseMieruInboundDefaults(t *testing.T) {
 	}
 }
 
-func TestParseMieruInboundIgnoresLegacyPortRange(t *testing.T) {
+func TestParseMieruInboundRejectsPortRange(t *testing.T) {
 	inbound := &model.Inbound{
 		Type: "mieru",
 		Tag:  "mieru-range",
@@ -56,18 +57,8 @@ func TestParseMieruInboundIgnoresLegacyPortRange(t *testing.T) {
 		}`),
 	}
 
-	config, err := parseMieruInbound(inbound)
-	if err != nil {
-		t.Fatalf("parse Mieru range inbound: %v", err)
-	}
-	if config.Transport != "UDP" || config.HandshakeMode != "HANDSHAKE_NO_WAIT" {
-		t.Fatalf("unexpected normalized config: %#v", config)
-	}
-	if config.TrafficPattern != "BALANCED" {
-		t.Fatalf("unexpected traffic policy: %#v", config)
-	}
-	if config.ListenPort != 23000 {
-		t.Fatalf("unexpected listen port: %d", config.ListenPort)
+	if _, err := parseMieruInbound(inbound); err == nil || !strings.Contains(err.Error(), "port_range is not supported") {
+		t.Fatalf("expected unsupported port_range to fail clearly, got %v", err)
 	}
 }
 
@@ -81,23 +72,6 @@ func TestParseMieruInboundRejectsInvalidListenPort(t *testing.T) {
 		if _, err := parseMieruInbound(inbound); err == nil {
 			t.Fatalf("expected invalid listen port %d to fail", port)
 		}
-	}
-}
-
-func TestRemoveMieruLegacyPortRange(t *testing.T) {
-	inbound := &model.Inbound{Options: json.RawMessage(`{"listen_port":443,"port_range":"443-452","transport":"TCP"}`)}
-	if err := removeMieruLegacyPortRange(inbound); err != nil {
-		t.Fatalf("remove legacy Mieru port range: %v", err)
-	}
-	var options map[string]interface{}
-	if err := json.Unmarshal(inbound.Options, &options); err != nil {
-		t.Fatalf("parse cleaned options: %v", err)
-	}
-	if _, exists := options["port_range"]; exists {
-		t.Fatalf("legacy port range was not removed: %#v", options)
-	}
-	if options["listen_port"] != float64(443) || options["transport"] != "TCP" {
-		t.Fatalf("unrelated Mieru options changed: %#v", options)
 	}
 }
 

@@ -453,7 +453,6 @@ export default {
       serverTitle: "HTTP 入站版本",
       versions: "HTTP 版本",
       serverDefaultHint: "新建入站默认使用 HTTP/1.1，兼容 Mihomo 普通 Clash type:http。HTTP/2 和 HTTP/3 均要求启用入站 TLS。",
-      legacyVersionWarning: "此旧版入站未保存为单一 HTTP 版本。打开对话框不会更改已保存的值；保存前请明确选择一个版本。",
       advanced: "HTTP 高级选项",
       clientAdvanced: "HTTP 客户端高级选项",
       version: "HTTP 版本",

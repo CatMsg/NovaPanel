@@ -53,10 +53,9 @@ func TestResolveHY2ForwardScriptUsesExecutableDirectory(t *testing.T) {
 func TestCollectMieruInboundForwardPortsUsesConfiguredTransport(t *testing.T) {
 	inbound := &model.Inbound{
 		Type: "mieru",
-		Tag:  "mieru-range",
+		Tag:  "mieru-single-port",
 		Options: json.RawMessage(`{
 			"listen_port":24000,
-			"port_range":"443-445",
 			"transport":"UDP"
 		}`),
 	}

@@ -15,27 +15,17 @@ export interface HttpInboundLike {
 
 const supportedVersions = new Set([1, 2, 3])
 
-export function normalizeHttpVersions(value: unknown, fallback: number[] = []): unknown[] {
-  const candidates = Array.isArray(value) ? value : value === undefined || value === null ? fallback : [value]
-  return [...candidates]
-}
-
-export function effectiveInboundHttpVersions(inbound: Pick<HttpInboundLike, 'version'>): unknown[] {
-  return normalizeHttpVersions(inbound.version)
-}
-
 function validVersion(value: unknown, allowAuto = false): value is number {
   return typeof value === 'number' && Number.isInteger(value) &&
     (supportedVersions.has(value) || (allowAuto && value === 0))
 }
 
 export function selectedInboundHttpVersion(value: unknown): number | undefined {
-  const candidate = Array.isArray(value) ? value.length === 1 ? value[0] : undefined : value
-  return validVersion(candidate) ? candidate : undefined
+  return validVersion(value) ? value : undefined
 }
 
 export function requiresHttpVersionSelection(value: unknown): boolean {
-  return value === undefined || value === null || (Array.isArray(value) && value.length !== 1)
+  return !validVersion(value)
 }
 
 export function hasHttpPathOrHost(options: Record<string, unknown> | null | undefined): boolean {
@@ -102,11 +92,9 @@ export function httpInboundIssue(
   inbound: HttpInboundLike,
   tlsConfigs: Array<Record<string, any>>,
 ): HttpVersionIssue | undefined {
-  const versions = effectiveInboundHttpVersions(inbound)
-  if (versions.some(version => !validVersion(version))) return 'invalidVersion'
-  if (versions.length !== 1) return 'singleVersionRequired'
-
-  const version = versions[0]
+  if (inbound.version === undefined || inbound.version === null || Array.isArray(inbound.version)) return 'singleVersionRequired'
+  if (!validVersion(inbound.version)) return 'invalidVersion'
+  const version = inbound.version
   if (version === 3 && !hasEnabledInboundTls(inbound, tlsConfigs)) return 'tlsRequired'
   if (version === 2 && !hasEnabledInboundTls(inbound, tlsConfigs)) return 'http2OnlyRequiresTls'
   return httpClientIssue(inbound)

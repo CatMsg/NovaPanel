@@ -301,11 +301,11 @@ func TestValidateRuntimeConfigDNSFallbackLifecycle(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			// Same normalization and validator as getConfig -> save/preflight.
+			// Same non-rewriting validation as getConfig -> save/preflight.
 			// No database, listeners, certificates, NTP or outbound queries.
-			config, err := NormalizeSingBoxConfig([]byte(test.config))
+			config, err := ValidateSingBoxConfig([]byte(test.config))
 			if err != nil {
-				t.Fatalf("normalize fixture: %v", err)
+				t.Fatalf("validate fixture: %v", err)
 			}
 			err = validateRuntimeConfig(config)
 			if test.wantPath == "" {

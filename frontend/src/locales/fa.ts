@@ -428,7 +428,6 @@ export default {
       serverTitle: "نسخه‌های ورودی HTTP",
       versions: "نسخه HTTP",
       serverDefaultHint: "ورودی‌های جدید به‌طور پیش‌فرض از HTTP/1.1 استفاده می‌کنند که با type:http معمولی Mihomo Clash سازگار است. برای HTTP/2 و HTTP/3 باید TLS ورودی فعال باشد.",
-      legacyVersionWarning: "این ورودی قدیمی یک نسخه HTTP واحد ذخیره نکرده است. بازکردن پنجره مقدار ذخیره‌شده را تغییر نمی‌دهد؛ پیش از ذخیره یک نسخه را آگاهانه انتخاب کنید.",
       advanced: "گزینه‌های پیشرفته HTTP",
       clientAdvanced: "گزینه‌های پیشرفته کلاینت HTTP",
       version: "نسخه HTTP",

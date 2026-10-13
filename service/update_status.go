@@ -23,12 +23,12 @@ const (
 
 var (
 	backgroundUpdateMu sync.Mutex
-	updateCandidates   = []string{"/usr/bin/novas", "/usr/local/novas/novas.sh"}
+	updateCommand      = "/usr/bin/novas"
 	lastUpdateLaunch   time.Time
 )
 
-// StartBackgroundUpdate delegates the upgrade to the installed compatibility
-// script. The new process is detached so an SSH disconnect cannot interrupt it.
+// StartBackgroundUpdate delegates the upgrade to the installed updater. The new
+// process is detached so an SSH disconnect cannot interrupt it.
 func StartBackgroundUpdate() (bool, error) {
 	backgroundUpdateMu.Lock()
 	defer backgroundUpdateMu.Unlock()
@@ -44,28 +44,25 @@ func StartBackgroundUpdate() (bool, error) {
 		return false, nil
 	}
 
-	for _, path := range updateCandidates {
-		if _, err := os.Stat(path); err != nil {
-			continue
-		}
-		command := exec.Command(path, "update", "--background")
-		devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
-		if err != nil {
-			return false, err
-		}
-		command.Stdin = devNull
-		command.Stdout = devNull
-		command.Stderr = devNull
-		if err := command.Start(); err != nil {
-			_ = devNull.Close()
-			continue
-		}
-		_ = devNull.Close()
-		go func() { _ = command.Wait() }()
-		lastUpdateLaunch = time.Now()
-		return true, nil
+	if _, err := os.Stat(updateCommand); err != nil {
+		return false, errors.New("未找到 novas 更新程序")
 	}
-	return false, errors.New("未找到 novas 更新脚本")
+	command := exec.Command(updateCommand, "update", "--background")
+	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		return false, err
+	}
+	command.Stdin = devNull
+	command.Stdout = devNull
+	command.Stderr = devNull
+	if err := command.Start(); err != nil {
+		_ = devNull.Close()
+		return false, err
+	}
+	_ = devNull.Close()
+	go func() { _ = command.Wait() }()
+	lastUpdateLaunch = time.Now()
+	return true, nil
 }
 
 // GetUpdateStatus returns a small, safe status object for the local panel and

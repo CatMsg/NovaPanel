@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { createInbound, type HTTP } from '@/types/inbounds'
 import {
-  effectiveInboundHttpVersions,
   httpInboundIssue,
   httpOutboundIssue,
-  normalizeHttpVersions,
   requiresHttpVersionSelection,
   selectedInboundHttpVersion,
   synchronizeHttpInboundClientVersion,
@@ -15,21 +13,15 @@ describe('HTTP inbound version selection', () => {
     expect((createInbound('http') as HTTP).version).toBe(1)
   })
 
-  it('reads valid scalars and singleton arrays without normalizing legacy data', () => {
-    expect(normalizeHttpVersions(3)).toEqual([3])
-    expect(normalizeHttpVersions([1, 2, 2, 3])).toEqual([1, 2, 2, 3])
-    expect(normalizeHttpVersions([1, '3', 1.5])).toEqual([1, '3', 1.5])
-    expect(normalizeHttpVersions(undefined)).toEqual([])
-    expect(normalizeHttpVersions([])).toEqual([])
-    expect(effectiveInboundHttpVersions({ version: 1 })).toEqual([1])
+	it('accepts only a scalar supported version for panel-managed inbounds', () => {
     expect(selectedInboundHttpVersion(1)).toBe(1)
-    expect(selectedInboundHttpVersion([2])).toBe(2)
+		expect(selectedInboundHttpVersion([2])).toBeUndefined()
     expect(selectedInboundHttpVersion(undefined)).toBeUndefined()
     expect(selectedInboundHttpVersion([1, 2])).toBeUndefined()
     expect(selectedInboundHttpVersion('3')).toBeUndefined()
     expect(requiresHttpVersionSelection(undefined)).toBe(true)
     expect(requiresHttpVersionSelection([1, 2])).toBe(true)
-    expect(requiresHttpVersionSelection([1])).toBe(false)
+		expect(requiresHttpVersionSelection(1)).toBe(false)
   })
 
   it('synchronizes the client only for a valid single version and manages fallback flags', () => {
@@ -37,7 +29,7 @@ describe('HTTP inbound version selection', () => {
     expect(synchronizeHttpInboundClientVersion(http1)).toBe(true)
     expect(http1.out_json).toEqual({ version: 1, path: '/proxy' })
 
-    const http2 = { version: [2], out_json: { version: 1 } }
+		const http2 = { version: 2, out_json: { version: 1 } }
     expect(synchronizeHttpInboundClientVersion(http2)).toBe(true)
     expect(http2.out_json).toEqual({ version: 2, disable_version_fallback: true })
 
@@ -100,7 +92,7 @@ describe('HTTP version guards', () => {
     expect(httpInboundIssue({ version: 3, tls_id: 8 }, tlsConfigs)).toBeUndefined()
     expect(httpInboundIssue({ version: undefined, tls_id: 0 }, tlsConfigs)).toBe('singleVersionRequired')
     expect(httpInboundIssue({ version: [1, 2], tls_id: 8 }, tlsConfigs)).toBe('singleVersionRequired')
-    expect(httpInboundIssue({ version: [1, '3'], tls_id: 8 }, tlsConfigs)).toBe('invalidVersion')
+		expect(httpInboundIssue({ version: [1, '3'], tls_id: 8 }, tlsConfigs)).toBe('singleVersionRequired')
     expect(httpInboundIssue({ version: 1.5, tls_id: 8 }, tlsConfigs)).toBe('invalidVersion')
   })
 })

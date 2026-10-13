@@ -428,7 +428,6 @@ export default {
       serverTitle: "Phiên bản HTTP đầu vào",
       versions: "Phiên bản HTTP",
       serverDefaultHint: "Đầu vào mới mặc định dùng HTTP/1.1, tương thích với type:http thông thường của Mihomo Clash. HTTP/2 và HTTP/3 đều yêu cầu TLS đầu vào được bật.",
-      legacyVersionWarning: "Đầu vào cũ này không lưu một phiên bản HTTP duy nhất. Mở hộp thoại không thay đổi giá trị đã lưu; hãy chọn rõ một phiên bản trước khi lưu.",
       advanced: "Tùy chọn HTTP nâng cao",
       clientAdvanced: "Tùy chọn HTTP client nâng cao",
       version: "Phiên bản HTTP",

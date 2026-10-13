@@ -452,7 +452,6 @@ export default {
       serverTitle: "HTTP inbound versions",
       versions: "HTTP version",
       serverDefaultHint: "New listeners default to HTTP/1.1, the compatible choice for Mihomo's ordinary Clash type:http. HTTP/2 and HTTP/3 require enabled inbound TLS.",
-      legacyVersionWarning: "This legacy inbound stores no single HTTP version. Opening it does not change the saved value; choose one version before saving.",
       advanced: "Advanced HTTP options",
       clientAdvanced: "Advanced HTTP client options",
       version: "HTTP version",

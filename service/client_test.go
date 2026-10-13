@@ -97,7 +97,7 @@ func TestNextClientMonthlyResetFollowsCalendarAndTimezone(t *testing.T) {
 	}
 }
 
-func TestResetClientsInitializesMissingScheduleWithoutResettingUsage(t *testing.T) {
+func TestResetClientsRejectsInvalidScheduleAndResetsDueUsage(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "client-reset.db")); err != nil {
 		t.Fatalf("init db: %v", err)
 	}
@@ -107,55 +107,39 @@ func TestResetClientsInitializesMissingScheduleWithoutResettingUsage(t *testing.
 	client := model.Client{
 		Enable: true, Name: "reset-test", Config: json.RawMessage(`{}`), Inbounds: json.RawMessage(`[]`),
 		Links: json.RawMessage(`[]`), AutoReset: true, ResetDays: 30,
-		Up: 100, Down: 200, TotalUp: 300, TotalDown: 400,
+		Up: 50, Down: 75, TotalUp: 100, TotalDown: 125,
 	}
 	if err := db.Create(&client).Error; err != nil {
 		t.Fatalf("create client: %v", err)
 	}
-	legacyClient := model.Client{
-		Enable: true, Name: "legacy-reset-test", Config: json.RawMessage(`{}`), Inbounds: json.RawMessage(`[]`),
-		Links: json.RawMessage(`[]`), AutoReset: true, ResetDays: 30, NextReset: now + 3*86400,
-		Up: 50, Down: 75, TotalUp: 100, TotalDown: 125,
-	}
-	if err := db.Create(&legacyClient).Error; err != nil {
-		t.Fatalf("create legacy client: %v", err)
-	}
 
 	svc := &ClientService{}
-	if _, changed, err := svc.ResetClients(db, now); err != nil || !changed {
-		t.Fatalf("initialize missing schedule: changed=%v err=%v", changed, err)
+	if _, _, err := svc.ResetClients(db, now); err == nil || !strings.Contains(err.Error(), "重置时间无效") {
+		t.Fatalf("missing monthly schedule should be rejected, got %v", err)
 	}
 	var stored model.Client
 	if err := db.First(&stored, client.Id).Error; err != nil {
-		t.Fatalf("load initialized client: %v", err)
+		t.Fatalf("load unchanged client: %v", err)
 	}
 	location, err := (&SettingService{}).getTimeLocationTx(db)
 	if err != nil {
 		t.Fatalf("get reset timezone: %v", err)
 	}
-	firstReset := nextClientMonthlyReset(now, location)
-	if stored.NextReset != firstReset {
-		t.Fatalf("initialized next reset = %d, want %d", stored.NextReset, firstReset)
-	}
-	if stored.Up != 100 || stored.Down != 200 || stored.TotalUp != 300 || stored.TotalDown != 400 {
-		t.Fatalf("initializing schedule unexpectedly reset usage: up/down=%d/%d totals=%d/%d", stored.Up, stored.Down, stored.TotalUp, stored.TotalDown)
-	}
-	var migrated model.Client
-	if err := db.First(&migrated, legacyClient.Id).Error; err != nil {
-		t.Fatalf("load migrated client: %v", err)
-	}
-	if migrated.NextReset != firstReset || migrated.Up != 50 || migrated.Down != 75 || migrated.TotalUp != 100 || migrated.TotalDown != 125 {
-		t.Fatalf("legacy schedule migration changed usage or missed month boundary: next=%d up/down=%d/%d totals=%d/%d", migrated.NextReset, migrated.Up, migrated.Down, migrated.TotalUp, migrated.TotalDown)
+	if stored.NextReset != 0 || stored.Up != 50 || stored.Down != 75 || stored.TotalUp != 100 || stored.TotalDown != 125 {
+		t.Fatalf("invalid schedule handling changed client data: %+v", stored)
 	}
 
-	dueAt := stored.NextReset
+	dueAt := nextClientMonthlyReset(now, location)
+	if err := db.Model(&stored).Update("next_reset", dueAt).Error; err != nil {
+		t.Fatalf("set valid reset schedule: %v", err)
+	}
 	if _, changed, err := svc.ResetClients(db, dueAt); err != nil || !changed {
 		t.Fatalf("reset at due time: changed=%v err=%v", changed, err)
 	}
 	if err := db.First(&stored, client.Id).Error; err != nil {
 		t.Fatalf("load reset client: %v", err)
 	}
-	if stored.Up != 0 || stored.Down != 0 || stored.TotalUp != 400 || stored.TotalDown != 600 {
+	if stored.Up != 0 || stored.Down != 0 || stored.TotalUp != 150 || stored.TotalDown != 200 {
 		t.Fatalf("due reset did not roll usage into lifetime totals: up/down=%d/%d totals=%d/%d", stored.Up, stored.Down, stored.TotalUp, stored.TotalDown)
 	}
 	if stored.NextReset != nextClientMonthlyReset(dueAt, location) {
@@ -220,9 +204,14 @@ func TestClientEditPreservesLiveCountersAndUnchangedResetSchedule(t *testing.T) 
 	}
 
 	db := database.GetDB()
+	resetLocation, err := (&SettingService{}).getTimeLocationTx(db)
+	if err != nil {
+		t.Fatalf("get reset timezone: %v", err)
+	}
+	nextReset := nextClientMonthlyReset(time.Now().Unix(), resetLocation)
 	client := model.Client{
 		Enable: true, Name: "edit-live-test", Config: json.RawMessage(`{}`), Inbounds: json.RawMessage(`[]`),
-		Links: json.RawMessage(`[]`), AutoReset: true, ResetDays: 30, NextReset: 1_800_000_000,
+		Links: json.RawMessage(`[]`), AutoReset: true, ResetDays: 30, NextReset: nextReset,
 		Up: 10, Down: 20, TotalUp: 30, TotalDown: 40,
 	}
 	if err := db.Create(&client).Error; err != nil {
@@ -237,7 +226,7 @@ func TestClientEditPreservesLiveCountersAndUnchangedResetSchedule(t *testing.T) 
 	stale.ResetScheduleChanged = &unchanged
 	if err := db.Model(&model.Client{}).Where("id = ?", client.Id).Updates(map[string]interface{}{
 		"up": 111, "down": 222, "total_up": 333, "total_down": 444,
-		"reset_days": 45, "next_reset": 1_900_000_000,
+		"reset_days": 45, "next_reset": nextClientMonthlyReset(time.Unix(nextReset, 0).AddDate(0, 1, 0).Unix(), resetLocation),
 	}).Error; err != nil {
 		t.Fatalf("update live state: %v", err)
 	}
@@ -260,12 +249,9 @@ func TestClientEditPreservesLiveCountersAndUnchangedResetSchedule(t *testing.T) 
 	if saved.Up != 111 || saved.Down != 222 || saved.TotalUp != 333 || saved.TotalDown != 444 {
 		t.Fatalf("edit overwrote live counters: up/down=%d/%d totals=%d/%d", saved.Up, saved.Down, saved.TotalUp, saved.TotalDown)
 	}
-	resetLocation, err := (&SettingService{}).getTimeLocationTx(db)
-	if err != nil {
-		t.Fatalf("get reset timezone: %v", err)
-	}
-	if saved.ResetDays != 45 || !isClientMonthlyReset(saved.NextReset, resetLocation) {
-		t.Fatalf("edit did not align reset schedule to month boundary: days=%d next=%d", saved.ResetDays, saved.NextReset)
+	wantNextReset := nextClientMonthlyReset(time.Unix(nextReset, 0).AddDate(0, 1, 0).Unix(), resetLocation)
+	if saved.ResetDays != 45 || saved.NextReset != wantNextReset {
+		t.Fatalf("edit did not preserve the current monthly schedule: days=%d next=%d want=%d", saved.ResetDays, saved.NextReset, wantNextReset)
 	}
 }
 
@@ -275,9 +261,14 @@ func TestManualUsageResetUsesLatestCountersAndAllowsScheduleChange(t *testing.T)
 	}
 
 	db := database.GetDB()
+	resetLocation, err := (&SettingService{}).getTimeLocationTx(db)
+	if err != nil {
+		t.Fatalf("get reset timezone: %v", err)
+	}
+	initialNextReset := nextClientMonthlyReset(time.Now().Unix(), resetLocation)
 	client := model.Client{
 		Enable: true, Name: "manual-reset-test", Config: json.RawMessage(`{}`), Inbounds: json.RawMessage(`[]`),
-		Links: json.RawMessage(`[]`), AutoReset: true, ResetDays: 30, NextReset: 1_800_000_000,
+		Links: json.RawMessage(`[]`), AutoReset: true, ResetDays: 30, NextReset: initialNextReset,
 		Up: 10, Down: 20, TotalUp: 30, TotalDown: 40,
 	}
 	if err := db.Create(&client).Error; err != nil {
@@ -288,7 +279,7 @@ func TestManualUsageResetUsesLatestCountersAndAllowsScheduleChange(t *testing.T)
 		t.Fatalf("load edit snapshot: %v", err)
 	}
 	edited.ResetDays = 35
-	edited.NextReset = 1_900_100_000
+	edited.NextReset = nextClientMonthlyReset(time.Unix(initialNextReset, 0).AddDate(0, 1, 0).Unix(), resetLocation)
 	changed := true
 	edited.ResetScheduleChanged = &changed
 	edited.ResetUsage = true
@@ -313,12 +304,8 @@ func TestManualUsageResetUsesLatestCountersAndAllowsScheduleChange(t *testing.T)
 	if saved.Up != 0 || saved.Down != 0 || saved.TotalUp != 444 || saved.TotalDown != 666 {
 		t.Fatalf("manual reset failed to archive current usage: up/down=%d/%d totals=%d/%d", saved.Up, saved.Down, saved.TotalUp, saved.TotalDown)
 	}
-	resetLocation, err := (&SettingService{}).getTimeLocationTx(db)
-	if err != nil {
-		t.Fatalf("get reset timezone: %v", err)
-	}
-	if saved.ResetDays != 35 || !isClientMonthlyReset(saved.NextReset, resetLocation) {
-		t.Fatalf("requested schedule was not aligned to monthly reset: days=%d next=%d", saved.ResetDays, saved.NextReset)
+	if saved.ResetDays != 35 || saved.NextReset != edited.NextReset {
+		t.Fatalf("requested monthly schedule was not preserved: days=%d next=%d want=%d", saved.ResetDays, saved.NextReset, edited.NextReset)
 	}
 }
 
