@@ -15,6 +15,11 @@ type Inbound struct {
 	TlsId uint `json:"tls_id" form:"tls_id"`
 	Tls   *Tls `json:"tls" form:"tls" gorm:"foreignKey:TlsId;references:Id"`
 
+	// MASQUE owns its ECDSA identity. Keep the private material out of every
+	// API/subscription JSON representation while persisting it with the inbound.
+	MasqueTLSCertificate string `json:"-" form:"-" gorm:"type:TEXT"`
+	MasqueTLSKey         string `json:"-" form:"-" gorm:"type:TEXT"`
+
 	Addrs   json.RawMessage `json:"addrs" form:"addrs"`
 	OutJson json.RawMessage `json:"out_json" form:"out_json"`
 	Options json.RawMessage `json:"-" form:"-"`

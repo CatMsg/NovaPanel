@@ -209,7 +209,6 @@ export default {
         InTypes.Masque,
       ],
       HasTls: [
-        InTypes.Masque,
         InTypes.HTTP,
         InTypes.VMess,
         InTypes.Trojan,
@@ -226,7 +225,7 @@ export default {
         InTypes.Trojan,
         InTypes.Shadowsocks,
       ],
-      OnlyTLS: [InTypes.Hysteria, InTypes.Hysteria2, InTypes.TUIC, InTypes.Naive, InTypes.AnyTls, InTypes.Masque ],
+      OnlyTLS: [InTypes.Hysteria, InTypes.Hysteria2, InTypes.TUIC, InTypes.Naive, InTypes.AnyTls],
     }
   },
   methods: {

@@ -36,6 +36,9 @@ func (s *MasqueService) SyncFromDB() error {
 	if s == nil {
 		return nil
 	}
+	if err := MigrateMasqueTLSInbounds(database.GetDB()); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if corePtr == nil || !corePtr.IsRunning() {

@@ -7,12 +7,10 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"net"
 	"net/netip"
-	"os"
 	"strconv"
 	"strings"
 
@@ -36,38 +34,13 @@ func masqueMihomoEnabled(inbound *model.Inbound) bool {
 }
 
 func masqueServerPublicKey(inbound *model.Inbound) (string, error) {
-	if inbound.Tls == nil {
-		return "", errors.New("compatibility with Mihomo requires an ECDSA TLS template")
-	}
-	var fields struct {
-		Certificate          []string `json:"certificate"`
-		CertificatePath      string   `json:"certificate_path"`
-		ClientAuthentication string   `json:"client_authentication"`
-	}
-	if err := json.Unmarshal(inbound.Tls.Server, &fields); err != nil {
+	config, err := parseMasqueInbound(inbound)
+	if err != nil {
 		return "", err
 	}
-	if fields.ClientAuthentication != "" && fields.ClientAuthentication != "no" {
-		return "", errors.New("compatibility with Mihomo conflicts with this TLS client-authentication policy")
-	}
-	content := []byte(strings.Join(fields.Certificate, "\n"))
-	if len(content) == 0 && fields.CertificatePath != "" {
-		var err error
-		content, err = os.ReadFile(fields.CertificatePath)
-		if err != nil {
-			return "", errors.New("cannot read Mihomo TLS certificate")
-		}
-	}
-	block, _ := pem.Decode(content)
-	if block == nil || block.Type != "CERTIFICATE" {
-		return "", errors.New("compatibility with Mihomo requires a readable ECDSA TLS certificate")
-	}
-	certificate, err := x509.ParseCertificate(block.Bytes)
+	certificate, err := validateMasqueTLSMaterial(inbound, config.Host)
 	if err != nil {
-		return "", errors.New("invalid Mihomo TLS certificate")
-	}
-	if _, ok := certificate.PublicKey.(*ecdsa.PublicKey); !ok {
-		return "", errors.New("compatibility with Mihomo MASQUE requires an ECDSA TLS certificate, not RSA")
+		return "", err
 	}
 	der, err := x509.MarshalPKIXPublicKey(certificate.PublicKey)
 	if err != nil {

@@ -2,6 +2,8 @@ package service
 
 import (
 	"bytes"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -116,7 +118,7 @@ func TestMASQUEMihomoCredentialsStableBatchAndRevocation(t *testing.T) {
 	}
 }
 
-func TestMASQUEMihomoTemplateAndTLSPolicy(t *testing.T) {
+func TestMASQUEMihomoTemplateUsesDedicatedECDSAIdentity(t *testing.T) {
 	db, inbound := masqueManagedConfigFixture(t)
 	inbound.Options = json.RawMessage(`{"listen_port":443,"mihomo_compatible":true}`)
 	if err := prepareMasqueInbound(db, &inbound, nil, "2001:db8::1"); err != nil {
@@ -147,15 +149,18 @@ func TestMASQUEMihomoTemplateAndTLSPolicy(t *testing.T) {
 	if !bytes.Contains(saved.OutJson, []byte(`"nova_mihomo"`)) {
 		t.Fatal("TLS-triggered outbound refresh discarded compatibility fields")
 	}
-	var server map[string]any
-	if err := json.Unmarshal(inbound.Tls.Server, &server); err != nil {
+	if inbound.TlsId != 0 || inbound.Tls != nil || inbound.MasqueTLSCertificate == "" {
+		t.Fatal("Mihomo compatibility still depends on a shared TLS template")
+	}
+	certificate, err := validateMasqueTLSMaterial(&inbound, "2001:db8::1")
+	if err != nil {
+		t.Fatalf("dedicated certificate is invalid: %v", err)
+	}
+	publicKey, err := x509.MarshalPKIXPublicKey(certificate.PublicKey)
+	if err != nil {
 		t.Fatal(err)
 	}
-	server["client_authentication"] = "require-and-verify"
-	copyTLS := *inbound.Tls
-	copyTLS.Server, _ = json.Marshal(server)
-	inbound.Tls = &copyTLS
-	if _, err := masqueServerPublicKey(&inbound); err == nil {
-		t.Fatal("conflicting TLS authentication was silently weakened")
+	if compatible["public-key"] != base64.StdEncoding.EncodeToString(publicKey) {
+		t.Fatal("Mihomo pin does not match the dedicated server certificate")
 	}
 }

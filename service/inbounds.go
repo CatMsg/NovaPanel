@@ -465,6 +465,14 @@ func (s *InboundService) UpdateOutJsons(tx *gorm.DB, inboundIds []uint, hostname
 	}
 	for _, inbound := range inbounds {
 		if inbound.Type == "masque" {
+			config, parseErr := parseMasqueInbound(&inbound)
+			if parseErr != nil {
+				return parseErr
+			}
+			if _, err = ensureMasqueTLSMaterial(&inbound, config.Host); err != nil {
+				return err
+			}
+			inbound.TlsId, inbound.Tls = 0, nil
 			inbound.OutJson, err = buildMasqueClientTemplate(&inbound)
 		} else {
 			err = util.FillOutJson(&inbound, hostname)
@@ -472,7 +480,13 @@ func (s *InboundService) UpdateOutJsons(tx *gorm.DB, inboundIds []uint, hostname
 		if err != nil {
 			return err
 		}
-		err = tx.Model(model.Inbound{}).Where("tag = ?", inbound.Tag).Update("out_json", inbound.OutJson).Error
+		updates := map[string]any{"out_json": inbound.OutJson}
+		if inbound.Type == "masque" {
+			updates["tls_id"] = 0
+			updates["masque_tls_certificate"] = inbound.MasqueTLSCertificate
+			updates["masque_tls_key"] = inbound.MasqueTLSKey
+		}
+		err = tx.Model(model.Inbound{}).Where("tag = ?", inbound.Tag).Updates(updates).Error
 		if err != nil {
 			return err
 		}

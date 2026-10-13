@@ -48,20 +48,17 @@ func parseMasqueInbound(inbound *model.Inbound) (*masqueInboundConfig, error) {
 	if err != nil || !address.Addr().Is4() || address.Bits() < 16 || address.Bits() > 30 || address.Addr() == address.Masked().Addr() {
 		return nil, fmt.Errorf("MASQUE address must be a server IPv4 address in a /16 through /30 pool (for example 172.16.0.1/24)")
 	}
-	var tls map[string]any
-	if inbound.TlsId == 0 || inbound.Tls == nil || json.Unmarshal(inbound.Tls.Server, &tls) != nil || tls["enabled"] != true {
-		return nil, fmt.Errorf("MASQUE HTTP/3 requires an enabled TLS template")
-	}
-	if maximum, _ := tls["max_version"].(string); maximum == "1.0" || maximum == "1.1" || maximum == "1.2" {
-		return nil, fmt.Errorf("MASQUE HTTP/3 requires TLS 1.3")
-	}
-	if reality, _ := tls["reality"].(map[string]any); reality["enabled"] == true {
-		return nil, fmt.Errorf("MASQUE HTTP/3 does not support Reality TLS templates")
-	}
 	return &masqueInboundConfig{Host: strings.TrimSpace(options.Server), Port: options.Port, Address: address}, nil
 }
 
-func prepareMasqueInbound(tx *gorm.DB, inbound, _ *model.Inbound, hostname string) error {
+func prepareMasqueInbound(tx *gorm.DB, inbound, oldInbound *model.Inbound, hostname string) error {
+	if oldInbound != nil && oldInbound.Type == "masque" {
+		inbound.MasqueTLSCertificate = oldInbound.MasqueTLSCertificate
+		inbound.MasqueTLSKey = oldInbound.MasqueTLSKey
+	}
+	// MASQUE uses its own generated ECDSA identity, not a shared TLS template.
+	inbound.TlsId = 0
+	inbound.Tls = nil
 	var options map[string]any
 	if err := json.Unmarshal(inbound.Options, &options); err != nil {
 		return err
@@ -123,6 +120,9 @@ func prepareMasqueInbound(tx *gorm.DB, inbound, _ *model.Inbound, hostname strin
 	if err != nil {
 		return err
 	}
+	if _, err := ensureMasqueTLSMaterial(inbound, config.Host); err != nil {
+		return err
+	}
 	if masqueMihomoEnabled(inbound) {
 		if _, err := masqueServerPublicKey(inbound); err != nil {
 			return err
@@ -157,7 +157,8 @@ func buildMasqueEndpointConfig(tx *gorm.DB, inbound *model.Inbound) (json.RawMes
 	if len(users) == 0 {
 		return nil, nil
 	}
-	if _, err := parseMasqueInbound(inbound); err != nil {
+	config, err := parseMasqueInbound(inbound)
+	if err != nil {
 		return nil, err
 	}
 	raw, err := inbound.MarshalJSON()
@@ -171,6 +172,11 @@ func buildMasqueEndpointConfig(tx *gorm.DB, inbound *model.Inbound) (json.RawMes
 	options["type"], options["users"] = "masque-server", users
 	delete(options, "server")
 	delete(options, "mihomo_compatible")
+	tlsOptions, err := masqueServerTLSOptions(inbound, config.Host)
+	if err != nil {
+		return nil, err
+	}
+	options["tls"] = tlsOptions
 	if masqueMihomoEnabled(inbound) {
 		enabled := make(map[string]bool)
 		for _, user := range users {
@@ -190,8 +196,15 @@ func buildMasqueClientTemplate(inbound *model.Inbound) (json.RawMessage, error) 
 	if err != nil {
 		return nil, err
 	}
+	tlsOptions, err := masqueServerTLSOptions(inbound, config.Host)
+	if err != nil {
+		return nil, err
+	}
+	delete(tlsOptions, "key")
 	copy := *inbound
 	copy.OutJson = json.RawMessage(`{}`)
+	copy.TlsId = 1
+	copy.Tls = &model.Tls{Server: mustJSONRaw(tlsOptions), Client: json.RawMessage(`{}`)}
 	if err := util.FillOutJson(&copy, config.Host); err != nil {
 		return nil, err
 	}
@@ -208,4 +221,9 @@ func buildMasqueClientTemplate(inbound *model.Inbound) (json.RawMessage, error) 
 		return json.Marshal(fields)
 	}
 	return copy.OutJson, nil
+}
+
+func mustJSONRaw(value any) json.RawMessage {
+	raw, _ := json.Marshal(value)
+	return raw
 }

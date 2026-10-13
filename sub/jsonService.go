@@ -194,13 +194,11 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 			}
 			outbound["username"], outbound["password"] = username, password
 			if len(formats) > 0 && formats[0] == "clash" && mihomoTemplate != nil {
-				if inData.Tls != nil {
-					publicKey, err := service.MasqueMihomoPublicKey(inData)
-					if err != nil {
-						return nil, nil, err
-					}
-					mihomoTemplate["public-key"] = publicKey
+				publicKey, err := service.MasqueMihomoPublicKey(inData)
+				if err != nil {
+					return nil, nil, err
 				}
+				mihomoTemplate["public-key"] = publicKey
 				entries, _ := credential["mihomo"].(map[string]interface{})
 				compatible, _ := entries[strconv.FormatUint(uint64(inData.Id), 10)].(map[string]interface{})
 				privateKey, _ := compatible["private_key"].(string)

@@ -5,11 +5,13 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,7 +29,26 @@ func TestMASQUEMihomoSubscriptionIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	db := database.GetDB()
-	inbound := model.Inbound{Type: "masque", Tag: "dual", Options: json.RawMessage(`{"mihomo_compatible":true}`), Addrs: json.RawMessage(`[]`), OutJson: json.RawMessage(`{"type":"masque-client","tag":"dual","server":"localhost","server_port":443,"version":3,"system":false,"on_demand":true,"disable_version_fallback":true,"tls":{"enabled":true,"alpn":["h3"]},"nova_mihomo":{"public-key":"synthetic-server-key","uri":"https://localhost:443/.well-known/masque/ip/*/*/","network":"quic","mtu":1280,"udp":true}}`)}
+	serverKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	serverCert := &x509.Certificate{SerialNumber: big.NewInt(123), Subject: pkix.Name{CommonName: "localhost"}, DNSNames: []string{"localhost"}, NotBefore: now.Add(-time.Hour), NotAfter: now.AddDate(5, 0, 0), KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, IsCA: true, BasicConstraintsValid: true}
+	serverDER, err := x509.CreateCertificate(rand.Reader, serverCert, serverCert, &serverKey.PublicKey, serverKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverPrivateDER, err := x509.MarshalECPrivateKey(serverKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverPublicDER, err := x509.MarshalPKIXPublicKey(&serverKey.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverPublicKey := base64.StdEncoding.EncodeToString(serverPublicDER)
+	inbound := model.Inbound{Type: "masque", Tag: "dual", MasqueTLSCertificate: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: serverDER})), MasqueTLSKey: string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: serverPrivateDER})), Options: json.RawMessage(`{"server":"localhost","listen_port":443,"mihomo_compatible":true,"version":[3],"system":false,"mtu":1280,"address":["172.29.0.1/24"]}`), Addrs: json.RawMessage(`[]`), OutJson: json.RawMessage(`{"type":"masque-client","tag":"dual","server":"localhost","server_port":443,"version":3,"system":false,"on_demand":true,"disable_version_fallback":true,"tls":{"enabled":true,"alpn":["h3"]},"nova_mihomo":{"public-key":"synthetic-server-key","uri":"https://localhost:443/.well-known/masque/ip/*/*/","network":"quic","mtu":1280,"udp":true}}`)}
 	if err := db.Create(&inbound).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +83,7 @@ func TestMASQUEMihomoSubscriptionIsolation(t *testing.T) {
 		t.Fatal("dual node missing from Clash subscription")
 	}
 	proxy := profile.Proxies[0]
-	for key, value := range map[string]any{"type": "masque", "private-key": "synthetic-private-key", "public-key": "synthetic-server-key", "uri": "https://localhost:443/.well-known/masque/ip/*/*/", "udp": true} {
+	for key, value := range map[string]any{"type": "masque", "private-key": "synthetic-private-key", "public-key": serverPublicKey, "uri": "https://localhost:443/.well-known/masque/ip/*/*/", "udp": true} {
 		if proxy[key] != value {
 			t.Fatalf("Clash field %s mismatch", key)
 		}
@@ -78,26 +99,18 @@ func TestMASQUEMihomoSubscriptionIsolation(t *testing.T) {
 	if _, _, err := (&JsonService{}).getOutbounds(json.RawMessage(`{"masque":{"username":"alice","password":"native-test-password"}}`), []*model.Inbound{&inbound}, "clash"); err == nil {
 		t.Fatal("missing key silently downgraded to Basic auth")
 	}
-	certificatePath := filepath.Join(t.TempDir(), "server.pem")
-	rotateCertificate := func() string {
-		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-		if err != nil {
-			t.Fatal(err)
-		}
-		template := &x509.Certificate{SerialNumber: big.NewInt(1), NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour)}
-		der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(certificatePath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0600); err != nil {
-			t.Fatal(err)
-		}
-		publicDER, _ := x509.MarshalPKIXPublicKey(&key.PublicKey)
-		return base64.StdEncoding.EncodeToString(publicDER)
+	firstKey := serverPublicKey
+	differentKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
 	}
-	firstKey := rotateCertificate()
-	tlsServer, _ := json.Marshal(map[string]any{"enabled": true, "certificate_path": certificatePath})
-	tls := model.Tls{Name: "live-cert", Server: tlsServer, Client: json.RawMessage(`{}`)}
+	differentDER, err := x509.MarshalPKIXPublicKey(&differentKey.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherPublicKey := base64.StdEncoding.EncodeToString(differentDER)
+	tlsServer, _ := json.Marshal(map[string]any{"enabled": true, "certificate": []string{"unrelated TLS template certificate"}})
+	tls := model.Tls{Name: "unrelated-template", Server: tlsServer, Client: json.RawMessage(`{}`)}
 	if err := db.Create(&tls).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -105,13 +118,8 @@ func TestMASQUEMihomoSubscriptionIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	clash, _, err = (&ClashService{}).GetClash(client.Name)
-	if err != nil || !strings.Contains(*clash, firstKey) || strings.Contains(*clash, "synthetic-server-key") {
-		t.Fatal("live certificate pin was not exported")
-	}
-	secondKey := rotateCertificate()
-	clash, _, err = (&ClashService{}).GetClash(client.Name)
-	if err != nil || !strings.Contains(*clash, secondKey) || strings.Contains(*clash, firstKey) {
-		t.Fatal("ACME public-key rotation served a stale cached pin")
+	if err != nil || !strings.Contains(*clash, firstKey) || strings.Contains(*clash, otherPublicKey) || strings.Contains(*clash, "synthetic-server-key") {
+		t.Fatal("Mihomo pin did not stay bound to the MASQUE-owned ECDSA certificate")
 	}
 	if err := db.Model(&inbound).Update("exclude_from_sub", true).Error; err != nil {
 		t.Fatal(err)
@@ -138,7 +146,39 @@ func TestMASQUEMihomoGeneratedNodeAcceptedByBinary(t *testing.T) {
 	privateDER, _ := x509.MarshalECPrivateKey(key)
 	publicDER, _ := x509.MarshalPKIXPublicKey(&key.PublicKey)
 	privateKey, publicKey := base64.StdEncoding.EncodeToString(privateDER), base64.StdEncoding.EncodeToString(publicDER)
-	inbound := &model.Inbound{Id: 1, Type: "masque", Tag: "dual", Addrs: json.RawMessage(`[]`)}
+	serverKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverPrivateDER, err := x509.MarshalECPrivateKey(serverKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	serverCertificate := &x509.Certificate{
+		SerialNumber:          big.NewInt(456),
+		Subject:               pkix.Name{CommonName: "2001:db8::1"},
+		IPAddresses:           []net.IP{net.ParseIP("2001:db8::1")},
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.AddDate(5, 0, 0),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+	}
+	serverCertificateDER, err := x509.CreateCertificate(rand.Reader, serverCertificate, serverCertificate, &serverKey.PublicKey, serverKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inbound := &model.Inbound{
+		Id:                   1,
+		Type:                 "masque",
+		Tag:                  "dual",
+		Options:              json.RawMessage(`{"server":"2001:db8::1","listen_port":443,"mihomo_compatible":true,"version":[3],"system":false,"mtu":1280,"address":["172.29.0.1/24"]}`),
+		MasqueTLSCertificate: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: serverCertificateDER})),
+		MasqueTLSKey:         string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: serverPrivateDER})),
+		Addrs:                json.RawMessage(`[]`),
+	}
 	inbound.OutJson, _ = json.Marshal(map[string]any{"type": "masque-client", "tag": "dual", "server": "2001:db8::1", "server_port": 443, "nova_mihomo": map[string]any{"public-key": publicKey, "uri": "https://[2001:db8::1]:443/.well-known/masque/ip/*/*/", "udp": true, "mtu": 1280}})
 	clientConfig, _ := json.Marshal(map[string]any{"masque": map[string]any{"username": "alice", "password": "native-test-only", "mihomo": map[string]any{"1": map[string]any{"private_key": privateKey, "ip": "172.29.0.2/32"}}}})
 	nodes, _, err := (&JsonService{}).getOutbounds(clientConfig, []*model.Inbound{inbound}, "clash")

@@ -37,7 +37,7 @@ for required in \
   TestManagedMASQUEMihomoBinaryTCPAndUDP \
   TestManagedMASQUEMihomoAuthenticationAndRoutes \
   TestMASQUEMihomoCredentialsStableBatchAndRevocation \
-  TestMASQUEMihomoTemplateAndTLSPolicy \
+  TestMASQUEMihomoTemplateUsesDedicatedECDSAIdentity \
   TestMASQUEMihomoListMetadata \
   TestMASQUEMihomoSubscriptionIsolation \
   TestMASQUEMihomoGeneratedNodeAcceptedByBinary; do
