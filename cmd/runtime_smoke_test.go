@@ -74,6 +74,7 @@ func TestRuntimeBinarySmoke(t *testing.T) {
 	run("setting", "-port", panelPort, "-path", "/runtime-test/", "-subPort", subPort)
 	run("admin", "-username", "runtime-smoke", "-password", "temporary-test-only")
 	before := run("admin", "-show")
+	run("upgrade-db")
 	run("checkdb")
 	if after := run("admin", "-show"); !bytes.Equal(before, after) {
 		t.Fatal("administrator changed during validation")

@@ -100,6 +100,7 @@ novas_deploy() (
     chmod 755 "$stage"
     chmod 755 "$stage/novas" "$stage/novas.sh" "$stage/scripts/"*.sh
     # Work on the staged offline database, never on the only rollback copy.
+    (cd "$stage"; env NOVAS_DB_FOLDER="$stage/db" ./novas upgrade-db)
     (cd "$stage"; env NOVAS_DB_FOLDER="$stage/db" ./novas checkdb)
 
     deployed=1

@@ -1,6 +1,7 @@
 package database
 
 import (
+	"database/sql"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -127,5 +128,122 @@ func TestInitDBRejectsMissingColumnWithoutRepairing(t *testing.T) {
 	}
 	if GetDB().Migrator().HasColumn(&model.Setting{}, "value") {
 		t.Fatal("initialization recreated a missing column")
+	}
+}
+
+func TestMigrateMasqueIdentityColumnsPreservesData(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "masque-migration.db")
+	if err := InitDB(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := CloseDB(); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Exec("ALTER TABLE inbounds DROP COLUMN masque_tls_key").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Exec("ALTER TABLE inbounds DROP COLUMN masque_tls_certificate").Error; err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := conn.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ValidateCurrentSchema(path); err == nil || !strings.Contains(err.Error(), "inbounds.masque_tls_certificate") {
+		t.Fatalf("pre-upgrade schema should be rejected by validation, got %v", err)
+	}
+	applied, err := MigrateMasqueIdentityColumns(path)
+	if err != nil || !applied {
+		t.Fatalf("MASQUE identity migration did not run: applied=%v err=%v", applied, err)
+	}
+	if err := ValidateCurrentSchema(path); err != nil {
+		t.Fatalf("migrated schema failed validation: %v", err)
+	}
+	if applied, err := MigrateMasqueIdentityColumns(path); err != nil || applied {
+		t.Fatalf("migration is not idempotent: applied=%v err=%v", applied, err)
+	}
+	readOnly, err := sql.Open("sqlite3", "file:"+path+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer readOnly.Close()
+	var users int
+	if err := readOnly.QueryRow("SELECT COUNT(*) FROM users WHERE username = 'admin'").Scan(&users); err != nil || users != 1 {
+		t.Fatalf("migration did not preserve existing user data: users=%d err=%v", users, err)
+	}
+}
+
+func TestMigrateMasqueIdentityColumnsRepairsSingleMissingColumn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "partial.db")
+	if err := InitDB(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := CloseDB(); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Exec("ALTER TABLE inbounds DROP COLUMN masque_tls_key").Error; err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := conn.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if applied, err := MigrateMasqueIdentityColumns(path); err != nil || !applied {
+		t.Fatalf("single missing MASQUE column should be repaired: applied=%v err=%v", applied, err)
+	}
+	if err := ValidateCurrentSchema(path); err != nil {
+		t.Fatalf("repaired schema did not validate: %v", err)
+	}
+}
+
+func TestMigrateMasqueIdentityColumnsRejectsUnrelatedSchemaDifference(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "unrelated-difference.db")
+	if err := InitDB(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := CloseDB(); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		"ALTER TABLE inbounds DROP COLUMN masque_tls_key",
+		"ALTER TABLE inbounds DROP COLUMN masque_tls_certificate",
+		"ALTER TABLE settings DROP COLUMN value",
+	} {
+		if err := conn.Exec(statement).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	sqlDB, err := conn.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if applied, err := MigrateMasqueIdentityColumns(path); err == nil || applied || !strings.Contains(err.Error(), "settings.value") {
+		t.Fatalf("unrelated schema difference should prevent migration: applied=%v err=%v", applied, err)
+	}
+	if err := ValidateCurrentSchema(path); err == nil || !strings.Contains(err.Error(), "settings.value") {
+		t.Fatalf("rejected migration changed database schema: %v", err)
 	}
 }

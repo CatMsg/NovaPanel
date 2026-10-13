@@ -72,6 +72,11 @@ if exist "%WINSW_PATH%" (
 
 REM Validate the database before starting the service
 cd /d "%INSTALL_DIR%"
+novas.exe upgrade-db
+if %errorLevel% neq 0 (
+    echo Database upgrade preparation failed. Installation stopped without resetting settings.
+    exit /b 1
+)
 novas.exe checkdb
 if %errorLevel% neq 0 (
     echo Database validation failed. Installation stopped without resetting settings.

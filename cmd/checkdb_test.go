@@ -5,6 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/CatMsg/NovaPanel/database"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 func TestCheckRuntimeDatabase(t *testing.T) {
@@ -12,22 +16,26 @@ func TestCheckRuntimeDatabase(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "novas.db")
 			switch kind {
-			case "valid", "wal", "unrelated":
+			case "valid", "wal":
+				if err := database.InitDB(path); err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = database.CloseDB() }()
+				if kind == "wal" {
+					if err := database.GetDB().Exec("PRAGMA journal_mode=WAL").Error; err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := database.CloseDB(); err != nil {
+					t.Fatal(err)
+				}
+			case "unrelated":
 				db, err := sql.Open("sqlite3", path)
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer db.Close()
-				if kind == "wal" {
-					if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-						t.Fatal(err)
-					}
-				}
-				statement := "CREATE TABLE unrelated (id INTEGER)"
-				if kind != "unrelated" {
-					statement = "CREATE TABLE settings (key TEXT, value TEXT); CREATE TABLE users (username TEXT, password TEXT); INSERT INTO users VALUES ('test', 'test-only');"
-				}
-				if _, err := db.Exec(statement); err != nil {
+				if _, err := db.Exec("CREATE TABLE unrelated (id INTEGER)"); err != nil {
 					t.Fatal(err)
 				}
 			case "corrupt", "empty":
@@ -54,5 +62,38 @@ func TestCheckRuntimeDatabase(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestUpgradeRuntimeDatabaseAppliesStructuralMasquePatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "novas.db")
+	if err := database.InitDB(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.CloseDB(); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, column := range []string{"masque_tls_key", "masque_tls_certificate"} {
+		if err := conn.Exec("ALTER TABLE inbounds DROP COLUMN " + column).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	sqlDB, err := conn.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := upgradeRuntimeDatabase(path); err != nil {
+		t.Fatalf("structural upgrade failed: %v", err)
+	}
+	if err := checkRuntimeDatabase(path); err != nil {
+		t.Fatalf("upgraded database did not pass full validation: %v", err)
 	}
 }

@@ -40,7 +40,7 @@ func TestOfflineDeployment(t *testing.T) {
 		helper = override
 	}
 	installer := filepath.Join(filepath.Dir(source), "../../install.sh")
-	for _, scenario := range []string{"fresh", "fresh-callback", "current", "concurrent-current", "validation-failure", "health-failure", "custom-db", "bad-package", "locked"} {
+	for _, scenario := range []string{"fresh", "fresh-callback", "current", "concurrent-current", "migration-failure", "validation-failure", "health-failure", "custom-db", "bad-package", "locked"} {
 		t.Run(scenario, func(t *testing.T) {
 			root := t.TempDir()
 			fresh := scenario == "fresh" || scenario == "fresh-callback"
@@ -76,7 +76,8 @@ func TestOfflineDeployment(t *testing.T) {
 set -eu
 case "$1" in
   -v) echo 'NovaPanel Panel 1.6.97';;
-  checkdb) [[ "$SCENARIO" != validation-failure ]];;
+  upgrade-db) echo upgrade-db >> "$TEST_ROOT/db-actions"; [[ "$SCENARIO" != migration-failure ]];;
+  checkdb) echo checkdb >> "$TEST_ROOT/db-actions"; [[ "$SCENARIO" != validation-failure ]];;
   healthcheck) [[ "$SCENARIO" != health-failure ]];;
 esac
 `, 0755)
@@ -141,6 +142,16 @@ source "$1"; novas_deploy "$2" "$3"`
 			if !success && err == nil {
 				t.Fatalf("failure was accepted\n%s", output)
 			}
+			if scenario == "fresh" || scenario == "fresh-callback" || scenario == "current" || scenario == "concurrent-current" || scenario == "migration-failure" || scenario == "validation-failure" || scenario == "health-failure" {
+				dbActions, _ := os.ReadFile(filepath.Join(root, "db-actions"))
+				want := "upgrade-db\ncheckdb\n"
+				if scenario == "migration-failure" {
+					want = "upgrade-db\n"
+				}
+				if string(dbActions) != want {
+					t.Fatalf("database preflight order = %q, want %q", dbActions, want)
+				}
+			}
 			if success {
 				if scenario == "fresh-callback" || scenario == "concurrent-current" {
 					actions, _ := os.ReadFile(filepath.Join(root, "callback-actions"))
@@ -174,6 +185,10 @@ source "$1"; novas_deploy "$2" "$3"`
 				data, _ := os.ReadFile(filepath.Join(old, "db/novas.db"))
 				if string(data) != "user-data" {
 					t.Fatalf("rollback lost data\n%s", output)
+				}
+				binary, _ := os.ReadFile(filepath.Join(old, "novas"))
+				if string(binary) != "old-binary" {
+					t.Fatalf("failed preflight replaced the previous binary\n%s", output)
 				}
 				if _, err := os.Stat(filepath.Join(root, "active-"+oldName)); err != nil {
 					t.Fatalf("old service not recovered: %v\n%s", err, output)

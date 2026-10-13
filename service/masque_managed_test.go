@@ -198,6 +198,45 @@ func TestSavingNewMASQUEInboundPersistsDedicatedECDSAIdentity(t *testing.T) {
 	}
 }
 
+func TestMigrateLegacyMASQUEIdentityOnlyForExplicitUpgrade(t *testing.T) {
+	db, base := masqueManagedConfigFixture(t)
+	legacy := model.Inbound{
+		Type:    "masque",
+		Tag:     "legacy-masque",
+		TlsId:   base.TlsId,
+		Tls:     base.Tls,
+		Addrs:   json.RawMessage(`[]`),
+		OutJson: json.RawMessage(`{}`),
+		Options: json.RawMessage(`{"server":"legacy.example","listen":"::","listen_port":443,"version":[3],"system":false,"mtu":1280,"address":["172.16.0.1/24"]}`),
+	}
+	if err := db.Create(&legacy).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := MigrateLegacyMasqueTLSInbounds(db); err != nil {
+		t.Fatal(err)
+	}
+	var migrated model.Inbound
+	if err := db.First(&migrated, legacy.Id).Error; err != nil {
+		t.Fatal(err)
+	}
+	if migrated.MasqueTLSCertificate == "" || migrated.MasqueTLSKey == "" || migrated.TlsId != 0 {
+		t.Fatal("legacy MASQUE inbound did not receive a dedicated ECDSA identity")
+	}
+	if _, err := validateMasqueTLSMaterial(&migrated, "legacy.example"); err != nil {
+		t.Fatalf("migrated ECDSA identity is invalid: %v", err)
+	}
+	key, certificate := migrated.MasqueTLSKey, migrated.MasqueTLSCertificate
+	if err := MigrateLegacyMasqueTLSInbounds(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&migrated, legacy.Id).Error; err != nil {
+		t.Fatal(err)
+	}
+	if migrated.MasqueTLSKey != key || migrated.MasqueTLSCertificate != certificate {
+		t.Fatal("repeated offline upgrade rotated the MASQUE identity")
+	}
+}
+
 func TestMASQUEManagedNormalizeCredentialsAcrossSaves(t *testing.T) {
 	db, inbound := masqueManagedConfigFixture(t)
 	if err := db.Create(&inbound).Error; err != nil {

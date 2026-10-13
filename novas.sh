@@ -1629,7 +1629,7 @@ show_menu() {
 
 if [[ $# > 0 ]]; then
     case $1 in
-    "admin"|"setting"|"uri"|"checkdb"|"healthcheck"|"-v")
+    "admin"|"setting"|"uri"|"upgrade-db"|"checkdb"|"healthcheck"|"-v")
         exec /usr/local/novas/novas "$@"
         ;;
     "start")

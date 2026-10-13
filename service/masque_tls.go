@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/CatMsg/NovaPanel/database/model"
+	"gorm.io/gorm"
 )
 
 func normalizeMasqueCertificateHost(host string) (string, error) {
@@ -165,6 +166,59 @@ func validateMasqueTLSMaterial(inbound *model.Inbound, host string) (*x509.Certi
 		return nil, errors.New("stored MASQUE certificate has expired")
 	}
 	return certificate, nil
+}
+
+// MigrateLegacyMasqueTLSInbounds is called only by the explicit offline
+// database-upgrade command after the dedicated identity columns are added.
+func MigrateLegacyMasqueTLSInbounds(db *gorm.DB) error {
+	var inbounds []model.Inbound
+	if err := db.Where("type = ?", "masque").Find(&inbounds).Error; err != nil {
+		return err
+	}
+	var migrationErrors []error
+	for index := range inbounds {
+		inbound := inbounds[index]
+		if inbound.TlsId == 0 && inbound.MasqueTLSCertificate != "" && inbound.MasqueTLSKey != "" {
+			if config, err := parseMasqueInbound(&inbound); err == nil {
+				if certificate, err := validateMasqueTLSMaterial(&inbound, config.Host); err == nil && time.Until(certificate.NotAfter) > 30*24*time.Hour {
+					continue
+				}
+			}
+		}
+		err := db.Transaction(func(tx *gorm.DB) error {
+			var stored model.Inbound
+			if err := tx.First(&stored, inbound.Id).Error; err != nil {
+				return err
+			}
+			inbound = stored
+			config, err := parseMasqueInbound(&inbound)
+			if err != nil {
+				return err
+			}
+			certificateBefore, keyBefore, tlsIDBefore := inbound.MasqueTLSCertificate, inbound.MasqueTLSKey, inbound.TlsId
+			if _, err := ensureMasqueTLSMaterial(&inbound, config.Host); err != nil {
+				return err
+			}
+			if certificateBefore == inbound.MasqueTLSCertificate && keyBefore == inbound.MasqueTLSKey && tlsIDBefore == 0 {
+				return nil
+			}
+			inbound.TlsId, inbound.Tls = 0, nil
+			inbound.OutJson, err = buildMasqueClientTemplate(&inbound)
+			if err != nil {
+				return err
+			}
+			return tx.Model(&model.Inbound{}).Where("id = ?", inbound.Id).Updates(map[string]any{
+				"masque_tls_certificate": inbound.MasqueTLSCertificate,
+				"masque_tls_key":         inbound.MasqueTLSKey,
+				"tls_id":                 0,
+				"out_json":               inbound.OutJson,
+			}).Error
+		})
+		if err != nil {
+			migrationErrors = append(migrationErrors, fmt.Errorf("migrate MASQUE inbound %s: %w", inbound.Tag, err))
+		}
+	}
+	return errors.Join(migrationErrors...)
 }
 
 func masqueServerTLSOptions(inbound *model.Inbound, host string) (map[string]any, error) {

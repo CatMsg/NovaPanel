@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -142,6 +144,98 @@ func InitDB(dbPath string) error {
 	})
 }
 
+// ValidateCurrentSchema opens an existing database read-only and verifies the
+// complete current schema. It never creates tables, columns, or indexes.
+func ValidateCurrentSchema(dbPath string) error {
+	db, closeDB, err := openSchemaDatabase(dbPath, "mode=ro")
+	if err != nil {
+		return err
+	}
+	defer closeDB()
+	return validateCurrentSchema(db)
+}
+
+// MigrateMasqueIdentityColumns upgrades a database only when the two MASQUE
+// identity columns are its sole schema difference. It does not inspect app
+// versions or repair any other missing schema. Call on an isolated copy.
+func MigrateMasqueIdentityColumns(dbPath string) (bool, error) {
+	info, err := os.Lstat(dbPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !info.Mode().IsRegular() || info.Size() == 0 {
+		return false, errors.New("database must be a non-empty regular file")
+	}
+
+	gormDB, closeDB, err := openSchemaDatabase(dbPath, "mode=rw")
+	if err != nil {
+		return false, err
+	}
+	defer closeDB()
+
+	applied := false
+	err = gormDB.Transaction(func(tx *gorm.DB) error {
+		missing, err := missingSchemaColumns(tx)
+		if err != nil {
+			return err
+		}
+		if len(missing) == 0 {
+			return validateIndexes(tx)
+		}
+
+		masqueColumns := map[string]string{
+			"inbounds.masque_tls_certificate": "ALTER TABLE inbounds ADD COLUMN masque_tls_certificate TEXT NOT NULL DEFAULT ''",
+			"inbounds.masque_tls_key":         "ALTER TABLE inbounds ADD COLUMN masque_tls_key TEXT NOT NULL DEFAULT ''",
+		}
+		for _, column := range missing {
+			if _, supported := masqueColumns[column]; !supported {
+				return fmt.Errorf("unsupported database schema; missing columns: %s (only the MASQUE identity column patch is supported)", strings.Join(missing, ", "))
+			}
+		}
+		if err := validateIndexes(tx); err != nil {
+			return err
+		}
+		for _, column := range missing {
+			if err := tx.Exec(masqueColumns[column]).Error; err != nil {
+				return fmt.Errorf("add MASQUE identity column %s: %w", column, err)
+			}
+		}
+		if err := validateCurrentSchema(tx); err != nil {
+			return err
+		}
+		applied = true
+		return nil
+	})
+	if err != nil {
+		return false, fmt.Errorf("apply MASQUE identity column patch: %w", err)
+	}
+	return applied, nil
+}
+
+func openSchemaDatabase(dbPath, mode string) (*gorm.DB, func(), error) {
+	absolute, err := filepath.Abs(dbPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	dsn := (&url.URL{
+		Scheme:   "file",
+		Path:     filepath.ToSlash(absolute),
+		RawQuery: mode + "&_busy_timeout=3000",
+	}).String()
+	gormDB, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Discard})
+	if err != nil {
+		return nil, nil, err
+	}
+	sqlDB, err := gormDB.DB()
+	if err != nil {
+		return nil, nil, err
+	}
+	return gormDB, func() { _ = sqlDB.Close() }, nil
+}
+
 func createIndexes(tx *gorm.DB) error {
 	for _, index := range schemaIndexes {
 		if err := tx.Exec(index.sql).Error; err != nil {
@@ -152,21 +246,40 @@ func createIndexes(tx *gorm.DB) error {
 }
 
 func validateSchema(tx *gorm.DB) error {
+	missing, err := missingSchemaColumns(tx)
+	if err != nil {
+		return err
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("database schema is missing column %s; automatic schema migration is not supported", missing[0])
+	}
+	return nil
+}
+
+func missingSchemaColumns(tx *gorm.DB) ([]string, error) {
+	var missing []string
 	for _, schemaModel := range schemaModels {
 		statement := &gorm.Statement{DB: tx}
 		if err := statement.Parse(schemaModel); err != nil {
-			return err
+			return nil, err
 		}
 		if !tx.Migrator().HasTable(schemaModel) {
-			return fmt.Errorf("database schema is missing table %s; automatic schema migration is not supported", statement.Schema.Table)
+			return nil, fmt.Errorf("database schema is missing table %s; automatic schema migration is not supported", statement.Schema.Table)
 		}
 		for _, field := range statement.Schema.Fields {
 			if field.DBName != "" && !tx.Migrator().HasColumn(schemaModel, field.DBName) {
-				return fmt.Errorf("database schema is missing column %s.%s; automatic schema migration is not supported", statement.Schema.Table, field.DBName)
+				missing = append(missing, statement.Schema.Table+"."+field.DBName)
 			}
 		}
 	}
-	return nil
+	return missing, nil
+}
+
+func validateCurrentSchema(tx *gorm.DB) error {
+	if err := validateSchema(tx); err != nil {
+		return err
+	}
+	return validateIndexes(tx)
 }
 
 func validateIndexes(tx *gorm.DB) error {
@@ -190,6 +303,18 @@ func seedFreshDatabase(tx *gorm.DB) error {
 
 func GetDB() *gorm.DB {
 	return db
+}
+
+func CloseDB() error {
+	if db == nil {
+		return nil
+	}
+	sqlDB, err := db.DB()
+	db = nil
+	if err != nil {
+		return err
+	}
+	return sqlDB.Close()
 }
 
 func IsNotFound(err error) bool {

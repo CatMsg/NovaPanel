@@ -55,6 +55,7 @@ func ParseCmd() {
 		fmt.Println("Commands:")
 		fmt.Println("    admin          set/reset/show first admin credentials")
 		fmt.Println("    uri            Show panel URI")
+		fmt.Println("    upgrade-db     apply the supported offline schema upgrade")
 		fmt.Println("    checkdb        validate the offline database")
 		fmt.Println("    healthcheck    check local panel availability")
 		fmt.Println("    setting        set/reset/show settings")
@@ -112,6 +113,12 @@ func ParseCmd() {
 			fmt.Fprintln(os.Stderr, "Database check failed:", err)
 			os.Exit(1)
 		}
+	case "upgrade-db":
+		if err := upgradeRuntimeDatabase(config.GetDBPath()); err != nil {
+			fmt.Fprintln(os.Stderr, "Database upgrade failed:", err)
+			os.Exit(1)
+		}
+		fmt.Println("Database upgrade preflight passed")
 
 	case "setting":
 		err := settingCmd.Parse(os.Args[2:])

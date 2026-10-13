@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/CatMsg/NovaPanel/database"
 )
 
 // Validate an offline database without rewriting settings or creating a file.
@@ -52,6 +54,9 @@ func checkRuntimeDatabase(path string) error {
 		if err := rows.Close(); err != nil {
 			return err
 		}
+	}
+	if err := database.ValidateCurrentSchema(path); err != nil {
+		return fmt.Errorf("invalid panel schema: %w", err)
 	}
 	return nil
 }
