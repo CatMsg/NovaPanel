@@ -7,6 +7,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +17,7 @@ import (
 	"github.com/CatMsg/NovaPanel/core"
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
+	"github.com/CatMsg/NovaPanel/internal/testutil"
 	"gorm.io/gorm"
 )
 
@@ -90,6 +93,20 @@ func TestMaintenanceReviewRealCoreSaveAndAutomaticStartsRemainPaused(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	var newInboundPort struct {
+		ListenPort int `json:"listen_port"`
+	}
+	if err := json.Unmarshal(newInboundData, &newInboundPort); err != nil {
+		t.Fatal(err)
+	}
+	var hostCommands *testutil.HostCommandSandbox
+	var wantHostCalls [][]string
+	if runtime.GOOS == "linux" {
+		port := strconv.Itoa(newInboundPort.ListenPort)
+		forwardCall := []string{"scripts/hy2-forward.sh", "apply", "paused-inbound", port, port, "tcp"}
+		hostCommands = testutil.NewHostCommandSandbox(t, forwardCall)
+		wantHostCalls = [][]string{{"bash", "scripts/hy2-forward.sh", "apply", "paused-inbound", port, port, "tcp"}}
+	}
 	for _, save := range []struct {
 		object string
 		data   json.RawMessage
@@ -103,6 +120,9 @@ func TestMaintenanceReviewRealCoreSaveAndAutomaticStartsRemainPaused(t *testing.
 			t.Fatalf("save %s while paused: %v", save.object, err)
 		}
 		assertMaintenanceReviewStopped(t, address)
+	}
+	if hostCommands != nil {
+		hostCommands.AssertCalls(t, wantHostCalls)
 	}
 	for name, start := range map[string]func() error{
 		"start":           config.StartCore,
