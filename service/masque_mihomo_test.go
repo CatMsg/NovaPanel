@@ -50,7 +50,7 @@ func TestMASQUEMihomoCredentialsStableBatchAndRevocation(t *testing.T) {
 	}
 	before := bytes.Clone(alice.Config)
 	bob := makeClient("bob")
-	// New records first must not steal an existing record's reserved address.
+	// Batch order must not affect per-user authentication keys.
 	if err := normalizeMasqueClientConfigs(db, []*model.Client{bob, alice}); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestMASQUEMihomoCredentialsStableBatchAndRevocation(t *testing.T) {
 	b, _, _ := decodeMasqueCredential(bob.Config)
 	id := fmt.Sprint(inbound.Id)
 	if a.Mihomo[id].IP != "172.29.0.2/32" || b.Mihomo[id].IP != "172.29.0.3/32" || a.Mihomo[id].PublicKey == b.Mihomo[id].PublicKey {
-		t.Fatal("users did not receive independent keys and addresses")
+		t.Fatal("users did not receive independent bootstrap addresses and authentication keys")
 	}
 	if err := db.Create(bob).Error; err != nil {
 		t.Fatal(err)
@@ -97,12 +97,13 @@ func TestMASQUEMihomoCredentialsStableBatchAndRevocation(t *testing.T) {
 		Mihomo []struct {
 			Username  string `json:"username"`
 			PublicKey string `json:"public_key"`
+			Address   string `json:"address"`
 		} `json:"mihomo_users"`
 	}
 	if err := json.Unmarshal(raw, &config); err != nil {
 		t.Fatal(err)
 	}
-	if len(config.Users) != 1 || len(config.Mihomo) != 1 || config.Mihomo[0].Username != "alice" || config.Mihomo[0].PublicKey != rotated.Mihomo[id].PublicKey || bytes.Contains(raw, []byte(a.Mihomo[id].PublicKey)) || bytes.Contains(raw, []byte(rotated.Mihomo[id].PrivateKey)) {
+	if len(config.Users) != 1 || len(config.Mihomo) != 1 || config.Mihomo[0].Username != "alice" || config.Mihomo[0].PublicKey != rotated.Mihomo[id].PublicKey || config.Mihomo[0].Address != "172.29.0.2" || bytes.Contains(raw, []byte(a.Mihomo[id].PublicKey)) || bytes.Contains(raw, []byte(rotated.Mihomo[id].PrivateKey)) {
 		t.Fatal("revoked/disabled/private key leaked into live server identities")
 	}
 	alice.Inbounds = json.RawMessage(`[]`)

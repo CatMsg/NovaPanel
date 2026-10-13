@@ -103,9 +103,11 @@ func TestManagedMASQUEHTTP3RejectsPeerRouteSpoofing(t *testing.T) {
 	identity := managed.(*managedMASQUEEndpoint).identity
 	identity.mu.Lock()
 	var victim netip.Addr
-	for address, lease := range identity.leases {
-		if lease.user == httpProxyTestUser {
-			victim = address
+	for address, leases := range identity.leases {
+		for _, lease := range leases {
+			if lease.user == httpProxyTestUser {
+				victim = address
+			}
 		}
 	}
 	identity.mu.Unlock()

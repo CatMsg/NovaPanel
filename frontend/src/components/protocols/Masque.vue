@@ -8,13 +8,13 @@
         <v-chip color="primary" variant="tonal">HTTP/3</v-chip>
       </div>
       <v-alert type="info" variant="tonal" class="mb-4">
-        需要启用的 TLS 模板。sing-box 使用 JSON 订阅；开启下方兼容开关后也支持 Clash / Mihomo 订阅。
+        需要选择启用的 TLS 模板。默认同时支持 sing-box JSON 与 Clash / Mihomo 订阅；如只使用 sing-box，可关闭兼容开关。
         TCP/UDP 按用户统计、限速并记录历史；不开放客户端路由通告、隧道间直连或 ICMP 转发。没有有效用户时不启动监听。
       </v-alert>
-      <v-switch v-model="data.mihomo_compatible" label="同时兼容 Mihomo（密钥认证）" color="primary" hide-details class="mb-4" />
+      <v-switch v-model="data.mihomo_compatible" label="兼容 Clash / Mihomo 订阅（密钥认证）" color="primary" hide-details class="mb-4" />
       <v-alert v-if="data.mihomo_compatible" type="info" variant="tonal" class="mb-4">
         同一 UDP 端口同时支持 sing-box 账号认证和 Mihomo 密钥认证，共用原生核心统计和限速。
-        TLS 模板必须使用 ECDSA 证书，不能使用 RSA。Mihomo 为每个用户分配固定地址，同一套密钥同时只允许一个隧道；多台独立客户端请分配不同用户。未定义通用 MASQUE 单节点 URI，请使用订阅。
+        TLS 模板必须使用 ECDSA 证书，不能使用 RSA。同一面板用户可在多台设备同时连接并共用该用户的隧道地址；服务器按连接流关联回对应隧道，不会互相挤掉。流量、限速与历史按用户汇总。未定义通用 MASQUE 单节点 URI，请使用订阅。
       </v-alert>
       <v-row>
         <v-col cols="12" sm="6"><v-text-field v-model="data.server" label="订阅域名" hint="留空使用当前面板域名" persistent-hint /></v-col>

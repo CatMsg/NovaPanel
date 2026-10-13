@@ -141,7 +141,25 @@ test('subscription hiding saves its flag and updates the inbound list without re
 })
 
 for (const width of [1280, 390]) {
-  test(`MASQUE compatibility is opt-in, explained and saved at ${width}px`, async ({ page }) => {
+  test(`new MASQUE inbound defaults to dual subscriptions at ${width}px`, async ({ page }) => {
+    await installAppBase(page, () => loadData([]))
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto('/app/inbounds')
+    await page.getByRole('button', { name: '添加', exact: true }).click()
+
+    const editor = page.getByRole('dialog').last()
+    await editor.getByRole('combobox').first().click()
+    await page.getByRole('option', { name: 'Masque', exact: true }).click()
+
+    const compatibility = editor.getByRole('checkbox', { name: '兼容 Clash / Mihomo 订阅（密钥认证）' })
+    await expect(compatibility).toBeChecked()
+    await expect(editor.getByText(/默认同时支持 sing-box JSON 与 Clash \/ Mihomo 订阅/)).toBeVisible()
+    await expect(editor.getByText(/TLS 模板必须使用 ECDSA/)).toBeVisible()
+    await expectDialogInsideViewport(page, editor)
+    await expectNoHorizontalOverflow(page)
+  })
+
+  test(`legacy MASQUE compatibility stays native-only until enabled at ${width}px`, async ({ page }) => {
     const masque = { ...inbound, type: 'masque', tag: 'dual-masque', tls_id: 7, listen_port: 443, version: [3], system: false, mtu: 1280 }
     let saved: Record<string, unknown> | undefined
     await installAppBase(page, () => ({ ...loadData([masque]), tls: [{ id: 7, name: 'ECDSA TLS', server: { enabled: true } }] }))
@@ -156,11 +174,11 @@ for (const width of [1280, 390]) {
     if (width === 1280) await page.getByRole('row', { name: /dual-masque/ }).getByRole('button', { name: '编辑' }).click()
     else await page.locator('.resource-card').filter({ hasText: 'dual-masque' }).getByRole('button', { name: '编辑' }).click()
     const editor = page.getByRole('dialog').last()
-    const toggle = editor.getByRole('checkbox', { name: '同时兼容 Mihomo（密钥认证）' })
+    const toggle = editor.getByRole('checkbox', { name: '兼容 Clash / Mihomo 订阅（密钥认证）' })
     await expect(toggle).not.toBeChecked()
     await toggle.check()
     await expect(editor.getByText(/TLS 模板必须使用 ECDSA/)).toBeVisible()
-    await expect(editor.getByText(/同时只允许一个隧道/)).toBeVisible()
+    await expect(editor.getByText(/多台设备同时连接并共用该用户的隧道地址/)).toBeVisible()
     await expectDialogInsideViewport(page, editor)
     await expectNoHorizontalOverflow(page)
     await editor.getByRole('button', { name: '保存', exact: true }).click()

@@ -12,13 +12,14 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/sagernet/sing-box/adapter"
 )
 
 func TestManagedMASQUEMihomoBinaryTCPAndUDP(t *testing.T) {
@@ -71,113 +72,116 @@ func TestManagedMASQUEMihomoBinaryTCPAndUDP(t *testing.T) {
 	nativeProxy, _ := nativeClient.Endpoint().Get("native-client")
 	endpoint, _ := server.GetInstance().Endpoint().Get("test-http")
 	identity := endpoint.(*managedMASQUEEndpoint).identity
-	identity.mu.Lock()
-	_, stolen := identity.leases[netip.MustParseAddr("172.29.0.2")]
-	identity.mu.Unlock()
-	if stolen {
-		t.Fatal("native dynamic allocation stole the reserved Mihomo address")
-	}
-	socksPort := portFromAddress(t, reserveLoopbackPort(t))
-	controller := reserveLoopbackPort(t)
-	config := map[string]any{
-		"external-controller": controller,
-		"socks-port":          socksPort, "allow-lan": false, "bind-address": "127.0.0.1", "mode": "rule", "log-level": "debug",
-		"dns": map[string]any{"enable": false},
-		"proxies": []any{map[string]any{
-			"name": "native-masque", "type": "masque", "server": "127.0.0.1", "port": port,
-			"private-key": base64.StdEncoding.EncodeToString(privateDER), "public-key": base64.StdEncoding.EncodeToString(serverPublicDER),
-			"ip": "172.29.0.2/32", "uri": "https://localhost/.well-known/masque/ip/*/*/", "sni": "localhost", "mtu": 1280, "udp": true,
-		}}, "rules": []string{"MATCH,native-masque"},
-	}
-	directory := t.TempDir()
-	content, _ := json.Marshal(config)
-	configPath := filepath.Join(directory, "config.json")
-	if err := os.WriteFile(configPath, content, 0600); err != nil {
-		t.Fatal(err)
-	}
-	output, err := os.Create(filepath.Join(directory, "mihomo.log"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer output.Close()
-	command := exec.Command(binary, "-d", directory, "-f", configPath)
-	command.Stdout, command.Stderr = output, output
-	if err := command.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		command.Process.Signal(os.Interrupt)
-		done := make(chan struct{})
-		go func() { command.Wait(); close(done) }()
-		select {
-		case <-done:
-		case <-time.After(2 * time.Second):
-			command.Process.Kill()
-			<-done
+	startMihomo := func() adapter.Outbound {
+		socksPort := portFromAddress(t, reserveLoopbackPort(t))
+		controller := reserveLoopbackPort(t)
+		config := map[string]any{
+			"external-controller": controller,
+			"socks-port":          socksPort, "allow-lan": false, "bind-address": "127.0.0.1", "mode": "rule", "log-level": "debug",
+			"dns": map[string]any{"enable": false},
+			"proxies": []any{map[string]any{
+				"name": "native-masque", "type": "masque", "server": "127.0.0.1", "port": port,
+				"private-key": base64.StdEncoding.EncodeToString(privateDER), "public-key": base64.StdEncoding.EncodeToString(serverPublicDER),
+				"ip": "172.29.0.2/32", "uri": "https://localhost/.well-known/masque/ip/*/*/", "sni": "localhost", "mtu": 1280, "udp": true,
+			}}, "rules": []string{"MATCH,native-masque"},
 		}
-		if t.Failed() {
-			content, _ := os.ReadFile(filepath.Join(directory, "mihomo.log"))
-			t.Logf("Mihomo test log: %s", content)
+		directory := t.TempDir()
+		content, _ := json.Marshal(config)
+		configPath := filepath.Join(directory, "config.json")
+		if err := os.WriteFile(configPath, content, 0600); err != nil {
+			t.Fatal(err)
 		}
-	})
-	httpClient := &http.Client{Timeout: time.Second}
-	waitHTTPProxyCondition(t, 5*time.Second, func() bool {
-		response, err := httpClient.Get("http://" + controller + "/rules")
+		output, err := os.Create(filepath.Join(directory, "mihomo.log"))
 		if err != nil {
-			return false
+			t.Fatal(err)
 		}
-		defer response.Body.Close()
-		var result struct {
-			Rules []struct {
-				Proxy string `json:"proxy"`
-			} `json:"rules"`
+		command := exec.Command(binary, "-d", directory, "-f", configPath)
+		command.Stdout, command.Stderr = output, output
+		if err := command.Start(); err != nil {
+			_ = output.Close()
+			t.Fatal(err)
 		}
-		return response.StatusCode == http.StatusOK && json.NewDecoder(response.Body).Decode(&result) == nil && len(result.Rules) == 1 && result.Rules[0].Proxy == "native-masque"
-	})
-	waitHTTPProxyCondition(t, 5*time.Second, func() bool {
-		conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(socksPort)), 100*time.Millisecond)
-		if err != nil {
-			return false
-		}
-		conn.Close()
-		return true
-	})
-	client := startHTTPProxyTestBox(t, marshalHTTPProxyTestConfig(map[string]any{
-		"outbounds": []any{map[string]any{"type": "socks", "tag": "proxy", "server": "127.0.0.1", "server_port": socksPort}},
-		"route":     map[string]any{"final": "proxy"},
-	}))
-	proxy, _ := client.Outbound().Outbound("proxy")
-	// Mihomo publishes listeners and rules before OnRunning. A successful
-	// SOCKS handshake alone can precede its traffic handler being enabled.
-	waitHTTPProxyCondition(t, 5*time.Second, func() bool {
-		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-		defer cancel()
-		conn, err := proxy.DialContext(ctx, "tcp", socksaddrForTest(t, targets.tcpAddress))
-		if err != nil {
-			return false
-		}
-		defer conn.Close()
-		conn.SetDeadline(time.Now().Add(300 * time.Millisecond))
-		if _, err := io.WriteString(conn, "ready"); err != nil {
-			return false
-		}
-		response := make([]byte, 5)
-		_, err = io.ReadFull(conn, response)
-		return err == nil && string(response) == "ready"
-	})
+		t.Cleanup(func() {
+			_ = command.Process.Signal(os.Interrupt)
+			done := make(chan struct{})
+			go func() { _ = command.Wait(); close(done) }()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				_ = command.Process.Kill()
+				<-done
+			}
+			_ = output.Close()
+			if t.Failed() {
+				content, _ := os.ReadFile(filepath.Join(directory, "mihomo.log"))
+				t.Logf("Mihomo test log: %s", content)
+			}
+		})
+		httpClient := &http.Client{Timeout: time.Second}
+		waitHTTPProxyCondition(t, 5*time.Second, func() bool {
+			response, err := httpClient.Get("http://" + controller + "/rules")
+			if err != nil {
+				return false
+			}
+			defer response.Body.Close()
+			var result struct {
+				Rules []struct {
+					Proxy string `json:"proxy"`
+				} `json:"rules"`
+			}
+			return response.StatusCode == http.StatusOK && json.NewDecoder(response.Body).Decode(&result) == nil && len(result.Rules) == 1 && result.Rules[0].Proxy == "native-masque"
+		})
+		waitHTTPProxyCondition(t, 5*time.Second, func() bool {
+			conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(socksPort)), 100*time.Millisecond)
+			if err != nil {
+				return false
+			}
+			_ = conn.Close()
+			return true
+		})
+		client := startHTTPProxyTestBox(t, marshalHTTPProxyTestConfig(map[string]any{
+			"outbounds": []any{map[string]any{"type": "socks", "tag": "proxy", "server": "127.0.0.1", "server_port": socksPort}},
+			"route":     map[string]any{"final": "proxy"},
+		}))
+		proxy, _ := client.Outbound().Outbound("proxy")
+		// Mihomo publishes listeners and rules before OnRunning. A successful
+		// SOCKS handshake alone can precede its traffic handler being enabled.
+		waitHTTPProxyCondition(t, 5*time.Second, func() bool {
+			ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+			defer cancel()
+			conn, err := proxy.DialContext(ctx, "tcp", socksaddrForTest(t, targets.tcpAddress))
+			if err != nil {
+				return false
+			}
+			defer conn.Close()
+			conn.SetDeadline(time.Now().Add(300 * time.Millisecond))
+			if _, err := io.WriteString(conn, "ready"); err != nil {
+				return false
+			}
+			response := make([]byte, 5)
+			_, err = io.ReadFull(conn, response)
+			return err == nil && string(response) == "ready"
+		})
+		return proxy
+	}
+	proxy := startMihomo()
+	secondProxy := startMihomo()
 	assertHTTPProxyRoundTrip(t, proxy, server.GetInstance(), targets, 3, "Mihomo native MASQUE compatibility")
+	assertHTTPProxyRoundTrip(t, secondProxy, server.GetInstance(), targets, 3, "second Mihomo client using the same user key")
 	assertHTTPProxyRoundTrip(t, nativeProxy, server.GetInstance(), targets, 3, "native with compatibility enabled")
 	assertHTTPProxyHistory(t)
 	identity.mu.Lock()
-	_, assigned := identity.leases[netip.MustParseAddr("172.29.0.2")]
-	leaseCount := len(identity.leases)
+	leaseCount := 0
 	trustedPeers := true
-	for _, lease := range identity.leases {
-		trustedPeers = trustedPeers && lease.peer.Addr.IsLoopback()
+	for _, addressLeases := range identity.leases {
+		leaseCount += len(addressLeases)
+		for _, lease := range addressLeases {
+			trustedPeers = trustedPeers && lease.user == httpProxyTestUser && lease.peer.Addr.IsLoopback()
+		}
 	}
 	identity.mu.Unlock()
-	if !assigned || leaseCount != 2 || !trustedPeers {
-		t.Fatal("native and Mihomo tunnels did not retain independent addresses")
+	if leaseCount != 3 || !trustedPeers {
+		t.Fatalf("native and two same-key Mihomo sessions did not coexist under one user: leases=%d trusted=%v", leaseCount, trustedPeers)
 	}
 	// Recreate the listener without the old public key. An existing Mihomo
 	// process must not retain access after the panel revokes its credentials.
@@ -204,13 +208,16 @@ func TestManagedMASQUEMihomoBinaryTCPAndUDP(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if conn, err := proxy.DialContext(ctx, "tcp", socksaddrForTest(t, targets.tcpAddress)); err == nil {
-		defer conn.Close()
-		conn.SetDeadline(time.Now().Add(2 * time.Second))
-		if _, err := conn.Write([]byte("revoked")); err == nil {
-			if _, err := io.ReadFull(conn, make([]byte, 7)); err == nil {
-				t.Fatal("revoked Mihomo key still passed traffic")
+	for _, revokedProxy := range []adapter.Outbound{proxy, secondProxy} {
+		if conn, err := revokedProxy.DialContext(ctx, "tcp", socksaddrForTest(t, targets.tcpAddress)); err == nil {
+			conn.SetDeadline(time.Now().Add(2 * time.Second))
+			if _, err := conn.Write([]byte("revoked")); err == nil {
+				if _, err := io.ReadFull(conn, make([]byte, 7)); err == nil {
+					_ = conn.Close()
+					t.Fatal("revoked Mihomo key still passed traffic")
+				}
 			}
+			_ = conn.Close()
 		}
 	}
 }

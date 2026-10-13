@@ -15,59 +15,79 @@ import (
 
 func TestManagedMASQUEIdentityLease(t *testing.T) {
 	router := &masqueRouter{
-		users:  map[string]struct{}{"alice": {}},
-		leases: make(map[netip.Addr]*masqueLease),
+		users:  map[string]struct{}{"alice": {}, "bob": {}},
+		leases: make(map[netip.Addr][]*masqueLease),
+		flows:  make(map[masqueFlowKey]masqueFlowEntry),
 	}
 	address := netip.MustParseAddr("172.29.0.2")
-	peer := M.ParseSocksaddr("203.0.113.9:54321")
-	if _, err := router.OnSessionOpened(context.Background(), "unknown", peer, []netip.Addr{address}); err == nil {
+	peer1 := M.ParseSocksaddr("203.0.113.9:54321")
+	if _, _, err := router.OnSessionOpened(context.Background(), "unknown", peer1, []netip.Addr{address}); err == nil {
 		t.Fatal("unconfigured identity accepted")
 	}
-	release, err := router.OnSessionOpened(context.Background(), "alice", peer, []netip.Addr{address})
+	ctx1, release1, err := router.OnSessionOpened(context.Background(), "alice", peer1, []netip.Addr{address})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer release()
-	if _, err := router.OnSessionOpened(context.Background(), "alice", peer, []netip.Addr{address}); err == nil {
-		t.Fatal("active address was reassigned")
+	defer release1()
+	peer2 := M.ParseSocksaddr("203.0.113.10:54322")
+	ctx2, release2, err := router.OnSessionOpened(context.Background(), "alice", peer2, []netip.Addr{address})
+	if err != nil {
+		t.Fatalf("same user could not open a second session on its assigned address: %v", err)
 	}
-	conn, client := net.Pipe()
-	defer client.Close()
-	metadata := adapter.InboundContext{Source: M.SocksaddrFrom(address, 10000), Network: "tcp"}
-	ctx, bound, _, err := router.bind(metadata, conn)
-	if err != nil || bound.User != "alice" || bound.Source != peer {
-		t.Fatalf("authenticated metadata not preserved: user=%q source=%s err=%v", bound.User, bound.Source, err)
+	defer release2()
+	source1 := M.SocksaddrFrom(address, 10001)
+	source2 := M.SocksaddrFrom(address, 10002)
+	originalDestination := M.ParseSocksaddr("172.29.0.1:443")
+	loopbackDestination := M.ParseSocksaddr("127.0.0.1:443")
+	router.OnSessionPacket(ctx1, "alice", peer1, 6, source1, originalDestination)
+	router.OnSessionPacket(ctx2, "alice", peer2, 6, source2, originalDestination)
+	conn1, client1 := net.Pipe()
+	defer client1.Close()
+	metadata1 := adapter.InboundContext{Source: source1, Destination: loopbackDestination, OriginDestination: originalDestination, Network: "tcp"}
+	boundCtx1, bound1, _, err := router.bind(metadata1, conn1)
+	if err != nil || bound1.User != "alice" || bound1.Source != peer1 {
+		t.Fatalf("first authenticated flow was not pinned: user=%q source=%s err=%v", bound1.User, bound1.Source, err)
 	}
-	if got := router.PreMatch(metadata, nil).Action; got != adapter.PreMatchContinue {
+	conn2, client2 := net.Pipe()
+	defer client2.Close()
+	metadata2 := adapter.InboundContext{Source: source2, Destination: loopbackDestination, OriginDestination: originalDestination, Network: "tcp"}
+	_, bound2, _, err := router.bind(metadata2, conn2)
+	if err != nil || bound2.User != "alice" || bound2.Source != peer2 {
+		t.Fatalf("second authenticated flow was attributed to the wrong device: user=%q source=%s err=%v", bound2.User, bound2.Source, err)
+	}
+	if got := router.PreMatch(metadata1, nil).Action; got != adapter.PreMatchContinue {
 		t.Fatalf("managed TCP bypasses ordinary accounting: %v", got)
 	}
-	if err := router.AllowPeerRoutes(ctx, "alice", []transport.AddressRange{{}}); err == nil {
+	if err := router.AllowPeerRoutes(boundCtx1, "alice", []transport.AddressRange{{}}); err == nil {
 		t.Fatal("peer route advertisement accepted")
 	}
-	if err := router.AllowPeerForwarding(ctx, "alice", address); err == nil {
+	if err := router.AllowPeerForwarding(boundCtx1, "alice", address); err == nil {
 		t.Fatal("tunnel-to-tunnel accounting bypass accepted")
 	}
-	release()
-	if ctx.Err() == nil {
+	release1()
+	if boundCtx1.Err() == nil {
 		t.Fatal("closed lease did not cancel its connection context")
 	}
-	if _, err := client.Read(make([]byte, 1)); err != io.EOF {
+	if _, err := client1.Read(make([]byte, 1)); err != io.EOF {
 		t.Fatalf("lease did not close active connection: %v", err)
 	}
-	if _, _, _, err := router.bind(metadata, nil); err == nil {
-		t.Fatal("released source identity remained usable")
+	if _, bound, _, err := router.bind(metadata2, nil); err != nil || bound.Source != peer2 {
+		t.Fatalf("closing one device disconnected the other device: source=%s err=%v", bound.Source, err)
 	}
-	if got := router.PreMatch(metadata, nil).Action; got != adapter.PreMatchReject {
-		t.Fatalf("unknown source not rejected: %v", got)
+	if _, _, err := router.OnSessionOpened(context.Background(), "bob", peer1, []netip.Addr{address}); err == nil {
+		t.Fatal("a different user was allowed to reuse the assigned address")
 	}
-	second, err := router.OnSessionOpened(context.Background(), "alice", peer, []netip.Addr{address})
+	secondCtx, secondRelease, err := router.OnSessionOpened(context.Background(), "alice", peer1, []netip.Addr{address})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer second()
-	release()
-	if _, _, _, err := router.bind(metadata, nil); err != nil {
-		t.Fatal("stale cleanup removed a newer lease")
+	defer secondRelease()
+	udpSource := M.SocksaddrFrom(address, 53001)
+	udpDestination := M.ParseSocksaddr("203.0.113.53:53")
+	router.OnSessionPacket(secondCtx, "alice", peer1, 17, udpSource, udpDestination)
+	metadata3 := adapter.InboundContext{Source: udpSource, Destination: udpDestination, Network: "udp"}
+	if got := router.PreMatch(metadata3, nil).Action; got != adapter.PreMatchContinue {
+		t.Fatalf("active shared address was invalidated by stale cleanup: %v", got)
 	}
 }
 

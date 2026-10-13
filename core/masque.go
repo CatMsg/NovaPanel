@@ -8,7 +8,9 @@ import (
 	"net"
 	"net/netip"
 	"reflect"
+	"slices"
 	"sync"
+	"time"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/endpoint"
@@ -31,11 +33,27 @@ type masqueLease struct {
 	connections map[io.Closer]struct{}
 }
 
+type masqueSessionContextKey struct{}
+
+type masqueFlowKey struct {
+	network     string
+	source      netip.AddrPort
+	destination netip.AddrPort
+}
+
+type masqueFlowEntry struct {
+	lease    *masqueLease
+	lastSeen time.Time
+}
+
+const masqueFlowTTL = 5 * time.Minute
+
 type masqueRouter struct {
 	adapter.Router
 	mu            sync.Mutex
 	users         map[string]struct{}
-	leases        map[netip.Addr]*masqueLease
+	leases        map[netip.Addr][]*masqueLease
+	flows         map[masqueFlowKey]masqueFlowEntry
 	compatibility *masqueCompatibility
 }
 
@@ -81,7 +99,7 @@ func newMASQUEServerEndpoint(ctx context.Context, router adapter.Router, logger 
 	if options.System || len(options.Users) == 0 {
 		return nil, errors.New("managed MASQUE requires system:false and at least one authenticated user")
 	}
-	wrapped := &masqueRouter{Router: router, users: make(map[string]struct{}), leases: make(map[netip.Addr]*masqueLease)}
+	wrapped := &masqueRouter{Router: router, users: make(map[string]struct{}), leases: make(map[netip.Addr][]*masqueLease), flows: make(map[masqueFlowKey]masqueFlowEntry)}
 	for _, user := range options.Users {
 		if user.Username == "" || user.Password == "" {
 			return nil, errors.New("MASQUE username and password are required")
@@ -114,10 +132,13 @@ func newMASQUEServerEndpoint(ctx context.Context, router adapter.Router, logger 
 func (r *masqueRouter) closeAll() {
 	r.mu.Lock()
 	leases := make(map[*masqueLease]struct{})
-	for _, lease := range r.leases {
-		leases[lease] = struct{}{}
+	for _, addressLeases := range r.leases {
+		for _, lease := range addressLeases {
+			leases[lease] = struct{}{}
+		}
 	}
-	r.leases = make(map[netip.Addr]*masqueLease)
+	r.leases = make(map[netip.Addr][]*masqueLease)
+	r.flows = make(map[masqueFlowKey]masqueFlowEntry)
 	var connections []io.Closer
 	for lease := range leases {
 		for conn := range lease.connections {
@@ -134,29 +155,44 @@ func (r *masqueRouter) closeAll() {
 	}
 }
 
-func (r *masqueRouter) OnSessionOpened(ctx context.Context, user string, peer M.Socksaddr, assigned []netip.Addr) (func(), error) {
+func (r *masqueRouter) OnSessionOpened(ctx context.Context, user string, peer M.Socksaddr, assigned []netip.Addr) (context.Context, func(), error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, configured := r.users[user]; !configured || !peer.Addr.IsValid() || len(assigned) == 0 {
-		return nil, errMASQUEIdentity
+		return nil, nil, errMASQUEIdentity
 	}
 	for _, address := range assigned {
-		if !address.IsValid() || r.leases[address] != nil {
-			return nil, errMASQUEIdentity
+		if !address.IsValid() {
+			return nil, nil, errMASQUEIdentity
+		}
+		for _, current := range r.leases[address] {
+			if current.user != user {
+				return nil, nil, errMASQUEIdentity
+			}
 		}
 	}
-	sessionCtx, cancel := context.WithCancel(ctx)
-	lease := &masqueLease{user: user, peer: peer, ctx: sessionCtx, cancel: cancel, connections: make(map[io.Closer]struct{})}
+	baseContext, cancel := context.WithCancel(ctx)
+	lease := &masqueLease{user: user, peer: peer, cancel: cancel, connections: make(map[io.Closer]struct{})}
+	sessionCtx := context.WithValue(baseContext, masqueSessionContextKey{}, lease)
+	lease.ctx = sessionCtx
 	for _, address := range assigned {
-		r.leases[address] = lease
+		r.leases[address] = append(r.leases[address], lease)
 	}
 	var once sync.Once
-	return func() {
+	return sessionCtx, func() {
 		once.Do(func() {
 			r.mu.Lock()
 			for _, address := range assigned {
-				if r.leases[address] == lease {
+				current := slices.DeleteFunc(r.leases[address], func(it *masqueLease) bool { return it == lease })
+				if len(current) == 0 {
 					delete(r.leases, address)
+				} else {
+					r.leases[address] = current
+				}
+			}
+			for key, entry := range r.flows {
+				if entry.lease == lease {
+					delete(r.flows, key)
 				}
 			}
 			connections := make([]io.Closer, 0, len(lease.connections))
@@ -173,6 +209,39 @@ func (r *masqueRouter) OnSessionOpened(ctx context.Context, user string, peer M.
 	}, nil
 }
 
+func (r *masqueRouter) ShareSessionAddress(ctx context.Context, user string, address netip.Addr) bool {
+	return r.SessionAddress(ctx, user) == address
+}
+
+func (r *masqueRouter) OnSessionPacket(ctx context.Context, user string, _ M.Socksaddr, protocol uint8, source, destination M.Socksaddr) {
+	lease, ok := ctx.Value(masqueSessionContextKey{}).(*masqueLease)
+	if !ok || lease == nil || lease.user != user {
+		return
+	}
+	network := N.NetworkTCP
+	if protocol == 17 {
+		network = N.NetworkUDP
+	} else if protocol != 6 {
+		return
+	}
+	key := masqueFlowKey{network: network, source: source.AddrPort(), destination: destination.AddrPort()}
+	if !key.source.IsValid() || !key.destination.IsValid() {
+		return
+	}
+	now := time.Now()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if lease.ctx.Err() != nil || lease.connections == nil {
+		return
+	}
+	for flowKey, entry := range r.flows {
+		if now.Sub(entry.lastSeen) > masqueFlowTTL {
+			delete(r.flows, flowKey)
+		}
+	}
+	r.flows[key] = masqueFlowEntry{lease: lease, lastSeen: now}
+}
+
 func (*masqueRouter) AllowPeerRoutes(_ context.Context, _ string, routes []transport.AddressRange) error {
 	if len(routes) != 0 {
 		return errors.New("client route advertisements are disabled for managed MASQUE")
@@ -187,7 +256,22 @@ func (*masqueRouter) AllowPeerForwarding(context.Context, string, netip.Addr) er
 func (r *masqueRouter) bind(metadata adapter.InboundContext, connection io.Closer) (context.Context, adapter.InboundContext, func(), error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	lease := r.leases[metadata.Source.Addr]
+	var lease *masqueLease
+	destination := metadata.Destination
+	if metadata.OriginDestination.IsValid() {
+		destination = metadata.OriginDestination
+	}
+	key := masqueFlowKey{network: metadata.Network, source: metadata.Source.AddrPort(), destination: destination.AddrPort()}
+	entry, hasFlow := r.flows[key]
+	if hasFlow && time.Since(entry.lastSeen) <= masqueFlowTTL && entry.lease.ctx.Err() == nil {
+		lease = entry.lease
+	} else {
+		delete(r.flows, key)
+		current := r.leases[metadata.Source.Addr]
+		if len(current) == 1 {
+			lease = current[0]
+		}
+	}
 	if lease == nil || lease.ctx.Err() != nil || lease.connections == nil {
 		return nil, metadata, nil, errMASQUEIdentity
 	}
@@ -203,6 +287,7 @@ func (r *masqueRouter) bind(metadata adapter.InboundContext, connection io.Close
 }
 
 func (r *masqueRouter) RouteConnectionEx(_ context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+	metadata.Network = N.NetworkTCP
 	ctx, metadata, unbind, err := r.bind(metadata, conn)
 	if err != nil {
 		N.CloseOnHandshakeFailure(conn, onClose, err)
@@ -217,6 +302,7 @@ func (r *masqueRouter) RouteConnectionEx(_ context.Context, conn net.Conn, metad
 }
 
 func (r *masqueRouter) RoutePacketConnectionEx(_ context.Context, conn N.PacketConn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+	metadata.Network = N.NetworkUDP
 	ctx, metadata, unbind, err := r.bind(metadata, conn)
 	if err != nil {
 		N.CloseOnHandshakeFailure(conn, onClose, err)
@@ -250,6 +336,7 @@ func (r *masqueRouter) PreMatch(metadata adapter.InboundContext, _ []byte) adapt
 }
 
 func (r *masqueRouter) HijackDNSPacket(_ context.Context, payload []byte, writer N.PacketWriter, metadata adapter.InboundContext) {
+	metadata.Network = N.NetworkUDP
 	ctx, metadata, _, err := r.bind(metadata, nil)
 	if err != nil {
 		return

@@ -139,8 +139,8 @@ func normalizeMasqueMihomo(tx *gorm.DB, clients []*model.Client) error {
 		for id, value := range credential.Mihomo {
 			inboundID, _ := strconv.ParseUint(id, 10, 64)
 			assigned := false
-			for _, value := range bound {
-				assigned = assigned || value == uint(inboundID)
+			for _, boundID := range bound {
+				assigned = assigned || boundID == uint(inboundID)
 			}
 			if assigned && compatible[uint(inboundID)] != nil {
 				if err := reserve(id, value); err != nil {
@@ -149,7 +149,6 @@ func normalizeMasqueMihomo(tx *gorm.DB, clients []*model.Client) error {
 			}
 		}
 	}
-	// Reserve pending clients' stable addresses before allocating any new ones.
 	for _, client := range clients {
 		credential, _, err := decodeMasqueCredential(client.Config)
 		if err != nil {
@@ -284,6 +283,9 @@ func loadMasqueMihomoUsers(tx *gorm.DB, inbound *model.Inbound, enabled map[stri
 			return nil, err
 		}
 		value := credential.Mihomo[strconv.FormatUint(uint64(inbound.Id), 10)]
+		if value.PublicKey == "" {
+			return nil, fmt.Errorf("credentials for Mihomo missing for user %s", client.Name)
+		}
 		prefix, err := netip.ParsePrefix(value.IP)
 		if err != nil || value.PublicKey == "" {
 			return nil, fmt.Errorf("credentials for Mihomo missing for user %s", client.Name)

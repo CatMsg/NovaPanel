@@ -57,7 +57,7 @@ func (s *MasqueService) GetStatus(tag string) (map[string]interface{}, error) {
 	compatible := masqueMihomoEnabled(&inbound)
 	detail := "内置用户态协议栈；无系统 TUN / NAT 规则。sing-box 使用 JSON 订阅；TCP/UDP 按面板用户统计和限速。"
 	if compatible {
-		detail += " 已开启 Mihomo 密钥认证，可使用 Clash / Mihomo 订阅；同一套密钥同时只允许一个隧道。"
+		detail += " 已开启 Mihomo 密钥认证，可使用 Clash / Mihomo 订阅；同一面板用户可同时建立多条隧道，每条隧道单独分配地址，流量和历史按用户汇总。"
 	} else {
 		detail += " 未开启 Mihomo 兼容，Clash 订阅不会包含此入站。"
 	}

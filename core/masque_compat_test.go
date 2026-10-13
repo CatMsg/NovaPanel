@@ -44,7 +44,8 @@ func TestManagedMASQUEMihomoAuthenticationAndRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	der, _ := x509.MarshalPKIXPublicKey(&key.PublicKey)
-	options := managedMASQUEServerOptions{MihomoUsers: []MihomoMASQUEUser{{Username: "alice", PublicKey: base64.StdEncoding.EncodeToString(der), Address: netip.MustParseAddr("172.29.0.2")}}}
+	address := netip.MustParseAddr("172.29.0.2")
+	options := managedMASQUEServerOptions{MihomoUsers: []MihomoMASQUEUser{{Username: "alice", PublicKey: base64.StdEncoding.EncodeToString(der), Address: address}}}
 	options.Users = []auth.User{{Username: "alice", Password: "test-only"}}
 	options.Address = []netip.Prefix{netip.MustParsePrefix("172.29.0.1/29")}
 	options.TLS = &option.InboundTLSOptions{Enabled: true}
@@ -54,10 +55,11 @@ func TestManagedMASQUEMihomoAuthenticationAndRoutes(t *testing.T) {
 	}
 	router := &masqueRouter{compatibility: compatible}
 	for _, tc := range []struct {
-		name             string
-		certificate      *x509.Certificate
-		password         string
-		accepted, static bool
+		name        string
+		certificate *x509.Certificate
+		password    string
+		accepted    bool
+		mihomo      bool
 	}{
 		{"native-basic", nil, "test-only", true, false},
 		{"key", &x509.Certificate{PublicKey: &key.PublicKey}, "", true, true},
@@ -87,10 +89,13 @@ func TestManagedMASQUEMihomoAuthenticationAndRoutes(t *testing.T) {
 				return
 			}
 			user, ok := auth.UserFromContext[string](next.ctx)
-			if !ok || user != "alice" || router.SessionAddress(next.ctx, user).IsValid() != tc.static {
-				t.Fatal("trusted identity/address was lost")
+			if !ok || user != "alice" || router.SessionAddress(next.ctx, user).IsValid() != tc.mihomo {
+				t.Fatal("trusted identity or session address policy mismatch")
 			}
-			if tc.static {
+			if tc.mihomo {
+				if router.SessionAddress(next.ctx, user) != address || !router.ShareSessionAddress(next.ctx, user, address) {
+					t.Fatal("Mihomo user lost its shared session address")
+				}
 				defaults := []transport.AddressRange{{Start: netip.IPv4Unspecified(), End: netip.MustParseAddr("255.255.255.255")}, {Start: netip.IPv6Unspecified(), End: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")}}
 				if routes, err := router.SessionRoutes(next.ctx, user, defaults); err != nil || len(routes) != 0 {
 					t.Fatal("default routes were installed or rejected instead of discarded")
@@ -100,16 +105,22 @@ func TestManagedMASQUEMihomoAuthenticationAndRoutes(t *testing.T) {
 						t.Fatal("non-default route advertisement accepted")
 					}
 				}
+			} else if router.SessionAddress(next.ctx, user).IsValid() {
+				t.Fatal("native username/password identity was marked as Mihomo")
 			}
 		})
 	}
-	if !router.ReservedSessionAddress(netip.MustParseAddr("172.29.0.2")) || router.ReservedSessionAddress(netip.MustParseAddr("172.29.0.3")) {
-		t.Fatal("static reservation mismatch")
+	if !router.ReservedSessionAddress(address) || router.ReservedSessionAddress(netip.MustParseAddr("172.29.0.3")) {
+		t.Fatal("Mihomo address reservation mismatch")
 	}
-	for _, address := range []string{"172.29.0.0", "172.29.0.1", "172.29.0.7", "172.30.0.2", "2001:db8::2"} {
-		options.MihomoUsers[0].Address = netip.MustParseAddr(address)
-		if _, err := newMASQUECompatibility(options); err == nil {
-			t.Fatalf("unsafe address %s accepted", address)
-		}
+	legacy := []byte(`{"address":["172.29.0.1/29"],"mihomo_users":[{"username":"alice","public_key":"` + base64.StdEncoding.EncodeToString(der) + `","address":"172.29.0.2"}]}`)
+	var legacyOptions managedMASQUEServerOptions
+	if err := legacyOptions.UnmarshalJSONContext(context.Background(), legacy); err != nil {
+		t.Fatalf("legacy stored fixed address was not loaded: %v", err)
+	}
+	legacyOptions.Users, legacyOptions.TLS = options.Users, options.TLS
+	legacyCompatibility, err := newMASQUECompatibility(legacyOptions)
+	if err != nil || len(legacyCompatibility.keys) != 1 {
+		t.Fatalf("legacy stored fixed address prevented compatibility: %v", err)
 	}
 }

@@ -2,12 +2,14 @@ package masque
 
 import (
 	"context"
+	"encoding/binary"
 	"net"
 	"net/http"
 	"net/netip"
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	transportHTTP "github.com/sagernet/sing-box/transport/http"
 	"github.com/sagernet/sing-tun"
@@ -30,9 +32,17 @@ type ServerHandler interface {
 // ServerSessionObserver is an optional embedding hook for authenticated proxy
 // accounting. Opening runs before Accept; release runs before address reuse.
 type ServerSessionObserver interface {
-	OnSessionOpened(ctx context.Context, user string, peer M.Socksaddr, assigned []netip.Addr) (release func(), err error)
+	OnSessionOpened(ctx context.Context, user string, peer M.Socksaddr, assigned []netip.Addr) (sessionContext context.Context, release func(), err error)
 	AllowPeerRoutes(ctx context.Context, user string, routes []AddressRange) error
 	AllowPeerForwarding(ctx context.Context, user string, destination netip.Addr) error
+}
+
+type ServerSessionSharingPolicy interface {
+	ShareSessionAddress(ctx context.Context, user string, address netip.Addr) bool
+}
+
+type ServerSessionPacketObserver interface {
+	OnSessionPacket(ctx context.Context, user string, peer M.Socksaddr, protocol uint8, source, destination M.Socksaddr)
 }
 
 type ServerSessionAddressPolicy interface {
@@ -56,19 +66,21 @@ type ServerOptions struct {
 }
 
 type Server struct {
-	ctx             context.Context
-	logger          logger.ContextLogger
-	template        *Template
-	pools           []*addressPool
-	inet4Address    netip.Addr
-	inet6Address    netip.Addr
-	advertiseRoutes *netipx.IPSet
-	resolve         func(ctx context.Context, domain string) ([]netip.Addr, error)
-	handler         ServerHandler
-	sessionObserver ServerSessionObserver
-	access          sync.RWMutex
-	addresses       map[netip.Addr]*serverSession
-	advertisements  []*serverSession
+	ctx               context.Context
+	logger            logger.ContextLogger
+	template          *Template
+	pools             []*addressPool
+	inet4Address      netip.Addr
+	inet6Address      netip.Addr
+	advertiseRoutes   *netipx.IPSet
+	resolve           func(ctx context.Context, domain string) ([]netip.Addr, error)
+	handler           ServerHandler
+	sessionObserver   ServerSessionObserver
+	access            sync.RWMutex
+	addresses         map[netip.Addr][]*serverSession
+	sharedAddressRefs map[netip.Addr]int
+	flows             map[packetFlowKey]packetFlowEntry
+	advertisements    []*serverSession
 }
 
 type serverSession struct {
@@ -77,9 +89,24 @@ type serverSession struct {
 	server           *Server
 	ctx              context.Context
 	user             string
+	peer             M.Socksaddr
 	addresses        []netip.Addr
+	sharedAddresses  map[netip.Addr]bool
 	advertisedRoutes []AddressRange
 	peerRoutes       []AddressRange
+}
+
+const packetFlowTTL = 5 * time.Minute
+
+type packetFlowKey struct {
+	protocol uint8
+	source   netip.AddrPort
+	dest     netip.AddrPort
+}
+
+type packetFlowEntry struct {
+	session  *serverSession
+	lastSeen time.Time
 }
 
 func NewServer(options ServerOptions) (*Server, error) {
@@ -91,13 +118,15 @@ func NewServer(options ServerOptions) (*Server, error) {
 		return nil, E.New("missing address")
 	}
 	server := &Server{
-		ctx:             options.Context,
-		logger:          options.Logger,
-		template:        template,
-		resolve:         options.Resolve,
-		handler:         options.Handler,
-		sessionObserver: options.SessionObserver,
-		addresses:       make(map[netip.Addr]*serverSession),
+		ctx:               options.Context,
+		logger:            options.Logger,
+		template:          template,
+		resolve:           options.Resolve,
+		handler:           options.Handler,
+		sessionObserver:   options.SessionObserver,
+		addresses:         make(map[netip.Addr][]*serverSession),
+		sharedAddressRefs: make(map[netip.Addr]int),
+		flows:             make(map[packetFlowKey]packetFlowEntry),
 	}
 	var builder netipx.IPSetBuilder
 	for _, address := range options.Address {
@@ -168,23 +197,34 @@ func (s *Server) NewTunnelRequest(ctx context.Context, request transportHTTP.Tun
 		builder.AddSet(s.advertiseRoutes)
 	}
 	current := &serverSession{
-		server: s,
-		ctx:    ctx,
+		server:          s,
+		ctx:             ctx,
+		sharedAddresses: make(map[netip.Addr]bool),
 	}
 	current.user, _ = auth.UserFromContext[string](ctx)
 	addressPolicy, _ := s.sessionObserver.(ServerSessionAddressPolicy)
+	sharingPolicy, _ := s.sessionObserver.(ServerSessionSharingPolicy)
 	for _, pool := range s.pools {
 		var address netip.Addr
 		var allocated bool
-		if addressPolicy != nil && addressPolicy.SessionAddress(ctx, current.user).IsValid() {
+		if addressPolicy != nil {
 			address = addressPolicy.SessionAddress(ctx, current.user)
+		}
+		if address.IsValid() {
+			shared := sharingPolicy != nil && sharingPolicy.ShareSessionAddress(ctx, current.user, address)
+			s.access.Lock()
 			pool.access.Lock()
 			_, inUse := pool.allocated[address]
-			if pool.prefix.Contains(address) && pool.usable(address) && !inUse {
-				pool.allocated[address] = struct{}{}
+			if pool.prefix.Contains(address) && pool.usable(address) && (!inUse || shared) {
+				if !inUse {
+					pool.allocated[address] = struct{}{}
+				}
+				s.sharedAddressRefs[address]++
+				current.sharedAddresses[address] = true
 				allocated = true
 			}
 			pool.access.Unlock()
+			s.access.Unlock()
 		} else {
 			var firstSkipped netip.Addr
 			for attempts := 0; attempts < 65536; attempts++ {
@@ -244,7 +284,12 @@ func (s *Server) NewTunnelRequest(ctx context.Context, request transportHTTP.Tun
 		if actual := M.ParseSocksaddr(request.Request().RemoteAddr).Unwrap(); actual.IsValid() {
 			peer = actual
 		}
-		release, observeErr := s.sessionObserver.OnSessionOpened(ctx, current.user, peer, slices.Clone(current.addresses))
+		current.peer = peer
+		sessionContext, release, observeErr := s.sessionObserver.OnSessionOpened(ctx, current.user, peer, slices.Clone(current.addresses))
+		if sessionContext != nil {
+			ctx = sessionContext
+			current.ctx = sessionContext
+		}
 		if release != nil {
 			defer release()
 		}
@@ -267,7 +312,7 @@ func (s *Server) NewTunnelRequest(ctx context.Context, request transportHTTP.Tun
 	})
 	s.access.Lock()
 	for _, address := range current.addresses {
-		s.addresses[address] = current
+		s.addresses[address] = append(s.addresses[address], current)
 	}
 	s.access.Unlock()
 	assignedAddresses := strings.Join(common.Map(current.addresses, netip.Addr.String), " ")
@@ -294,8 +339,36 @@ func (s *Server) NewTunnelRequest(ctx context.Context, request transportHTTP.Tun
 func (s *Server) releaseSession(current *serverSession) {
 	s.access.Lock()
 	for _, address := range current.addresses {
-		if s.addresses[address] == current {
+		currentSessions := slices.DeleteFunc(s.addresses[address], func(it *serverSession) bool { return it == current })
+		if len(currentSessions) == 0 {
 			delete(s.addresses, address)
+		} else {
+			s.addresses[address] = currentSessions
+		}
+	}
+	for key, entry := range s.flows {
+		if entry.session == current {
+			delete(s.flows, key)
+		}
+	}
+	var addressesToRelease []netip.Addr
+	for _, address := range current.addresses {
+		if !current.sharedAddresses[address] {
+			addressesToRelease = append(addressesToRelease, address)
+			continue
+		}
+		if refs := s.sharedAddressRefs[address]; refs > 1 {
+			s.sharedAddressRefs[address] = refs - 1
+		} else {
+			delete(s.sharedAddressRefs, address)
+			addressesToRelease = append(addressesToRelease, address)
+		}
+	}
+	for _, address := range addressesToRelease {
+		for _, pool := range s.pools {
+			if pool.prefix.Contains(address) {
+				pool.release(address)
+			}
 		}
 	}
 	s.advertisements = slices.DeleteFunc(s.advertisements, func(it *serverSession) bool {
@@ -305,21 +378,17 @@ func (s *Server) releaseSession(current *serverSession) {
 	if current.queue != nil {
 		current.queue.Close()
 	}
-	for _, address := range current.addresses {
-		for _, pool := range s.pools {
-			if pool.prefix.Contains(address) {
-				pool.release(address)
-			}
-		}
-	}
 }
 
 func (s *Server) lookup(destination netip.Addr, protocol uint8) *serverSession {
 	s.access.RLock()
 	defer s.access.RUnlock()
-	current, loaded := s.addresses[destination]
-	if loaded {
-		return current
+	current := s.addresses[destination]
+	if len(current) == 1 {
+		return current[0]
+	}
+	if len(current) > 1 {
+		return nil
 	}
 	if destination == s.inet4Address || destination == s.inet6Address {
 		return nil
@@ -374,7 +443,10 @@ func (s *Server) WritePacketBuffers(packetBuffers []*buf.Buffer, forwarded bool)
 			continue
 		}
 		errorType := tun.ICMPErrorNoRoute
-		target := s.route(source, destination, protocol)
+		target := s.routeFlow(packetBuffer.Bytes())
+		if target == nil {
+			target = s.route(source, destination, protocol)
+		}
 		if target != nil && forwarded && !decrementHopLimit(packetBuffer.Bytes()) {
 			target = nil
 			errorType = tun.ICMPErrorHopLimitExceeded
@@ -409,15 +481,112 @@ func (s *Server) receivedPacketHeadroom() int {
 
 func (s *Server) Close() error {
 	s.access.RLock()
-	sessions := make([]*serverSession, 0, len(s.addresses))
-	for _, current := range s.addresses {
-		sessions = append(sessions, current)
+	unique := make(map[*serverSession]struct{})
+	for _, currentSessions := range s.addresses {
+		for _, current := range currentSessions {
+			unique[current] = struct{}{}
+		}
 	}
 	s.access.RUnlock()
-	for _, current := range sessions {
+	for current := range unique {
 		current.cancel(net.ErrClosed)
 	}
 	return nil
+}
+
+func (s *Server) routeFlow(packet []byte) *serverSession {
+	key, ok := packetFlow(packet)
+	if !ok {
+		return nil
+	}
+	now := time.Now()
+	s.access.Lock()
+	defer s.access.Unlock()
+	for flowKey, entry := range s.flows {
+		if now.Sub(entry.lastSeen) > packetFlowTTL {
+			delete(s.flows, flowKey)
+		}
+	}
+	entry, loaded := s.flows[key]
+	if !loaded || now.Sub(entry.lastSeen) > packetFlowTTL || entry.session.ctx.Err() != nil || !entry.session.accepts(key.source.Addr(), key.protocol) {
+		delete(s.flows, key)
+		return nil
+	}
+	entry.lastSeen = now
+	s.flows[key] = entry
+	return entry.session
+}
+
+func packetFlow(packet []byte) (packetFlowKey, bool) {
+	source, destination, protocol, valid := packetAddresses(packet)
+	if !valid || protocol != 6 && protocol != 17 {
+		return packetFlowKey{}, false
+	}
+	offset, actualProtocol, valid := transportHeaderOffset(packet)
+	if !valid || actualProtocol != protocol || len(packet) < offset+4 {
+		return packetFlowKey{}, false
+	}
+	return packetFlowKey{
+		protocol: protocol,
+		source:   netip.AddrPortFrom(source, binary.BigEndian.Uint16(packet[offset:offset+2])),
+		dest:     netip.AddrPortFrom(destination, binary.BigEndian.Uint16(packet[offset+2:offset+4])),
+	}, true
+}
+
+func (key packetFlowKey) reverse() packetFlowKey {
+	return packetFlowKey{protocol: key.protocol, source: key.dest, dest: key.source}
+}
+
+func transportHeaderOffset(packet []byte) (int, uint8, bool) {
+	if len(packet) == 0 {
+		return 0, 0, false
+	}
+	switch packet[0] >> 4 {
+	case 4:
+		if len(packet) < 20 {
+			return 0, 0, false
+		}
+		offset := int(packet[0]&0x0f) * 4
+		if offset < 20 || len(packet) < offset || binary.BigEndian.Uint16(packet[6:8])&0x1fff != 0 {
+			return 0, 0, false
+		}
+		return offset, packet[9], true
+	case 6:
+		if len(packet) < 40 {
+			return 0, 0, false
+		}
+		nextHeader, offset := packet[6], 40
+		for extensions := 0; extensions < 8; extensions++ {
+			switch nextHeader {
+			case 0, 43, 60, 135, 139, 140:
+				if len(packet) < offset+2 {
+					return 0, 0, false
+				}
+				headerLength := (int(packet[offset+1]) + 1) * 8
+				if len(packet) < offset+headerLength {
+					return 0, 0, false
+				}
+				nextHeader, offset = packet[offset], offset+headerLength
+			case 44:
+				if len(packet) < offset+8 || binary.BigEndian.Uint16(packet[offset+2:offset+4])>>3 != 0 {
+					return 0, 0, false
+				}
+				nextHeader, offset = packet[offset], offset+8
+			case 51:
+				if len(packet) < offset+2 {
+					return 0, 0, false
+				}
+				headerLength := (int(packet[offset+1]) + 2) * 4
+				if len(packet) < offset+headerLength {
+					return 0, 0, false
+				}
+				nextHeader, offset = packet[offset], offset+headerLength
+			default:
+				return offset, nextHeader, true
+			}
+		}
+	}
+	return 0, 0, false
 }
 
 func (s *serverSession) accepts(source netip.Addr, protocol uint8) bool {
@@ -511,6 +680,12 @@ func (s *serverSession) handlePacket(buffer *buf.Buffer) {
 			break
 		}
 		if target == nil {
+			if flow, flowOK := packetFlow(buffer.Bytes()); flowOK {
+				s.server.recordSessionFlow(flow.reverse(), s)
+				if observer, ok := s.server.sessionObserver.(ServerSessionPacketObserver); ok {
+					observer.OnSessionPacket(s.ctx, s.user, s.peer, flow.protocol, M.SocksaddrFrom(flow.source.Addr(), flow.source.Port()), M.SocksaddrFrom(flow.dest.Addr(), flow.dest.Port()))
+				}
+			}
 			err := s.server.handler.WriteInboundBuffers([]*buf.Buffer{buffer})
 			if err != nil {
 				s.server.logger.DebugContext(s.ctx, E.Cause(err, "write packet to device"))
@@ -537,6 +712,18 @@ func (s *serverSession) handlePacket(buffer *buf.Buffer) {
 	if built {
 		s.queue.WriteBuffers([]*buf.Buffer{reply})
 	}
+}
+
+func (s *Server) recordSessionFlow(key packetFlowKey, current *serverSession) {
+	now := time.Now()
+	s.access.Lock()
+	for flowKey, entry := range s.flows {
+		if now.Sub(entry.lastSeen) > packetFlowTTL {
+			delete(s.flows, flowKey)
+		}
+	}
+	s.flows[key] = packetFlowEntry{session: current, lastSeen: now}
+	s.access.Unlock()
 }
 
 func (s *serverSession) handlePacketTooBig(buffer *buf.Buffer, mtu int) {

@@ -62,10 +62,13 @@ func TestMASQUEMihomoSubscriptionIsolation(t *testing.T) {
 		t.Fatal("dual node missing from Clash subscription")
 	}
 	proxy := profile.Proxies[0]
-	for key, value := range map[string]any{"type": "masque", "private-key": "synthetic-private-key", "public-key": "synthetic-server-key", "ip": "172.29.0.2/32", "uri": "https://localhost:443/.well-known/masque/ip/*/*/", "udp": true} {
+	for key, value := range map[string]any{"type": "masque", "private-key": "synthetic-private-key", "public-key": "synthetic-server-key", "uri": "https://localhost:443/.well-known/masque/ip/*/*/", "udp": true} {
 		if proxy[key] != value {
 			t.Fatalf("Clash field %s mismatch", key)
 		}
+	}
+	if proxy["ip"] != "172.29.0.2/32" {
+		t.Fatal("Mihomo subscription did not preserve its required initial local address")
 	}
 	for _, forbidden := range []string{"native-test-password", "nova_mihomo", "synthetic-client-key", "masque-client"} {
 		if strings.Contains(*clash, forbidden) {
@@ -153,6 +156,9 @@ func TestMASQUEMihomoGeneratedNodeAcceptedByBinary(t *testing.T) {
 	proxy := parsed["proxies"].([]any)[0].(map[string]any)
 	if proxy["server"] != "2001:db8::1" {
 		t.Fatal("IPv6 server contains literal YAML quote/bracket characters")
+	}
+	if proxy["ip"] != "172.29.0.2/32" {
+		t.Fatal("generated Mihomo node omitted its required initial local address")
 	}
 	directory := t.TempDir()
 	path := filepath.Join(directory, "clash.yaml")

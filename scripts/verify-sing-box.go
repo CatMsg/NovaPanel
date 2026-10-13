@@ -34,7 +34,7 @@ const (
 	singBoxTest    = "route/network_started_test.go"
 	singBoxTestSHA = "2f7b8eb0aa76ccc1348dca086e1ee8bd4eb68d360041a030fc8592b58898c0c2"
 	masquePatch    = "docs/patches/sing-box-v1.15.0-alpha.12-masque-integration.patch"
-	masquePatchSHA = "82a9a1e307fcfdd377034251e5c322cedccee9649e69a9c35e64be6690da04ee"
+	masquePatchSHA = "76eccb382c92d11a94aaef7efe6ad14418aff3517e9d736698d84e36c16103ff"
 )
 
 type sourcePatchPin struct {
@@ -44,7 +44,7 @@ type sourcePatchPin struct {
 // Only these reviewed hooks and the URLTest selection race fix may differ.
 var masquePatchPins = [3]sourcePatchPin{
 	{"protocol/masque/server.go", "9cd47ca60adbcc0ff440ae4ab04c1b7ba44c1e9ba111812e21d8e7d5b86ea45e", "b8a77ff30e5036999c21702856694e8c1c1d9483179477f42cf587bb45e1cb57"},
-	{"transport/masque/server.go", "75e07c475865fe3539cf1470fe7fa15d019d3261958111c341ebba5f38157086", "14c4a4ed410363f3f19cd261632eda137defa7b6916edfd8a3772547e1277d4d"},
+	{"transport/masque/server.go", "75e07c475865fe3539cf1470fe7fa15d019d3261958111c341ebba5f38157086", "2662161eae854e01a8af3a78ffd687144b27295008f049e5bfa491a7c69f4d98"},
 	{"protocol/group/urltest.go", "fc3d26ed1cecf664f23c870b5caa3f96af868dd4cdbca4d46bc6a309fdaff2c2", "edc7dd0a2a91d19e81b036f65786b3b3a96ab0b5c11fbf543249b0874ee95779"},
 }
 
@@ -152,7 +152,7 @@ func verifySingBox(archiveSource string) error {
 			return fmt.Errorf("Git archive: %w", err)
 		}
 	}
-	fmt.Printf("Verified %s %s: official module sums and ZIP SHA-256 intact; %d official files, 2 audited MASQUE integration hooks and 1 URLTest race fix, %d byte-identical official files, one hash-pinned regression test; patch SHA-256 and exact replay verified; Git-visible source complete; release Cronet pin matches official source and module requirements\n", singBoxModule, singBoxVersion, officialCount, officialCount-len(masquePatchPins))
+	fmt.Printf("Verified %s %s: official module sums and ZIP SHA-256 intact; %d official files, audited MASQUE core integration changes and 1 URLTest race fix, %d byte-identical official files, one hash-pinned regression test; patch SHA-256 and exact replay verified; Git-visible source complete; release Cronet pin matches official source and module requirements\n", singBoxModule, singBoxVersion, officialCount, officialCount-len(masquePatchPins))
 	return nil
 }
 

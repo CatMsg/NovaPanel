@@ -284,6 +284,7 @@ const defaultValues: Record<InType, Inbound> = {
     type: InTypes.Masque,
     version: [3],
     system: false,
+    mihomo_compatible: true,
     mtu: 1280,
   },
   tun: <Tun>{ type: InTypes.Tun, mtu: 9000, udp_timeout: '5m', auto_route: false },

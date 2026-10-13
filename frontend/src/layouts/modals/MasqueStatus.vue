@@ -21,7 +21,7 @@
           </dl>
           <v-alert type="info" variant="tonal" class="mt-4">
             连接数不是 CONNECT-IP 隧道数。流量、在线用户和访问历史以面板核心统计为准。
-            没有有效用户时不监听。Mihomo 兼容模式的固定地址与原生客户端动态地址相互隔离。
+            没有有效用户时不监听。同一用户的多条 Mihomo 隧道可共用地址；连接流会关联到对应隧道，关闭一台设备不会断开其他设备。流量与历史按用户汇总。
           </v-alert>
           <v-alert v-for="item in status.diagnostics ?? []" :key="item.id" type="info" variant="tonal" class="mt-4">{{ item.detail }}</v-alert>
         </template>
