@@ -199,6 +199,147 @@ func applyInboundRuntimeSave(t *testing.T, db *gorm.DB, svc *InboundService, act
 	return action()
 }
 
+func setupInboundRuntimeMASQUEEndpoint(t *testing.T, db *gorm.DB) model.Inbound {
+	t.Helper()
+	listener, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.LocalAddr().(*net.UDPAddr).Port
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	masque := model.Inbound{
+		Type:    "masque",
+		Tag:     "same-port-protocol-conversion",
+		Addrs:   json.RawMessage(`[]`),
+		OutJson: json.RawMessage(`{}`),
+		Options: json.RawMessage(fmt.Sprintf(`{"server":"localhost","listen":"127.0.0.1","listen_port":%d,"version":[3],"system":false,"mtu":1280,"address":["172.28.0.1/24"]}`, port)),
+	}
+	if err := prepareMasqueInbound(db, &masque, nil, "localhost"); err != nil {
+		t.Fatalf("prepare MASQUE inbound: %v", err)
+	}
+	if err := db.Create(&masque).Error; err != nil {
+		t.Fatalf("create MASQUE inbound: %v", err)
+	}
+	client := model.Client{
+		Enable:   true,
+		Name:     "same-port-conversion-user",
+		Config:   json.RawMessage(`{"masque":{"username":"same-port-conversion-user","password":"masque-test-password"},"shadowsocks":{"password":"shadowsocks-test-password"}}`),
+		Inbounds: json.RawMessage(fmt.Sprintf(`[%d]`, masque.Id)),
+		Links:    json.RawMessage(`[]`),
+		History:  json.RawMessage(`[]`),
+	}
+	if err := db.Create(&client).Error; err != nil {
+		t.Fatalf("create protocol-conversion user: %v", err)
+	}
+
+	previousMasque := masquePtr
+	masqueService := NewMasqueService()
+	masquePtr = masqueService
+	t.Cleanup(func() {
+		if err := masqueService.Stop(); err != nil {
+			t.Errorf("stop test MASQUE service: %v", err)
+		}
+		masquePtr = previousMasque
+	})
+	if err := masqueService.SyncFromDB(); err != nil {
+		if strings.Contains(err.Error(), "QUIC is not included in this build") {
+			t.Skip("MASQUE runtime test requires the with_quic build tag")
+		}
+		t.Fatalf("start MASQUE endpoint: %v", err)
+	}
+	if _, exists := corePtr.GetInstance().Endpoint().Get(masque.Tag); !exists {
+		t.Fatal("MASQUE endpoint did not acquire its UDP port")
+	}
+	return masque
+}
+
+func TestInboundRuntimeSaveMASQUEToShadowsocksOnSamePort(t *testing.T) {
+	db, _ := setupInboundRuntimeTest(t)
+	masque := setupInboundRuntimeMASQUEEndpoint(t, db)
+	masqueConfig, err := parseMasqueInbound(&masque)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configService := &ConfigService{}
+	if err := configService.SettingService.SetConfig(`{"log":{"disabled":true},"route":{"final":"direct"}}`); err != nil {
+		t.Fatalf("set runtime config: %v", err)
+	}
+	updated := model.Inbound{
+		Id:   masque.Id,
+		Type: "shadowsocks",
+		Tag:  masque.Tag,
+		Options: json.RawMessage(fmt.Sprintf(
+			`{"listen":"127.0.0.1","listen_port":%d,"method":"aes-128-gcm"}`,
+			masqueConfig.Port,
+		)),
+	}
+	_, changed, err := configService.Save("inbounds", "edit", inboundRuntimePayload(t, updated), "", "test", "localhost")
+	if err != nil || !changed {
+		t.Fatalf("convert MASQUE to Shadowsocks on the same port: changed=%v err=%v", changed, err)
+	}
+	assertInboundRuntimeTag(t, masque.Tag, true)
+	if _, exists := corePtr.GetInstance().Endpoint().Get(masque.Tag); exists {
+		t.Fatal("old MASQUE endpoint still owns the converted port")
+	}
+	var saved model.Inbound
+	if err := db.First(&saved, masque.Id).Error; err != nil {
+		t.Fatalf("load converted inbound: %v", err)
+	}
+	if saved.Type != "shadowsocks" {
+		t.Fatalf("saved inbound type = %q, want shadowsocks", saved.Type)
+	}
+}
+
+func TestInboundRuntimeFailedMASQUEConversionRestoresEndpoint(t *testing.T) {
+	db, _ := setupInboundRuntimeTest(t)
+	masque := setupInboundRuntimeMASQUEEndpoint(t, db)
+	masqueConfig, err := parseMasqueInbound(&masque)
+	if err != nil {
+		t.Fatal(err)
+	}
+	occupiedTCP, err := net.Listen("tcp4", fmt.Sprintf("127.0.0.1:%d", masqueConfig.Port))
+	if err != nil {
+		t.Fatalf("occupy TCP side of MASQUE port: %v", err)
+	}
+	defer occupiedTCP.Close()
+
+	configService := &ConfigService{}
+	if err := configService.SettingService.SetConfig(`{"log":{"disabled":true},"route":{"final":"direct"}}`); err != nil {
+		t.Fatalf("set runtime config: %v", err)
+	}
+	updated := model.Inbound{
+		Id:   masque.Id,
+		Type: "shadowsocks",
+		Tag:  masque.Tag,
+		Options: json.RawMessage(fmt.Sprintf(
+			`{"listen":"127.0.0.1","listen_port":%d,"method":"aes-128-gcm"}`,
+			masqueConfig.Port,
+		)),
+	}
+	_, changed, err := configService.Save("inbounds", "edit", inboundRuntimePayload(t, updated), "", "test", "localhost")
+	if err == nil || changed || !strings.Contains(err.Error(), "address already in use") || !strings.Contains(err.Error(), "配置已自动回滚") {
+		t.Fatalf("expected bind failure with automatic rollback: changed=%v err=%v", changed, err)
+	}
+	if _, exists := corePtr.GetInstance().Endpoint().Get(masque.Tag); !exists {
+		t.Fatal("failed conversion did not restore the original MASQUE endpoint")
+	}
+	var saved model.Inbound
+	if err := db.First(&saved, masque.Id).Error; err != nil {
+		t.Fatalf("load rolled-back inbound: %v", err)
+	}
+	if saved.Type != "masque" {
+		t.Fatalf("failed conversion left inbound type %q, want masque", saved.Type)
+	}
+	probe, err := net.ListenPacket("udp4", fmt.Sprintf("127.0.0.1:%d", masqueConfig.Port))
+	if err == nil {
+		_ = probe.Close()
+		t.Fatal("restored MASQUE endpoint did not reacquire its UDP port")
+	}
+}
+
 func assertInboundRuntimeColdConfig(t *testing.T, db *gorm.DB, svc *InboundService, tag string, want bool) {
 	t.Helper()
 	configs, err := svc.GetAllConfig(db)

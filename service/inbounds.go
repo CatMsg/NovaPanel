@@ -295,6 +295,18 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		inboundConfigSnapshot := append([]byte(nil), inboundConfig...)
 		postCommit = func() error {
 			coreChanged := false
+			masqueSyncedBeforeApply := false
+			if corePtr.IsRunning() &&
+				oldSnapshot != nil && oldSnapshot.Type == "masque" &&
+				inboundSnapshot.Type != "masque" {
+				if masquePtr == nil {
+					return errors.New("cannot replace a MASQUE inbound while its service is unavailable")
+				}
+				if err := masquePtr.SyncFromDB(); err != nil {
+					return fmt.Errorf("release MASQUE listener before replacing inbound: %w", err)
+				}
+				masqueSyncedBeforeApply = true
+			}
 			if corePtr.IsRunning() {
 				if act == "edit" && oldSnapshot != nil && oldSnapshot.Type != "masque" {
 					if err := corePtr.RemoveInbound(oldSnapshot.Tag); err != nil && err != os.ErrInvalid {
@@ -323,8 +335,10 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 				}
 			}
 			if masquePtr != nil && (inboundSnapshot.Type == "masque" || (oldSnapshot != nil && oldSnapshot.Type == "masque")) {
-				if err := masquePtr.SyncFromDB(); err != nil {
-					return err
+				if !masqueSyncedBeforeApply {
+					if err := masquePtr.SyncFromDB(); err != nil {
+						return err
+					}
 				}
 			}
 			return nil
