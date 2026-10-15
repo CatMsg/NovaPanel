@@ -295,7 +295,17 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		inboundConfigSnapshot := append([]byte(nil), inboundConfig...)
 		postCommit = func() error {
 			coreChanged := false
+			mieruSyncedBeforeApply := false
 			masqueSyncedBeforeApply := false
+			if oldSnapshot != nil && oldSnapshot.Type == "mieru" && inboundSnapshot.Type != "mieru" {
+				if mieruPtr == nil {
+					return errors.New("cannot replace a Mieru inbound while its service is unavailable")
+				}
+				if err := mieruPtr.SyncFromDB(); err != nil {
+					return fmt.Errorf("release Mieru listener before replacing inbound: %w", err)
+				}
+				mieruSyncedBeforeApply = true
+			}
 			if corePtr.IsRunning() &&
 				oldSnapshot != nil && oldSnapshot.Type == "masque" &&
 				inboundSnapshot.Type != "masque" {
@@ -329,7 +339,7 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 				}
 				return err
 			}
-			if mieruPtr != nil && (inboundSnapshot.Type == "mieru" || (oldSnapshot != nil && oldSnapshot.Type == "mieru")) {
+			if mieruPtr != nil && !mieruSyncedBeforeApply && (inboundSnapshot.Type == "mieru" || (oldSnapshot != nil && oldSnapshot.Type == "mieru")) {
 				if err := mieruPtr.SyncFromDB(); err != nil {
 					return err
 				}

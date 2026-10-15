@@ -379,6 +379,18 @@ func validateDependencyCycles(graph map[string][]string, cycleError func([]strin
 	return nil
 }
 
+func validateShadowsocksInboundUsers(config map[string]interface{}) error {
+	for index, inbound := range objectList(config["inbounds"]) {
+		if stringValue(inbound["type"]) != "shadowsocks" || stringValue(inbound["method"]) != "none" {
+			continue
+		}
+		if len(objectList(inbound["users"])) > 0 {
+			return fmt.Errorf("inbounds[%d] Shadowsocks method=none 不支持多用户入站，请选择加密方法", index)
+		}
+	}
+	return nil
+}
+
 func objectList(value interface{}) []map[string]interface{} {
 	items, _ := value.([]interface{})
 	result := make([]map[string]interface{}, 0, len(items))

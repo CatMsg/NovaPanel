@@ -278,6 +278,9 @@ export default {
         this.inbound.type,
         this.inbound.type != this.inTypes.Tun ? prevConfig : { tag, exclude_from_sub: prevConfig.exclude_from_sub },
       )
+      if (this.inbound.type == this.inTypes.Shadowsocks) {
+        ;(this.inbound as any).password = RandomUtil.randomSeq(10)
+      }
       if (this.HasInData.includes(this.inbound.type)){
         this.inbound.addrs = []
         this.inbound.out_json = {}

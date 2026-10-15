@@ -38,6 +38,15 @@ func TestValidateSingBoxConfigRequiresObject(t *testing.T) {
 	}
 }
 
+func TestValidateSingBoxConfigRejectsShadowsocksNoneWithUsers(t *testing.T) {
+	if _, err := ValidateSingBoxConfig([]byte(`{"inbounds":[{"type":"shadowsocks","tag":"ss","method":"none","users":[{"name":"user","password":"secret"}]}]}`)); err == nil || !strings.Contains(err.Error(), "不支持多用户入站") {
+		t.Fatalf("expected a clear multi-user Shadowsocks method error, got %v", err)
+	}
+	if _, err := ValidateSingBoxConfig([]byte(`{"inbounds":[{"type":"shadowsocks","tag":"ss","method":"none"}]}`)); err != nil {
+		t.Fatalf("standalone Shadowsocks method=none should remain valid: %v", err)
+	}
+}
+
 func TestValidateSingBoxConfigValidatesDNSRuleMapReferences(t *testing.T) {
 	tests := []struct {
 		name    string

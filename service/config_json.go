@@ -22,6 +22,9 @@ func ValidateSingBoxConfig(raw []byte) ([]byte, error) {
 	if err := validateHTTPProxyConfig(config); err != nil {
 		return nil, err
 	}
+	if err := validateShadowsocksInboundUsers(config); err != nil {
+		return nil, err
+	}
 	if err := validateDNSRuleMapValues(config); err != nil {
 		return nil, err
 	}

@@ -5,13 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/CatMsg/NovaPanel/core"
 	"github.com/CatMsg/NovaPanel/database"
@@ -170,6 +174,59 @@ func inboundRuntimeClient(inboundID uint, enabled bool) model.Client {
 	}
 }
 
+func TestInboundRuntimeMieruPortHolder(t *testing.T) {
+	address := os.Getenv("NOVAS_TEST_MIERU_PORT_HOLDER")
+	if address == "" {
+		return
+	}
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	select {}
+}
+
+func startInboundRuntimeMieruPortHolder(t *testing.T, address string) *mieruRuntime {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("Mieru listener lifecycle test requires Unix process signals")
+	}
+	command := exec.Command(os.Args[0], "-test.run=^TestInboundRuntimeMieruPortHolder$")
+	command.Env = append(os.Environ(), "NOVAS_TEST_MIERU_PORT_HOLDER="+address)
+	command.Stdout = io.Discard
+	command.Stderr = io.Discard
+	if err := command.Start(); err != nil {
+		t.Fatalf("start Mieru port holder: %v", err)
+	}
+	runtimeState := &mieruRuntime{cmd: command, done: make(chan error, 1)}
+	runtimeState.running.Store(true)
+	go func() {
+		waitErr := command.Wait()
+		runtimeState.running.Store(false)
+		runtimeState.done <- waitErr
+		close(runtimeState.done)
+	}()
+	t.Cleanup(func() { stopMieruRuntime(runtimeState) })
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		connection, err := net.DialTimeout("tcp", address, 100*time.Millisecond)
+		if err == nil {
+			_ = connection.Close()
+			return runtimeState
+		}
+		select {
+		case waitErr := <-runtimeState.done:
+			t.Fatalf("Mieru port holder exited before listening: %v", waitErr)
+		default:
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("Mieru port holder did not listen on %s", address)
+	return nil
+}
+
 func inboundRuntimePayload(t *testing.T, inbound model.Inbound) json.RawMessage {
 	t.Helper()
 	payload, err := inbound.MarshalFull()
@@ -290,6 +347,87 @@ func TestInboundRuntimeSaveMASQUEToShadowsocksOnSamePort(t *testing.T) {
 	}
 	if saved.Type != "shadowsocks" {
 		t.Fatalf("saved inbound type = %q, want shadowsocks", saved.Type)
+	}
+}
+
+func TestInboundRuntimeSaveMieruToMixedOnSamePort(t *testing.T) {
+	db, _ := setupInboundRuntimeTest(t)
+	probe, err := net.Listen("tcp", "0.0.0.0:0")
+	if err != nil {
+		t.Fatalf("allocate Mieru test port: %v", err)
+	}
+	port := probe.Addr().(*net.TCPAddr).Port
+	if err := probe.Close(); err != nil {
+		t.Fatal(err)
+	}
+	portAddress := net.JoinHostPort("0.0.0.0", strconv.Itoa(port))
+	holder := startInboundRuntimeMieruPortHolder(t, portAddress)
+
+	inbound := model.Inbound{
+		Type: "mieru",
+		Tag:  "same-port-mieru-conversion",
+		Options: json.RawMessage(fmt.Sprintf(
+			`{"listen":"0.0.0.0","listen_port":%d,"transport":"TCP"}`,
+			port,
+		)),
+	}
+	if err := db.Create(&inbound).Error; err != nil {
+		t.Fatalf("create Mieru inbound: %v", err)
+	}
+	client := model.Client{
+		Enable:   true,
+		Name:     "same-port-mieru-user",
+		Config:   json.RawMessage(`{"mieru":{"password":"mieru-test-password"},"mixed":{"username":"test-user","password":"test-pass"}}`),
+		Inbounds: json.RawMessage(fmt.Sprintf(`[%d]`, inbound.Id)),
+		Links:    json.RawMessage(`[]`),
+		History:  json.RawMessage(`[]`),
+	}
+	if err := db.Create(&client).Error; err != nil {
+		t.Fatalf("create Mieru user: %v", err)
+	}
+	previousMieru := mieruPtr
+	mieru := NewMieruService()
+	mieru.active = holder
+	mieru.total = 1
+	mieru.inboundTag = inbound.Tag
+	mieruPtr = mieru
+	core.SetMieruBridgeInboundTag(inbound.Tag)
+	t.Cleanup(func() {
+		core.SetMieruBridgeInboundTag("")
+		mieruPtr = previousMieru
+	})
+	bridgeConfig, err := buildMieruBridgeInboundFromDB(db, &inbound)
+	if err != nil {
+		t.Fatalf("build old Mieru routing bridge: %v", err)
+	}
+	if err := corePtr.AddInbound(bridgeConfig); err != nil {
+		t.Fatalf("start old Mieru routing bridge: %v", err)
+	}
+
+	configService := &ConfigService{}
+	if err := configService.SettingService.SetConfig(`{"log":{"disabled":true},"route":{"final":"direct"}}`); err != nil {
+		t.Fatalf("set runtime config: %v", err)
+	}
+	updated := model.Inbound{
+		Id:      inbound.Id,
+		Type:    "mixed",
+		Tag:     inbound.Tag,
+		Options: json.RawMessage(fmt.Sprintf(`{"listen":"0.0.0.0","listen_port":%d}`, port)),
+	}
+	_, changed, err := configService.Save("inbounds", "edit", inboundRuntimePayload(t, updated), "", "test", "localhost")
+	if err != nil || !changed {
+		t.Fatalf("convert Mieru to mixed on the same port: changed=%v err=%v", changed, err)
+	}
+	if mieru.active != nil || holder.running.Load() {
+		t.Fatal("Mieru listener remained active after conversion")
+	}
+	assertInboundRuntimeTag(t, inbound.Tag, true)
+	var saved model.Inbound
+	if err := db.First(&saved, inbound.Id).Error; err != nil {
+		t.Fatalf("load converted inbound: %v", err)
+	}
+	if saved.Type != "mixed" {
+		t.Fatalf("saved inbound type = %q, want mixed", saved.Type)
 	}
 }
 
