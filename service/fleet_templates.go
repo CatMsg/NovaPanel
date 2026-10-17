@@ -81,15 +81,17 @@ type FleetTemplateSummary struct {
 }
 
 type FleetTemplatePreview struct {
-	TLSAdd         int      `json:"tlsAdd"`
-	TLSUpdate      int      `json:"tlsUpdate"`
-	InboundAdd     int      `json:"inboundAdd"`
-	InboundUpdate  int      `json:"inboundUpdate"`
-	OutboundAdd    int      `json:"outboundAdd"`
-	OutboundUpdate int      `json:"outboundUpdate"`
-	ClientAdd      int      `json:"clientAdd"`
-	ClientUpdate   int      `json:"clientUpdate"`
-	ConfigUpdates  []string `json:"configUpdates"`
+	TLSAdd            int      `json:"tlsAdd"`
+	TLSUpdate         int      `json:"tlsUpdate"`
+	InboundAdd        int      `json:"inboundAdd"`
+	InboundUpdate     int      `json:"inboundUpdate"`
+	InboundAddTags    []string `json:"inboundAddTags,omitempty"`
+	InboundUpdateTags []string `json:"inboundUpdateTags,omitempty"`
+	OutboundAdd       int      `json:"outboundAdd"`
+	OutboundUpdate    int      `json:"outboundUpdate"`
+	ClientAdd         int      `json:"clientAdd"`
+	ClientUpdate      int      `json:"clientUpdate"`
+	ConfigUpdates     []string `json:"configUpdates"`
 }
 
 type FleetTemplateTargetResult struct {
@@ -152,7 +154,7 @@ func (t FleetTemplate) Summary() FleetTemplateSummary {
 	}
 }
 
-func (s *FleetService) CaptureFleetTemplate(name string, sections FleetTemplateSections, hostname string) (*FleetTemplate, error) {
+func (s *FleetService) CaptureFleetTemplate(name string, sections FleetTemplateSections, hostname string, selectedInboundIDs []uint) (*FleetTemplate, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, common.NewError("模板名称不能为空")
@@ -180,9 +182,33 @@ func (s *FleetService) CaptureFleetTemplate(name string, sections FleetTemplateS
 	}
 	if sections.Inbounds {
 		var inbounds []model.Inbound
-		if err := db.Find(&inbounds).Error; err != nil {
+		query := db.Order("id ASC")
+		if selectedInboundIDs != nil {
+			selected := make(map[uint]struct{}, len(selectedInboundIDs))
+			for _, id := range selectedInboundIDs {
+				if id == 0 {
+					return nil, common.NewError("入站选择包含无效 ID")
+				}
+				selected[id] = struct{}{}
+			}
+			if len(selected) == 0 {
+				return nil, common.NewError("至少选择一个要批量复制的入站")
+			}
+			ids := make([]uint, 0, len(selected))
+			for id := range selected {
+				ids = append(ids, id)
+			}
+			query = query.Where("id IN ?", ids)
+			if err := query.Find(&inbounds).Error; err != nil {
+				return nil, err
+			}
+			if len(inbounds) != len(selected) {
+				return nil, common.NewError("部分所选入站已不存在，请刷新页面后重试")
+			}
+		} else if err := query.Find(&inbounds).Error; err != nil {
 			return nil, err
 		}
+		tlsIDs := make(map[uint]struct{})
 		for _, inbound := range inbounds {
 			options, err := sanitizeFleetInboundOptions(inbound.Options)
 			if err != nil {
@@ -194,6 +220,21 @@ func (s *FleetService) CaptureFleetTemplate(name string, sections FleetTemplateS
 				ExcludeFromSub: inbound.ExcludeFromSub,
 				Addrs:          append(json.RawMessage(nil), inbound.Addrs...), Options: options,
 			})
+			if inbound.TlsId > 0 {
+				tlsIDs[inbound.TlsId] = struct{}{}
+			}
+		}
+		if !sections.TLS && len(tlsIDs) > 0 {
+			ids := make([]uint, 0, len(tlsIDs))
+			for id := range tlsIDs {
+				ids = append(ids, id)
+			}
+			if err := db.Where("id IN ?", ids).Find(&template.TLS).Error; err != nil {
+				return nil, err
+			}
+			if len(template.TLS) != len(tlsIDs) {
+				return nil, common.NewError("所选入站引用了不存在的 TLS 配置")
+			}
 		}
 	}
 	if sections.Outbounds {
@@ -208,14 +249,12 @@ func (s *FleetService) CaptureFleetTemplate(name string, sections FleetTemplateS
 		}
 	}
 	if sections.Clients {
-		if len(template.InboundRefs) == 0 {
-			var inbounds []model.Inbound
-			if err := db.Select("id", "tag").Find(&inbounds).Error; err != nil {
-				return nil, err
-			}
-			for _, inbound := range inbounds {
-				template.InboundRefs[inbound.Id] = inbound.Tag
-			}
+		var inbounds []model.Inbound
+		if err := db.Select("id", "tag").Find(&inbounds).Error; err != nil {
+			return nil, err
+		}
+		for _, inbound := range inbounds {
+			template.InboundRefs[inbound.Id] = inbound.Tag
 		}
 		if err := db.Find(&template.Clients).Error; err != nil {
 			return nil, err
@@ -228,14 +267,8 @@ func (s *FleetService) CaptureFleetTemplate(name string, sections FleetTemplateS
 			template.Clients[index].History = nil
 		}
 	}
-	if sections.Inbounds {
-		var tlsRows []model.Tls
-		if err := db.Select("id", "name").Find(&tlsRows).Error; err != nil {
-			return nil, err
-		}
-		for _, tls := range tlsRows {
-			template.TLSRefs[tls.Id] = tls.Name
-		}
+	for _, tls := range template.TLS {
+		template.TLSRefs[tls.Id] = tls.Name
 	}
 	if sections.Route || sections.DNS {
 		configValue, err := s.GetConfig()
@@ -497,8 +530,10 @@ func (s *ConfigService) PreviewFleetTemplate(template FleetTemplate, hostname st
 		}
 		if count == 0 {
 			preview.InboundAdd++
+			preview.InboundAddTags = append(preview.InboundAddTags, item.Tag)
 		} else {
 			preview.InboundUpdate++
+			preview.InboundUpdateTags = append(preview.InboundUpdateTags, item.Tag)
 		}
 	}
 	for _, item := range template.Outbounds {
@@ -616,9 +651,11 @@ func (s *ConfigService) applyFleetTemplateTx(tx *gorm.DB, template FleetTemplate
 		if err != nil && !database.IsNotFound(err) {
 			return err
 		}
-		if database.IsNotFound(err) {
+		isNew := database.IsNotFound(err)
+		if isNew {
 			target = model.Inbound{Tag: source.Tag}
 		}
+		oldInbound := target
 		options, err := sanitizeFleetInboundOptions(source.Options)
 		if err != nil {
 			return fmt.Errorf("sanitize inbound %q options: %w", source.Tag, err)
@@ -629,11 +666,17 @@ func (s *ConfigService) applyFleetTemplateTx(tx *gorm.DB, template FleetTemplate
 		target.Options = replaceFleetTemplateHost(options, template.SourceHost, hostname)
 		if mapped, ok := tlsIDs[source.TLSID]; ok {
 			target.TlsId = mapped
+			var targetTLS model.Tls
+			if err := tx.First(&targetTLS, mapped).Error; err != nil {
+				return err
+			}
+			target.Tls = &targetTLS
 		} else if source.TLSID == 0 {
 			target.TlsId = 0
+			target.Tls = nil
 		} else if tlsName := template.TLSRefs[source.TLSID]; tlsName != "" {
 			var existingTLS model.Tls
-			err := tx.Select("id").Where("name = ?", tlsName).First(&existingTLS).Error
+			err := tx.Where("name = ?", tlsName).First(&existingTLS).Error
 			if database.IsNotFound(err) {
 				return common.NewErrorf("入站 %s 需要目标机已有 TLS %s，或在模板中同时勾选 TLS", source.Tag, tlsName)
 			}
@@ -641,13 +684,35 @@ func (s *ConfigService) applyFleetTemplateTx(tx *gorm.DB, template FleetTemplate
 				return err
 			}
 			target.TlsId = existingTLS.Id
+			target.Tls = &existingTLS
+		}
+		if target.Type == "masque" {
+			var previous *model.Inbound
+			if !isNew {
+				previous = &oldInbound
+			}
+			if err := prepareMasqueInbound(tx, &target, previous, hostname); err != nil {
+				return fmt.Errorf("prepare MASQUE inbound %q: %w", target.Tag, err)
+			}
+		} else if isNew || oldInbound.Type != target.Type || len(bytes.TrimSpace(target.OutJson)) == 0 {
+			// FillOutJson needs an object to merge generated client settings into.
+			target.OutJson = json.RawMessage(`{}`)
+		}
+		if target.Type != "masque" && oldInbound.Type == "masque" {
+			target.MasqueTLSCertificate = ""
+			target.MasqueTLSKey = ""
 		}
 		if target.Type == "mieru" {
 			if _, err := parseMieruInbound(&target); err != nil {
 				return err
 			}
 		}
-		if err := util.FillOutJson(&target, hostname); err != nil {
+		if target.Type == "masque" {
+			target.OutJson, err = buildMasqueClientTemplate(&target)
+		} else {
+			err = util.FillOutJson(&target, hostname)
+		}
+		if err != nil {
 			return err
 		}
 		if spec, err := collectInboundForwardSpec(&target); err != nil {

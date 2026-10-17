@@ -529,7 +529,14 @@ func (a *ApiService) CaptureFleetTemplate(c *gin.Context) {
 		jsonMsg(c, "save", err)
 		return
 	}
-	template, err := a.FleetService.CaptureFleetTemplate(c.Request.FormValue("name"), sections, getHostname(c))
+	var inboundIDs []uint
+	if raw := c.Request.FormValue("inboundIds"); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &inboundIDs); err != nil {
+			jsonMsg(c, "save", err)
+			return
+		}
+	}
+	template, err := a.FleetService.CaptureFleetTemplate(c.Request.FormValue("name"), sections, getHostname(c), inboundIDs)
 	if err != nil {
 		jsonObj(c, nil, err)
 		return

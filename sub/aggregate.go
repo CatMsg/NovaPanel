@@ -157,9 +157,10 @@ func (a *AggregateService) collectAggregateClashProxies(host string) ([]map[stri
 
 	seen := make(map[string]struct{})
 	seenSources := make(map[string]struct{})
+	seenProxies := make(map[string]struct{})
 	proxies := make([]map[string]interface{}, 0)
 	usage := aggregateUsage{}
-	for _, source := range sources {
+	for sourceIndex, source := range sources {
 		if sameSubscriptionSource(source, selfAggregateURI) {
 			logger.Warning("aggregate: skip self source")
 			continue
@@ -200,10 +201,18 @@ func (a *AggregateService) collectAggregateClashProxies(host string) ([]map[stri
 			if name == "" {
 				continue
 			}
-			if _, exists := seen[name]; exists {
+			fingerprint, err := json.Marshal(proxy)
+			if err != nil {
+				logger.Warning("aggregate: skip unencodable clash proxy")
 				continue
 			}
-			seen[name] = struct{}{}
+			if _, exists := seenProxies[string(fingerprint)]; exists {
+				continue
+			}
+			uniqueName := uniqueAggregateTag(name, sourceIndex, seen, nil)
+			proxy["name"] = uniqueName
+			seen[uniqueName] = struct{}{}
+			seenProxies[string(fingerprint)] = struct{}{}
 			proxies = append(proxies, proxy)
 		}
 	}

@@ -230,6 +230,66 @@ func TestAggregateJSONPreservesStructuredHTTPAndFallsBackForPlainSource(t *testi
 	}
 }
 
+func TestAggregateClashRenamesSameNameNodesAndKeepsDistinctServers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var proxy string
+		switch r.URL.Path {
+		case "/north":
+			proxy = `{"name":"shared-inbound","type":"socks5","server":"north.example","port":1080}`
+		case "/south":
+			proxy = `{"name":"shared-inbound","type":"socks5","server":"south.example","port":1080}`
+		case "/duplicate":
+			proxy = `{"name":"shared-inbound","type":"socks5","server":"north.example","port":1080}`
+		default:
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"proxies":[` + proxy + `]}`))
+	}))
+	defer server.Close()
+
+	if err := database.InitDB(filepath.Join(t.TempDir(), "aggregate-clash-names.db")); err != nil {
+		t.Fatalf("init temporary DB: %v", err)
+	}
+	seedSubscriptionTestSettings(t,
+		model.Setting{Key: "subMode", Value: "master"},
+		model.Setting{Key: "subMasterSources", Value: strings.Join([]string{
+			server.URL + "/north",
+			server.URL + "/south",
+			server.URL + "/duplicate",
+		}, "\n")},
+		model.Setting{Key: "subUpdates", Value: "24"},
+	)
+
+	result, _, err := (&AggregateService{}).GetAggregate("clash", "panel.example")
+	if err != nil {
+		t.Fatalf("build aggregate Clash subscription: %v", err)
+	}
+	var config struct {
+		Proxies []map[string]interface{} `yaml:"proxies"`
+	}
+	if err := yaml.Unmarshal([]byte(*result), &config); err != nil {
+		t.Fatalf("parse aggregate Clash subscription: %v", err)
+	}
+	if len(config.Proxies) != 2 {
+		t.Fatalf("aggregate proxies = %#v, want both distinct servers while deduplicating exact duplicates", config.Proxies)
+	}
+	byName := make(map[string]map[string]interface{}, len(config.Proxies))
+	for _, proxy := range config.Proxies {
+		name := asString(proxy["name"])
+		if _, exists := byName[name]; exists {
+			t.Fatalf("aggregate contains duplicate Clash proxy name %q", name)
+		}
+		byName[name] = proxy
+	}
+	if got := asString(byName["shared-inbound"]["server"]); got != "north.example" {
+		t.Errorf("first proxy server = %q, want north.example", got)
+	}
+	if got := asString(byName["2.shared-inbound"]["server"]); got != "south.example" {
+		t.Errorf("renamed proxy server = %q, want south.example", got)
+	}
+}
+
 func TestAggregateEmptyStructuredJSONDoesNotBecomePlainLinks(t *testing.T) {
 	outbounds, structured, err := aggregateJSONOutbounds(`{"outbounds":[]}`)
 	if err != nil {

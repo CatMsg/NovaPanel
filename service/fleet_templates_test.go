@@ -413,7 +413,7 @@ func TestCaptureFleetTemplateOutboundsKeepsOptionsAfterStorage(t *testing.T) {
 	if err := database.GetDB().Create(&model.Outbound{Type: "socks", Tag: "stream", Options: options}).Error; err != nil {
 		t.Fatal(err)
 	}
-	template, err := (&FleetService{}).CaptureFleetTemplate("streaming", FleetTemplateSections{Outbounds: true}, "la.mile.news")
+	template, err := (&FleetService{}).CaptureFleetTemplate("streaming", FleetTemplateSections{Outbounds: true}, "la.mile.news", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -435,6 +435,60 @@ func TestCaptureFleetTemplateOutboundsKeepsOptionsAfterStorage(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("captured template omitted stream outbound")
+	}
+}
+
+func TestCaptureFleetTemplateSelectsInboundsAndIncludesOnlyRequiredTLS(t *testing.T) {
+	if err := database.InitDB(filepath.Join(t.TempDir(), "fleet-selected-inbounds.db")); err != nil {
+		t.Fatal(err)
+	}
+	db := database.GetDB()
+	tlsRows := []model.Tls{
+		{Name: "selected-cert", Server: json.RawMessage(`{"enabled":true}`)},
+		{Name: "other-cert", Server: json.RawMessage(`{"enabled":true}`)},
+	}
+	if err := db.Create(&tlsRows).Error; err != nil {
+		t.Fatalf("create TLS fixtures: %v", err)
+	}
+	inbounds := []model.Inbound{
+		{Type: "vless", Tag: "selected-inbound", TlsId: tlsRows[0].Id, Options: json.RawMessage(`{"listen":"::","listen_port":443}`)},
+		{Type: "trojan", Tag: "unselected-inbound", TlsId: tlsRows[1].Id, Options: json.RawMessage(`{"listen":"::","listen_port":8443}`)},
+	}
+	if err := db.Create(&inbounds).Error; err != nil {
+		t.Fatalf("create inbound fixtures: %v", err)
+	}
+	client := model.Client{Name: "bound-to-unselected", Config: json.RawMessage(`{}`), Inbounds: json.RawMessage(`[2]`), Links: json.RawMessage(`[]`)}
+	if err := db.Create(&client).Error; err != nil {
+		t.Fatalf("create client fixture: %v", err)
+	}
+
+	template, err := (&FleetService{}).CaptureFleetTemplate(
+		"one inbound", FleetTemplateSections{Inbounds: true, Clients: true}, "source.example", []uint{inbounds[0].Id},
+	)
+	if err != nil {
+		t.Fatalf("capture selected inbound: %v", err)
+	}
+	if len(template.Inbounds) != 1 || template.Inbounds[0].Tag != "selected-inbound" {
+		t.Fatalf("captured inbounds = %#v, want only selected-inbound", template.Inbounds)
+	}
+	if len(template.TLS) != 1 || template.TLS[0].Name != "selected-cert" {
+		t.Fatalf("captured TLS dependencies = %#v, want only selected-cert", template.TLS)
+	}
+	if template.TLSRefs[tlsRows[0].Id] != "selected-cert" {
+		t.Fatalf("TLS references = %#v, missing selected-cert", template.TLSRefs)
+	}
+	if template.InboundRefs[inbounds[1].Id] != "unselected-inbound" {
+		t.Fatalf("client inbound references omit unselected source inbound: %#v", template.InboundRefs)
+	}
+	if len(template.Clients) != 1 || template.Clients[0].Name != "bound-to-unselected" {
+		t.Fatalf("captured clients = %#v, want the selected template client", template.Clients)
+	}
+
+	if _, err := (&FleetService{}).CaptureFleetTemplate("empty", FleetTemplateSections{Inbounds: true}, "source.example", []uint{}); err == nil {
+		t.Fatal("capture accepted an empty explicit inbound selection")
+	}
+	if _, err := (&FleetService{}).CaptureFleetTemplate("stale", FleetTemplateSections{Inbounds: true}, "source.example", []uint{9999}); err == nil {
+		t.Fatal("capture accepted an inbound ID that does not exist")
 	}
 }
 
@@ -471,7 +525,7 @@ func TestFleetTemplatePreservesInboundSubscriptionVisibility(t *testing.T) {
 	if err := db.Model(&model.Setting{}).Where("key = ?", config.Key).Update("value", config.Value).Error; err != nil {
 		t.Fatalf("create test config: %v", err)
 	}
-	template, err := (&FleetService{}).CaptureFleetTemplate("visibility", FleetTemplateSections{Inbounds: true}, "panel.example")
+	template, err := (&FleetService{}).CaptureFleetTemplate("visibility", FleetTemplateSections{Inbounds: true}, "panel.example", nil)
 	if err != nil {
 		t.Fatalf("capture fleet template: %v", err)
 	}
@@ -605,6 +659,99 @@ func TestFleetTemplateOutboundPreviewAndMerge(t *testing.T) {
 	}
 	if err := db.Model(&model.Outbound{}).Count(&count).Error; err != nil || count != 3 {
 		t.Fatalf("unrelated direct outbound removed: count=%d, err=%v", count, err)
+	}
+}
+
+func TestFleetTemplatePreviewListsInboundTagsForAddAndUpdate(t *testing.T) {
+	_ = testutil.NewManagedPortSandbox(t)
+	if err := database.InitDB(filepath.Join(t.TempDir(), "fleet-inbound-preview.db")); err != nil {
+		t.Fatal(err)
+	}
+	settingService := &SettingService{}
+	if _, err := settingService.GetAllSetting(); err != nil {
+		t.Fatal(err)
+	}
+	db := database.GetDB()
+	if err := db.Model(&model.Setting{}).Where("key = ?", "config").Update("value", `{"log":{"disabled":true},"route":{"final":"direct"}}`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.Inbound{
+		Type: "socks", Tag: "existing-inbound", Options: json.RawMessage(`{"listen":"127.0.0.1","listen_port":1080}`),
+	}).Error; err != nil {
+		t.Fatalf("create existing inbound: %v", err)
+	}
+	template := FleetTemplate{
+		FormatVersion: fleetTemplateFormatVersion,
+		Sections:      FleetTemplateSections{Inbounds: true},
+		Inbounds: []FleetTemplateInbound{
+			{Type: "socks", Tag: "existing-inbound", Options: json.RawMessage(`{"listen":"127.0.0.1","listen_port":1081}`)},
+			{Type: "socks", Tag: "new-inbound", Options: json.RawMessage(`{"listen":"127.0.0.1","listen_port":1082}`)},
+		},
+	}
+	preview, err := (&ConfigService{}).PreviewFleetTemplate(template, "target.example")
+	if err != nil {
+		t.Fatalf("preview inbound changes: %v", err)
+	}
+	if preview.InboundAdd != 1 || !reflect.DeepEqual(preview.InboundAddTags, []string{"new-inbound"}) {
+		t.Errorf("inbound additions = count %d tags %#v, want one new-inbound", preview.InboundAdd, preview.InboundAddTags)
+	}
+	if preview.InboundUpdate != 1 || !reflect.DeepEqual(preview.InboundUpdateTags, []string{"existing-inbound"}) {
+		t.Errorf("inbound updates = count %d tags %#v, want one existing-inbound", preview.InboundUpdate, preview.InboundUpdateTags)
+	}
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		return (&ConfigService{}).applyFleetTemplateTx(tx, template, "target.example")
+	}); err != nil {
+		t.Fatalf("apply template with new inbound: %v", err)
+	}
+	var created model.Inbound
+	if err := db.Where("tag = ?", "new-inbound").First(&created).Error; err != nil {
+		t.Fatalf("load new inbound: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(created.OutJson, &out); err != nil {
+		t.Fatalf("decode generated outbound config %q: %v", created.OutJson, err)
+	}
+	if out["type"] != "socks" || out["server"] != "target.example" || out["server_port"] != float64(1082) {
+		t.Fatalf("new inbound generated outbound config = %#v", out)
+	}
+}
+
+func TestFleetTemplateApplyGeneratesTargetMasqueIdentity(t *testing.T) {
+	_ = testutil.NewManagedPortSandbox(t)
+	if err := database.InitDB(filepath.Join(t.TempDir(), "fleet-masque-inbound.db")); err != nil {
+		t.Fatal(err)
+	}
+	settingService := &SettingService{}
+	if _, err := settingService.GetAllSetting(); err != nil {
+		t.Fatal(err)
+	}
+	db := database.GetDB()
+	template := FleetTemplate{
+		FormatVersion: fleetTemplateFormatVersion,
+		Sections:      FleetTemplateSections{Inbounds: true},
+		Inbounds: []FleetTemplateInbound{{
+			Type: "masque", Tag: "fleet-masque",
+			Options: json.RawMessage(`{"listen_port":443}`),
+		}},
+	}
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		return (&ConfigService{}).applyFleetTemplateTx(tx, template, "target.example")
+	}); err != nil {
+		t.Fatalf("apply MASQUE inbound template: %v", err)
+	}
+	var inbound model.Inbound
+	if err := db.Where("tag = ?", "fleet-masque").First(&inbound).Error; err != nil {
+		t.Fatalf("load MASQUE inbound: %v", err)
+	}
+	if inbound.MasqueTLSCertificate == "" || inbound.MasqueTLSKey == "" {
+		t.Fatal("target MASQUE inbound is missing its generated TLS identity")
+	}
+	var out map[string]any
+	if err := json.Unmarshal(inbound.OutJson, &out); err != nil {
+		t.Fatalf("decode generated MASQUE outbound config %q: %v", inbound.OutJson, err)
+	}
+	if out["type"] != "masque-client" || out["server"] != "target.example" || out["server_port"] != float64(443) {
+		t.Fatalf("generated MASQUE outbound config = %#v", out)
 	}
 }
 

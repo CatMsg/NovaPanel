@@ -362,6 +362,25 @@
                       <v-icon :icon="templateSections[option.key] ? 'mdi-check-circle' : 'mdi-circle-outline'" />
                     </button>
                   </div>
+                  <div v-if="templateSections.inbounds" class="fleet-inbound-picker">
+                    <div class="fleet-inbound-picker__head">
+                      <strong>{{ $t('ui.fleet.inboundSelectionCount', { selected: selectedInboundIds.length, total: sourceInbounds.length }) }}</strong>
+                      <div>
+                        <button type="button" :disabled="!sourceInbounds.length" @click="selectAllInbounds">{{ $t('ui.fleet.selectAllInbounds') }}</button>
+                        <button type="button" :disabled="!selectedInboundIds.length" @click="clearInboundSelection">{{ $t('ui.fleet.clearInboundSelection') }}</button>
+                      </div>
+                    </div>
+                    <v-alert v-if="inboundOptionsError" type="error" variant="tonal" density="compact">{{ inboundOptionsError }}</v-alert>
+                    <div v-else-if="inboundOptionsLoading" class="fleet-inbound-picker__empty">{{ $t('ui.fleet.loadingInbounds') }}</div>
+                    <div v-else-if="!sourceInbounds.length" class="fleet-inbound-picker__empty">{{ $t('ui.fleet.inboundSelectionEmpty') }}</div>
+                    <div v-else class="fleet-inbound-picker__list">
+                      <label v-for="inbound in sourceInbounds" :key="inbound.id" class="fleet-inbound-picker__item" :class="{ 'is-selected': selectedInboundIds.includes(inbound.id) }">
+                        <input v-model="selectedInboundIds" type="checkbox" :value="inbound.id" />
+                        <span><strong>{{ inbound.tag }}</strong><small>{{ inbound.type }}<template v-if="inbound.listen_port"> · {{ $t('ui.common.port') }} {{ inbound.listen_port }}</template></small></span>
+                      </label>
+                    </div>
+                    <p>{{ $t('ui.fleet.inboundSelectionHint') }}</p>
+                  </div>
                   <v-btn color="primary" size="large" :loading="orchestrationLoading === 'capture'" :disabled="!canCaptureTemplate" @click="captureTemplate">
                     <v-icon icon="mdi-content-save-plus-outline" start />{{ $t('ui.fleet.saveAndContinue') }}
                   </v-btn>
@@ -404,7 +423,14 @@
                 </div>
                 <div class="fleet-orchestration__results">
                   <div v-for="result in templateResults" :key="result.id" class="fleet-orchestration__result" :class="result.success ? 'is-success' : 'is-error'">
-                    <div><strong>{{ result.name }}</strong><span v-if="result.preview">{{ previewSummary(result.preview) }}</span><span v-else-if="result.error">{{ result.error }}</span><span v-else>{{ $t('ui.fleet.deployed') }}</span></div>
+                    <div>
+                      <strong>{{ result.name }}</strong>
+                      <span v-if="result.preview">{{ previewSummary(result.preview) }}</span>
+                      <span v-else-if="result.error">{{ result.error }}</span>
+                      <span v-else>{{ $t('ui.fleet.deployed') }}</span>
+                      <small v-if="result.preview?.inboundAddTags?.length">{{ $t('ui.fleet.inboundAddPreview') }} {{ result.preview.inboundAddTags.join('、') }}</small>
+                      <small v-if="result.preview?.inboundUpdateTags?.length">{{ $t('ui.fleet.inboundUpdatePreview') }} {{ result.preview.inboundUpdateTags.join('、') }}</small>
+                    </div>
                     <v-icon :icon="result.success ? 'mdi-check-circle' : 'mdi-alert-circle'" />
                   </div>
                 </div>
@@ -604,6 +630,7 @@ type FleetConfig = {
 }
 
 type FleetTemplateSectionKey = 'tls' | 'inbounds' | 'outbounds' | 'clients' | 'route' | 'dns'
+type FleetInboundOption = { id: number; tag: string; type: string; listen_port?: number }
 
 type FleetTemplate = {
   id: string
@@ -617,6 +644,8 @@ type FleetTemplatePreview = {
   tlsUpdate: number
   inboundAdd: number
   inboundUpdate: number
+  inboundAddTags?: string[]
+  inboundUpdateTags?: string[]
   outboundAdd: number
   outboundUpdate: number
   clientAdd: number
@@ -657,7 +686,11 @@ const batchMessageType = ref<'info' | 'success' | 'warning' | 'error'>('info')
 const templates = ref<FleetTemplate[]>([])
 const templateMode = ref<'saved' | 'create'>('saved')
 const templateName = ref('')
-const templateSections = ref<Record<FleetTemplateSectionKey, boolean>>({ tls: false, inbounds: true, outbounds: false, clients: true, route: true, dns: true })
+const templateSections = ref<Record<FleetTemplateSectionKey, boolean>>({ tls: false, inbounds: true, outbounds: false, clients: false, route: false, dns: false })
+const sourceInbounds = ref<FleetInboundOption[]>([])
+const selectedInboundIds = ref<number[]>([])
+const inboundOptionsLoading = ref(false)
+const inboundOptionsError = ref('')
 const selectedTemplateId = ref('')
 const selectedTargets = ref<string[]>([])
 const canaryTarget = ref<string | null>(null)
@@ -757,7 +790,13 @@ const templateSectionOptions = computed<Array<{ key: FleetTemplateSectionKey; la
   { key: 'route', label: t('pages.rules'), hint: t('ui.fleet.scopeRoute'), icon: 'mdi-routes' },
   { key: 'dns', label: 'DNS', hint: t('ui.fleet.scopeDns'), icon: 'mdi-dns-outline' },
 ])
-const canCaptureTemplate = computed(() => Boolean(templateName.value.trim() && Object.values(templateSections.value).some(Boolean)))
+const canCaptureTemplate = computed(() => Boolean(
+  templateName.value.trim()
+  && Object.values(templateSections.value).some(Boolean)
+  && (!templateSections.value.inbounds || selectedInboundIds.value.length > 0)
+  && !inboundOptionsLoading.value
+  && !inboundOptionsError.value,
+))
 const canRunTemplate = computed(() => Boolean(selectedTemplateId.value && selectedTargets.value.length))
 const canDeployTemplate = computed(() => canRunTemplate.value && templateResults.value.length > 0 && templateResults.value.every(result => result.success))
 const rolloutOrderLabel = computed(() => {
@@ -955,12 +994,12 @@ const openOrchestration = async () => {
   orchestrationStep.value = 1
   deploymentComplete.value = false
   templateName.value = ''
-  templateSections.value = { tls: false, inbounds: true, outbounds: false, clients: true, route: true, dns: true }
+  templateSections.value = { tls: false, inbounds: true, outbounds: false, clients: false, route: false, dns: false }
   templateResults.value = []
   selectedTargets.value = []
   canaryTarget.value = null
   selectedTemplateId.value = ''
-  await loadTemplates()
+  await Promise.all([loadTemplates(), loadSourceInbounds()])
   templateMode.value = templates.value.length ? 'saved' : 'create'
   showOrchestration.value = true
 }
@@ -979,6 +1018,33 @@ const templateSectionLabels = (template: FleetTemplate) => templateSectionOption
 
 const toggleTemplateSection = (key: FleetTemplateSectionKey) => {
   templateSections.value[key] = !templateSections.value[key]
+}
+
+const loadSourceInbounds = async () => {
+  inboundOptionsLoading.value = true
+  inboundOptionsError.value = ''
+  const response = await HttpUtils.get('api/inbounds')
+  if (!response.success) {
+    sourceInbounds.value = []
+    selectedInboundIds.value = []
+    inboundOptionsError.value = response.msg || t('ui.fleet.inboundSelectionLoadFailed')
+  } else {
+    const list = response.obj?.inbounds
+    sourceInbounds.value = Array.isArray(list)
+      ? list.filter((inbound: any) => Number(inbound.id) > 0 && String(inbound.tag || '').trim())
+        .map((inbound: any) => ({ id: Number(inbound.id), tag: String(inbound.tag), type: String(inbound.type || ''), listen_port: Number(inbound.listen_port) || undefined }))
+      : []
+    selectedInboundIds.value = sourceInbounds.value.map(inbound => inbound.id)
+  }
+  inboundOptionsLoading.value = false
+}
+
+const selectAllInbounds = () => {
+  selectedInboundIds.value = sourceInbounds.value.map(inbound => inbound.id)
+}
+
+const clearInboundSelection = () => {
+  selectedInboundIds.value = []
 }
 
 const goToTargets = () => {
@@ -1002,6 +1068,7 @@ const captureTemplate = async () => {
   const response = await HttpUtils.post('api/fleetTemplateCapture', {
     name: templateName.value,
     sections: JSON.stringify(templateSections.value),
+    inboundIds: JSON.stringify(templateSections.value.inbounds ? selectedInboundIds.value : []),
   })
   if (response.success) {
     templateName.value = ''
@@ -1422,6 +1489,22 @@ onBeforeUnmount(() => {
 .fleet-template-scope button > span { display: grid; gap: 2px; min-width: 0; }
 .fleet-template-scope button strong { color: var(--np-text); font-size: .8rem; }
 .fleet-template-scope button small { overflow: hidden; color: var(--np-text-muted); font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-inbound-picker { display: grid; gap: 9px; padding: 12px; border: 1px solid var(--np-border); border-radius: 14px; background: var(--np-surface); }
+.fleet-inbound-picker__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.fleet-inbound-picker__head strong { font-size: .78rem; }
+.fleet-inbound-picker__head > div { display: flex; gap: 8px; }
+.fleet-inbound-picker__head button { padding: 5px 8px; border-radius: 8px; color: rgb(var(--v-theme-primary)); font-size: .72rem; font-weight: 650; }
+.fleet-inbound-picker__head button:disabled { color: var(--np-text-muted); opacity: .55; }
+.fleet-inbound-picker__list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; max-height: 230px; overflow-y: auto; }
+.fleet-inbound-picker__item { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 9px; min-width: 0; padding: 9px 10px; border: 1px solid var(--np-border); border-radius: 11px; background: var(--np-surface-muted); }
+.fleet-inbound-picker__item.is-selected { border-color: rgba(10, 132, 255, .42); background: rgba(10, 132, 255, .07); }
+.fleet-inbound-picker__item input { width: 16px; height: 16px; accent-color: rgb(var(--v-theme-primary)); }
+.fleet-inbound-picker__item > span { display: grid; gap: 2px; min-width: 0; }
+.fleet-inbound-picker__item strong, .fleet-inbound-picker__item small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-inbound-picker__item strong { font-size: .76rem; }
+.fleet-inbound-picker__item small, .fleet-inbound-picker__empty, .fleet-inbound-picker > p { color: var(--np-text-muted); font-size: .68rem; }
+.fleet-inbound-picker__empty { padding: 16px; text-align: center; }
+.fleet-inbound-picker > p { margin: 0; line-height: 1.45; }
 .fleet-rollout__selection-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 14px; border-radius: 13px; background: rgba(10, 132, 255, .08); }
 .fleet-rollout__selection-summary span { color: var(--np-text-muted); font-size: .72rem; }
 .fleet-target-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
@@ -1445,6 +1528,7 @@ onBeforeUnmount(() => {
 .fleet-orchestration__result { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--np-border); border-radius: 14px; }
 .fleet-orchestration__result > div { display: grid; gap: 3px; min-width: 0; }
 .fleet-orchestration__result span { color: var(--np-text-muted); font-size: .78rem; overflow-wrap: anywhere; }
+.fleet-orchestration__result small { color: var(--np-text-muted); font-size: .7rem; overflow-wrap: anywhere; }
 .fleet-orchestration__result.is-success { color: rgb(var(--v-theme-success)); background: rgba(34, 197, 94, .06); }
 .fleet-orchestration__result.is-error { color: rgb(var(--v-theme-error)); background: rgba(239, 68, 68, .06); }
 .fleet-rollout__footer { min-height: 64px; padding: 10px 20px; border-top: 1px solid var(--np-border); background: var(--np-surface-muted); }
@@ -1461,6 +1545,7 @@ onBeforeUnmount(() => {
   .fleet-rollout__steps button strong { font-size: .7rem; }
   .fleet-rollout__body { padding: 18px 14px 14px; }
   .fleet-template-list, .fleet-template-scope, .fleet-target-grid, .fleet-rollout__review-meta { grid-template-columns: 1fr; }
+  .fleet-inbound-picker__list { grid-template-columns: 1fr; }
   .fleet-canary-box { grid-template-columns: 1fr; }
   .fleet-template-list__actions { position: sticky; bottom: 0; padding: 8px; border-radius: 12px; background: var(--np-surface); box-shadow: 0 -8px 24px rgba(15, 23, 42, .08); }
   .fleet-rollout__footer { flex-wrap: wrap; padding: 9px 12px; }

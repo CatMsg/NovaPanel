@@ -47,6 +47,30 @@ test('configuration rollout separates using a saved template from creating one',
     body: json({ servers: [{ id: 'local', name: '本机', url: '本机', enabled: true, reachable: true, core: { running: true } }] }),
   }))
   await page.route('**/api/fleetTemplates**', route => route.fulfill({ status: 200, contentType: 'application/json', body: json([]) }))
+  await page.route('**/api/inbounds', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json({ inbounds: [
+      { id: 11, tag: 'vless-main', type: 'vless', listen_port: 443 },
+      { id: 12, tag: 'hy2-main', type: 'hysteria2', listen_port: 8443 },
+    ] }),
+  }))
+  let capturedInboundIds: number[] | undefined
+  let capturedSections: Record<string, boolean> | undefined
+  await page.route('**/api/fleetTemplateCapture', async route => {
+    const form = new URLSearchParams(route.request().postData() ?? '')
+    capturedInboundIds = JSON.parse(form.get('inboundIds') ?? '[]')
+    capturedSections = JSON.parse(form.get('sections') ?? '{}')
+    await route.fulfill({ status: 200, contentType: 'application/json', body: json({ id: 'template-1', name: 'one inbound', sections: capturedSections }) })
+  })
+  await page.route('**/api/fleetTemplatePreview', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json([{
+      id: 'local', name: '本机', success: true,
+      preview: { inboundAdd: 0, inboundUpdate: 1, inboundUpdateTags: ['hy2-main'] },
+    }]),
+  }))
 
   await page.goto('/app/fleet')
   await page.getByRole('button', { name: '配置编排' }).click()
@@ -58,4 +82,15 @@ test('configuration rollout separates using a saved template from creating one',
   await expect(dialog.getByLabel('模板名称')).toBeHidden()
   await dialog.getByRole('button', { name: '新建模板' }).click()
   await expect(dialog.getByLabel('模板名称')).toBeVisible()
+  await expect(dialog.getByText('已选 2/2 个入站')).toBeVisible()
+  await dialog.getByRole('checkbox', { name: /vless-main/ }).uncheck()
+  await expect(dialog.getByText('已选 1/2 个入站')).toBeVisible()
+  await dialog.getByLabel('模板名称').fill('one inbound')
+  await dialog.getByRole('button', { name: '保存并继续' }).click()
+  await expect(dialog.getByRole('heading', { name: '选择目标服务器' })).toBeVisible()
+  expect(capturedInboundIds).toEqual([12])
+  expect(capturedSections).toMatchObject({ inbounds: true, clients: false, route: false, dns: false, outbounds: false })
+  await dialog.getByRole('button', { name: /本机/ }).click()
+  await dialog.getByRole('button', { name: '预览差异' }).click()
+  await expect(dialog.getByText('更新： hy2-main')).toBeVisible()
 })
