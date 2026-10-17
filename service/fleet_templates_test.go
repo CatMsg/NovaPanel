@@ -716,6 +716,174 @@ func TestFleetTemplatePreviewListsInboundTagsForAddAndUpdate(t *testing.T) {
 	}
 }
 
+func TestFleetTemplateNamesCopiedInboundForTargetAndMigratesReferences(t *testing.T) {
+	_ = testutil.NewManagedPortSandbox(t)
+	if err := database.InitDB(filepath.Join(t.TempDir(), "fleet-inbound-target-name.db")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (&SettingService{}).GetAllSetting(); err != nil {
+		t.Fatal(err)
+	}
+	db := database.GetDB()
+	if err := db.Model(&model.Setting{}).Where("key = ?", "config").Update("value", `{
+		"log":{"disabled":true},
+		"dns":{"servers":[{"type":"local","tag":"dns-local"}],"final":"dns-local","rules":[{"inbound":["stream"],"action":"route","server":"dns-local"}]},
+		"outbounds":[{"type":"direct","tag":"direct"}],
+		"route":{"rules":[{"inbound":["stream"],"action":"route","outbound":"direct"}],"final":"direct"}
+	}`).Error; err != nil {
+		t.Fatal(err)
+	}
+	inbound := model.Inbound{
+		Type: "socks", Tag: "stream", Addrs: json.RawMessage(`[]`), OutJson: json.RawMessage(`{}`),
+		Options: json.RawMessage(`{"listen":"::","listen_port":1080}`),
+	}
+	if err := db.Create(&inbound).Error; err != nil {
+		t.Fatalf("create legacy target inbound: %v", err)
+	}
+	client := model.Client{
+		Enable: true, Name: "fleet-user",
+		Config:   json.RawMessage(`{"socks":{"username":"alice","password":"secret"}}`),
+		Inbounds: json.RawMessage(`[1]`),
+		Links:    json.RawMessage(`[{"remark":"stream","type":"local","uri":"socks5://alice:secret@old.example:1080"}]`),
+		History:  json.RawMessage(`[{"dateTime":1,"domain":"example.com","inbound":"stream"}]`),
+	}
+	client.Inbounds, _ = json.Marshal([]uint{inbound.Id})
+	if err := db.Create(&client).Error; err != nil {
+		t.Fatalf("create client: %v", err)
+	}
+	var storedBindings string
+	if err := db.Raw("SELECT inbounds FROM clients WHERE id = ?", client.Id).Scan(&storedBindings).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(storedBindings, "1") {
+		t.Fatalf("client inbound assignment = %q, expected inbound id %d", storedBindings, inbound.Id)
+	}
+	if err := db.Create(&model.Stats{DateTime: 1, Resource: "inbound", Tag: "stream", Traffic: 123}).Error; err != nil {
+		t.Fatalf("create inbound stats: %v", err)
+	}
+	clientIDs, err := (&ClientService{}).collectClientIDsByInboundID(db, inbound.Id)
+	if err != nil || len(clientIDs) != 1 || clientIDs[0] != client.Id {
+		t.Fatalf("client lookup by assigned inbound = %v, err=%v; want client %d", clientIDs, err, client.Id)
+	}
+	template := FleetTemplate{
+		FormatVersion: fleetTemplateFormatVersion,
+		SourceHost:    "source.example",
+		Sections:      FleetTemplateSections{Inbounds: true, Route: true, DNS: true},
+		Inbounds: []FleetTemplateInbound{{
+			ID: inbound.Id, Type: "socks", Tag: "stream", Addrs: json.RawMessage(`[]`),
+			Options: json.RawMessage(`{"listen":"::","listen_port":1080}`),
+		}},
+		Config: map[string]json.RawMessage{
+			"dns":   json.RawMessage(`{"servers":[{"type":"local","tag":"dns-local"}],"final":"dns-local","rules":[{"inbound":["stream"],"action":"route","server":"dns-local"}]}`),
+			"route": json.RawMessage(`{"rules":[{"inbound":["stream"],"action":"route","outbound":"direct"}],"final":"direct"}`),
+		},
+	}
+	wantTag := "stream [la.example]"
+	preview, err := (&ConfigService{}).PreviewFleetTemplate(template, "la.example")
+	if err != nil {
+		t.Fatalf("preview named inbound: %v", err)
+	}
+	if preview.InboundUpdate != 1 || !reflect.DeepEqual(preview.InboundUpdateTags, []string{wantTag}) {
+		t.Fatalf("legacy inbound preview = %+v, want an update to %q", preview, wantTag)
+	}
+	apply := func() {
+		t.Helper()
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			return (&ConfigService{}).applyFleetTemplateTx(tx, template, "la.example")
+		}); err != nil {
+			t.Fatalf("apply named inbound: %v", err)
+		}
+	}
+	apply()
+
+	var savedInbound model.Inbound
+	if err := db.First(&savedInbound, inbound.Id).Error; err != nil {
+		t.Fatal(err)
+	}
+	if savedInbound.Tag != wantTag {
+		t.Fatalf("inbound tag = %q, want %q", savedInbound.Tag, wantTag)
+	}
+	var inboundCount int64
+	if err := db.Model(&model.Inbound{}).Count(&inboundCount).Error; err != nil || inboundCount != 1 {
+		t.Fatalf("inbound count = %d, err=%v; migration must not leave a duplicate", inboundCount, err)
+	}
+	var linksRaw string
+	if err := db.Raw("SELECT links FROM clients WHERE id = ?", client.Id).Scan(&linksRaw).Error; err != nil {
+		t.Fatal(err)
+	}
+	links, err := decodeClientLinks(json.RawMessage(linksRaw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasLinkRemark(links, wantTag) {
+		t.Fatalf("client subscription links did not get the target-specific name: %#v", links)
+	}
+	var historyRaw string
+	if err := db.Raw("SELECT history FROM clients WHERE id = ?", client.Id).Scan(&historyRaw).Error; err != nil {
+		t.Fatal(err)
+	}
+	var history []map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(historyRaw), &history); err != nil {
+		t.Fatal(err)
+	}
+	var historyInbound string
+	if err := json.Unmarshal(history[0]["inbound"], &historyInbound); err != nil || historyInbound != wantTag {
+		t.Fatalf("history inbound = %q, err=%v, want preserved history under %q", historyInbound, err, wantTag)
+	}
+	var historyDomain string
+	if err := json.Unmarshal(history[0]["domain"], &historyDomain); err != nil || historyDomain != "example.com" {
+		t.Fatalf("browsing history domain = %q, err=%v; expected original history to remain", historyDomain, err)
+	}
+	var savedStats model.Stats
+	if err := db.Where("resource = ?", "inbound").First(&savedStats).Error; err != nil {
+		t.Fatal(err)
+	}
+	if savedStats.Tag != wantTag || savedStats.Traffic != 123 {
+		t.Fatalf("historical stats = %+v, want tag %q with traffic preserved", savedStats, wantTag)
+	}
+	var config map[string]json.RawMessage
+	var configSetting model.Setting
+	if err := db.Where("key = ?", "config").First(&configSetting).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(configSetting.Value), &config); err != nil {
+		t.Fatal(err)
+	}
+	for key, raw := range map[string]json.RawMessage{"route": config["route"], "dns": config["dns"]} {
+		var decoded interface{}
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		encoded, _ := json.Marshal(decoded)
+		if strings.Contains(string(encoded), `"stream"`) || !strings.Contains(string(encoded), wantTag) {
+			t.Errorf("%s inbound reference was not consistently renamed: %s", key, encoded)
+		}
+	}
+	preview, err = (&ConfigService{}).PreviewFleetTemplate(template, "la.example")
+	if err != nil {
+		t.Fatalf("preview repeated named inbound: %v", err)
+	}
+	if preview.InboundUpdate != 1 || !reflect.DeepEqual(preview.InboundUpdateTags, []string{wantTag}) {
+		t.Fatalf("repeated preview = %+v, want an idempotent update of %q", preview, wantTag)
+	}
+	apply()
+	if err := db.Model(&model.Inbound{}).Count(&inboundCount).Error; err != nil || inboundCount != 1 {
+		t.Fatalf("repeated apply created duplicate inbounds: count=%d err=%v", inboundCount, err)
+	}
+}
+
+func TestFleetTemplateInboundTagIsTargetSpecificButStableOnSource(t *testing.T) {
+	if got := fleetTemplateInboundTag("VLESS", "source.example", "source.example"); got != "VLESS" {
+		t.Fatalf("source inbound tag = %q, want original name", got)
+	}
+	if got := fleetTemplateInboundTag("VLESS", "source.example", "la.example"); got != "VLESS [la.example]" {
+		t.Fatalf("target inbound tag = %q, want server-qualified name", got)
+	}
+	if got := fleetTemplateInboundTag("VLESS", "source.example", "tk.example"); got == fleetTemplateInboundTag("VLESS", "source.example", "la.example") {
+		t.Fatal("different target hosts must produce different node names")
+	}
+}
+
 func TestFleetTemplateApplyGeneratesTargetMasqueIdentity(t *testing.T) {
 	_ = testutil.NewManagedPortSandbox(t)
 	if err := database.InitDB(filepath.Join(t.TempDir(), "fleet-masque-inbound.db")); err != nil {
