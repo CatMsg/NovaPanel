@@ -106,6 +106,15 @@ func (s *InboundService) GetAll() (*[]map[string]interface{}, error) {
 					}
 				}
 			}
+			if inbound.Type == "http" {
+				if raw, ok := restFields["version"]; ok && len(raw) > 0 {
+					var version int
+					if err := json.Unmarshal(raw, &version); err != nil {
+						return nil, err
+					}
+					inbData["version"] = version
+				}
+			}
 			if inbound.Type == "shadowsocks" {
 				if raw, ok := restFields["managed"]; ok && len(raw) > 0 {
 					if err := json.Unmarshal(raw, &ss_managed); err != nil {

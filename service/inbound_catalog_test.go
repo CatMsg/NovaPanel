@@ -120,3 +120,27 @@ func TestInboundCatalogAllowsClientsOnEmptyUserInbounds(t *testing.T) {
 	}
 	t.Fatal("bound inbound is missing from the catalog")
 }
+
+func TestInboundCatalogExposesHTTPVersionForFleetTLSSelection(t *testing.T) {
+	if err := database.InitDB(filepath.Join(t.TempDir(), "inbound-http-version.db")); err != nil {
+		t.Fatalf("init database: %v", err)
+	}
+	inbound := model.Inbound{
+		Type:    "http",
+		Tag:     "http-v2",
+		Options: json.RawMessage(`{"listen_port":8080,"version":2}`),
+	}
+	if err := database.GetDB().Create(&inbound).Error; err != nil {
+		t.Fatalf("create HTTP inbound: %v", err)
+	}
+	catalog, err := (&InboundService{}).GetAll()
+	if err != nil {
+		t.Fatalf("get inbound catalog: %v", err)
+	}
+	if len(*catalog) != 1 {
+		t.Fatalf("catalog contains %d entries, want 1", len(*catalog))
+	}
+	if version, ok := (*catalog)[0]["version"].(int); !ok || version != 2 {
+		t.Fatalf("HTTP inbound version = %#v, want integer 2", (*catalog)[0]["version"])
+	}
+}

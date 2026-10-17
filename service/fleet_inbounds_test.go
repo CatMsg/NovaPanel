@@ -2,13 +2,16 @@ package service
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/CatMsg/NovaPanel/core"
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
 	"github.com/CatMsg/NovaPanel/internal/testutil"
@@ -17,6 +20,126 @@ import (
 func TestFleetInboundTargetTagIncludesFleetName(t *testing.T) {
 	if got, want := fleetInboundTargetTag("anytls", "Korea - KR"), "anytls [Korea - KR]"; got != want {
 		t.Fatalf("target tag = %q, want %q", got, want)
+	}
+}
+
+func TestFleetInboundTargetTagDisambiguatesDuplicateNames(t *testing.T) {
+	target := FleetServer{ID: "server-abcdef", Name: "KR"}
+	if got, want := fleetInboundTargetTagForServer("anytls", target, true), "anytls [KR] {server}"; got != want {
+		t.Fatalf("duplicate-name tag = %q, want %q", got, want)
+	}
+	if got, want := fleetInboundTargetTagForServer("anytls", target, false), "anytls [KR]"; got != want {
+		t.Fatalf("unique-name tag = %q, want %q", got, want)
+	}
+}
+
+func TestFleetInboundTLSRequirementByProtocol(t *testing.T) {
+	tests := []struct {
+		name    string
+		typeID  string
+		options string
+		want    bool
+		wantErr bool
+	}{
+		{name: "AnyTLS", typeID: "anytls", want: true},
+		{name: "Hysteria2", typeID: "hysteria2", want: true},
+		{name: "HTTP 1", typeID: "http", options: `{"version":1}`, want: false},
+		{name: "HTTP 2", typeID: "http", options: `{"version":2}`, want: true},
+		{name: "HTTP missing version", typeID: "http", options: `{}`, wantErr: true},
+		{name: "SOCKS", typeID: "socks", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inbound := &model.Inbound{Type: tt.typeID, Options: json.RawMessage(tt.options)}
+			got, err := fleetInboundTLSRequired(inbound)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("fleetInboundTLSRequired() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err == nil && got != tt.want {
+				t.Fatalf("fleetInboundTLSRequired() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFleetInboundListenPortProbeChecksTransportOccupancy(t *testing.T) {
+	tcpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tcpPort := tcpListener.Addr().(*net.TCPAddr).Port
+	tcpInbound := &model.Inbound{
+		Type:    "socks",
+		Options: json.RawMessage(`{"listen":"127.0.0.1","listen_port":` + strconv.Itoa(tcpPort) + `}`),
+	}
+	if err := checkFleetInboundListenPort(tcpInbound); err == nil || !strings.Contains(err.Error(), "TCP") {
+		t.Fatalf("busy TCP listener was not rejected: %v", err)
+	}
+	if err := tcpListener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkFleetInboundListenPort(tcpInbound); err != nil {
+		t.Fatalf("released TCP listener still rejected: %v", err)
+	}
+
+	udpListener, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	udpPort := udpListener.LocalAddr().(*net.UDPAddr).Port
+	udpInbound := &model.Inbound{
+		Type:    "shadowsocks",
+		Options: json.RawMessage(`{"listen":"127.0.0.1","listen_port":` + strconv.Itoa(udpPort) + `,"network":"udp"}`),
+	}
+	if err := checkFleetInboundListenPort(udpInbound); err == nil || !strings.Contains(err.Error(), "UDP") {
+		t.Fatalf("busy UDP listener was not rejected: %v", err)
+	}
+	if err := udpListener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkFleetInboundListenPort(udpInbound); err != nil {
+		t.Fatalf("released UDP listener still rejected: %v", err)
+	}
+}
+
+func TestFleetInboundRemotePreflightReportsBusyPort(t *testing.T) {
+	if err := database.InitDB(filepath.Join(t.TempDir(), "fleet-inbound-busy-port.db")); err != nil {
+		t.Fatalf("init database: %v", err)
+	}
+	if _, err := (&SettingService{}).GetAllSetting(); err != nil {
+		t.Fatalf("initialize settings: %v", err)
+	}
+	previousCore := corePtr
+	NewConfigService(&core.Core{})
+	t.Cleanup(func() { corePtr = previousCore })
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	port := listener.Addr().(*net.TCPAddr).Port
+	payload, err := json.Marshal(map[string]interface{}{
+		"type": "socks", "tag": "remote-busy", "listen": "127.0.0.1", "listen_port": port,
+		"addrs": []interface{}{}, "out_json": map[string]interface{}{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := FleetInboundRemotePreflight(payload, "target.example")
+	if err != nil {
+		t.Fatalf("remote preflight returned error: %v", err)
+	}
+	if report == nil || report.Valid {
+		t.Fatalf("busy target port unexpectedly passed preflight: %+v", report)
+	}
+	found := false
+	for _, check := range report.Checks {
+		if check.Name == "目标机监听端口" && check.Status == "error" && strings.Contains(check.Detail, "TCP") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("preflight did not report the occupied TCP listener: %+v", report.Checks)
 	}
 }
 
@@ -240,6 +363,85 @@ func TestCreateFleetInboundUsesTargetNamesAndPorts(t *testing.T) {
 	for _, result := range results {
 		if !result.Success || !result.Created {
 			t.Fatalf("expected target create success: %+v", result)
+		}
+	}
+}
+
+func TestPreviewFleetInboundRejectsSharedTargetCertificate(t *testing.T) {
+	_ = testutil.NewManagedPortSandbox(t)
+	if err := database.InitDB(filepath.Join(t.TempDir(), "fleet-inbound-shared-cert.db")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (&SettingService{}).GetAllSetting(); err != nil {
+		t.Fatal(err)
+	}
+	db := database.GetDB()
+	tls := model.Tls{Name: "source-tls", Server: json.RawMessage(`{"enabled":true}`), Client: json.RawMessage(`{"enabled":true}`)}
+	if err := db.Create(&tls).Error; err != nil {
+		t.Fatal(err)
+	}
+	source := model.Inbound{
+		Type:    "anytls",
+		Tag:     "anytls-source",
+		TlsId:   tls.Id,
+		Tls:     &tls,
+		Addrs:   json.RawMessage(`[]`),
+		OutJson: json.RawMessage(`{}`),
+		Options: json.RawMessage(`{"listen":"::","listen_port":443}`),
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	var preflights atomic.Int32
+	newTarget := func(name string, profileID uint) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case r.Method == http.MethodGet && r.URL.Path == "/apiv2/fleet-inbound-capabilities":
+				body, _ := json.Marshal(map[string]interface{}{"success": true, "msg": "", "obj": map[string]interface{}{
+					"hostname": name + ".panel.example", "subscriptionHost": name + ".example",
+					"tlsProfiles": []FleetInboundTLSProfile{{ID: profileID, Name: "target-tls", CertificateFingerprint: "same-certificate-fingerprint"}},
+				}})
+				_, _ = w.Write(body)
+			case r.Method == http.MethodPost && r.URL.Path == "/apiv2/fleet-inbound-preflight":
+				preflights.Add(1)
+				_, _ = w.Write([]byte(`{"success":true,"msg":"","obj":{"valid":true,"checks":[]}}`))
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+	}
+	la := newTarget("la", 11)
+	defer la.Close()
+	kr := newTarget("kr", 22)
+	defer kr.Close()
+	fleet := &FleetService{}
+	if err := fleet.SaveFleet([]FleetServerInput{
+		{ID: "la", Name: "LA", URL: la.URL, Token: "test-token-la", Enabled: true},
+		{ID: "kr", Name: "KR", URL: kr.URL, Token: "test-token-kr", Enabled: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	results, err := fleet.PreviewFleetInboundCreate(FleetInboundCreatePlan{
+		SourceInboundID: source.Id,
+		BaseTag:         "anytls",
+		Targets: []FleetInboundTargetSelection{
+			{ID: "la", TLSID: 11, ListenPort: 443},
+			{ID: "kr", TLSID: 22, ListenPort: 443},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preflights.Load() != 0 {
+		t.Fatalf("preflighted %d targets with a shared certificate", preflights.Load())
+	}
+	if len(results) != 2 {
+		t.Fatalf("got %d results, want 2", len(results))
+	}
+	for _, result := range results {
+		if result.Success || !strings.Contains(result.Error, "证书与其他目标服务器相同") {
+			t.Fatalf("shared target certificate was not rejected: %+v", result)
 		}
 	}
 }

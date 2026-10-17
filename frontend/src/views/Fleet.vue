@@ -556,6 +556,12 @@
                 <div v-if="remoteInboundTLSCapable && remoteTargetSettings[id]?.tlsId" class="fleet-remote-target__certificate">
                   <span>{{ $t('ui.fleet.remoteInboundCertificate') }}: {{ remoteTargetTlsSummary(id) }}</span>
                 </div>
+                <v-alert
+                  v-if="selectedRemoteInboundSource?.type === 'masque'"
+                  type="info"
+                  variant="tonal"
+                  density="compact"
+                >{{ $t('ui.fleet.remoteInboundMasqueTLS') }}</v-alert>
               </div>
               <p v-else-if="remoteTargetInfo(id)?.error" class="fleet-remote-target__error">{{ remoteTargetInfo(id)?.error }}</p>
               <p v-else class="fleet-remote-target__hint">{{ $t('ui.fleet.remoteInboundWaiting') }}</p>
@@ -779,7 +785,7 @@ type FleetConfig = {
 }
 
 type FleetTemplateSectionKey = 'tls' | 'inbounds' | 'outbounds' | 'clients' | 'route' | 'dns'
-type FleetInboundOption = { id: number; tag: string; type: string; listen_port?: number; tls_id?: number }
+type FleetInboundOption = { id: number; tag: string; type: string; listen_port?: number; tls_id?: number; version?: number }
 type FleetRemoteTLSProfile = { id: number; name: string; serverName?: string; acmeDomains?: string[]; certificateFingerprint?: string }
 type FleetRemoteInboundCapabilities = { hostname: string; subscriptionHost: string; tlsProfiles: FleetRemoteTLSProfile[] }
 type FleetRemoteInboundTarget = { id: string; name: string; success: boolean; capabilities?: FleetRemoteInboundCapabilities; error?: string }
@@ -819,6 +825,7 @@ type FleetTemplateResult = {
 const t = i18n.global.t
 const remoteInboundProtocolTypes = ['mixed', 'socks', 'http', 'shadowsocks', 'vmess', 'trojan', 'naive', 'hysteria', 'shadowtls', 'tuic', 'hysteria2', 'vless', 'anytls', 'mieru', 'masque']
 const remoteInboundTLSProtocols = ['http', 'vmess', 'trojan', 'naive', 'hysteria', 'tuic', 'hysteria2', 'vless', 'anytls']
+const remoteInboundRequiredTLSProtocols = ['naive', 'hysteria', 'hysteria2', 'tuic', 'anytls']
 
 const loading = ref(true)
 const saving = ref(false)
@@ -952,9 +959,13 @@ const remoteInboundOptions = computed(() => remoteInboundSources.value.map(inbou
   value: inbound.id,
 })))
 const selectedRemoteInboundSource = computed(() => remoteInboundSources.value.find(inbound => inbound.id === remoteSourceInboundId.value))
-const remoteInboundTLSRequired = computed(() => Boolean(
-  selectedRemoteInboundSource.value?.tls_id && remoteInboundTLSProtocols.includes(selectedRemoteInboundSource.value.type),
-))
+const remoteInboundTLSRequired = computed(() => {
+  const source = selectedRemoteInboundSource.value
+  if (!source || !remoteInboundTLSProtocols.includes(source.type)) return false
+  return Boolean(source.tls_id)
+    || remoteInboundRequiredTLSProtocols.includes(source.type)
+    || (source.type === 'http' && Number(source.version) >= 2)
+})
 const remoteInboundTLSCapable = computed(() => remoteInboundTLSProtocols.includes(selectedRemoteInboundSource.value?.type ?? ''))
 const remoteInboundPreviewPassed = computed(() => Boolean(
   remoteInboundTargetIds.value.length > 0
@@ -1227,7 +1238,7 @@ const loadSourceInbounds = async () => {
     const list = response.obj?.inbounds
     sourceInbounds.value = Array.isArray(list)
       ? list.filter((inbound: any) => Number(inbound.id) > 0 && String(inbound.tag || '').trim())
-        .map((inbound: any) => ({ id: Number(inbound.id), tag: String(inbound.tag), type: String(inbound.type || ''), listen_port: Number(inbound.listen_port) || undefined, tls_id: Number(inbound.tls_id) || undefined }))
+        .map((inbound: any) => ({ id: Number(inbound.id), tag: String(inbound.tag), type: String(inbound.type || ''), listen_port: Number(inbound.listen_port) || undefined, tls_id: Number(inbound.tls_id) || undefined, version: Number(inbound.version) || undefined }))
       : []
     selectedInboundIds.value = sourceInbounds.value.map(inbound => inbound.id)
   }
@@ -1265,7 +1276,7 @@ const resetRemoteInboundDraft = (sourceID: number | null) => {
     const profiles = target.capabilities?.tlsProfiles ?? []
     nextSettings[target.id] = {
       listenPort: sourcePort,
-        tlsId: remoteInboundTLSProtocols.includes(selectedRemoteInboundSource.value?.type ?? '') && selectedRemoteInboundSource.value?.tls_id
+      tlsId: remoteInboundTLSRequired.value
           ? (profiles.length === 1 ? profiles[0].id : null)
           : null,
     }
@@ -1308,7 +1319,15 @@ const toggleRemoteInboundTarget = async (id: string) => {
 
 const remoteTargetInfo = (id: string) => remoteInboundTargets.value.find(target => target.id === id)
 const remoteInboundServer = (id: string) => remoteServers.value.find(server => server.id === id)
-const remoteGeneratedTag = (id: string) => `${remoteBaseTag.value.trim()} [${remoteInboundServer(id)?.name ?? id}]`
+const remoteGeneratedTag = (id: string) => {
+  const server = remoteInboundServer(id)
+  const name = (server?.name ?? id).trim().replace(/\s+/g, ' ')
+  const matchingTargets = remoteInboundTargetIds.value.filter(targetID =>
+    (remoteInboundServer(targetID)?.name ?? targetID).trim().replace(/\s+/g, ' ').toLowerCase() === name.toLowerCase(),
+  )
+  const suffix = matchingTargets.length > 1 ? ` {${id.slice(0, 6)}}` : ''
+  return `${remoteBaseTag.value.trim()} [${name}]${suffix}`
+}
 const remoteTlsItems = (id: string) => (remoteTargetInfo(id)?.capabilities?.tlsProfiles ?? []).map(profile => ({
   title: profile.serverName ? `${profile.name} · ${profile.serverName}` : profile.name,
   value: profile.id,

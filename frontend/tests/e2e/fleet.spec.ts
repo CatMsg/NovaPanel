@@ -156,7 +156,7 @@ test('remote inbound creation uses per-server names, ports, and TLS profiles', a
   await page.goto('/app/fleet')
   await page.getByRole('button', { name: '远程新建入站' }).click()
   const dialog = page.getByRole('dialog')
-  await expect(dialog.getByText('创建后需到目标机用户管理中绑定用户。')).toBeVisible()
+  await expect(dialog.getByText(/不复制用户绑定/)).toBeVisible()
   await dialog.getByRole('button', { name: /LA/ }).click()
   await dialog.getByRole('button', { name: /KR/ }).click()
   await expect(dialog.getByText('la.example', { exact: true })).toBeVisible()
@@ -228,4 +228,75 @@ test('remote inbound can add a target TLS profile when the local prototype has n
   await dialog.getByRole('button', { name: '校验全部目标' }).click()
   await expect(dialog.getByText('全部目标预检通过，尚未创建入站。')).toBeVisible()
   expect(previewPlan.targets).toEqual([{ id: 'kr', tlsId: 202, listenPort: 443 }])
+})
+
+test('TLS-required protocols cannot preview without a target certificate', async ({ page }) => {
+  await installBaseMocks(page, true)
+  await page.route('**/api/fleet**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json({ servers: [
+      { id: 'local', name: '本机', url: '本机', enabled: true, reachable: true, core: { running: true } },
+      { id: 'kr', name: 'KR', url: 'https://kr.example:9999', enabled: true, reachable: true, core: { running: true } },
+    ] }),
+  }))
+  await page.route('**/api/inbounds', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json({ inbounds: [{ id: 31, tag: 'anytls-plain', type: 'anytls', listen_port: 443, tls_id: 0 }] }),
+  }))
+  await page.route('**/api/fleetInboundTargets**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json([{
+      id: 'kr', name: 'KR', success: true,
+      capabilities: { hostname: 'kr.panel.example', subscriptionHost: 'kr.example', tlsProfiles: [] },
+    }]),
+  }))
+
+  await page.goto('/app/fleet')
+  await page.getByRole('button', { name: '远程新建入站' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: /KR/ }).click()
+  await expect(dialog.getByText('目标机没有 TLS 配置，请先在该服务器添加。')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '校验全部目标' })).toBeDisabled()
+})
+
+test('MASQUE remote creation explains its per-target ECDSA identity', async ({ page }) => {
+  await installBaseMocks(page, true)
+  await page.route('**/api/fleet**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json({ servers: [
+      { id: 'local', name: '本机', url: '本机', enabled: true, reachable: true, core: { running: true } },
+      { id: 'kr', name: 'KR', url: 'https://kr.example:9999', enabled: true, reachable: true, core: { running: true } },
+    ] }),
+  }))
+  await page.route('**/api/inbounds', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json({ inbounds: [{ id: 41, tag: 'masque-main', type: 'masque', listen_port: 443, tls_id: 0 }] }),
+  }))
+  await page.route('**/api/fleetInboundTargets**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json([{
+      id: 'kr', name: 'KR', success: true,
+      capabilities: { hostname: 'kr.panel.example', subscriptionHost: 'kr.example', tlsProfiles: [] },
+    }]),
+  }))
+  await page.route('**/api/fleetInboundPreview', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json([{ id: 'kr', name: 'KR', tag: 'masque-main [KR]', success: true, created: false, preview: { valid: true, checks: [] } }]),
+  }))
+
+  await page.goto('/app/fleet')
+  await page.getByRole('button', { name: '远程新建入站' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: /KR/ }).click()
+  await expect(dialog.getByText('创建时会在此目标机生成并保存独立的 ECDSA 证书和私钥。')).toBeVisible()
+  await expect(dialog.getByRole('combobox', { name: '此服务器 TLS 配置' })).toHaveCount(0)
+  await dialog.getByRole('button', { name: '校验全部目标' }).click()
+  await expect(dialog.getByText('全部目标预检通过，尚未创建入站。')).toBeVisible()
 })
