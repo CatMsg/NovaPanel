@@ -94,3 +94,138 @@ test('configuration rollout separates using a saved template from creating one',
   await dialog.getByRole('button', { name: '预览差异' }).click()
   await expect(dialog.getByText('更新： hy2-main')).toBeVisible()
 })
+
+test('remote inbound creation uses per-server names, ports, and TLS profiles', async ({ page }) => {
+  await installBaseMocks(page, true)
+  await page.route('**/api/fleet**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json({ servers: [
+      { id: 'local', name: '本机', url: '本机', enabled: true, reachable: true, latencyMs: 0, core: { running: true } },
+      { id: 'la', name: 'LA', url: 'https://la.example:9999', enabled: true, reachable: true, latencyMs: 20, core: { running: true } },
+      { id: 'kr', name: 'KR', url: 'https://kr.example:9999', enabled: true, reachable: true, latencyMs: 30, core: { running: true } },
+    ] }),
+  }))
+  await page.route('**/api/inbounds', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json({ inbounds: [{ id: 11, tag: 'anytls-main', type: 'anytls', listen_port: 443, tls_id: 1 }] }),
+  }))
+  await page.route('**/api/fleetInboundTargets**', async route => {
+    const url = new URL(route.request().url())
+    const targets = JSON.parse(url.searchParams.get('targets') ?? '[]') as string[]
+    const items = targets.map(id => ({
+      id,
+      name: id.toUpperCase(),
+      success: true,
+      capabilities: {
+        hostname: `${id}.panel.example`,
+        subscriptionHost: `${id}.example`,
+        tlsProfiles: [{ id: id === 'la' ? 101 : 202, name: `tls-${id}`, serverName: `${id}.example`, certificateFingerprint: `${id}1234567890abcdef` }],
+      },
+    }))
+    await route.fulfill({ status: 200, contentType: 'application/json', body: json(items) })
+  })
+
+  let previewPlan: any
+  let createPlan: any
+  await page.route('**/api/fleetInboundPreview', async route => {
+    const form = new URLSearchParams(route.request().postData() ?? '')
+    previewPlan = JSON.parse(form.get('plan') ?? '{}')
+    await route.fulfill({ status: 200, contentType: 'application/json', body: json(previewPlan.targets.map((target: any) => ({
+      id: target.id,
+      name: target.id.toUpperCase(),
+      tag: `${previewPlan.baseTag} [${target.id.toUpperCase()}]`,
+      success: true,
+      created: false,
+      preview: { valid: true, checks: [{ name: '端口', status: 'ok', detail: '可用' }] },
+    }))) })
+  })
+  await page.route('**/api/fleetInboundCreate', async route => {
+    const form = new URLSearchParams(route.request().postData() ?? '')
+    createPlan = JSON.parse(form.get('plan') ?? '{}')
+    await route.fulfill({ status: 200, contentType: 'application/json', body: json(createPlan.targets.map((target: any) => ({
+      id: target.id,
+      name: target.id.toUpperCase(),
+      tag: `${createPlan.baseTag} [${target.id.toUpperCase()}]`,
+      success: true,
+      created: true,
+    }))) })
+  })
+
+  await page.goto('/app/fleet')
+  await page.getByRole('button', { name: '远程新建入站' }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByText('创建后需到目标机用户管理中绑定用户。')).toBeVisible()
+  await dialog.getByRole('button', { name: /LA/ }).click()
+  await dialog.getByRole('button', { name: /KR/ }).click()
+  await expect(dialog.getByText('la.example', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('kr.example', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('将创建为: anytls-main [LA]')).toBeVisible()
+  await expect(dialog.getByText('将创建为: anytls-main [KR]')).toBeVisible()
+
+  const ports = dialog.getByLabel('此服务器监听端口')
+  await ports.nth(0).fill('8443')
+  await ports.nth(1).fill('9443')
+  await dialog.getByRole('button', { name: '校验全部目标' }).click()
+  await expect(dialog.getByText('全部目标预检通过，尚未创建入站。')).toBeVisible()
+  expect(previewPlan).toMatchObject({
+    sourceInboundId: 11,
+    baseTag: 'anytls-main',
+    targets: [
+      { id: 'la', tlsId: 101, listenPort: 8443 },
+      { id: 'kr', tlsId: 202, listenPort: 9443 },
+    ],
+  })
+
+  page.once('dialog', dialogEvent => dialogEvent.accept())
+  await dialog.getByRole('button', { name: '在目标机创建' }).click()
+  await expect(dialog.getByText('已创建。客户端连接前，请在目标机为该入站绑定用户。').first()).toBeVisible()
+  expect(createPlan).toEqual(previewPlan)
+})
+
+test('remote inbound can add a target TLS profile when the local prototype has no TLS', async ({ page }) => {
+  await installBaseMocks(page, true)
+  await page.route('**/api/fleet**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json({ servers: [
+      { id: 'local', name: '本机', url: '本机', enabled: true, reachable: true, core: { running: true } },
+      { id: 'kr', name: 'KR', url: 'https://kr.example:9999', enabled: true, reachable: true, core: { running: true } },
+    ] }),
+  }))
+  await page.route('**/api/inbounds', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json({ inbounds: [{ id: 21, tag: 'vless-plain', type: 'vless', listen_port: 443, tls_id: 0 }] }),
+  }))
+  await page.route('**/api/fleetInboundTargets**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json([{
+      id: 'kr', name: 'KR', success: true,
+      capabilities: { hostname: 'kr.panel.example', subscriptionHost: 'kr.example', tlsProfiles: [{ id: 202, name: 'tls-kr', serverName: 'kr.example' }] },
+    }]),
+  }))
+  let previewPlan: any
+  await page.route('**/api/fleetInboundPreview', async route => {
+    const form = new URLSearchParams(route.request().postData() ?? '')
+    previewPlan = JSON.parse(form.get('plan') ?? '{}')
+    await route.fulfill({ status: 200, contentType: 'application/json', body: json([{
+      id: 'kr', name: 'KR', tag: 'vless-plain [KR]', success: true, created: false,
+      preview: { valid: true, checks: [] },
+    }]) })
+  })
+
+  await page.goto('/app/fleet')
+  await page.getByRole('button', { name: '远程新建入站' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: /KR/ }).click()
+  const tls = dialog.getByRole('combobox', { name: '此服务器 TLS 配置' })
+  await expect(tls).toBeVisible()
+  await dialog.locator('.fleet-remote-target__settings .v-select').click()
+  await page.getByRole('option', { name: /tls-kr/ }).click()
+  await dialog.getByRole('button', { name: '校验全部目标' }).click()
+  await expect(dialog.getByText('全部目标预检通过，尚未创建入站。')).toBeVisible()
+  expect(previewPlan.targets).toEqual([{ id: 'kr', tlsId: 202, listenPort: 443 }])
+})

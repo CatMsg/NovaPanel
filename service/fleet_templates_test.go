@@ -716,9 +716,9 @@ func TestFleetTemplatePreviewListsInboundTagsForAddAndUpdate(t *testing.T) {
 	}
 }
 
-func TestFleetTemplateNamesCopiedInboundForTargetAndMigratesReferences(t *testing.T) {
+func TestFleetTemplateMergesInboundByOriginalTagWithoutRenaming(t *testing.T) {
 	_ = testutil.NewManagedPortSandbox(t)
-	if err := database.InitDB(filepath.Join(t.TempDir(), "fleet-inbound-target-name.db")); err != nil {
+	if err := database.InitDB(filepath.Join(t.TempDir(), "fleet-inbound-template-merge.db")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := (&SettingService{}).GetAllSetting(); err != nil {
@@ -738,7 +738,7 @@ func TestFleetTemplateNamesCopiedInboundForTargetAndMigratesReferences(t *testin
 		Options: json.RawMessage(`{"listen":"::","listen_port":1080}`),
 	}
 	if err := db.Create(&inbound).Error; err != nil {
-		t.Fatalf("create legacy target inbound: %v", err)
+		t.Fatalf("create existing target inbound: %v", err)
 	}
 	client := model.Client{
 		Enable: true, Name: "fleet-user",
@@ -778,20 +778,20 @@ func TestFleetTemplateNamesCopiedInboundForTargetAndMigratesReferences(t *testin
 			"route": json.RawMessage(`{"rules":[{"inbound":["stream"],"action":"route","outbound":"direct"}],"final":"direct"}`),
 		},
 	}
-	wantTag := "stream [la.example]"
+	wantTag := "stream"
 	preview, err := (&ConfigService{}).PreviewFleetTemplate(template, "la.example")
 	if err != nil {
-		t.Fatalf("preview named inbound: %v", err)
+		t.Fatalf("preview inbound merge: %v", err)
 	}
 	if preview.InboundUpdate != 1 || !reflect.DeepEqual(preview.InboundUpdateTags, []string{wantTag}) {
-		t.Fatalf("legacy inbound preview = %+v, want an update to %q", preview, wantTag)
+		t.Fatalf("inbound preview = %+v, want an update to the original tag %q", preview, wantTag)
 	}
 	apply := func() {
 		t.Helper()
 		if err := db.Transaction(func(tx *gorm.DB) error {
 			return (&ConfigService{}).applyFleetTemplateTx(tx, template, "la.example")
 		}); err != nil {
-			t.Fatalf("apply named inbound: %v", err)
+			t.Fatalf("apply inbound merge: %v", err)
 		}
 	}
 	apply()
@@ -816,7 +816,7 @@ func TestFleetTemplateNamesCopiedInboundForTargetAndMigratesReferences(t *testin
 		t.Fatal(err)
 	}
 	if !hasLinkRemark(links, wantTag) {
-		t.Fatalf("client subscription links did not get the target-specific name: %#v", links)
+		t.Fatalf("template merge changed the original subscription name: %#v", links)
 	}
 	var historyRaw string
 	if err := db.Raw("SELECT history FROM clients WHERE id = ?", client.Id).Scan(&historyRaw).Error; err != nil {
@@ -828,7 +828,7 @@ func TestFleetTemplateNamesCopiedInboundForTargetAndMigratesReferences(t *testin
 	}
 	var historyInbound string
 	if err := json.Unmarshal(history[0]["inbound"], &historyInbound); err != nil || historyInbound != wantTag {
-		t.Fatalf("history inbound = %q, err=%v, want preserved history under %q", historyInbound, err, wantTag)
+		t.Fatalf("history inbound = %q, err=%v, want original history tag %q", historyInbound, err, wantTag)
 	}
 	var historyDomain string
 	if err := json.Unmarshal(history[0]["domain"], &historyDomain); err != nil || historyDomain != "example.com" {
@@ -839,7 +839,7 @@ func TestFleetTemplateNamesCopiedInboundForTargetAndMigratesReferences(t *testin
 		t.Fatal(err)
 	}
 	if savedStats.Tag != wantTag || savedStats.Traffic != 123 {
-		t.Fatalf("historical stats = %+v, want tag %q with traffic preserved", savedStats, wantTag)
+		t.Fatalf("historical stats = %+v, want original tag %q with traffic preserved", savedStats, wantTag)
 	}
 	var config map[string]json.RawMessage
 	var configSetting model.Setting
@@ -855,13 +855,13 @@ func TestFleetTemplateNamesCopiedInboundForTargetAndMigratesReferences(t *testin
 			t.Fatal(err)
 		}
 		encoded, _ := json.Marshal(decoded)
-		if strings.Contains(string(encoded), `"stream"`) || !strings.Contains(string(encoded), wantTag) {
-			t.Errorf("%s inbound reference was not consistently renamed: %s", key, encoded)
+		if !strings.Contains(string(encoded), `"stream"`) || strings.Contains(string(encoded), "la.example") {
+			t.Errorf("%s inbound reference was unexpectedly renamed: %s", key, encoded)
 		}
 	}
 	preview, err = (&ConfigService{}).PreviewFleetTemplate(template, "la.example")
 	if err != nil {
-		t.Fatalf("preview repeated named inbound: %v", err)
+		t.Fatalf("preview repeated inbound merge: %v", err)
 	}
 	if preview.InboundUpdate != 1 || !reflect.DeepEqual(preview.InboundUpdateTags, []string{wantTag}) {
 		t.Fatalf("repeated preview = %+v, want an idempotent update of %q", preview, wantTag)
@@ -869,18 +869,6 @@ func TestFleetTemplateNamesCopiedInboundForTargetAndMigratesReferences(t *testin
 	apply()
 	if err := db.Model(&model.Inbound{}).Count(&inboundCount).Error; err != nil || inboundCount != 1 {
 		t.Fatalf("repeated apply created duplicate inbounds: count=%d err=%v", inboundCount, err)
-	}
-}
-
-func TestFleetTemplateInboundTagIsTargetSpecificButStableOnSource(t *testing.T) {
-	if got := fleetTemplateInboundTag("VLESS", "source.example", "source.example"); got != "VLESS" {
-		t.Fatalf("source inbound tag = %q, want original name", got)
-	}
-	if got := fleetTemplateInboundTag("VLESS", "source.example", "la.example"); got != "VLESS [la.example]" {
-		t.Fatalf("target inbound tag = %q, want server-qualified name", got)
-	}
-	if got := fleetTemplateInboundTag("VLESS", "source.example", "tk.example"); got == fleetTemplateInboundTag("VLESS", "source.example", "la.example") {
-		t.Fatal("different target hosts must produce different node names")
 	}
 }
 

@@ -524,22 +524,16 @@ func (s *ConfigService) PreviewFleetTemplate(template FleetTemplate, hostname st
 		}
 	}
 	for _, item := range template.Inbounds {
-		targetTag := fleetTemplateInboundTag(item.Tag, template.SourceHost, hostname)
 		var count int64
-		if err := db.Model(&model.Inbound{}).Where("tag = ?", targetTag).Count(&count).Error; err != nil {
+		if err := db.Model(&model.Inbound{}).Where("tag = ?", item.Tag).Count(&count).Error; err != nil {
 			return nil, err
-		}
-		if count == 0 && targetTag != item.Tag {
-			if err := db.Model(&model.Inbound{}).Where("tag = ?", item.Tag).Count(&count).Error; err != nil {
-				return nil, err
-			}
 		}
 		if count == 0 {
 			preview.InboundAdd++
-			preview.InboundAddTags = append(preview.InboundAddTags, targetTag)
+			preview.InboundAddTags = append(preview.InboundAddTags, item.Tag)
 		} else {
 			preview.InboundUpdate++
-			preview.InboundUpdateTags = append(preview.InboundUpdateTags, targetTag)
+			preview.InboundUpdateTags = append(preview.InboundUpdateTags, item.Tag)
 		}
 	}
 	for _, item := range template.Outbounds {
@@ -651,29 +645,17 @@ func (s *ConfigService) applyFleetTemplateTx(tx *gorm.DB, template FleetTemplate
 	}
 
 	inboundIDs := make(map[uint]uint)
-	inboundTagMap := make(map[string]string, len(template.Inbounds))
 	for _, source := range template.Inbounds {
-		targetTag := fleetTemplateInboundTag(source.Tag, template.SourceHost, hostname)
 		var target model.Inbound
-		err := tx.Where("tag = ?", targetTag).First(&target).Error
-		if database.IsNotFound(err) && targetTag != source.Tag {
-			// Migrate targets created by older template versions without leaving a duplicate.
-			err = tx.Where("tag = ?", source.Tag).First(&target).Error
-		}
+		err := tx.Where("tag = ?", source.Tag).First(&target).Error
 		if err != nil && !database.IsNotFound(err) {
 			return err
 		}
 		isNew := database.IsNotFound(err)
 		if isNew {
-			target = model.Inbound{Tag: targetTag}
+			target = model.Inbound{Tag: source.Tag}
 		}
 		oldInbound := target
-		if !isNew {
-			target.Tag = targetTag
-		}
-		if source.Tag != targetTag {
-			inboundTagMap[source.Tag] = targetTag
-		}
 		options, err := sanitizeFleetInboundOptions(source.Options)
 		if err != nil {
 			return fmt.Errorf("sanitize inbound %q options: %w", source.Tag, err)
@@ -749,20 +731,6 @@ func (s *ConfigService) applyFleetTemplateTx(tx *gorm.DB, template FleetTemplate
 		if err := syncManagedPortEntriesForInboundTx(tx, &target); err != nil {
 			return err
 		}
-		if !isNew && oldInbound.Tag != target.Tag {
-			if err := tx.Model(&model.Stats{}).
-				Where("resource = ? AND tag = ?", "inbound", oldInbound.Tag).
-				Update("tag", target.Tag).Error; err != nil {
-				return err
-			}
-			renamed := []model.Inbound{target}
-			if err := s.ClientService.UpdateLinksByInboundChange(tx, &renamed, hostname, oldInbound.Tag); err != nil {
-				return err
-			}
-			if err := renameFleetInboundHistory(tx, oldInbound.Tag, target.Tag); err != nil {
-				return err
-			}
-		}
 		inboundIDs[source.ID] = target.Id
 	}
 
@@ -819,14 +787,10 @@ func (s *ConfigService) applyFleetTemplateTx(tx *gorm.DB, template FleetTemplate
 				continue
 			}
 			if tag := template.InboundRefs[sourceID]; tag != "" {
-				targetTag := fleetTemplateInboundTag(tag, template.SourceHost, hostname)
 				var existingInbound model.Inbound
-				err := tx.Select("id").Where("tag = ?", targetTag).First(&existingInbound).Error
-				if database.IsNotFound(err) && targetTag != tag {
-					err = tx.Select("id").Where("tag = ?", tag).First(&existingInbound).Error
-				}
+				err := tx.Select("id").Where("tag = ?", tag).First(&existingInbound).Error
 				if database.IsNotFound(err) {
-					return common.NewErrorf("用户 %s 需要目标机已有入站 %s，或在模板中同时勾选入站", source.Name, targetTag)
+					return common.NewErrorf("用户 %s 需要目标机已有入站 %s，或在模板中同时勾选入站", source.Name, tag)
 				}
 				if err != nil {
 					return err
@@ -853,14 +817,7 @@ func (s *ConfigService) applyFleetTemplateTx(tx *gorm.DB, template FleetTemplate
 			return err
 		}
 		for key, value := range template.Config {
-			value = replaceFleetTemplateHost(value, template.SourceHost, hostname)
-			if len(inboundTagMap) > 0 && (key == "route" || key == "dns") {
-				value, err = rewriteFleetInboundReferences(value, inboundTagMap)
-				if err != nil {
-					return fmt.Errorf("rewrite template %s inbound references: %w", key, err)
-				}
-			}
-			configMap[key] = value
+			configMap[key] = replaceFleetTemplateHost(value, template.SourceHost, hostname)
 		}
 		raw, err := json.Marshal(configMap)
 		if err != nil {
@@ -868,40 +825,6 @@ func (s *ConfigService) applyFleetTemplateTx(tx *gorm.DB, template FleetTemplate
 		}
 		if err := s.SettingService.SaveConfig(tx, raw); err != nil && !errors.Is(err, ErrNoChanges) {
 			return err
-		}
-	}
-	if len(inboundTagMap) > 0 {
-		current, err := s.SettingService.getStringTx(tx, "config")
-		if err != nil {
-			return err
-		}
-		var configMap map[string]json.RawMessage
-		if err := json.Unmarshal([]byte(current), &configMap); err != nil {
-			return err
-		}
-		configChanged := false
-		for _, key := range []string{"route", "dns"} {
-			value, exists := configMap[key]
-			if !exists {
-				continue
-			}
-			rewritten, err := rewriteFleetInboundReferences(value, inboundTagMap)
-			if err != nil {
-				return fmt.Errorf("rewrite %s inbound references: %w", key, err)
-			}
-			if !bytes.Equal(value, rewritten) {
-				configMap[key] = rewritten
-				configChanged = true
-			}
-		}
-		if configChanged {
-			raw, err := json.Marshal(configMap)
-			if err != nil {
-				return err
-			}
-			if err := s.SettingService.SaveConfig(tx, raw); err != nil {
-				return err
-			}
 		}
 	}
 
@@ -954,100 +877,4 @@ func fleetTemplateHostname(host string) string {
 		return strings.Trim(parsed, "[]")
 	}
 	return strings.Trim(host, "[]")
-}
-
-func fleetTemplateInboundTag(sourceTag, sourceHost, targetHost string) string {
-	sourceHost = fleetTemplateHostname(sourceHost)
-	targetHost = fleetTemplateHostname(targetHost)
-	if strings.TrimSpace(sourceTag) == "" || sourceHost == "" || targetHost == "" || strings.EqualFold(sourceHost, targetHost) {
-		return sourceTag
-	}
-	return fmt.Sprintf("%s [%s]", sourceTag, strings.ToLower(targetHost))
-}
-
-func rewriteFleetInboundReferences(raw json.RawMessage, tagMap map[string]string) (json.RawMessage, error) {
-	if len(raw) == 0 || len(tagMap) == 0 {
-		return append(json.RawMessage(nil), raw...), nil
-	}
-	var value interface{}
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return nil, err
-	}
-	if !rewriteFleetInboundReferenceValue(value, tagMap) {
-		return append(json.RawMessage(nil), raw...), nil
-	}
-	return json.Marshal(value)
-}
-
-func rewriteFleetInboundReferenceValue(value interface{}, tagMap map[string]string) bool {
-	changed := false
-	switch typed := value.(type) {
-	case map[string]interface{}:
-		for key, item := range typed {
-			if key == "inbound" {
-				switch inbound := item.(type) {
-				case string:
-					if replacement, ok := tagMap[inbound]; ok {
-						typed[key] = replacement
-						changed = true
-					}
-				case []interface{}:
-					for index, rawTag := range inbound {
-						if tag, ok := rawTag.(string); ok {
-							if replacement, exists := tagMap[tag]; exists {
-								inbound[index] = replacement
-								changed = true
-							}
-						}
-					}
-				}
-			}
-			if rewriteFleetInboundReferenceValue(item, tagMap) {
-				changed = true
-			}
-		}
-	case []interface{}:
-		for _, item := range typed {
-			if rewriteFleetInboundReferenceValue(item, tagMap) {
-				changed = true
-			}
-		}
-	}
-	return changed
-}
-
-func renameFleetInboundHistory(tx *gorm.DB, oldTag, newTag string) error {
-	if oldTag == "" || newTag == "" || oldTag == newTag {
-		return nil
-	}
-	var clients []model.Client
-	if err := tx.Select("id", "history").Where("history IS NOT NULL AND history <> ''").Find(&clients).Error; err != nil {
-		return err
-	}
-	for _, client := range clients {
-		var entries []map[string]json.RawMessage
-		if err := json.Unmarshal(client.History, &entries); err != nil {
-			continue
-		}
-		changed := false
-		for _, entry := range entries {
-			var tag string
-			if err := json.Unmarshal(entry["inbound"], &tag); err == nil && tag == oldTag {
-				rawTag, _ := json.Marshal(newTag)
-				entry["inbound"] = rawTag
-				changed = true
-			}
-		}
-		if !changed {
-			continue
-		}
-		raw, err := json.Marshal(entries)
-		if err != nil {
-			return err
-		}
-		if err := tx.Model(&model.Client{}).Where("id = ?", client.Id).Update("history", string(raw)).Error; err != nil {
-			return err
-		}
-	}
-	return nil
 }

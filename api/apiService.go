@@ -568,6 +568,60 @@ func (a *ApiService) DeployFleetTemplate(c *gin.Context) {
 	jsonObj(c, result, err)
 }
 
+func (a *ApiService) GetFleetInboundTargets(c *gin.Context) {
+	var targets []string
+	if err := json.Unmarshal([]byte(c.Query("targets")), &targets); err != nil {
+		jsonMsg(c, "targets", err)
+		return
+	}
+	jsonObj(c, a.FleetService.GetFleetInboundTargetInfo(targets), nil)
+}
+
+func (a *ApiService) PreviewFleetInboundCreate(c *gin.Context) {
+	var plan service.FleetInboundCreatePlan
+	if err := json.Unmarshal([]byte(c.Request.FormValue("plan")), &plan); err != nil {
+		jsonMsg(c, "preview", err)
+		return
+	}
+	result, err := a.FleetService.PreviewFleetInboundCreate(plan)
+	jsonObj(c, result, err)
+}
+
+func (a *ApiService) CreateFleetInbound(c *gin.Context) {
+	var plan service.FleetInboundCreatePlan
+	if err := json.Unmarshal([]byte(c.Request.FormValue("plan")), &plan); err != nil {
+		jsonMsg(c, "create", err)
+		return
+	}
+	result, err := a.FleetService.CreateFleetInbound(plan)
+	jsonObj(c, result, err)
+}
+
+func (a *ApiService) GetLocalFleetInboundCapabilities(c *gin.Context) {
+	result, err := a.FleetService.LocalFleetInboundCapabilities(getHostname(c))
+	jsonObj(c, result, err)
+}
+
+func (a *ApiService) PreflightFleetInboundCreate(c *gin.Context) {
+	var request service.FleetInboundRemoteRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		jsonMsg(c, "preflight", err)
+		return
+	}
+	result, err := service.FleetInboundRemotePreflight(request.Inbound, getHostname(c))
+	jsonObj(c, result, err)
+}
+
+func (a *ApiService) CreateLocalFleetInbound(c *gin.Context, username string) {
+	var request service.FleetInboundRemoteRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		jsonMsg(c, "create", err)
+		return
+	}
+	result, err := service.FleetInboundRemoteCreate(request.Inbound, username, getHostname(c))
+	jsonObj(c, result, err)
+}
+
 func (a *ApiService) PreviewLocalFleetTemplate(c *gin.Context) {
 	var template service.FleetTemplate
 	if err := c.ShouldBindJSON(&template); err != nil {

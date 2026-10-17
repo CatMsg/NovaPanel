@@ -55,6 +55,10 @@ func (a *APIv2Handler) postHandler(c *gin.Context) {
 		a.ApiService.PreviewLocalFleetTemplate(c)
 	case "fleet-template-apply":
 		a.ApiService.ApplyLocalFleetTemplate(c)
+	case "fleet-inbound-preflight":
+		a.ApiService.PreflightFleetInboundCreate(c)
+	case "fleet-inbound-create":
+		a.ApiService.CreateLocalFleetInbound(c, username)
 	case "alertSave":
 		a.ApiService.SaveAlertSettings(c)
 	case "alertTest":
@@ -124,6 +128,8 @@ func (a *APIv2Handler) getHandler(c *gin.Context) {
 		a.ApiService.GetPorts(c)
 	case "fleet-status":
 		a.ApiService.GetFleetStatus(c)
+	case "fleet-inbound-capabilities":
+		a.ApiService.GetLocalFleetInboundCapabilities(c)
 	case "update-status":
 		a.ApiService.GetUpdateStatus(c)
 	case "masque-status":

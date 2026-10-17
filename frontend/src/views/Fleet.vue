@@ -58,6 +58,10 @@
               <v-icon icon="mdi-layers-triple-outline" start />
               {{ $t('ui.fleet.orchestration') }}
             </v-btn>
+            <v-btn variant="tonal" color="primary" :disabled="loading" @click="openRemoteInboundDialog">
+              <v-icon icon="mdi-server-plus" start />
+              {{ $t('ui.fleet.remoteInboundCreate') }}
+            </v-btn>
             <v-btn color="primary" :loading="loading" @click="loadFleet">
               <v-icon icon="mdi-refresh" start />
               {{ $t('ui.fleet.refreshStatus') }}
@@ -452,6 +456,151 @@
       </v-card>
     </v-dialog>
 
+    <v-dialog v-model="showRemoteInbound" max-width="980" scrollable>
+      <v-card rounded="xl" class="fleet-dialog fleet-remote-inbound">
+        <header class="fleet-rollout__header">
+          <div>
+            <span class="fleet-rollout__eyebrow">{{ $t('ui.fleet.remoteInboundEyebrow') }}</span>
+            <h2>{{ $t('ui.fleet.remoteInboundTitle') }}</h2>
+            <p>{{ $t('ui.fleet.remoteInboundHint') }}</p>
+          </div>
+          <v-btn icon="mdi-close" variant="text" :aria-label="$t('actions.close')" @click="showRemoteInbound = false" />
+        </header>
+        <v-card-text class="fleet-remote-inbound__body">
+          <v-alert type="info" variant="tonal" density="compact">{{ $t('ui.fleet.remoteInboundSafety') }}</v-alert>
+          <v-alert v-if="!inboundOptionsLoading && !remoteInboundSources.length" type="warning" variant="tonal" density="compact">{{ $t('ui.fleet.inboundSelectionEmpty') }}</v-alert>
+          <div class="fleet-remote-inbound__form">
+            <v-select
+              v-model="remoteSourceInboundId"
+              :items="remoteInboundOptions"
+              :label="$t('ui.fleet.remoteInboundSource')"
+              :loading="inboundOptionsLoading"
+              :error-messages="inboundOptionsError"
+              item-title="title"
+              item-value="value"
+              variant="outlined"
+              density="comfortable"
+              hide-details="auto"
+              @update:model-value="resetRemoteInboundDraft"
+            />
+            <v-text-field
+              v-model="remoteBaseTag"
+              :label="$t('ui.fleet.remoteInboundBaseName')"
+              :placeholder="$t('ui.fleet.remoteInboundBaseNameHint')"
+              variant="outlined"
+              density="comfortable"
+              hide-details
+              @update:model-value="clearRemoteInboundPreview"
+            />
+          </div>
+
+          <section class="fleet-remote-inbound__section">
+            <div class="fleet-rollout__section-head">
+              <div class="fleet-rollout__section-icon"><v-icon icon="mdi-server-network-outline" /></div>
+              <div><h3>{{ $t('ui.fleet.targetServers') }}</h3><p>{{ $t('ui.fleet.remoteInboundTargetsHint') }}</p></div>
+            </div>
+            <div class="fleet-target-grid">
+              <button
+                v-for="server in remoteInboundServers"
+                :key="server.id"
+                type="button"
+                :aria-pressed="remoteInboundTargetIds.includes(server.id)"
+                :class="{ 'is-selected': remoteInboundTargetIds.includes(server.id) }"
+                @click="toggleRemoteInboundTarget(server.id)"
+              >
+                <span class="fleet-target-grid__check"><v-icon :icon="remoteInboundTargetIds.includes(server.id) ? 'mdi-check' : 'mdi-plus'" /></span>
+                <span><strong>{{ server.name }}</strong><small>{{ server.url }}</small></span>
+                <em>{{ server.latencyMs ? `${server.latencyMs} ms` : $t('ui.common.online') }}</em>
+              </button>
+            </div>
+            <v-alert v-if="!remoteInboundServers.length" type="warning" variant="tonal" density="compact">{{ $t('ui.fleet.remoteInboundNoServers') }}</v-alert>
+          </section>
+
+          <div v-if="remoteInboundTargetIds.length" class="fleet-remote-inbound__targets">
+            <v-progress-linear v-if="remoteInboundLoading === 'targets'" indeterminate color="primary" />
+            <article v-for="id in remoteInboundTargetIds" :key="id" class="fleet-remote-target">
+              <header>
+                <div><strong>{{ remoteInboundServer(id)?.name || id }}</strong><small>{{ remoteTargetInfo(id)?.capabilities?.subscriptionHost || remoteTargetInfo(id)?.error || $t('ui.fleet.remoteInboundWaiting') }}</small></div>
+                <v-chip v-if="remoteTargetInfo(id)?.success" size="small" color="success" variant="tonal">{{ $t('ui.common.online') }}</v-chip>
+                <v-chip v-else-if="remoteTargetInfo(id)?.error" size="small" color="error" variant="tonal">{{ $t('ui.fleet.failed') }}</v-chip>
+              </header>
+              <div v-if="remoteTargetInfo(id)?.success && remoteTargetSettings[id]" class="fleet-remote-target__settings">
+                <v-text-field
+                  v-model.number="remoteTargetSettings[id].listenPort"
+                  type="number"
+                  min="1"
+                  max="65535"
+                  :label="$t('ui.fleet.remoteInboundPort')"
+                  variant="outlined"
+                  density="comfortable"
+                  hide-details
+                  @update:model-value="clearRemoteInboundPreview"
+                />
+                <v-select
+                  v-if="remoteInboundTLSCapable"
+                  v-model="remoteTargetSettings[id].tlsId"
+                  :items="remoteTlsItems(id)"
+                  :label="$t('ui.fleet.remoteInboundTLS')"
+                  :placeholder="remoteInboundTLSRequired ? $t('ui.fleet.remoteInboundTLSSelect') : $t('ui.fleet.remoteInboundTLSOptional')"
+                  :clearable="!remoteInboundTLSRequired"
+                  item-title="title"
+                  item-value="value"
+                  variant="outlined"
+                  density="comfortable"
+                  hide-details
+                  @update:model-value="clearRemoteInboundPreview"
+                />
+                <v-alert v-if="remoteInboundTLSRequired && remoteTargetInfo(id)?.capabilities?.tlsProfiles.length === 0" class="fleet-remote-target__certificate" type="warning" variant="tonal" density="compact">
+                  {{ $t('ui.fleet.remoteInboundTLSUnavailable') }}
+                </v-alert>
+                <div v-if="remoteInboundTLSCapable && remoteTargetSettings[id]?.tlsId" class="fleet-remote-target__certificate">
+                  <span>{{ $t('ui.fleet.remoteInboundCertificate') }}: {{ remoteTargetTlsSummary(id) }}</span>
+                </div>
+              </div>
+              <p v-else-if="remoteTargetInfo(id)?.error" class="fleet-remote-target__error">{{ remoteTargetInfo(id)?.error }}</p>
+              <p v-else class="fleet-remote-target__hint">{{ $t('ui.fleet.remoteInboundWaiting') }}</p>
+              <footer v-if="remoteBaseTag.trim()">
+                {{ $t('ui.fleet.remoteInboundGeneratedName') }}: <strong>{{ remoteGeneratedTag(id) }}</strong>
+              </footer>
+            </article>
+          </div>
+
+          <v-alert v-if="remoteInboundPreviewResults.length" :type="remoteInboundPreviewPassed ? 'success' : 'error'" variant="tonal" density="compact">
+            {{ remoteInboundPreviewPassed ? $t('ui.fleet.remoteInboundPreviewPassed') : $t('ui.fleet.remoteInboundPreviewFailed') }}
+          </v-alert>
+          <div v-if="remoteInboundPreviewResults.length" class="fleet-orchestration__results">
+            <div v-for="result in remoteInboundPreviewResults" :key="result.id" class="fleet-orchestration__result" :class="result.success ? 'is-success' : 'is-error'">
+              <div>
+                <strong>{{ result.name }}</strong>
+                <span>{{ result.tag }}</span>
+                <small v-if="result.created">{{ $t('ui.fleet.remoteInboundCreated') }}</small>
+                <small v-else-if="result.error">{{ result.error }}</small>
+                <small v-else-if="result.preview?.checks?.length">{{ result.preview.checks.map(check => `${check.name}: ${check.detail}`).join(' · ') }}</small>
+              </div>
+              <v-icon :icon="result.success ? 'mdi-check-circle' : 'mdi-alert-circle'" />
+            </div>
+          </div>
+        </v-card-text>
+        <v-card-actions class="fleet-rollout__footer">
+          <v-spacer />
+          <v-btn variant="text" @click="showRemoteInbound = false">{{ $t('ui.common.close') }}</v-btn>
+          <v-btn
+            color="primary"
+            :loading="remoteInboundLoading === 'preview'"
+            :disabled="!canPreviewRemoteInbound || remoteInboundLoading !== '' || remoteInboundCreateAttempted"
+            @click="previewRemoteInbound"
+          ><v-icon icon="mdi-file-search-outline" start />{{ $t('ui.fleet.remoteInboundPreview') }}</v-btn>
+          <v-btn
+            v-if="remoteInboundPreviewPassed && !remoteInboundCreateAttempted"
+            color="success"
+            :loading="remoteInboundLoading === 'create'"
+            :disabled="remoteInboundLoading !== ''"
+            @click="createRemoteInbound"
+          ><v-icon icon="mdi-check-circle" start />{{ $t('ui.fleet.remoteInboundCreateAction') }}</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <v-dialog v-model="showDetails" max-width="760" scrollable>
       <v-card rounded="xl" class="fleet-dialog" v-if="selectedServer">
         <v-card-title class="fleet-dialog__title">
@@ -630,7 +779,13 @@ type FleetConfig = {
 }
 
 type FleetTemplateSectionKey = 'tls' | 'inbounds' | 'outbounds' | 'clients' | 'route' | 'dns'
-type FleetInboundOption = { id: number; tag: string; type: string; listen_port?: number }
+type FleetInboundOption = { id: number; tag: string; type: string; listen_port?: number; tls_id?: number }
+type FleetRemoteTLSProfile = { id: number; name: string; serverName?: string; acmeDomains?: string[]; certificateFingerprint?: string }
+type FleetRemoteInboundCapabilities = { hostname: string; subscriptionHost: string; tlsProfiles: FleetRemoteTLSProfile[] }
+type FleetRemoteInboundTarget = { id: string; name: string; success: boolean; capabilities?: FleetRemoteInboundCapabilities; error?: string }
+type FleetRemoteInboundCheck = { name: string; status: string; detail: string }
+type FleetRemoteInboundResult = { id: string; name: string; tag?: string; success: boolean; created: boolean; error?: string; preview?: { valid: boolean; checks?: FleetRemoteInboundCheck[] } }
+type FleetRemoteInboundTargetSettings = { tlsId: number | null; listenPort: number }
 
 type FleetTemplate = {
   id: string
@@ -662,12 +817,15 @@ type FleetTemplateResult = {
 }
 
 const t = i18n.global.t
+const remoteInboundProtocolTypes = ['mixed', 'socks', 'http', 'shadowsocks', 'vmess', 'trojan', 'naive', 'hysteria', 'shadowtls', 'tuic', 'hysteria2', 'vless', 'anytls', 'mieru', 'masque']
+const remoteInboundTLSProtocols = ['http', 'vmess', 'trojan', 'naive', 'hysteria', 'tuic', 'hysteria2', 'vless', 'anytls']
 
 const loading = ref(true)
 const saving = ref(false)
 const showConfig = ref(false)
 const showDetails = ref(false)
 const showOrchestration = ref(false)
+const showRemoteInbound = ref(false)
 const orchestrationStep = ref(1)
 const deploymentComplete = ref(false)
 const servers = ref<FleetServer[]>([])
@@ -696,6 +854,15 @@ const selectedTargets = ref<string[]>([])
 const canaryTarget = ref<string | null>(null)
 const templateResults = ref<FleetTemplateResult[]>([])
 const orchestrationLoading = ref<'' | 'capture' | 'preview' | 'deploy'>('')
+const remoteSourceInboundId = ref<number | null>(null)
+const remoteBaseTag = ref('')
+const remoteInboundTargetIds = ref<string[]>([])
+const remoteInboundTargets = ref<FleetRemoteInboundTarget[]>([])
+const remoteTargetSettings = ref<Record<string, FleetRemoteInboundTargetSettings>>({})
+const remoteInboundPreviewResults = ref<FleetRemoteInboundResult[]>([])
+const remoteInboundLoading = ref<'' | 'targets' | 'preview' | 'create'>('')
+const remoteInboundCreateAttempted = ref(false)
+let remoteTargetRequestRevision = 0
 const updateLoadingId = ref('')
 const refreshLoadingId = ref('')
 const updateStates = ref<Record<string, any>>({})
@@ -778,6 +945,34 @@ const driftServerCount = computed(() => servers.value.filter((server) => server.
 const initialLoading = computed(() => loading.value && servers.value.length === 0)
 const deployableServers = computed(() => servers.value.filter(server => server.reachable && server.enabled))
 const selectedTemplate = computed(() => templates.value.find(item => item.id === selectedTemplateId.value))
+const remoteInboundServers = computed(() => remoteServers.value.filter(server => server.reachable && server.enabled))
+const remoteInboundSources = computed(() => sourceInbounds.value.filter(inbound => remoteInboundProtocolTypes.includes(inbound.type)))
+const remoteInboundOptions = computed(() => remoteInboundSources.value.map(inbound => ({
+  title: `${inbound.tag} · ${inbound.type}${inbound.listen_port ? ` · ${t('ui.common.port')} ${inbound.listen_port}` : ''}`,
+  value: inbound.id,
+})))
+const selectedRemoteInboundSource = computed(() => remoteInboundSources.value.find(inbound => inbound.id === remoteSourceInboundId.value))
+const remoteInboundTLSRequired = computed(() => Boolean(
+  selectedRemoteInboundSource.value?.tls_id && remoteInboundTLSProtocols.includes(selectedRemoteInboundSource.value.type),
+))
+const remoteInboundTLSCapable = computed(() => remoteInboundTLSProtocols.includes(selectedRemoteInboundSource.value?.type ?? ''))
+const remoteInboundPreviewPassed = computed(() => Boolean(
+  remoteInboundTargetIds.value.length > 0
+  && remoteInboundPreviewResults.value.length === remoteInboundTargetIds.value.length
+  && remoteInboundPreviewResults.value.every(result => result.success),
+))
+const canPreviewRemoteInbound = computed(() => Boolean(
+  selectedRemoteInboundSource.value
+  && remoteBaseTag.value.trim()
+  && remoteInboundTargetIds.value.length > 0
+  && remoteInboundTargets.value.length === remoteInboundTargetIds.value.length
+  && remoteInboundTargets.value.every(target => target.success)
+  && remoteInboundTargetIds.value.every(id => {
+    const settings = remoteTargetSettings.value[id]
+    return Boolean(settings && settings.listenPort >= 1 && settings.listenPort <= 65535
+      && (!remoteInboundTLSRequired.value || (settings.tlsId !== null && settings.tlsId > 0)))
+  }),
+))
 const selectedTargetItems = computed(() => deployableServers.value
   .filter(server => selectedTargets.value.includes(server.id))
   .map(server => ({ title: server.name, value: server.id })))
@@ -1032,11 +1227,159 @@ const loadSourceInbounds = async () => {
     const list = response.obj?.inbounds
     sourceInbounds.value = Array.isArray(list)
       ? list.filter((inbound: any) => Number(inbound.id) > 0 && String(inbound.tag || '').trim())
-        .map((inbound: any) => ({ id: Number(inbound.id), tag: String(inbound.tag), type: String(inbound.type || ''), listen_port: Number(inbound.listen_port) || undefined }))
+        .map((inbound: any) => ({ id: Number(inbound.id), tag: String(inbound.tag), type: String(inbound.type || ''), listen_port: Number(inbound.listen_port) || undefined, tls_id: Number(inbound.tls_id) || undefined }))
       : []
     selectedInboundIds.value = sourceInbounds.value.map(inbound => inbound.id)
   }
   inboundOptionsLoading.value = false
+}
+
+const openRemoteInboundDialog = async () => {
+  showRemoteInbound.value = true
+  remoteSourceInboundId.value = null
+  remoteBaseTag.value = ''
+  remoteInboundTargetIds.value = []
+  remoteInboundTargets.value = []
+  remoteTargetSettings.value = {}
+  remoteInboundPreviewResults.value = []
+  remoteInboundCreateAttempted.value = false
+  await loadSourceInbounds()
+  const first = remoteInboundOptions.value[0]
+  if (first) {
+    remoteSourceInboundId.value = first.value
+    remoteBaseTag.value = selectedRemoteInboundSource.value?.tag ?? ''
+  }
+}
+
+const clearRemoteInboundPreview = () => {
+  remoteInboundPreviewResults.value = []
+  remoteInboundCreateAttempted.value = false
+}
+
+const resetRemoteInboundDraft = (sourceID: number | null) => {
+  remoteSourceInboundId.value = sourceID
+  remoteBaseTag.value = selectedRemoteInboundSource.value?.tag ?? ''
+  const sourcePort = selectedRemoteInboundSource.value?.listen_port ?? 0
+  const nextSettings: Record<string, FleetRemoteInboundTargetSettings> = {}
+  for (const target of remoteInboundTargets.value) {
+    const profiles = target.capabilities?.tlsProfiles ?? []
+    nextSettings[target.id] = {
+      listenPort: sourcePort,
+        tlsId: remoteInboundTLSProtocols.includes(selectedRemoteInboundSource.value?.type ?? '') && selectedRemoteInboundSource.value?.tls_id
+          ? (profiles.length === 1 ? profiles[0].id : null)
+          : null,
+    }
+  }
+  remoteTargetSettings.value = nextSettings
+  clearRemoteInboundPreview()
+}
+
+const toggleRemoteInboundTarget = async (id: string) => {
+  const selected = remoteInboundTargetIds.value.includes(id)
+    ? remoteInboundTargetIds.value.filter(target => target !== id)
+    : [...remoteInboundTargetIds.value, id]
+  remoteInboundTargetIds.value = selected
+  remoteInboundTargets.value = []
+  remoteTargetSettings.value = {}
+  clearRemoteInboundPreview()
+  const requestRevision = ++remoteTargetRequestRevision
+  if (!selected.length) {
+    remoteInboundLoading.value = ''
+    return
+  }
+
+  remoteInboundLoading.value = 'targets'
+  const response = await HttpUtils.get('api/fleetInboundTargets', { targets: JSON.stringify(selected) })
+  if (requestRevision !== remoteTargetRequestRevision) return
+  remoteInboundLoading.value = ''
+  if (!response.success || !Array.isArray(response.obj)) {
+    remoteInboundTargets.value = selected.map(targetID => ({ id: targetID, name: remoteInboundServer(targetID)?.name ?? targetID, success: false, error: response.msg || t('ui.fleet.remoteInboundTargetsFailed') }))
+    return
+  }
+  const byID = new Map((response.obj as FleetRemoteInboundTarget[]).map(target => [target.id, target]))
+  remoteInboundTargets.value = selected.map(targetID => byID.get(targetID) ?? ({
+    id: targetID,
+    name: remoteInboundServer(targetID)?.name ?? targetID,
+    success: false,
+    error: t('ui.fleet.remoteInboundTargetMissing'),
+  }))
+  resetRemoteInboundDraft(remoteSourceInboundId.value)
+}
+
+const remoteTargetInfo = (id: string) => remoteInboundTargets.value.find(target => target.id === id)
+const remoteInboundServer = (id: string) => remoteServers.value.find(server => server.id === id)
+const remoteGeneratedTag = (id: string) => `${remoteBaseTag.value.trim()} [${remoteInboundServer(id)?.name ?? id}]`
+const remoteTlsItems = (id: string) => (remoteTargetInfo(id)?.capabilities?.tlsProfiles ?? []).map(profile => ({
+  title: profile.serverName ? `${profile.name} · ${profile.serverName}` : profile.name,
+  value: profile.id,
+}))
+const remoteTargetTlsSummary = (id: string) => {
+  const settings = remoteTargetSettings.value[id]
+  const profile = remoteTargetInfo(id)?.capabilities?.tlsProfiles?.find(item => item.id === settings?.tlsId)
+  if (!profile) return t('ui.fleet.remoteInboundTLSSelect')
+  const parts = [profile.serverName, profile.acmeDomains?.join(', '), profile.certificateFingerprint ? `SHA-256 ${profile.certificateFingerprint.slice(0, 16)}…` : ''].filter(Boolean)
+  return parts.join(' · ') || profile.name
+}
+
+const previewRemoteInbound = async () => {
+  const source = selectedRemoteInboundSource.value
+  if (!source || !canPreviewRemoteInbound.value) return
+  remoteInboundLoading.value = 'preview'
+  remoteInboundPreviewResults.value = []
+  const plan = {
+    sourceInboundId: source.id,
+    baseTag: remoteBaseTag.value.trim(),
+    targets: remoteInboundTargetIds.value.map(id => ({
+      id,
+      tlsId: remoteTargetSettings.value[id]?.tlsId ?? 0,
+      listenPort: remoteTargetSettings.value[id]?.listenPort ?? 0,
+    })),
+  }
+  const response = await HttpUtils.post('api/fleetInboundPreview', { plan: JSON.stringify(plan) })
+  if (response.success && Array.isArray(response.obj)) remoteInboundPreviewResults.value = response.obj
+  else if (!response.success) remoteInboundPreviewResults.value = remoteInboundTargetIds.value.map(id => ({
+    id,
+    name: remoteInboundServer(id)?.name ?? id,
+    tag: remoteGeneratedTag(id),
+    success: false,
+    created: false,
+    error: response.msg || t('ui.fleet.remoteInboundTargetsFailed'),
+  }))
+  remoteInboundLoading.value = ''
+}
+
+const createRemoteInbound = async () => {
+  if (!remoteInboundPreviewPassed.value || remoteInboundCreateAttempted.value) return
+  const names = remoteInboundPreviewResults.value.map(result => `${result.name}: ${result.tag}`).join('\n')
+  if (!window.confirm(t('ui.fleet.remoteInboundConfirm', { targets: names }))) return
+  const source = selectedRemoteInboundSource.value
+  if (!source) return
+  remoteInboundCreateAttempted.value = true
+  remoteInboundLoading.value = 'create'
+  const plan = {
+    sourceInboundId: source.id,
+    baseTag: remoteBaseTag.value.trim(),
+    targets: remoteInboundTargetIds.value.map(id => ({
+      id,
+      tlsId: remoteTargetSettings.value[id]?.tlsId ?? 0,
+      listenPort: remoteTargetSettings.value[id]?.listenPort ?? 0,
+    })),
+  }
+  const response = await HttpUtils.post('api/fleetInboundCreate', { plan: JSON.stringify(plan) })
+  if (response.success && Array.isArray(response.obj)) {
+    remoteInboundPreviewResults.value = response.obj
+    await loadFleet(true)
+  } else {
+    remoteInboundPreviewResults.value = remoteInboundTargetIds.value.map(id => ({
+      id,
+      name: remoteInboundServer(id)?.name ?? id,
+      tag: remoteGeneratedTag(id),
+      success: false,
+      created: false,
+      error: `${response.msg || t('ui.fleet.remoteInboundCreateFailed')} · ${t('ui.fleet.remoteInboundVerifyBeforeRetry')}`,
+    }))
+  }
+  remoteInboundLoading.value = ''
 }
 
 const selectAllInbounds = () => {
@@ -1532,6 +1875,22 @@ onBeforeUnmount(() => {
 .fleet-orchestration__result.is-success { color: rgb(var(--v-theme-success)); background: rgba(34, 197, 94, .06); }
 .fleet-orchestration__result.is-error { color: rgb(var(--v-theme-error)); background: rgba(239, 68, 68, .06); }
 .fleet-rollout__footer { min-height: 64px; padding: 10px 20px; border-top: 1px solid var(--np-border); background: var(--np-surface-muted); }
+.fleet-remote-inbound { overflow: hidden; }
+.fleet-remote-inbound__body { display: grid; gap: 16px; max-height: min(72vh, 820px); padding: 18px 24px; }
+.fleet-remote-inbound__form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.fleet-remote-inbound__section { display: grid; gap: 12px; }
+.fleet-remote-inbound__targets { display: grid; gap: 9px; }
+.fleet-remote-target { display: grid; gap: 10px; padding: 13px; border: 1px solid var(--np-border); border-radius: 15px; background: var(--np-surface); }
+.fleet-remote-target > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.fleet-remote-target > header > div { display: grid; gap: 3px; min-width: 0; }
+.fleet-remote-target > header strong { font-size: .84rem; }
+.fleet-remote-target > header small { color: var(--np-text-muted); font-size: .7rem; overflow-wrap: anywhere; }
+.fleet-remote-target__settings { display: grid; grid-template-columns: 1fr 1fr; align-items: start; gap: 10px; }
+.fleet-remote-target__certificate { grid-column: 1 / -1; color: var(--np-text-muted); font-size: .68rem; overflow-wrap: anywhere; }
+.fleet-remote-target__hint, .fleet-remote-target__error { margin: 0; color: var(--np-text-muted); font-size: .72rem; overflow-wrap: anywhere; }
+.fleet-remote-target__error { color: rgb(var(--v-theme-error)); }
+.fleet-remote-target > footer { padding-top: 8px; border-top: 1px solid var(--np-border); color: var(--np-text-muted); font-size: .7rem; overflow-wrap: anywhere; }
+.fleet-remote-target > footer strong { color: var(--np-text); }
 
 @media (max-width: 800px) {
   .fleet-hero { padding: 18px; }
@@ -1540,6 +1899,9 @@ onBeforeUnmount(() => {
   .fleet-hero__meta { flex-wrap: wrap; }
   .fleet-config-row { grid-template-columns: 1fr; padding: 14px 0; border-bottom: 1px solid var(--np-border); }
   .fleet-rollout__header { padding: 18px 16px 14px; }
+  .fleet-remote-inbound__body { padding: 16px 14px; }
+  .fleet-remote-inbound__form, .fleet-remote-target__settings { grid-template-columns: 1fr; }
+  .fleet-remote-target__certificate { grid-column: 1; }
   .fleet-rollout__steps { padding-inline: 8px; }
   .fleet-rollout__steps button { padding-inline: 4px; }
   .fleet-rollout__steps button strong { font-size: .7rem; }
