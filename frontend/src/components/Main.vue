@@ -114,6 +114,7 @@ import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref } from 
 import { i18n } from '@/locales'
 import logoUrl from '@/assets/logo.png'
 import { isPageVisible, onPageVisibilityChange } from '@/utils/pageVisibility'
+import { formatSystemUptime, formatSystemValue } from '@/utils/systemInfo'
 
 const LogVue = defineAsyncComponent(() => import('@/layouts/modals/Logs.vue'))
 const Backup = defineAsyncComponent(() => import('@/layouts/modals/Backup.vue'))
@@ -212,25 +213,29 @@ const tileKind = (key: string) => {
 const heroStackItems = computed(() => [
   {
     label: i18n.global.t('main.info.firewall'),
-    value: tilesData.value.sys?.firewallBackend || i18n.global.t('none'),
+    value: formatSystemValue(tilesData.value.sys?.firewallBackend, i18n.global.t('none')),
     icon: 'mdi-shield-lock-outline',
     tone: 'blue',
   },
   {
     label: i18n.global.t('main.info.running'),
-    value: tilesData.value.sbd?.running ? i18n.global.t('yes') : i18n.global.t('no'),
+    value: tilesData.value.sbd?.running
+      ? i18n.global.t('main.info.runningYes')
+      : i18n.global.t('main.info.runningNo'),
     icon: 'mdi-rocket-launch-outline',
     tone: tilesData.value.sbd?.running ? 'green' : 'red',
   },
   {
     label: i18n.global.t('main.info.systemVersion'),
-    value: tilesData.value.sys?.appVersion ? `v${tilesData.value.sys?.appVersion}` : '--',
+    value: formatSystemValue(tilesData.value.sys?.appVersion, '--') === '--'
+      ? '--'
+      : `v${formatSystemValue(tilesData.value.sys?.appVersion)}`,
     icon: 'mdi-tag-outline',
     tone: 'indigo',
   },
   {
     label: i18n.global.t('main.info.uptime'),
-    value: HumanReadable.formatSecond((Date.now()/1000) - tilesData.value.sys?.bootTime),
+    value: formatSystemUptime(tilesData.value.sys?.bootTime),
     icon: 'mdi-timer-outline',
     tone: 'teal',
   },

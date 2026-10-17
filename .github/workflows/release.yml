@@ -64,7 +64,6 @@ jobs:
         run: npm run test:e2e
 
   build-frontend:
-    needs: test-frontend
     runs-on: ubuntu-latest
     steps:
       - name: 检出仓库
@@ -117,7 +116,7 @@ jobs:
       - name: 运行静态检查
         run: |
           go vet ./...
-          go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
+          go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
           go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
 
       - name: 运行 Go 测试
@@ -131,8 +130,6 @@ jobs:
 
   test-fresh-ufw-linux:
     name: Native fresh-UFW acceptance
-    needs:
-      - test-backend
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -186,8 +183,6 @@ jobs:
 
   test-acme-cron-linux:
     name: Native ACME/cron acceptance
-    needs:
-      - test-backend
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -233,9 +228,6 @@ jobs:
     name: 构建-${{ matrix.platform }}
     needs:
       - build-frontend
-      - test-backend
-      - test-fresh-ufw-linux
-      - test-acme-cron-linux
     strategy:
       fail-fast: false
       matrix:
@@ -378,6 +370,10 @@ jobs:
     name: 发布 Release 产物
     needs:
       - build-linux
+      - test-frontend
+      - test-backend
+      - test-fresh-ufw-linux
+      - test-acme-cron-linux
     runs-on: ubuntu-latest
     steps:
       - name: 检出仓库

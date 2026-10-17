@@ -60,16 +60,18 @@ From the repository root:
 GOMAXPROCS=2 go run -p=2 -mod=readonly ./scripts/verify-sing-box.go
 GOMAXPROCS=2 go test -p=2 -mod=readonly -race ./scripts/verify-sing-box.go ./scripts/verify-sing-box_test.go -count=1 -timeout=60s
 GOMAXPROCS=2 go test -p=2 -mod=readonly -race github.com/sagernet/sing-box/route -run '^TestNetworkManagerStarted' -count=20 -timeout=120s
-GOMAXPROCS=2 GOFLAGS='-p=2 -ldflags=-checklinkname=0' bash ./scripts/test-sing-box-race.sh
+GOTOOLCHAIN=go1.26.9 GOMAXPROCS=2 bash ./scripts/test-sing-box-race.sh
 ```
 
 For full panel validation, use the canonical feature tags and linker flag:
 
 ```sh
 TAGS='with_quic,with_grpc,with_utls,with_acme,with_gvisor,with_naive_outbound,with_musl,badlinkname,tfogo_checklinkname0,with_tailscale'
-GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 go build -p=2 -mod=readonly -tags "$TAGS" -ldflags=-checklinkname=0 ./...
-GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 go test -p=2 -mod=readonly -tags "$TAGS" -ldflags=-checklinkname=0 ./... -count=1 -timeout=300s
-GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 go test -p=2 -mod=readonly -race -tags "$TAGS" -ldflags=-checklinkname=0 ./core -run 'TestComponentScope|TestOutboundScope|TestBoxConstructorFailure|TestBoxStartFailure|TestBoxCloseBeforeStart|TestCoreImplicit|TestCoreDynamic' -count=10 -timeout=180s
+GOTOOLCHAIN=go1.26.9 GOMAXPROCS=2 go build -p=2 -mod=readonly -tags "$TAGS" -ldflags=-checklinkname=0 ./...
+GOTOOLCHAIN=go1.26.9 GOMAXPROCS=2 go test -p=2 -mod=readonly -tags "$TAGS" -ldflags=-checklinkname=0 ./... -count=1 -timeout=300s
+GOTOOLCHAIN=go1.26.9 GOMAXPROCS=2 go test -p=2 -mod=readonly -race -tags "$TAGS" -ldflags=-checklinkname=0 ./core -run 'TestComponentScope|TestOutboundScope|TestBoxConstructorFailure|TestBoxStartFailure|TestBoxCloseBeforeStart|TestCoreImplicit|TestCoreDynamic' -count=10 -timeout=180s
+GOTOOLCHAIN=go1.27.2 bash ./scripts/go-test-packages.sh
+GOTOOLCHAIN=go1.27.2 GOMAXPROCS=2 bash ./scripts/test-sing-box-race.sh
 ```
 
 The linker flag is required for upstream's standard-library linkname references
@@ -77,8 +79,8 @@ on current Go toolchains; it is not a source patch. Tests use temporary database
 never the running panel's database. Full CI/build entrypoints are maintained
 outside this dependency import and must carry the same linker flag.
 
-Release-equivalent verification is pinned per command to Go 1.26.6; it does not
-change the host toolchain. Go 1.26.6 uses upstream's legacy HTTP/2 extended CONNECT
+Release-equivalent verification is pinned per command to Go 1.26.9; it does not
+change the host toolchain. Go 1.26.9 uses upstream's legacy HTTP/2 extended CONNECT
 hook in `transport/http/extended_connect_legacy.go`. Go 1.27 uses the standard
 library wrapper and `extended_connect_wrap_badlinkname.go` under `badlinkname`;
 without that tag its HTTP/2 CONNECT-UDP support is unavailable. The canonical

@@ -92,13 +92,15 @@ export default {
       host: "主机",
       cpu: "CPU",
       core: "核心",
-      firewall: "规则软件",
+      firewall: "防火墙",
       systemVersion: "系统版本",
       uptime: "运行时间",
       startupTime: "启动时间",
       threads: "线程",
       memory: "内存",
-      running: "运行状态"
+      running: "运行状态",
+      runningYes: "运行中",
+      runningNo: "已停止"
     },
     backup: {
       title: "备份与恢复",

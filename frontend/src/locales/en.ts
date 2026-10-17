@@ -92,12 +92,15 @@ export default {
       host: "Host",
       cpu: "CPU",
       core: "Core",
-      firewall: "Rule software",
+      firewall: "Firewall",
+      systemVersion: "System version",
       uptime: "Uptime",
       startupTime: "Startup time",
       threads: "Threads",
       memory: "Memory",
-      running: "Running"
+      running: "Running",
+      runningYes: "Running",
+      runningNo: "Stopped"
     },
     backup: {
       title: "Backup & Restore",

@@ -2,8 +2,8 @@
   <v-row class="main-info-grid">
     <v-col cols="4" class="main-info-grid__label">{{ $t('main.info.running') }}</v-col>
     <v-col cols="8" class="main-info-grid__value">
-      <v-chip density="compact" color="success" variant="flat" v-if="tilesData?.sbd?.running">{{ $t('yes') }}</v-chip>
-      <v-chip density="compact" color="error" variant="flat" v-else>{{ $t('no') }}</v-chip>
+      <v-chip density="compact" color="success" variant="flat" v-if="tilesData?.sbd?.running">{{ $t('main.info.runningYes') }}</v-chip>
+      <v-chip density="compact" color="error" variant="flat" v-else>{{ $t('main.info.runningNo') }}</v-chip>
       <v-chip density="compact" color="transparent" v-if="tilesData?.sbd?.running && !loading" class="main-info-grid__restart" :disabled="restartDisabled" @click="emit('restart')">
         <v-tooltip activator="parent" location="top">
           {{ $t('actions.restartSb') }}

@@ -92,12 +92,15 @@ export default {
       host: "Máy chủ",
       cpu: "CPU",
       core: "Nhân",
-      firewall: "Phần mềm quy tắc",
+      firewall: "Tường lửa",
+      systemVersion: "Phiên bản hệ thống",
       uptime: "Thời gian hoạt động",
       startupTime: "Thời gian khởi động",
       threads: "Luồng",
       memory: "Bộ nhớ",
-      running: "Đang chạy"
+      running: "Trạng thái",
+      runningYes: "Đang chạy",
+      runningNo: "Đã dừng"
     },
     backup: {
       title: "Sao lưu và khôi phục",

@@ -34,6 +34,7 @@ import (
 
 const httpProxyTestUser = "test"
 const httpProxyTestPassword = "proxy-test-password"
+const http2ExtendedConnectUnavailableMessage = "Go 1.27+ requires the badlinkname build tag"
 
 type httpProxyTestTLS struct {
 	certificatePath string
@@ -517,6 +518,9 @@ func assertHTTPProxyRoundTrip(t *testing.T, proxy adapter.Outbound, server *Box,
 	udpDestination := socksaddrForTest(t, echo.udpAddress.String())
 	packetConn, err := proxy.ListenPacket(ctx, udpDestination)
 	if err != nil {
+		if version == 2 && strings.Contains(err.Error(), http2ExtendedConnectUnavailableMessage) {
+			t.Skipf("HTTP/2 CONNECT-UDP is not included in this test build: %v", err)
+		}
 		t.Fatalf("%s CONNECT-UDP setup failed: %v", label, err)
 	}
 	defer packetConn.Close()

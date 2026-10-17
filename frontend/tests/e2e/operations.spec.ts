@@ -92,6 +92,22 @@ async function expectDialogInsideViewport(page: Page, dialog: Locator) {
   expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height + 1)
 }
 
+test('home uses clear placeholders when system metadata is unavailable', async ({ page }) => {
+  await installAppBase(page, () => loadData())
+  await page.route('**/api/status**', route => fulfillJson(route, { sys: {}, sbd: { running: false } }))
+  await page.route('**/api/maintenance-status', route => fulfillJson(route, { enabled: false, transitioning: false }))
+
+  await page.goto('/app/')
+
+  const systemTile = page.locator('.main-tile').filter({ hasText: '系统信息' })
+  await expect(systemTile.locator('.main-info-grid__value')).toHaveText(['-', '-', '-', '-', '-', '-'])
+  await expect(page.locator('.main-hero__status-row').filter({ hasText: '运行时间' }).locator('.main-hero__status-row-value')).toHaveText('-')
+  await expect(page.locator('.main-hero__status-row').filter({ hasText: '防火墙' }).locator('.main-hero__status-row-value')).toHaveText('无')
+  await expect(page.locator('.main-hero__status-row').filter({ hasText: '运行状态' }).locator('.main-hero__status-row-value')).toHaveText('已停止')
+  const runtimeTile = page.locator('.main-tile').filter({ hasText: '运行信息' })
+  await expect(runtimeTile.locator('.main-info-grid__value').first()).toHaveText('已停止')
+})
+
 test('subscription hiding saves its flag and updates the inbound list without restarting the service', async ({ page }) => {
   let inbounds = [inbound]
   let preflightInbound: Record<string, unknown> | undefined
@@ -136,7 +152,7 @@ test('subscription hiding saves its flag and updates the inbound list without re
 
   await page.goto('/app/')
   const runtimeRow = page.locator('.main-hero__status-row').filter({ hasText: '运行状态' })
-  await expect(runtimeRow.locator('.main-hero__status-row-value')).toHaveText('确认')
+  await expect(runtimeRow.locator('.main-hero__status-row-value')).toHaveText('运行中')
   expect(restartCalls).toBe(0)
 })
 

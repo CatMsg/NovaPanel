@@ -92,12 +92,15 @@ export default {
       host: "主機",
       cpu: "CPU",
       core: "核心",
-      firewall: "規則軟體",
+      firewall: "防火牆",
+      systemVersion: "系統版本",
       uptime: "運行時間",
       startupTime: "啟動時間",
       threads: "線程",
       memory: "內存",
-      running: "運行狀態"
+      running: "運行狀態",
+      runningYes: "運行中",
+      runningNo: "已停止"
     },
     backup: {
       title: "備份與恢復",

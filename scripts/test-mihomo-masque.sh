@@ -28,8 +28,7 @@ if [[ -z "${NOVAPANEL_MIHOMO_TEST_BINARY:-}" ]]; then
   export NOVAPANEL_MIHOMO_TEST_BINARY="$temporary/mihomo"
 fi
 
-GOMAXPROCS=2 go test -mod=readonly -race -p 2 \
-  -tags 'with_quic,badlinkname,tfogo_checklinkname0' -ldflags='-checklinkname=0' \
+GOMAXPROCS=2 bash ./scripts/go-test-sing-box.sh -mod=readonly -race -p 2 \
   ./core ./service ./sub \
   -run '^(TestManagedMASQUEMihomo.*|TestMASQUEMihomo.*)$' \
   -count=1 -timeout=120s -v | tee "$temporary/result.log"

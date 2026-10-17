@@ -134,8 +134,14 @@ GOTOOLCHAIN=go1.26.9 go test -mod=readonly \
 GOTOOLCHAIN=go1.26.9 go run -mod=readonly ./scripts/verify-sing-box.go \
   --source /absolute/path/to/extracted/archive/third_party/sing-box
 GOTOOLCHAIN=go1.26.9 GOMAXPROCS=2 \
-  GOFLAGS='-p=2 -ldflags=-checklinkname=0' bash ./scripts/test-sing-box-race.sh
+  bash ./scripts/test-sing-box-race.sh
 ```
+
+The test wrapper `scripts/go-test-sing-box.sh` supplies the QUIC and
+linkname-compatible tags required for the full feature suite. The ordinary
+`go test ./core` command remains useful on Go 1.27: tests for optional H2
+CONNECT-UDP support skip when that build tag is absent, while the tagged race
+gate requires the H2 and H3 cases to pass.
 
 Tests cover the real pinned ZIP and checksums, exact patch replay, altered
 baseline/patched hashes, artifact tampering, unknown/reordered allowlists,

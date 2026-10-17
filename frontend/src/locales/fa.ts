@@ -92,12 +92,15 @@ export default {
       host: "نام",
       cpu: "پردازنده",
       core: "هسته",
-      firewall: "نرم‌افزار قوانین",
+      firewall: "فایروال",
+      systemVersion: "نسخه سیستم",
       uptime: "مدت‌",
       startupTime: "زمان راه‌اندازی",
       threads: "نخ‌ها",
       memory: "حافظه",
-      running: "اجرا"
+      running: "وضعیت اجرا",
+      runningYes: "در حال اجرا",
+      runningNo: "متوقف"
     },
     backup: {
       title: "پشتیبان‌گیری و بازیابی",

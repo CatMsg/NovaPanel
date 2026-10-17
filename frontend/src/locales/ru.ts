@@ -92,12 +92,15 @@ export default {
       host: "Хост",
       cpu: "ЦП",
       core: "Ядро",
-      firewall: "Правила сети",
+      firewall: "Брандмауэр",
+      systemVersion: "Версия системы",
       uptime: "Время работы",
       startupTime: "Время запуска",
       threads: "Потоки",
       memory: "Память",
-      running: "Работает"
+      running: "Состояние",
+      runningYes: "Работает",
+      runningNo: "Остановлено"
     },
     backup: {
       title: "Резервное копирование и восстановление",

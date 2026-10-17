@@ -8,4 +8,11 @@ if [[ -z "${packages}" ]]; then
   exit 1
 fi
 
-printf '%s\n' "${packages}" | xargs go test
+core_package="$(go list ./core)"
+other_packages="$(printf '%s\n' "${packages}" | grep -Fvx "${core_package}" || true)"
+
+if [[ -n "${other_packages}" ]]; then
+  printf '%s\n' "${other_packages}" | xargs go test -mod=readonly
+fi
+
+bash ./scripts/go-test-sing-box.sh -mod=readonly "${core_package}"

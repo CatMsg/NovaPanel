@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/op/go-logging"
@@ -12,7 +13,7 @@ import (
 var (
 	// CLI commands can use service code before the application configures its
 	// final backend. Keep the package logger valid during that bootstrap phase.
-	logger    = logging.MustGetLogger("novas")
+	logger    atomic.Pointer[logging.Logger]
 	logBuffer []struct {
 		time  string
 		level logging.Level
@@ -20,6 +21,10 @@ var (
 	}
 	logBufferMu sync.RWMutex
 )
+
+func init() {
+	logger.Store(logging.MustGetLogger("novas"))
+}
 
 func InitLogger(level logging.Level) {
 	newLogger := logging.MustGetLogger("novas")
@@ -54,40 +59,40 @@ func InitLogger(level logging.Level) {
 	backendLeveled.SetLevel(level, "novas")
 	newLogger.SetBackend(backendLeveled)
 
-	logger = newLogger
+	logger.Store(newLogger)
 }
 
 func GetLogger() *logging.Logger {
-	return logger
+	return logger.Load()
 }
 
 func Debug(args ...interface{}) {
-	logger.Debug(args...)
+	GetLogger().Debug(args...)
 	addToBuffer("DEBUG", fmt.Sprint(args...))
 }
 
 func Debugf(format string, args ...interface{}) {
-	logger.Debugf(format, args...)
+	GetLogger().Debugf(format, args...)
 	addToBuffer("DEBUG", fmt.Sprintf(format, args...))
 }
 
 func Info(args ...interface{}) {
-	logger.Info(args...)
+	GetLogger().Info(args...)
 	addToBuffer("INFO", fmt.Sprint(args...))
 }
 
 func Infof(format string, args ...interface{}) {
-	logger.Infof(format, args...)
+	GetLogger().Infof(format, args...)
 	addToBuffer("INFO", fmt.Sprintf(format, args...))
 }
 
 func Warning(args ...interface{}) {
-	logger.Warning(args...)
+	GetLogger().Warning(args...)
 	addToBuffer("WARNING", fmt.Sprint(args...))
 }
 
 func Warningf(format string, args ...interface{}) {
-	logger.Warningf(format, args...)
+	GetLogger().Warningf(format, args...)
 	addToBuffer("WARNING", fmt.Sprintf(format, args...))
 }
 
@@ -100,12 +105,12 @@ func AuditWarningf(format string, args ...interface{}) {
 }
 
 func Error(args ...interface{}) {
-	logger.Error(args...)
+	GetLogger().Error(args...)
 	addToBuffer("ERROR", fmt.Sprint(args...))
 }
 
 func Errorf(format string, args ...interface{}) {
-	logger.Errorf(format, args...)
+	GetLogger().Errorf(format, args...)
 	addToBuffer("ERROR", fmt.Sprintf(format, args...))
 }
 

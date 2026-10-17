@@ -353,22 +353,39 @@ func TestNativeAcceptanceWorkflowIsolationAndReleaseGates(t *testing.T) {
 					Needs []string
 					If    string
 				}
-				node := workflow.Jobs["build-linux"]
-				if err := node.Decode(&build); err != nil {
+				buildNode := workflow.Jobs["build-linux"]
+				if err := buildNode.Decode(&build); err != nil {
 					t.Fatal(err)
 				}
 				if build.If != "" {
 					t.Fatal("release build must not override failed acceptance dependencies")
 				}
-				for _, gate := range []string{"test-fresh-ufw-linux", "test-acme-cron-linux"} {
+				for _, dependency := range build.Needs {
+					if dependency == "test-fresh-ufw-linux" || dependency == "test-acme-cron-linux" {
+						t.Errorf("release build must overlap native acceptance jobs, got dependency %s", dependency)
+					}
+				}
+
+				var publish struct {
+					Needs []string
+					If    string
+				}
+				publishNode := workflow.Jobs["publish-release"]
+				if err := publishNode.Decode(&publish); err != nil {
+					t.Fatal(err)
+				}
+				if publish.If != "" {
+					t.Fatal("release publication must not override failed acceptance dependencies")
+				}
+				for _, gate := range []string{"build-linux", "test-frontend", "test-backend", "test-fresh-ufw-linux", "test-acme-cron-linux"} {
 					found := false
-					for _, dependency := range build.Needs {
+					for _, dependency := range publish.Needs {
 						if dependency == gate {
 							found = true
 						}
 					}
 					if !found {
-						t.Errorf("release build missing required gate %s", gate)
+						t.Errorf("release publication missing required gate %s", gate)
 					}
 				}
 			}
