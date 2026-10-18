@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -253,19 +254,21 @@ func TestFleetInboundRemotePreflightRejectsBusyPortAndRequiresLocalUsers(t *test
 }
 
 func TestFleetInboundRemoteCreateBindsAllLocalUsersAndDoesNotCopyCN2Data(t *testing.T) {
-	_ = testutil.NewManagedPortSandbox(t)
-	initFleetInboundTestDB(t)
-	previousTrafficBlock := trafficBudgetBlocked.Load()
-	trafficBudgetBlocked.Store(true)
-	t.Cleanup(func() { trafficBudgetBlocked.Store(previousTrafficBlock) })
-	active := addFleetInboundTestClient(t, "local-active", true, `{"socks":{"username":"local-active","password":"local-active-secret"}}`)
-	disabled := addFleetInboundTestClient(t, "local-disabled", false, `{"socks":{"username":"local-disabled","password":"local-disabled-secret"}}`)
 	probe, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	port := probe.Addr().(*net.TCPAddr).Port
 	_ = probe.Close()
+	portArg := strconv.Itoa(port)
+	forwardCall := []string{"bash", "scripts/hy2-forward.sh", "apply", "la-socks", portArg, portArg, "tcp"}
+	hostCommands := testutil.NewManagedPortSandbox(t, forwardCall)
+	initFleetInboundTestDB(t)
+	previousTrafficBlock := trafficBudgetBlocked.Load()
+	trafficBudgetBlocked.Store(true)
+	t.Cleanup(func() { trafficBudgetBlocked.Store(previousTrafficBlock) })
+	active := addFleetInboundTestClient(t, "local-active", true, `{"socks":{"username":"local-active","password":"local-active-secret"}}`)
+	disabled := addFleetInboundTestClient(t, "local-disabled", false, `{"socks":{"username":"local-disabled","password":"local-disabled-secret"}}`)
 	request := fleetInboundRequest(t, `{
 		"id":991,"type":"socks","tag":"la-socks","tls_id":88,
 		"listen":"127.0.0.1","listen_port":`+strconv.Itoa(port)+`,
@@ -334,6 +337,13 @@ func TestFleetInboundRemoteCreateBindsAllLocalUsersAndDoesNotCopyCN2Data(t *test
 		if strings.Contains(config, "cn2-") {
 			t.Fatal("CN2 user data was written to target client records")
 		}
+	}
+	wantHostCalls := testutil.ManagedPortRebuildCalls(forwardCall)
+	if testutil.SystemdPresent() {
+		wantHostCalls = append(wantHostCalls, []string{"bash", "scripts/login-guard.sh", "sync", "2095", ""})
+	}
+	if runtime.GOOS == "linux" {
+		hostCommands.AssertCalls(t, wantHostCalls)
 	}
 }
 
