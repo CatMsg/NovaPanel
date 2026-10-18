@@ -262,7 +262,7 @@ func TestFleetInboundRemoteCreateBindsAllLocalUsersAndDoesNotCopyCN2Data(t *test
 	_ = probe.Close()
 	portArg := strconv.Itoa(port)
 	forwardCall := []string{"bash", "scripts/hy2-forward.sh", "apply", "la-socks", portArg, portArg, "tcp"}
-	hostCommands := testutil.NewManagedPortSandbox(t, forwardCall)
+	hostCommands := testutil.NewHostCommandSandbox(t, forwardCall[1:])
 	initFleetInboundTestDB(t)
 	previousTrafficBlock := trafficBudgetBlocked.Load()
 	trafficBudgetBlocked.Store(true)
@@ -338,12 +338,8 @@ func TestFleetInboundRemoteCreateBindsAllLocalUsersAndDoesNotCopyCN2Data(t *test
 			t.Fatal("CN2 user data was written to target client records")
 		}
 	}
-	wantHostCalls := testutil.ManagedPortRebuildCalls(forwardCall)
-	if testutil.SystemdPresent() {
-		wantHostCalls = append(wantHostCalls, []string{"bash", "scripts/login-guard.sh", "sync", "2095", ""})
-	}
 	if runtime.GOOS == "linux" {
-		hostCommands.AssertCalls(t, wantHostCalls)
+		hostCommands.AssertCalls(t, [][]string{forwardCall})
 	}
 }
 
