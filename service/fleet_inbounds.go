@@ -697,18 +697,6 @@ func fleetInboundTLSProfileEnabled(profiles []FleetInboundTLSProfile, id uint) b
 	return false
 }
 
-func fleetInboundTLSFingerprint(profiles []FleetInboundTLSProfile, id uint) string {
-	if id == 0 {
-		return ""
-	}
-	for _, profile := range profiles {
-		if profile.ID == id {
-			return strings.ToLower(strings.TrimSpace(profile.CertificateFingerprint))
-		}
-	}
-	return ""
-}
-
 func decodeFleetInboundPreview(value interface{}) (*PreflightReport, error) {
 	raw, err := json.Marshal(value)
 	if err != nil {
