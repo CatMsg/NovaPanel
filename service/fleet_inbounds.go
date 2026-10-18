@@ -1,8 +1,10 @@
 package service
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -22,6 +24,7 @@ import (
 type FleetInboundTLSProfile struct {
 	ID                     uint     `json:"id"`
 	Name                   string   `json:"name"`
+	ServerEnabled          bool     `json:"serverEnabled"`
 	ServerName             string   `json:"serverName,omitempty"`
 	ACMEDomains            []string `json:"acmeDomains,omitempty"`
 	CertificateFingerprint string   `json:"certificateFingerprint,omitempty"`
@@ -31,6 +34,7 @@ type FleetInboundCapabilities struct {
 	Hostname         string                   `json:"hostname"`
 	SubscriptionHost string                   `json:"subscriptionHost"`
 	TLSProfiles      []FleetInboundTLSProfile `json:"tlsProfiles"`
+	InboundTags      []string                 `json:"inboundTags"`
 }
 
 type FleetInboundTargetInfo struct {
@@ -48,13 +52,12 @@ type FleetInboundTargetSelection struct {
 }
 
 type FleetInboundCreatePlan struct {
-	SourceInboundID uint                          `json:"sourceInboundId"`
-	BaseTag         string                        `json:"baseTag"`
-	Targets         []FleetInboundTargetSelection `json:"targets"`
+	InboundDraft json.RawMessage               `json:"inboundDraft"`
+	Targets      []FleetInboundTargetSelection `json:"targets"`
 }
 
 type FleetInboundRemoteRequest struct {
-	Inbound json.RawMessage `json:"inbound"`
+	InboundDraft json.RawMessage `json:"inboundDraft"`
 }
 
 type FleetInboundRemoteCreated struct {
@@ -102,10 +105,15 @@ func (s *FleetService) LocalFleetInboundCapabilities(hostname string) (*FleetInb
 	for _, tlsConfig := range tlsConfigs {
 		profiles = append(profiles, summarizeFleetInboundTLS(tlsConfig))
 	}
+	var inboundTags []string
+	if err := database.GetDB().Model(&model.Inbound{}).Order("tag ASC").Pluck("tag", &inboundTags).Error; err != nil {
+		return nil, err
+	}
 	return &FleetInboundCapabilities{
 		Hostname:         localHost,
 		SubscriptionHost: subscriptionHost,
 		TLSProfiles:      profiles,
+		InboundTags:      inboundTags,
 	}, nil
 }
 
@@ -115,6 +123,7 @@ func summarizeFleetInboundTLS(tlsConfig model.Tls) FleetInboundTLSProfile {
 	if err := json.Unmarshal(tlsConfig.Server, &server); err != nil {
 		return profile
 	}
+	_ = json.Unmarshal(server["enabled"], &profile.ServerEnabled)
 	_ = json.Unmarshal(server["server_name"], &profile.ServerName)
 	var acme struct {
 		Domain []string `json:"domain"`
@@ -341,12 +350,24 @@ func (s *FleetService) preflightFleetInboundJobs(jobs []fleetInboundJob, results
 }
 
 func (s *FleetService) buildFleetInboundJobs(plan FleetInboundCreatePlan) ([]fleetInboundJob, []FleetInboundTargetResult, error) {
-	if plan.SourceInboundID == 0 {
-		return nil, nil, common.NewError("请选择一个本机入站作为协议配置原型")
+	if !json.Valid(plan.InboundDraft) {
+		return nil, nil, common.NewError("请选择协议并填写有效的全新入站配置")
 	}
-	plan.BaseTag = strings.TrimSpace(plan.BaseTag)
-	if plan.BaseTag == "" {
-		return nil, nil, common.NewError("入站基础名称不能为空")
+	var draft model.Inbound
+	if err := draft.UnmarshalJSON(plan.InboundDraft); err != nil {
+		return nil, nil, fmt.Errorf("解析新入站配置失败: %w", err)
+	}
+	if !fleetInboundProtocolSupported(draft.Type) || !(&InboundService{}).hasUser(draft.Type) {
+		return nil, nil, common.NewErrorf("不支持远程创建 %q 入站", draft.Type)
+	}
+	if draft.Type == "shadowtls" {
+		var options map[string]json.RawMessage
+		_ = json.Unmarshal(draft.Options, &options)
+		var version int
+		_ = json.Unmarshal(options["version"], &version)
+		if version != 3 {
+			return nil, nil, common.NewError("ShadowTLS 仅支持 v3 用户认证模式，才能绑定目标机用户")
+		}
 	}
 	if len(plan.Targets) == 0 {
 		return nil, nil, common.NewError("至少选择一台远端服务器")
@@ -355,17 +376,6 @@ func (s *FleetService) buildFleetInboundJobs(plan FleetInboundCreatePlan) ([]fle
 		return nil, nil, common.NewError("一次最多选择 50 台目标服务器")
 	}
 
-	var source model.Inbound
-	if err := database.GetDB().Preload("Tls").First(&source, plan.SourceInboundID).Error; err != nil {
-		return nil, nil, fmt.Errorf("读取本机入站原型失败: %w", err)
-	}
-	if !(&InboundService{}).hasUser(source.Type) {
-		return nil, nil, common.NewErrorf("入站类型 %s 不能作为代理入站原型", source.Type)
-	}
-	sourcePort, err := getInboundListenPort(&source)
-	if err != nil {
-		return nil, nil, err
-	}
 	configs, err := s.loadFleetServers()
 	if err != nil {
 		return nil, nil, err
@@ -409,7 +419,6 @@ func (s *FleetService) buildFleetInboundJobs(plan FleetInboundCreatePlan) ([]fle
 	capabilityWait.Wait()
 	results := make([]FleetInboundTargetResult, len(plan.Targets))
 	jobs := make([]fleetInboundJob, 0, len(plan.Targets))
-	fingerprintTargets := make(map[string][]int)
 	seen := make(map[string]struct{}, len(plan.Targets))
 	for index, selection := range plan.Targets {
 		id := strings.TrimSpace(selection.ID)
@@ -450,34 +459,32 @@ func (s *FleetService) buildFleetInboundJobs(plan FleetInboundCreatePlan) ([]fle
 
 		port := selection.ListenPort
 		if port == 0 {
-			port = sourcePort
+			port = 20000 + common.RandomInt(40000)
 		}
 		if port < 1 || port > 65535 {
 			results[index].Error = fmt.Sprintf("目标端口 %d 超出有效范围 1-65535", port)
 			continue
 		}
 		tlsID := selection.TLSID
-		if !inboundSupportsTLSProfile(source.Type) || source.Type == "masque" {
+		if !inboundSupportsTLSProfile(draft.Type) || draft.Type == "masque" {
 			tlsID = 0
 		}
-		tlsRequired, tlsErr := fleetInboundTLSRequired(&source)
+		draft.TlsId = 0
+		tlsRequired, tlsErr := fleetInboundTLSRequired(&draft)
 		if tlsErr != nil {
 			results[index].Error = tlsErr.Error()
 			continue
-		}
-		if source.TlsId > 0 && inboundSupportsTLSProfile(source.Type) {
-			tlsRequired = true
 		}
 		if tlsRequired && tlsID == 0 {
 			results[index].Error = "该协议或版本需要 TLS，请为目标服务器选择自己的 TLS 配置"
 			continue
 		}
-		if tlsID > 0 && !fleetInboundTLSProfileExists(capabilities.TLSProfiles, tlsID) {
-			results[index].Error = "所选 TLS 配置不属于目标服务器，请刷新目标列表后重试"
+		if tlsID > 0 && !fleetInboundTLSProfileEnabled(capabilities.TLSProfiles, tlsID) {
+			results[index].Error = "所选 TLS 配置不属于目标服务器或服务端 TLS 未启用，请刷新目标列表后重试"
 			continue
 		}
-		tag := fleetInboundTargetTagForServer(plan.BaseTag, config, nameCounts[normalizedFleetServerName(config.Name)] > 1)
-		payload, payloadErr := buildFleetInboundRemotePayload(&source, capabilities.SubscriptionHost, tag, port, tlsID)
+		tag := fleetInboundTargetTagForProtocol(config, draft.Type, nameCounts[normalizedFleetServerName(config.Name)] > 1, capabilities.InboundTags)
+		payload, payloadErr := buildFleetInboundRemotePayload(plan.InboundDraft, capabilities.SubscriptionHost, tag, port, tlsID)
 		if payloadErr != nil {
 			results[index].Error = payloadErr.Error()
 			continue
@@ -489,105 +496,147 @@ func (s *FleetService) buildFleetInboundJobs(plan FleetInboundCreatePlan) ([]fle
 		}
 		results[index].Tag = tag
 		jobs = append(jobs, fleetInboundJob{config: config, token: token, tag: tag, payload: payload, resultIndex: index})
-		if fingerprint := fleetInboundTLSFingerprint(capabilities.TLSProfiles, tlsID); fingerprint != "" {
-			fingerprintTargets[fingerprint] = append(fingerprintTargets[fingerprint], index)
-		}
-	}
-	invalidFingerprintTargets := make(map[int]struct{})
-	for _, indices := range fingerprintTargets {
-		if len(indices) < 2 {
-			continue
-		}
-		for _, index := range indices {
-			results[index].Error = "所选 TLS 证书与其他目标服务器相同；请为每台服务器配置独立证书"
-			results[index].Success = false
-			invalidFingerprintTargets[index] = struct{}{}
-		}
-	}
-	if len(invalidFingerprintTargets) > 0 {
-		filtered := jobs[:0]
-		for _, job := range jobs {
-			if _, invalid := invalidFingerprintTargets[job.resultIndex]; !invalid {
-				filtered = append(filtered, job)
-			}
-		}
-		jobs = filtered
 	}
 	return jobs, results, nil
 }
 
-func buildFleetInboundRemotePayload(source *model.Inbound, targetHost, targetTag string, listenPort int, tlsID uint) (FleetInboundRemoteRequest, error) {
-	if source == nil {
-		return FleetInboundRemoteRequest{}, errors.New("missing inbound prototype")
-	}
+func buildFleetInboundRemotePayload(draftJSON json.RawMessage, targetHost, targetTag string, listenPort int, tlsID uint) (FleetInboundRemoteRequest, error) {
 	targetHost = fleetTemplateHostname(targetHost)
 	if targetHost == "" {
 		return FleetInboundRemoteRequest{}, errors.New("目标机订阅域名为空")
 	}
-	full, err := source.MarshalFull()
-	if err != nil {
-		return FleetInboundRemoteRequest{}, err
+	var draft map[string]json.RawMessage
+	if err := json.Unmarshal(draftJSON, &draft); err != nil {
+		return FleetInboundRemoteRequest{}, fmt.Errorf("解析新入站配置失败: %w", err)
 	}
-	data := *full
-	delete(data, "id")
-	delete(data, "tls")
-	data["type"] = source.Type
-	data["tag"] = targetTag
-	data["tls_id"] = tlsID
-	data["out_json"] = map[string]interface{}{}
-	if _, exists := data["listen_port"]; exists {
-		data["listen_port"] = listenPort
+	var inboundType string
+	if err := json.Unmarshal(draft["type"], &inboundType); err != nil || !fleetInboundProtocolSupported(inboundType) {
+		return FleetInboundRemoteRequest{}, common.NewError("远程新建协议类型无效或不受支持")
 	}
-	addrs, err := buildFleetInboundAddresses(source.Addrs, targetHost, listenPort)
-	if err != nil {
-		return FleetInboundRemoteRequest{}, err
+	if strings.TrimSpace(targetTag) == "" || listenPort < 1 || listenPort > 65535 {
+		return FleetInboundRemoteRequest{}, common.NewError("目标入站名称或监听端口无效")
 	}
-	data["addrs"] = addrs
-	if source.Type == "masque" {
-		data["server"] = targetHost
-		delete(data, "address")
-		data["tls_id"] = 0
+
+	data := map[string]json.RawMessage{
+		"type":             mustMarshalRaw(inboundType),
+		"tag":              mustMarshalRaw(targetTag),
+		"listen":           mustMarshalRaw("::"),
+		"listen_port":      mustMarshalRaw(listenPort),
+		"tls_id":           mustMarshalRaw(tlsID),
+		"exclude_from_sub": mustMarshalRaw(false),
+		"addrs":            mustMarshalRaw([]map[string]interface{}{{"server": targetHost, "server_port": listenPort}}),
+	}
+	for _, key := range fleetInboundDraftOptionKeys(inboundType) {
+		if value, exists := draft[key]; exists {
+			data[key] = append(json.RawMessage(nil), value...)
+		}
+	}
+	if inboundType == "shadowsocks" {
+		delete(data, "password")
+	}
+	if inboundType == "hysteria" {
+		var obfs string
+		if err := json.Unmarshal(draft["obfs"], &obfs); err == nil && strings.TrimSpace(obfs) != "" {
+			data["obfs"] = mustMarshalRaw(fleetGenerateSecretMarker)
+		} else {
+			delete(data, "obfs")
+		}
+	}
+	if inboundType == "hysteria2" {
+		var obfs map[string]json.RawMessage
+		if err := json.Unmarshal(draft["obfs"], &obfs); err == nil {
+			var obfsType string
+			_ = json.Unmarshal(obfs["type"], &obfsType)
+			if obfsType == "salamander" {
+				data["obfs"] = mustMarshalRaw(map[string]string{"type": obfsType, "password": fleetGenerateSecretMarker})
+			} else {
+				delete(data, "obfs")
+			}
+		}
+	}
+	if inboundType == "masque" {
+		data["server"] = mustMarshalRaw(targetHost)
+		data["version"] = mustMarshalRaw([]int{3})
+		data["system"] = mustMarshalRaw(false)
 	}
 	raw, err := json.Marshal(data)
 	if err != nil {
 		return FleetInboundRemoteRequest{}, err
 	}
-	return FleetInboundRemoteRequest{Inbound: raw}, nil
+	return FleetInboundRemoteRequest{InboundDraft: raw}, nil
 }
 
-func buildFleetInboundAddresses(raw json.RawMessage, targetHost string, targetPort int) ([]map[string]interface{}, error) {
-	var addresses []map[string]interface{}
-	if len(raw) > 0 && string(raw) != "null" {
-		if err := json.Unmarshal(raw, &addresses); err != nil {
-			return nil, fmt.Errorf("解析原型入站地址失败: %w", err)
+func fleetInboundDraftOptionKeys(inboundType string) []string {
+	common := []string{"network", "tcp_fast_open", "tcp_multi_path", "udp_fragment", "udp_timeout", "detour", "disable_tcp_keep_alive", "tcp_keep_alive", "tcp_keep_alive_interval"}
+	protocol := map[string][]string{
+		"http":        {"version"},
+		"shadowsocks": {"method", "network", "multiplex", "managed", "server_ports", "hop_interval", "hop_interval_max", "disable_chrome_parrot"},
+		"vmess":       {"transport", "multiplex"},
+		"trojan":      {"transport", "multiplex", "fallback"},
+		"naive":       {"quic_congestion_control", "insecure_concurrency", "udp_over_tcp", "extra_headers"},
+		"hysteria":    {"up_mbps", "down_mbps", "obfs", "idle_timeout", "keep_alive_period", "stream_receive_window", "connection_receive_window", "max_concurrent_streams", "initial_packet_size", "disable_path_mtu_discovery"},
+		"shadowtls":   {"version", "handshake", "handshake_for_server_name", "strict_mode", "wildcard_sni"},
+		"tuic":        {"congestion_control", "auth_timeout", "zero_rtt_handshake", "heartbeat"},
+		"hysteria2":   {"up_mbps", "down_mbps", "obfs", "ignore_client_bandwidth", "masquerade", "bbr_profile", "idle_timeout", "keep_alive_period", "stream_receive_window", "connection_receive_window", "max_concurrent_streams", "initial_packet_size", "disable_path_mtu_discovery", "brutal_debug"},
+		"vless":       {"transport", "multiplex"},
+		"anytls":      {"padding_scheme"},
+		"mieru":       {"transport", "multiplexing", "handshake_mode", "traffic_pattern", "mtu"},
+		"masque":      {"mihomo_compatible", "path", "mtu"},
+	}
+	return append(common, protocol[inboundType]...)
+}
+
+func mustMarshalRaw(value interface{}) json.RawMessage {
+	raw, _ := json.Marshal(value)
+	return raw
+}
+
+func fleetInboundTargetTagForProtocol(server FleetServer, inboundType string, duplicateName bool, existingTags []string) string {
+	serverPart := fleetInboundTagSlug(server.Name)
+	if serverPart == "" {
+		serverPart = fleetInboundTagSlug(server.ID)
+	}
+	if duplicateName {
+		serverPart += "-" + fleetInboundTagSlug(shortFleetServerID(server.ID))
+	}
+	protocolPart := inboundType
+	if inboundType == "hysteria" {
+		protocolPart = "hy"
+	} else if inboundType == "hysteria2" {
+		protocolPart = "hy2"
+	} else if inboundType == "shadowsocks" {
+		protocolPart = "ss"
+	}
+	base := strings.Trim(strings.Join([]string{serverPart, protocolPart}, "-"), "-")
+	used := make(map[string]struct{}, len(existingTags))
+	for _, tag := range existingTags {
+		used[strings.ToLower(strings.TrimSpace(tag))] = struct{}{}
+	}
+	if _, exists := used[strings.ToLower(base)]; !exists {
+		return base
+	}
+	for suffix := 2; suffix < 10000; suffix++ {
+		candidate := fmt.Sprintf("%s-%d", base, suffix)
+		if _, exists := used[strings.ToLower(candidate)]; !exists {
+			return candidate
 		}
 	}
-	if len(addresses) == 0 {
-		return []map[string]interface{}{{"server": targetHost, "server_port": targetPort}}, nil
-	}
-	for _, address := range addresses {
-		address["server"] = targetHost
-		address["server_port"] = targetPort
-		delete(address, "tls")
-	}
-	return addresses, nil
+	return fmt.Sprintf("%s-%s", base, common.Random(6))
 }
 
-func fleetInboundTargetTag(baseTag, serverName string) string {
-	baseTag = strings.TrimSpace(baseTag)
-	serverName = strings.Join(strings.Fields(strings.TrimSpace(serverName)), " ")
-	if baseTag == "" || serverName == "" {
-		return ""
+func fleetInboundTagSlug(value string) string {
+	var result strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(strings.TrimSpace(value)) {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			result.WriteRune(r)
+			lastDash = false
+		} else if !lastDash && result.Len() > 0 {
+			result.WriteByte('-')
+			lastDash = true
+		}
 	}
-	return fmt.Sprintf("%s [%s]", baseTag, serverName)
-}
-
-func fleetInboundTargetTagForServer(baseTag string, server FleetServer, duplicateName bool) string {
-	tag := fleetInboundTargetTag(baseTag, server.Name)
-	if duplicateName {
-		tag += " {" + shortFleetServerID(server.ID) + "}"
-	}
-	return tag
+	return strings.Trim(result.String(), "-")
 }
 
 func normalizedFleetServerName(name string) string {
@@ -603,6 +652,15 @@ func shortFleetServerID(id string) string {
 	return id
 }
 
+func fleetInboundProtocolSupported(inboundType string) bool {
+	switch inboundType {
+	case "mixed", "socks", "http", "shadowsocks", "vmess", "trojan", "naive", "hysteria", "shadowtls", "tuic", "hysteria2", "vless", "anytls", "mieru", "masque":
+		return true
+	default:
+		return false
+	}
+}
+
 func inboundSupportsTLSProfile(inboundType string) bool {
 	switch inboundType {
 	case "http", "vmess", "trojan", "naive", "hysteria", "tuic", "hysteria2", "vless", "anytls":
@@ -614,7 +672,7 @@ func inboundSupportsTLSProfile(inboundType string) bool {
 
 func fleetInboundTLSRequired(inbound *model.Inbound) (bool, error) {
 	if inbound == nil {
-		return false, errors.New("missing inbound prototype")
+		return false, errors.New("missing inbound draft")
 	}
 	switch inbound.Type {
 	case "hysteria", "hysteria2", "tuic", "naive", "anytls":
@@ -630,10 +688,10 @@ func fleetInboundTLSRequired(inbound *model.Inbound) (bool, error) {
 	}
 }
 
-func fleetInboundTLSProfileExists(profiles []FleetInboundTLSProfile, id uint) bool {
+func fleetInboundTLSProfileEnabled(profiles []FleetInboundTLSProfile, id uint) bool {
 	for _, profile := range profiles {
 		if profile.ID == id {
-			return true
+			return profile.ServerEnabled
 		}
 	}
 	return false
@@ -675,18 +733,177 @@ func fleetInboundPreflightError(preview *PreflightReport) string {
 	return "目标机预检未通过"
 }
 
-func FleetInboundRemotePreflight(data json.RawMessage, hostname string) (*PreflightReport, error) {
+const fleetGenerateSecretMarker = "__generate_per_target__"
+
+func prepareFleetInboundRemotePayloadForTarget(data json.RawMessage, hostname string) (json.RawMessage, string, int, error) {
 	if !json.Valid(data) {
-		return nil, common.NewError("入站配置不是有效 JSON")
+		return nil, "", 0, common.NewError("新入站配置不是有效 JSON")
 	}
-	report, err := (&ConfigService{}).PreflightSave("inbounds", "new", data, "", hostname)
+	var request FleetInboundRemoteRequest
+	if err := json.Unmarshal(data, &request); err != nil || !json.Valid(request.InboundDraft) {
+		return nil, "", 0, common.NewError("远程创建请求缺少有效的新入站配置")
+	}
+	var inbound model.Inbound
+	if err := inbound.UnmarshalJSON(request.InboundDraft); err != nil {
+		return nil, "", 0, err
+	}
+	if !fleetInboundProtocolSupported(inbound.Type) || !(&InboundService{}).hasUser(inbound.Type) {
+		return nil, "", 0, common.NewError("目标机不支持该代理入站类型")
+	}
+	port, err := getInboundListenPort(&inbound)
+	if err != nil {
+		return nil, "", 0, err
+	}
+	if strings.TrimSpace(inbound.Tag) == "" {
+		return nil, "", 0, common.NewError("目标入站名称不能为空")
+	}
+	if !inboundSupportsTLSProfile(inbound.Type) || inbound.Type == "masque" {
+		inbound.TlsId = 0
+	}
+	tlsRequired, err := fleetInboundTLSRequired(&inbound)
+	if err != nil {
+		return nil, "", 0, err
+	}
+	if tlsRequired && inbound.TlsId == 0 {
+		return nil, "", 0, common.NewError("该协议或版本需要 TLS，请选择目标服务器本地且已启用服务端 TLS 的配置")
+	}
+	if inbound.TlsId > 0 {
+		var tlsConfig model.Tls
+		if err := database.GetDB().First(&tlsConfig, inbound.TlsId).Error; err != nil {
+			return nil, "", 0, common.NewError("所选 TLS 配置不存在于目标服务器")
+		}
+		if !summarizeFleetInboundTLS(tlsConfig).ServerEnabled {
+			return nil, "", 0, common.NewError("目标服务器所选 TLS 配置未启用服务端 TLS")
+		}
+	}
+	if inbound.Type == "shadowtls" {
+		var options map[string]json.RawMessage
+		_ = json.Unmarshal(inbound.Options, &options)
+		var version int
+		_ = json.Unmarshal(options["version"], &version)
+		if version != 3 {
+			return nil, "", 0, common.NewError("ShadowTLS 仅支持 v3 用户认证模式，才能绑定目标机用户")
+		}
+	}
+	capabilities, err := (&FleetService{}).LocalFleetInboundCapabilities(hostname)
+	if err != nil {
+		return nil, "", 0, fmt.Errorf("读取目标机本地订阅域名失败: %w", err)
+	}
+	clean, err := buildFleetInboundRemotePayload(request.InboundDraft, capabilities.SubscriptionHost, inbound.Tag, port, inbound.TlsId)
+	if err != nil {
+		return nil, "", 0, err
+	}
+	var targetInbound model.Inbound
+	if err := targetInbound.UnmarshalJSON(clean.InboundDraft); err != nil {
+		return nil, "", 0, err
+	}
+	if err := prepareFleetInboundTargetSecrets(&targetInbound); err != nil {
+		return nil, "", 0, err
+	}
+	cleanBytes, err := targetInbound.MarshalFull()
+	if err != nil {
+		return nil, "", 0, err
+	}
+	raw, err := json.Marshal(*cleanBytes)
+	if err != nil {
+		return nil, "", 0, err
+	}
+	var existing model.Inbound
+	if err := database.GetDB().Where("tag = ?", targetInbound.Tag).First(&existing).Error; err == nil {
+		return nil, "", 0, common.NewErrorf("目标机已存在入站名称 %q", targetInbound.Tag)
+	} else if !database.IsNotFound(err) {
+		return nil, "", 0, err
+	}
+	userIDs, enabledUsers, err := fleetLocalInboundUserIDs()
+	if err != nil {
+		return nil, "", 0, err
+	}
+	if enabledUsers == 0 {
+		return nil, "", 0, common.NewError("目标机没有启用用户；为避免创建无认证监听，请先启用至少一个本机用户")
+	}
+	return raw, userIDs, enabledUsers, nil
+}
+
+func prepareFleetInboundTargetSecrets(inbound *model.Inbound) error {
+	if inbound == nil {
+		return errors.New("missing target inbound")
+	}
+	var options map[string]json.RawMessage
+	if err := json.Unmarshal(inbound.Options, &options); err != nil {
+		return err
+	}
+	switch inbound.Type {
+	case "shadowsocks":
+		var method string
+		_ = json.Unmarshal(options["method"], &method)
+		if method == "none" {
+			return common.NewError("远程多用户 Shadowsocks 不支持 none 加密方式")
+		}
+		password := common.Random(32)
+		if strings.HasPrefix(method, "2022") {
+			keyBytes := 32
+			if method == "2022-blake3-aes-128-gcm" {
+				keyBytes = 16
+			}
+			key := make([]byte, keyBytes)
+			if _, err := rand.Read(key); err != nil {
+				return fmt.Errorf("为目标机生成 Shadowsocks 2022 密钥失败: %w", err)
+			}
+			password = base64.StdEncoding.EncodeToString(key)
+		}
+		options["password"] = mustMarshalRaw(password)
+	case "hysteria":
+		var obfs string
+		_ = json.Unmarshal(options["obfs"], &obfs)
+		if obfs == fleetGenerateSecretMarker {
+			options["obfs"] = mustMarshalRaw(common.Random(32))
+		}
+	case "hysteria2":
+		var obfs map[string]json.RawMessage
+		if err := json.Unmarshal(options["obfs"], &obfs); err == nil && len(obfs) > 0 {
+			var obfsType, password string
+			_ = json.Unmarshal(obfs["type"], &obfsType)
+			_ = json.Unmarshal(obfs["password"], &password)
+			if obfsType == "salamander" && password == fleetGenerateSecretMarker {
+				obfs["password"] = mustMarshalRaw(common.Random(32))
+				options["obfs"], _ = json.Marshal(obfs)
+			}
+		}
+	}
+	inbound.Options, _ = json.Marshal(options)
+	return nil
+}
+
+func fleetLocalInboundUserIDs() (string, int, error) {
+	var clients []model.Client
+	if err := database.GetDB().Select("id", "enable").Order("id ASC").Find(&clients).Error; err != nil {
+		return "", 0, err
+	}
+	ids := make([]string, 0, len(clients))
+	enabled := 0
+	for _, client := range clients {
+		ids = append(ids, strconv.FormatUint(uint64(client.Id), 10))
+		if client.Enable {
+			enabled++
+		}
+	}
+	return strings.Join(ids, ","), enabled, nil
+}
+
+func FleetInboundRemotePreflight(data json.RawMessage, hostname string) (*PreflightReport, error) {
+	normalized, userIDs, enabledUsers, err := prepareFleetInboundRemotePayloadForTarget(data, hostname)
+	if err != nil {
+		return nil, err
+	}
+	report, err := (&ConfigService{}).PreflightSave("inbounds", "new", normalized, userIDs, hostname)
 	if err != nil || report == nil || !report.Valid {
 		return report, err
 	}
 	var inbound model.Inbound
-	if err := inbound.UnmarshalJSON(data); err != nil {
+	if err := inbound.UnmarshalJSON(normalized); err != nil {
 		return nil, err
 	}
+	report.Checks = append(report.Checks, PreflightCheck{Name: "目标机用户绑定", Status: "ok", Detail: fmt.Sprintf("将绑定目标机全部用户（%d 个启用用户）；未复制 CN2 用户或凭据", enabledUsers)})
 	if err := checkFleetInboundListenPort(&inbound); err != nil {
 		report.Valid = false
 		report.Checks = append(report.Checks, PreflightCheck{Name: "目标机监听端口", Status: "error", Detail: err.Error()})
@@ -736,17 +953,18 @@ func checkFleetInboundListenPort(inbound *model.Inbound) error {
 }
 
 func FleetInboundRemoteCreate(data json.RawMessage, username, hostname string) (FleetInboundRemoteCreated, error) {
-	if !json.Valid(data) {
-		return FleetInboundRemoteCreated{}, common.NewError("入站配置不是有效 JSON")
+	normalized, userIDs, _, err := prepareFleetInboundRemotePayloadForTarget(data, hostname)
+	if err != nil {
+		return FleetInboundRemoteCreated{}, err
 	}
-	report, err := FleetInboundRemotePreflight(data, hostname)
+	report, err := FleetInboundRemotePreflight(mustMarshalRaw(FleetInboundRemoteRequest{InboundDraft: normalized}), hostname)
 	if err != nil || report == nil || !report.Valid {
 		if err == nil {
 			err = errors.New(fleetInboundPreflightError(report))
 		}
 		return FleetInboundRemoteCreated{}, fmt.Errorf("目标机预检未通过: %w", err)
 	}
-	_, changed, err := (&ConfigService{}).Save("inbounds", "new", data, "", username, hostname)
+	_, changed, err := (&ConfigService{}).Save("inbounds", "new", normalized, userIDs, username, hostname)
 	if err != nil {
 		return FleetInboundRemoteCreated{}, err
 	}
@@ -756,7 +974,7 @@ func FleetInboundRemoteCreate(data json.RawMessage, username, hostname string) (
 	var request struct {
 		Tag string `json:"tag"`
 	}
-	if err := json.Unmarshal(data, &request); err != nil || strings.TrimSpace(request.Tag) == "" {
+	if err := json.Unmarshal(normalized, &request); err != nil || strings.TrimSpace(request.Tag) == "" {
 		return FleetInboundRemoteCreated{}, common.NewError("已保存入站，但无法读取返回标签")
 	}
 	var inbound model.Inbound

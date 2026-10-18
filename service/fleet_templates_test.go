@@ -82,12 +82,9 @@ func TestApplyFleetTemplateFailurePreservesPostCommitOperations(t *testing.T) {
 		// MASQUE's first SyncFromDB is after template commit and port rebuild.
 		// No MASQUE inbound or listener is started.
 		writeErr := db.Transaction(func(writeTx *gorm.DB) error {
-			var committed model.Client
-			if err := writeTx.First(&committed, client.Id).Error; err != nil {
-				return err
-			}
-			if committed.Desc != "template intent" {
-				return errors.New("fixture did not reach the committed template")
+			var committed model.Outbound
+			if err := writeTx.Where("tag = ?", "failed-new-outbound").First(&committed).Error; err != nil {
+				return errors.New("fixture did not reach the committed template outbound")
 			}
 			if err := writeTx.Model(&model.Client{}).Where("id = ?", client.Id).Updates(map[string]interface{}{
 				"up": gorm.Expr("up + 7"), "down": gorm.Expr("down + 11"), "history": liveHistory,
@@ -107,12 +104,8 @@ func TestApplyFleetTemplateFailurePreservesPostCommitOperations(t *testing.T) {
 	t.Cleanup(func() { db.Callback().Query().Remove(callback) })
 	template := FleetTemplate{
 		FormatVersion: fleetTemplateFormatVersion,
-		Sections:      FleetTemplateSections{Clients: true, Outbounds: true},
-		Clients: []model.Client{
-			{Name: client.Name, Enable: false, Config: json.RawMessage(`{}`), Inbounds: json.RawMessage(`[]`), Desc: "template intent"},
-			{Name: "failed-new-user", Enable: true, Config: json.RawMessage(`{}`), Inbounds: json.RawMessage(`[]`)},
-		},
-		Outbounds: []FleetTemplateOutbound{{Type: "direct", Tag: "failed-new-outbound", Options: json.RawMessage(`{}`)}},
+		Sections:      FleetTemplateSections{Outbounds: true},
+		Outbounds:     []FleetTemplateOutbound{{Type: "direct", Tag: "failed-new-outbound", Options: json.RawMessage(`{}`)}},
 	}
 	err := (&ConfigService{}).ApplyFleetTemplate(template, "localhost")
 	if !injectedOnce || err == nil || !strings.Contains(err.Error(), injected.Error()) || !strings.Contains(err.Error(), "目标服务器已恢复旧配置") {
@@ -236,12 +229,9 @@ func TestApplyFleetTemplateCoreStartFailureRestoresRealCoreAndPostCommitOperatio
 		// This callback only records post-commit operations. The failure comes
 		// from Core.Start opening a missing temporary TLS certificate, not a hook.
 		tx.AddError(db.Transaction(func(writeTx *gorm.DB) error {
-			var committed model.Client
-			if err := writeTx.First(&committed, client.Id).Error; err != nil {
-				return err
-			}
-			if committed.Desc != "template intent" {
-				return errors.New("fixture did not reach the committed template")
+			var committed model.Outbound
+			if err := writeTx.Where("tag = ?", "failed-core-outbound").First(&committed).Error; err != nil {
+				return errors.New("fixture did not reach the committed template outbound")
 			}
 			if err := writeTx.Model(&model.Client{}).Where("id = ?", client.Id).Updates(map[string]interface{}{
 				"up": gorm.Expr("up + 7"), "down": gorm.Expr("down + 11"), "history": liveHistory,
@@ -266,12 +256,8 @@ func TestApplyFleetTemplateCoreStartFailureRestoresRealCoreAndPostCommitOperatio
 	// these options; outbound construction fails before any connection attempt.
 	template := FleetTemplate{
 		FormatVersion: fleetTemplateFormatVersion,
-		Sections:      FleetTemplateSections{Clients: true, Outbounds: true},
-		Clients: []model.Client{
-			{Name: client.Name, Enable: false, Config: json.RawMessage(`{}`), Inbounds: json.RawMessage(`[]`), Desc: "template intent"},
-			{Name: "failed-new-core-user", Enable: true, Config: json.RawMessage(`{}`), Inbounds: json.RawMessage(`[]`)},
-		},
-		Outbounds: []FleetTemplateOutbound{{Type: "http", Tag: "failed-core-outbound", Options: failedOptions}},
+		Sections:      FleetTemplateSections{Outbounds: true},
+		Outbounds:     []FleetTemplateOutbound{{Type: "http", Tag: "failed-core-outbound", Options: failedOptions}},
 	}
 	err = s.ApplyFleetTemplate(template, "localhost")
 	if err == nil || !strings.Contains(err.Error(), "initialize outbound") || !strings.Contains(err.Error(), "read certificate") || !strings.Contains(err.Error(), missingCertificate) || !strings.Contains(err.Error(), "目标服务器已恢复旧配置") || runtimeReads != 2 {
@@ -377,7 +363,9 @@ func TestFleetTemplateSummaryDoesNotExposeTemplatePayload(t *testing.T) {
 		ID:            "template-id",
 		Name:          "production",
 		CreatedAt:     time.Unix(10, 0),
-		Sections:      FleetTemplateSections{Clients: true},
+		Sections:      FleetTemplateSections{Inbounds: true, Clients: true, TLS: true},
+		Inbounds:      []FleetTemplateInbound{{Type: "socks", Tag: "legacy-inbound"}},
+		TLS:           []model.Tls{{Name: "source-tls", Server: json.RawMessage(`{"private_key":"tls-secret"}`)}},
 		Clients: []model.Client{{
 			Name:   "alice",
 			Config: json.RawMessage(`{"vless":{"uuid":"secret-value"}}`),
@@ -391,7 +379,7 @@ func TestFleetTemplateSummaryDoesNotExposeTemplatePayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(raw), "secret-value") || strings.Contains(string(raw), "private-endpoint") {
+	if strings.Contains(string(raw), "secret-value") || strings.Contains(string(raw), "private-endpoint") || strings.Contains(string(raw), "tls-secret") {
 		t.Fatalf("template summary exposed payload: %s", raw)
 	}
 	var fields map[string]json.RawMessage
@@ -403,6 +391,9 @@ func TestFleetTemplateSummaryDoesNotExposeTemplatePayload(t *testing.T) {
 			t.Fatalf("template summary exposed %q payload: %s", key, raw)
 		}
 	}
+	if string(fields["unsafeServerLocalData"]) != "true" {
+		t.Fatalf("template summary should mark legacy server-local data without exposing it: %s", raw)
+	}
 }
 
 func TestCaptureFleetTemplateOutboundsKeepsOptionsAfterStorage(t *testing.T) {
@@ -413,7 +404,7 @@ func TestCaptureFleetTemplateOutboundsKeepsOptionsAfterStorage(t *testing.T) {
 	if err := database.GetDB().Create(&model.Outbound{Type: "socks", Tag: "stream", Options: options}).Error; err != nil {
 		t.Fatal(err)
 	}
-	template, err := (&FleetService{}).CaptureFleetTemplate("streaming", FleetTemplateSections{Outbounds: true}, "la.mile.news", nil)
+	template, err := (&FleetService{}).CaptureFleetTemplate("streaming", FleetTemplateSections{Outbounds: true}, "la.mile.news")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,173 +429,128 @@ func TestCaptureFleetTemplateOutboundsKeepsOptionsAfterStorage(t *testing.T) {
 	}
 }
 
-func TestCaptureFleetTemplateSelectsInboundsAndIncludesOnlyRequiredTLS(t *testing.T) {
+func TestCaptureFleetTemplateRejectsInboundUsersAndTLS(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "fleet-selected-inbounds.db")); err != nil {
 		t.Fatal(err)
 	}
 	db := database.GetDB()
-	tlsRows := []model.Tls{
-		{Name: "selected-cert", Server: json.RawMessage(`{"enabled":true}`)},
-		{Name: "other-cert", Server: json.RawMessage(`{"enabled":true}`)},
+	inbound := model.Inbound{
+		Type: "anytls", Tag: "source-secret-inbound",
+		Options: json.RawMessage(`{"password":"must-not-be-copied"}`),
 	}
-	if err := db.Create(&tlsRows).Error; err != nil {
-		t.Fatalf("create TLS fixtures: %v", err)
+	if err := db.Create(&inbound).Error; err != nil {
+		t.Fatal(err)
 	}
-	inbounds := []model.Inbound{
-		{Type: "vless", Tag: "selected-inbound", TlsId: tlsRows[0].Id, Options: json.RawMessage(`{"listen":"::","listen_port":443}`)},
-		{Type: "trojan", Tag: "unselected-inbound", TlsId: tlsRows[1].Id, Options: json.RawMessage(`{"listen":"::","listen_port":8443}`)},
+	if err := db.Create(&model.Client{
+		Name: "source-user", Enable: true, Config: json.RawMessage(`{"anytls":{"password":"source-user-secret"}}`),
+		Inbounds: json.RawMessage(`[]`), Links: json.RawMessage(`[]`),
+	}).Error; err != nil {
+		t.Fatal(err)
 	}
-	if err := db.Create(&inbounds).Error; err != nil {
-		t.Fatalf("create inbound fixtures: %v", err)
+	if err := db.Create(&model.Tls{
+		Name: "source-cert", Server: json.RawMessage(`{"enabled":true,"private_key":"source-private-key"}`),
+	}).Error; err != nil {
+		t.Fatal(err)
 	}
-	client := model.Client{Name: "bound-to-unselected", Config: json.RawMessage(`{}`), Inbounds: json.RawMessage(`[2]`), Links: json.RawMessage(`[]`)}
-	if err := db.Create(&client).Error; err != nil {
-		t.Fatalf("create client fixture: %v", err)
+	for name, sections := range map[string]FleetTemplateSections{
+		"inbounds": {Inbounds: true},
+		"clients":  {Clients: true},
+		"tls":      {TLS: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := (&FleetService{}).CaptureFleetTemplate(name, sections, "source.example"); err == nil {
+				t.Fatalf("capture with %s section unexpectedly succeeded", name)
+			}
+		})
 	}
-
-	template, err := (&FleetService{}).CaptureFleetTemplate(
-		"one inbound", FleetTemplateSections{Inbounds: true, Clients: true}, "source.example", []uint{inbounds[0].Id},
-	)
+	template, err := (&FleetService{}).CaptureFleetTemplate("safe", FleetTemplateSections{Outbounds: true}, "source.example")
 	if err != nil {
-		t.Fatalf("capture selected inbound: %v", err)
+		t.Fatalf("capture non-inbound template: %v", err)
 	}
-	if len(template.Inbounds) != 1 || template.Inbounds[0].Tag != "selected-inbound" {
-		t.Fatalf("captured inbounds = %#v, want only selected-inbound", template.Inbounds)
+	if template.Sections.Inbounds || template.Sections.Clients || template.Sections.TLS || len(template.Inbounds) != 0 || len(template.Clients) != 0 || len(template.TLS) != 0 {
+		t.Fatalf("safe template copied server-local data: %+v", template)
 	}
-	if len(template.TLS) != 1 || template.TLS[0].Name != "selected-cert" {
-		t.Fatalf("captured TLS dependencies = %#v, want only selected-cert", template.TLS)
+	if strings.Contains(string(mustMarshalRaw(template)), "source-user-secret") || strings.Contains(string(mustMarshalRaw(template)), "source-private-key") || strings.Contains(string(mustMarshalRaw(template)), "must-not-be-copied") {
+		t.Fatal("safe template persisted source inbound, user, or TLS secrets")
 	}
-	if template.TLSRefs[tlsRows[0].Id] != "selected-cert" {
-		t.Fatalf("TLS references = %#v, missing selected-cert", template.TLSRefs)
-	}
-	if template.InboundRefs[inbounds[1].Id] != "unselected-inbound" {
-		t.Fatalf("client inbound references omit unselected source inbound: %#v", template.InboundRefs)
-	}
-	if len(template.Clients) != 1 || template.Clients[0].Name != "bound-to-unselected" {
-		t.Fatalf("captured clients = %#v, want the selected template client", template.Clients)
-	}
-
-	if _, err := (&FleetService{}).CaptureFleetTemplate("empty", FleetTemplateSections{Inbounds: true}, "source.example", []uint{}); err == nil {
-		t.Fatal("capture accepted an empty explicit inbound selection")
-	}
-	if _, err := (&FleetService{}).CaptureFleetTemplate("stale", FleetTemplateSections{Inbounds: true}, "source.example", []uint{9999}); err == nil {
-		t.Fatal("capture accepted an inbound ID that does not exist")
+	stored, err := (&FleetService{}).GetFleetTemplates()
+	if err != nil || len(stored) != 1 || len(stored[0].Inbounds) != 0 {
+		t.Fatalf("stored templates = %#v, err=%v", stored, err)
 	}
 }
 
-func TestFleetTemplatePreservesInboundSubscriptionVisibility(t *testing.T) {
-	commands := testutil.NewManagedPortSandbox(t)
-	if err := database.InitDB(filepath.Join(t.TempDir(), "fleet-inbound-visibility.db")); err != nil {
-		t.Fatal(err)
+func TestFleetTemplateRejectsLegacyServerLocalDataEvenWhenPayloadsAreHidden(t *testing.T) {
+	legacyTemplates := map[string]FleetTemplate{
+		"inbound section":    {FormatVersion: fleetTemplateFormatVersion, Sections: FleetTemplateSections{Inbounds: true}},
+		"inbound payload":    {FormatVersion: fleetTemplateFormatVersion, Inbounds: []FleetTemplateInbound{{Tag: "legacy"}}},
+		"user section":       {FormatVersion: fleetTemplateFormatVersion, Sections: FleetTemplateSections{Clients: true}},
+		"user payload":       {FormatVersion: fleetTemplateFormatVersion, Clients: []model.Client{{Name: "legacy", Config: json.RawMessage(`{"secret":"value"}`)}}},
+		"TLS section":        {FormatVersion: fleetTemplateFormatVersion, Sections: FleetTemplateSections{TLS: true}},
+		"TLS payload":        {FormatVersion: fleetTemplateFormatVersion, TLS: []model.Tls{{Name: "legacy", Server: json.RawMessage(`{"private_key":"value"}`)}}},
+		"inbound references": {FormatVersion: fleetTemplateFormatVersion, InboundRefs: map[uint]string{1: "legacy"}},
+		"TLS references":     {FormatVersion: fleetTemplateFormatVersion, TLSRefs: map[uint]string{1: "legacy"}},
 	}
-	if _, err := (&SettingService{}).GetAllSetting(); err != nil {
+	for name, template := range legacyTemplates {
+		t.Run(name, func(t *testing.T) {
+			if err := validateFleetTemplateNoServerLocalCopy(template); err == nil {
+				t.Fatal("legacy server-local data was allowed in a fleet template")
+			}
+			if _, err := (&ConfigService{}).PreviewFleetTemplate(template, "target.example"); err == nil {
+				t.Fatal("preview accepted legacy server-local data")
+			}
+			if err := (&ConfigService{}).ApplyFleetTemplate(template, "target.example"); err == nil {
+				t.Fatal("apply accepted legacy server-local data")
+			}
+		})
+	}
+}
+
+func TestFleetTemplateRejectsLegacyInboundCopiesWithoutMutatingTarget(t *testing.T) {
+	if err := database.InitDB(filepath.Join(t.TempDir(), "fleet-legacy-inbound.db")); err != nil {
 		t.Fatal(err)
 	}
 	db := database.GetDB()
-	inbounds := []model.Inbound{
-		{
-			Type:           "socks",
-			Tag:            "fleet-hidden-inbound",
-			ExcludeFromSub: true,
-			Addrs:          json.RawMessage(`[]`),
-			OutJson:        json.RawMessage(`{}`),
-			Options:        json.RawMessage(`{"listen":"::","listen_port":1080,"exclude_from_sub":false}`),
-		},
-		{
-			Type:    "socks",
-			Tag:     "fleet-visible-inbound",
-			Addrs:   json.RawMessage(`[]`),
-			OutJson: json.RawMessage(`{}`),
-			Options: json.RawMessage(`{"listen":"::","listen_port":1081}`),
-		},
+	original := model.Inbound{Type: "socks", Tag: "target-original", Options: json.RawMessage(`{"listen":"::","listen_port":1080}`)}
+	if err := db.Create(&original).Error; err != nil {
+		t.Fatal(err)
 	}
-	config := model.Setting{Key: "config", Value: `{"log":{"disabled":true},"route":{"final":"direct"}}`}
-	if err := db.Create(&inbounds).Error; err != nil {
-		t.Fatalf("create test inbound: %v", err)
+	legacy := FleetTemplate{
+		FormatVersion: fleetTemplateFormatVersion,
+		ID:            "legacy-inbound", Name: "Legacy", SourceHost: "source.example",
+		Sections: FleetTemplateSections{Inbounds: true},
+		Inbounds: []FleetTemplateInbound{{
+			Type: "socks", Tag: "target-original", Options: json.RawMessage(`{"listen":"::","listen_port":2080}`),
+		}},
 	}
-	if err := db.Model(&model.Setting{}).Where("key = ?", config.Key).Update("value", config.Value).Error; err != nil {
-		t.Fatalf("create test config: %v", err)
+	if err := (&FleetService{}).saveFleetTemplates([]FleetTemplate{legacy}); err != nil {
+		t.Fatal(err)
 	}
-	template, err := (&FleetService{}).CaptureFleetTemplate("visibility", FleetTemplateSections{Inbounds: true}, "panel.example", nil)
-	if err != nil {
-		t.Fatalf("capture fleet template: %v", err)
+	listed, err := (&FleetService{}).GetFleetTemplates()
+	if err != nil || len(listed) != 1 || listed[0].ID != legacy.ID {
+		t.Fatalf("legacy template should remain listable/deletable: %#v err=%v", listed, err)
 	}
-	assertFleetInboundVisibility := func(stage string, captured []FleetTemplateInbound) {
-		t.Helper()
-		states := make(map[string]bool, len(captured))
-		for _, inbound := range captured {
-			states[inbound.Tag] = inbound.ExcludeFromSub
-		}
-		if len(states) != len(inbounds) || !states["fleet-hidden-inbound"] || states["fleet-visible-inbound"] {
-			t.Fatalf("%s template lost inbound visibility: %+v", stage, captured)
-		}
+	if _, err := (&ConfigService{}).PreviewFleetTemplate(legacy, "target.example"); err == nil {
+		t.Fatal("local preview accepted legacy inbound copy")
 	}
-	assertFleetInboundVisibility("captured", template.Inbounds)
-	if template.FormatVersion != fleetTemplateFormatVersion {
-		t.Fatalf("captured template format version = %d, want %d", template.FormatVersion, fleetTemplateFormatVersion)
-	}
-	if len(template.Inbounds) != len(inbounds) {
-		t.Fatalf("captured %d inbounds, want %d", len(template.Inbounds), len(inbounds))
-	}
-	for _, inbound := range template.Inbounds {
-		if strings.Contains(string(inbound.Options), "exclude_from_sub") {
-			t.Fatalf("panel visibility metadata leaked into template options for %q: %s", inbound.Tag, inbound.Options)
-		}
-	}
-	raw, err := json.Marshal(template)
-	if err != nil {
-		t.Fatalf("marshal fleet template: %v", err)
-	}
-	var decoded FleetTemplate
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		t.Fatalf("unmarshal fleet template: %v", err)
-	}
-	assertFleetInboundVisibility("serialized", decoded.Inbounds)
-	if decoded.FormatVersion != fleetTemplateFormatVersion {
-		t.Fatalf("serialized template format version = %d, want %d", decoded.FormatVersion, fleetTemplateFormatVersion)
-	}
-	var unversioned FleetTemplate
-	if err := json.Unmarshal([]byte(`{"inbounds":[{"id":1,"type":"direct","tag":"unversioned"}]}`), &unversioned); err != nil {
-		t.Fatalf("unmarshal unversioned fleet template: %v", err)
-	}
-	if err := validateFleetTemplateFormat(unversioned); err == nil {
-		t.Fatal("fleet template without a format version must be rejected")
-	}
-	if err := validateFleetTemplateFormat(decoded); err != nil {
-		t.Fatalf("current fleet template format was rejected: %v", err)
-	}
-
-	if err := db.Model(&model.Inbound{}).Where("id = ?", inbounds[0].Id).Update("exclude_from_sub", false).Error; err != nil {
-		t.Fatalf("clear hidden target visibility before apply: %v", err)
-	}
-	if err := db.Model(&model.Inbound{}).Where("id = ?", inbounds[1].Id).Update("exclude_from_sub", true).Error; err != nil {
-		t.Fatalf("set visible target visibility before apply: %v", err)
-	}
-	if err := db.Model(&model.Inbound{}).Where("id = ?", inbounds[0].Id).Update("options", []byte(`{"listen":"::","listen_port":1080,"exclude_from_sub":false}`)).Error; err != nil {
-		t.Fatalf("restore stale panel key before apply: %v", err)
+	if err := (&ConfigService{}).ApplyFleetTemplate(legacy, "target.example"); err == nil {
+		t.Fatal("local apply accepted legacy inbound copy")
 	}
 	if err := db.Transaction(func(tx *gorm.DB) error {
-		return (&ConfigService{}).applyFleetTemplateTx(tx, decoded, "panel.example")
-	}); err != nil {
-		t.Fatalf("apply fleet template: %v", err)
+		return (&ConfigService{}).applyFleetTemplateTx(tx, legacy, "target.example")
+	}); err == nil {
+		t.Fatal("transaction helper accepted legacy inbound copy")
 	}
-	var applied []model.Inbound
-	if err := db.Order("id").Find(&applied).Error; err != nil {
-		t.Fatalf("read applied inbounds: %v", err)
+	legacy.Sections.Inbounds = false
+	if err := validateFleetTemplateNoServerLocalCopy(legacy); err == nil {
+		t.Fatal("legacy inbound payload bypassed rejection when section flag was false")
 	}
-	assertApplied := make(map[string]bool, len(applied))
-	for _, inbound := range applied {
-		assertApplied[inbound.Tag] = inbound.ExcludeFromSub
-		if strings.Contains(string(inbound.Options), "exclude_from_sub") {
-			t.Fatalf("panel visibility metadata persisted in core options for %q: %s", inbound.Tag, inbound.Options)
-		}
+	var current model.Inbound
+	if err := db.First(&current, original.Id).Error; err != nil {
+		t.Fatal(err)
 	}
-	if len(applied) != len(inbounds) || !assertApplied["fleet-hidden-inbound"] || assertApplied["fleet-visible-inbound"] {
-		t.Fatalf("fleet template apply did not restore both visibility states: %+v", applied)
+	if current.Tag != original.Tag || !equalJSONBytes(current.Options, original.Options) {
+		t.Fatalf("rejected legacy template mutated target inbound: %+v", current)
 	}
-	// This test exercises the database transaction helper directly. Host-side
-	// port-forwarding belongs to ApplyFleetTemplate, not applyFleetTemplateTx.
-	commands.AssertCalls(t, nil)
 }
 
 func TestFleetTemplateOutboundPreviewAndMerge(t *testing.T) {
@@ -663,251 +609,92 @@ func TestFleetTemplateOutboundPreviewAndMerge(t *testing.T) {
 }
 
 func TestFleetTemplatePreviewListsInboundTagsForAddAndUpdate(t *testing.T) {
-	_ = testutil.NewManagedPortSandbox(t)
 	if err := database.InitDB(filepath.Join(t.TempDir(), "fleet-inbound-preview.db")); err != nil {
 		t.Fatal(err)
 	}
-	settingService := &SettingService{}
-	if _, err := settingService.GetAllSetting(); err != nil {
-		t.Fatal(err)
-	}
-	db := database.GetDB()
-	if err := db.Model(&model.Setting{}).Where("key = ?", "config").Update("value", `{"log":{"disabled":true},"route":{"final":"direct"}}`).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Create(&model.Inbound{
-		Type: "socks", Tag: "existing-inbound", Options: json.RawMessage(`{"listen":"127.0.0.1","listen_port":1080}`),
-	}).Error; err != nil {
-		t.Fatalf("create existing inbound: %v", err)
-	}
-	template := FleetTemplate{
+	legacy := FleetTemplate{
 		FormatVersion: fleetTemplateFormatVersion,
 		Sections:      FleetTemplateSections{Inbounds: true},
-		Inbounds: []FleetTemplateInbound{
-			{Type: "socks", Tag: "existing-inbound", Options: json.RawMessage(`{"listen":"127.0.0.1","listen_port":1081}`)},
-			{Type: "socks", Tag: "new-inbound", Options: json.RawMessage(`{"listen":"127.0.0.1","listen_port":1082}`)},
-		},
+		Inbounds:      []FleetTemplateInbound{{Type: "socks", Tag: "source-inbound"}},
 	}
-	preview, err := (&ConfigService{}).PreviewFleetTemplate(template, "target.example")
-	if err != nil {
-		t.Fatalf("preview inbound changes: %v", err)
+	if _, err := (&ConfigService{}).PreviewFleetTemplate(legacy, "target.example"); err == nil {
+		t.Fatal("local preview accepted an inbound-copy template")
 	}
-	if preview.InboundAdd != 1 || !reflect.DeepEqual(preview.InboundAddTags, []string{"new-inbound"}) {
-		t.Errorf("inbound additions = count %d tags %#v, want one new-inbound", preview.InboundAdd, preview.InboundAddTags)
+	if _, err := (&FleetService{}).PreviewFleetTemplateTargets("missing", []string{"local"}); err == nil {
+		t.Fatal("missing template unexpectedly previewed")
 	}
-	if preview.InboundUpdate != 1 || !reflect.DeepEqual(preview.InboundUpdateTags, []string{"existing-inbound"}) {
-		t.Errorf("inbound updates = count %d tags %#v, want one existing-inbound", preview.InboundUpdate, preview.InboundUpdateTags)
+	if err := (&FleetService{}).saveFleetTemplates([]FleetTemplate{legacy}); err != nil {
+		t.Fatal(err)
 	}
-	if err := db.Transaction(func(tx *gorm.DB) error {
-		return (&ConfigService{}).applyFleetTemplateTx(tx, template, "target.example")
-	}); err != nil {
-		t.Fatalf("apply template with new inbound: %v", err)
+	if _, err := (&FleetService{}).PreviewFleetTemplateTargets("", []string{"local"}); err == nil {
+		t.Fatal("remote preview accepted a stored legacy inbound template")
 	}
-	var created model.Inbound
-	if err := db.Where("tag = ?", "new-inbound").First(&created).Error; err != nil {
-		t.Fatalf("load new inbound: %v", err)
-	}
-	var out map[string]any
-	if err := json.Unmarshal(created.OutJson, &out); err != nil {
-		t.Fatalf("decode generated outbound config %q: %v", created.OutJson, err)
-	}
-	if out["type"] != "socks" || out["server"] != "target.example" || out["server_port"] != float64(1082) {
-		t.Fatalf("new inbound generated outbound config = %#v", out)
+	if _, err := (&FleetService{}).DeployFleetTemplate(legacy.ID, []string{"local"}, ""); err == nil {
+		t.Fatal("remote deploy accepted a stored legacy inbound template")
 	}
 }
 
 func TestFleetTemplateMergesInboundByOriginalTagWithoutRenaming(t *testing.T) {
-	_ = testutil.NewManagedPortSandbox(t)
 	if err := database.InitDB(filepath.Join(t.TempDir(), "fleet-inbound-template-merge.db")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := (&SettingService{}).GetAllSetting(); err != nil {
-		t.Fatal(err)
-	}
 	db := database.GetDB()
-	if err := db.Model(&model.Setting{}).Where("key = ?", "config").Update("value", `{
-		"log":{"disabled":true},
-		"dns":{"servers":[{"type":"local","tag":"dns-local"}],"final":"dns-local","rules":[{"inbound":["stream"],"action":"route","server":"dns-local"}]},
-		"outbounds":[{"type":"direct","tag":"direct"}],
-		"route":{"rules":[{"inbound":["stream"],"action":"route","outbound":"direct"}],"final":"direct"}
-	}`).Error; err != nil {
-		t.Fatal(err)
-	}
 	inbound := model.Inbound{
-		Type: "socks", Tag: "stream", Addrs: json.RawMessage(`[]`), OutJson: json.RawMessage(`{}`),
+		Type: "socks", Tag: "stream",
 		Options: json.RawMessage(`{"listen":"::","listen_port":1080}`),
 	}
 	if err := db.Create(&inbound).Error; err != nil {
-		t.Fatalf("create existing target inbound: %v", err)
-	}
-	client := model.Client{
-		Enable: true, Name: "fleet-user",
-		Config:   json.RawMessage(`{"socks":{"username":"alice","password":"secret"}}`),
-		Inbounds: json.RawMessage(`[1]`),
-		Links:    json.RawMessage(`[{"remark":"stream","type":"local","uri":"socks5://alice:secret@old.example:1080"}]`),
-		History:  json.RawMessage(`[{"dateTime":1,"domain":"example.com","inbound":"stream"}]`),
-	}
-	client.Inbounds, _ = json.Marshal([]uint{inbound.Id})
-	if err := db.Create(&client).Error; err != nil {
-		t.Fatalf("create client: %v", err)
-	}
-	var storedBindings string
-	if err := db.Raw("SELECT inbounds FROM clients WHERE id = ?", client.Id).Scan(&storedBindings).Error; err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(storedBindings, "1") {
-		t.Fatalf("client inbound assignment = %q, expected inbound id %d", storedBindings, inbound.Id)
-	}
-	if err := db.Create(&model.Stats{DateTime: 1, Resource: "inbound", Tag: "stream", Traffic: 123}).Error; err != nil {
-		t.Fatalf("create inbound stats: %v", err)
-	}
-	clientIDs, err := (&ClientService{}).collectClientIDsByInboundID(db, inbound.Id)
-	if err != nil || len(clientIDs) != 1 || clientIDs[0] != client.Id {
-		t.Fatalf("client lookup by assigned inbound = %v, err=%v; want client %d", clientIDs, err, client.Id)
-	}
-	template := FleetTemplate{
-		FormatVersion: fleetTemplateFormatVersion,
-		SourceHost:    "source.example",
-		Sections:      FleetTemplateSections{Inbounds: true, Route: true, DNS: true},
-		Inbounds: []FleetTemplateInbound{{
-			ID: inbound.Id, Type: "socks", Tag: "stream", Addrs: json.RawMessage(`[]`),
-			Options: json.RawMessage(`{"listen":"::","listen_port":1080}`),
-		}},
-		Config: map[string]json.RawMessage{
-			"dns":   json.RawMessage(`{"servers":[{"type":"local","tag":"dns-local"}],"final":"dns-local","rules":[{"inbound":["stream"],"action":"route","server":"dns-local"}]}`),
-			"route": json.RawMessage(`{"rules":[{"inbound":["stream"],"action":"route","outbound":"direct"}],"final":"direct"}`),
-		},
-	}
-	wantTag := "stream"
-	preview, err := (&ConfigService{}).PreviewFleetTemplate(template, "la.example")
-	if err != nil {
-		t.Fatalf("preview inbound merge: %v", err)
-	}
-	if preview.InboundUpdate != 1 || !reflect.DeepEqual(preview.InboundUpdateTags, []string{wantTag}) {
-		t.Fatalf("inbound preview = %+v, want an update to the original tag %q", preview, wantTag)
-	}
-	apply := func() {
-		t.Helper()
-		if err := db.Transaction(func(tx *gorm.DB) error {
-			return (&ConfigService{}).applyFleetTemplateTx(tx, template, "la.example")
-		}); err != nil {
-			t.Fatalf("apply inbound merge: %v", err)
-		}
-	}
-	apply()
-
-	var savedInbound model.Inbound
-	if err := db.First(&savedInbound, inbound.Id).Error; err != nil {
-		t.Fatal(err)
-	}
-	if savedInbound.Tag != wantTag {
-		t.Fatalf("inbound tag = %q, want %q", savedInbound.Tag, wantTag)
-	}
-	var inboundCount int64
-	if err := db.Model(&model.Inbound{}).Count(&inboundCount).Error; err != nil || inboundCount != 1 {
-		t.Fatalf("inbound count = %d, err=%v; migration must not leave a duplicate", inboundCount, err)
-	}
-	var linksRaw string
-	if err := db.Raw("SELECT links FROM clients WHERE id = ?", client.Id).Scan(&linksRaw).Error; err != nil {
-		t.Fatal(err)
-	}
-	links, err := decodeClientLinks(json.RawMessage(linksRaw))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !hasLinkRemark(links, wantTag) {
-		t.Fatalf("template merge changed the original subscription name: %#v", links)
-	}
-	var historyRaw string
-	if err := db.Raw("SELECT history FROM clients WHERE id = ?", client.Id).Scan(&historyRaw).Error; err != nil {
-		t.Fatal(err)
-	}
-	var history []map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(historyRaw), &history); err != nil {
-		t.Fatal(err)
-	}
-	var historyInbound string
-	if err := json.Unmarshal(history[0]["inbound"], &historyInbound); err != nil || historyInbound != wantTag {
-		t.Fatalf("history inbound = %q, err=%v, want original history tag %q", historyInbound, err, wantTag)
-	}
-	var historyDomain string
-	if err := json.Unmarshal(history[0]["domain"], &historyDomain); err != nil || historyDomain != "example.com" {
-		t.Fatalf("browsing history domain = %q, err=%v; expected original history to remain", historyDomain, err)
-	}
-	var savedStats model.Stats
-	if err := db.Where("resource = ?", "inbound").First(&savedStats).Error; err != nil {
-		t.Fatal(err)
-	}
-	if savedStats.Tag != wantTag || savedStats.Traffic != 123 {
-		t.Fatalf("historical stats = %+v, want original tag %q with traffic preserved", savedStats, wantTag)
-	}
-	var config map[string]json.RawMessage
-	var configSetting model.Setting
-	if err := db.Where("key = ?", "config").First(&configSetting).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal([]byte(configSetting.Value), &config); err != nil {
-		t.Fatal(err)
-	}
-	for key, raw := range map[string]json.RawMessage{"route": config["route"], "dns": config["dns"]} {
-		var decoded interface{}
-		if err := json.Unmarshal(raw, &decoded); err != nil {
-			t.Fatal(err)
-		}
-		encoded, _ := json.Marshal(decoded)
-		if !strings.Contains(string(encoded), `"stream"`) || strings.Contains(string(encoded), "la.example") {
-			t.Errorf("%s inbound reference was unexpectedly renamed: %s", key, encoded)
-		}
-	}
-	preview, err = (&ConfigService{}).PreviewFleetTemplate(template, "la.example")
-	if err != nil {
-		t.Fatalf("preview repeated inbound merge: %v", err)
-	}
-	if preview.InboundUpdate != 1 || !reflect.DeepEqual(preview.InboundUpdateTags, []string{wantTag}) {
-		t.Fatalf("repeated preview = %+v, want an idempotent update of %q", preview, wantTag)
-	}
-	apply()
-	if err := db.Model(&model.Inbound{}).Count(&inboundCount).Error; err != nil || inboundCount != 1 {
-		t.Fatalf("repeated apply created duplicate inbounds: count=%d err=%v", inboundCount, err)
-	}
-}
-
-func TestFleetTemplateApplyGeneratesTargetMasqueIdentity(t *testing.T) {
-	_ = testutil.NewManagedPortSandbox(t)
-	if err := database.InitDB(filepath.Join(t.TempDir(), "fleet-masque-inbound.db")); err != nil {
-		t.Fatal(err)
-	}
-	settingService := &SettingService{}
-	if _, err := settingService.GetAllSetting(); err != nil {
-		t.Fatal(err)
-	}
-	db := database.GetDB()
 	template := FleetTemplate{
 		FormatVersion: fleetTemplateFormatVersion,
 		Sections:      FleetTemplateSections{Inbounds: true},
 		Inbounds: []FleetTemplateInbound{{
-			Type: "masque", Tag: "fleet-masque",
-			Options: json.RawMessage(`{"listen_port":443}`),
+			Type: "socks", Tag: "stream", Options: json.RawMessage(`{"listen":"::","listen_port":2080}`),
 		}},
+	}
+	if err := db.Create(&model.Stats{DateTime: 1, Resource: "inbound", Tag: "stream", Traffic: 123}).Error; err != nil {
+		t.Fatal(err)
 	}
 	if err := db.Transaction(func(tx *gorm.DB) error {
 		return (&ConfigService{}).applyFleetTemplateTx(tx, template, "target.example")
-	}); err != nil {
-		t.Fatalf("apply MASQUE inbound template: %v", err)
+	}); err == nil {
+		t.Fatal("inbound template apply unexpectedly succeeded")
 	}
-	var inbound model.Inbound
-	if err := db.Where("tag = ?", "fleet-masque").First(&inbound).Error; err != nil {
-		t.Fatalf("load MASQUE inbound: %v", err)
+	var stored model.Inbound
+	if err := db.First(&stored, inbound.Id).Error; err != nil {
+		t.Fatal(err)
 	}
-	if inbound.MasqueTLSCertificate == "" || inbound.MasqueTLSKey == "" {
-		t.Fatal("target MASQUE inbound is missing its generated TLS identity")
+	if stored.Tag != inbound.Tag || !equalJSONBytes(stored.Options, inbound.Options) {
+		t.Fatalf("inbound template changed target inbound: %+v", stored)
 	}
-	var out map[string]any
-	if err := json.Unmarshal(inbound.OutJson, &out); err != nil {
-		t.Fatalf("decode generated MASQUE outbound config %q: %v", inbound.OutJson, err)
+	var stats model.Stats
+	if err := db.Where("resource = ?", "inbound").First(&stats).Error; err != nil {
+		t.Fatal(err)
 	}
-	if out["type"] != "masque-client" || out["server"] != "target.example" || out["server_port"] != float64(443) {
-		t.Fatalf("generated MASQUE outbound config = %#v", out)
+	if stats.Tag != "stream" || stats.Traffic != 123 {
+		t.Fatalf("inbound template changed target history: %+v", stats)
+	}
+}
+
+func TestFleetTemplateApplyGeneratesTargetMasqueIdentity(t *testing.T) {
+	if err := database.InitDB(filepath.Join(t.TempDir(), "fleet-masque-inbound.db")); err != nil {
+		t.Fatal(err)
+	}
+	template := FleetTemplate{
+		FormatVersion: fleetTemplateFormatVersion,
+		Sections:      FleetTemplateSections{Inbounds: true},
+		Inbounds:      []FleetTemplateInbound{{Type: "masque", Tag: "fleet-masque"}},
+	}
+	if err := (&ConfigService{}).applyFleetTemplateTx(database.GetDB(), template, "target.example"); err == nil {
+		t.Fatal("configuration template created MASQUE inbound; use target-local remote creation instead")
+	}
+	var count int64
+	if err := database.GetDB().Model(&model.Inbound{}).Where("tag = ?", "fleet-masque").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("template created %d MASQUE inbound records", count)
 	}
 }
 

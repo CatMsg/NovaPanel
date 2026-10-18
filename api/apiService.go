@@ -529,14 +529,7 @@ func (a *ApiService) CaptureFleetTemplate(c *gin.Context) {
 		jsonMsg(c, "save", err)
 		return
 	}
-	var inboundIDs []uint
-	if raw := c.Request.FormValue("inboundIds"); raw != "" {
-		if err := json.Unmarshal([]byte(raw), &inboundIDs); err != nil {
-			jsonMsg(c, "save", err)
-			return
-		}
-	}
-	template, err := a.FleetService.CaptureFleetTemplate(c.Request.FormValue("name"), sections, getHostname(c), inboundIDs)
+	template, err := a.FleetService.CaptureFleetTemplate(c.Request.FormValue("name"), sections, getHostname(c))
 	if err != nil {
 		jsonObj(c, nil, err)
 		return
@@ -608,7 +601,12 @@ func (a *ApiService) PreflightFleetInboundCreate(c *gin.Context) {
 		jsonMsg(c, "preflight", err)
 		return
 	}
-	result, err := service.FleetInboundRemotePreflight(request.Inbound, getHostname(c))
+	data, err := json.Marshal(request)
+	if err != nil {
+		jsonMsg(c, "preflight", err)
+		return
+	}
+	result, err := service.FleetInboundRemotePreflight(data, getHostname(c))
 	jsonObj(c, result, err)
 }
 
@@ -618,7 +616,12 @@ func (a *ApiService) CreateLocalFleetInbound(c *gin.Context, username string) {
 		jsonMsg(c, "create", err)
 		return
 	}
-	result, err := service.FleetInboundRemoteCreate(request.Inbound, username, getHostname(c))
+	data, err := json.Marshal(request)
+	if err != nil {
+		jsonMsg(c, "create", err)
+		return
+	}
+	result, err := service.FleetInboundRemoteCreate(data, username, getHostname(c))
 	jsonObj(c, result, err)
 }
 

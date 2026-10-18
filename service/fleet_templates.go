@@ -12,7 +12,6 @@ import (
 
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
-	"github.com/CatMsg/NovaPanel/util"
 	"github.com/CatMsg/NovaPanel/util/common"
 	"gorm.io/gorm"
 )
@@ -45,18 +44,6 @@ type FleetTemplateOutbound struct {
 	Options json.RawMessage `json:"options,omitempty"`
 }
 
-func sanitizeFleetInboundOptions(options json.RawMessage) (json.RawMessage, error) {
-	if len(options) == 0 {
-		return nil, nil
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(options, &fields); err != nil {
-		return nil, err
-	}
-	delete(fields, "exclude_from_sub")
-	return json.Marshal(fields)
-}
-
 type FleetTemplate struct {
 	FormatVersion int                        `json:"formatVersion"`
 	ID            string                     `json:"id"`
@@ -74,10 +61,11 @@ type FleetTemplate struct {
 }
 
 type FleetTemplateSummary struct {
-	ID        string                `json:"id"`
-	Name      string                `json:"name"`
-	CreatedAt time.Time             `json:"createdAt"`
-	Sections  FleetTemplateSections `json:"sections"`
+	ID                    string                `json:"id"`
+	Name                  string                `json:"name"`
+	CreatedAt             time.Time             `json:"createdAt"`
+	Sections              FleetTemplateSections `json:"sections"`
+	UnsafeServerLocalData bool                  `json:"unsafeServerLocalData"`
 }
 
 type FleetTemplatePreview struct {
@@ -133,6 +121,16 @@ func validateFleetTemplateFormat(template FleetTemplate) error {
 	return nil
 }
 
+func validateFleetTemplateNoServerLocalCopy(template FleetTemplate) error {
+	if template.Sections.Inbounds || len(template.Inbounds) > 0 ||
+		template.Sections.Clients || len(template.Clients) > 0 ||
+		template.Sections.TLS || len(template.TLS) > 0 ||
+		len(template.InboundRefs) > 0 || len(template.TLSRefs) > 0 {
+		return common.NewError("配置模板不能复制来源服务器的入站、用户或 TLS 身份数据；请新建仅包含出站、路由或 DNS 的模板。入站请使用“远程新建入站”，并在目标服务器使用本地用户和 TLS 证书")
+	}
+	return nil
+}
+
 func (s *FleetService) GetFleetTemplateSummaries() ([]FleetTemplateSummary, error) {
 	templates, err := s.GetFleetTemplates()
 	if err != nil {
@@ -147,19 +145,29 @@ func (s *FleetService) GetFleetTemplateSummaries() ([]FleetTemplateSummary, erro
 
 func (t FleetTemplate) Summary() FleetTemplateSummary {
 	return FleetTemplateSummary{
-		ID:        t.ID,
-		Name:      t.Name,
-		CreatedAt: t.CreatedAt,
-		Sections:  t.Sections,
+		ID:                    t.ID,
+		Name:                  t.Name,
+		CreatedAt:             t.CreatedAt,
+		Sections:              t.Sections,
+		UnsafeServerLocalData: t.hasServerLocalData(),
 	}
 }
 
-func (s *FleetService) CaptureFleetTemplate(name string, sections FleetTemplateSections, hostname string, selectedInboundIDs []uint) (*FleetTemplate, error) {
+func (t FleetTemplate) hasServerLocalData() bool {
+	return t.Sections.Inbounds || t.Sections.Clients || t.Sections.TLS ||
+		len(t.Inbounds) > 0 || len(t.Clients) > 0 || len(t.TLS) > 0 ||
+		len(t.InboundRefs) > 0 || len(t.TLSRefs) > 0
+}
+
+func (s *FleetService) CaptureFleetTemplate(name string, sections FleetTemplateSections, hostname string) (*FleetTemplate, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, common.NewError("模板名称不能为空")
 	}
-	if !sections.TLS && !sections.Inbounds && !sections.Outbounds && !sections.Clients && !sections.Route && !sections.DNS {
+	if sections.Inbounds || sections.Clients || sections.TLS {
+		return nil, common.NewError("配置模板仅支持出站、路由和 DNS；入站、用户及 TLS 证书必须在目标服务器本地创建或维护")
+	}
+	if !sections.Outbounds && !sections.Route && !sections.DNS {
 		return nil, common.NewError("至少选择一项配置")
 	}
 
@@ -171,72 +179,8 @@ func (s *FleetService) CaptureFleetTemplate(name string, sections FleetTemplateS
 		CreatedAt:     time.Now(),
 		Sections:      sections,
 		Config:        make(map[string]json.RawMessage),
-		TLSRefs:       make(map[uint]string),
-		InboundRefs:   make(map[uint]string),
 	}
 	db := database.GetDB()
-	if sections.TLS {
-		if err := db.Find(&template.TLS).Error; err != nil {
-			return nil, err
-		}
-	}
-	if sections.Inbounds {
-		var inbounds []model.Inbound
-		query := db.Order("id ASC")
-		if selectedInboundIDs != nil {
-			selected := make(map[uint]struct{}, len(selectedInboundIDs))
-			for _, id := range selectedInboundIDs {
-				if id == 0 {
-					return nil, common.NewError("入站选择包含无效 ID")
-				}
-				selected[id] = struct{}{}
-			}
-			if len(selected) == 0 {
-				return nil, common.NewError("至少选择一个要批量复制的入站")
-			}
-			ids := make([]uint, 0, len(selected))
-			for id := range selected {
-				ids = append(ids, id)
-			}
-			query = query.Where("id IN ?", ids)
-			if err := query.Find(&inbounds).Error; err != nil {
-				return nil, err
-			}
-			if len(inbounds) != len(selected) {
-				return nil, common.NewError("部分所选入站已不存在，请刷新页面后重试")
-			}
-		} else if err := query.Find(&inbounds).Error; err != nil {
-			return nil, err
-		}
-		tlsIDs := make(map[uint]struct{})
-		for _, inbound := range inbounds {
-			options, err := sanitizeFleetInboundOptions(inbound.Options)
-			if err != nil {
-				return nil, fmt.Errorf("sanitize inbound %q options: %w", inbound.Tag, err)
-			}
-			template.InboundRefs[inbound.Id] = inbound.Tag
-			template.Inbounds = append(template.Inbounds, FleetTemplateInbound{
-				ID: inbound.Id, Type: inbound.Type, Tag: inbound.Tag, TLSID: inbound.TlsId,
-				ExcludeFromSub: inbound.ExcludeFromSub,
-				Addrs:          append(json.RawMessage(nil), inbound.Addrs...), Options: options,
-			})
-			if inbound.TlsId > 0 {
-				tlsIDs[inbound.TlsId] = struct{}{}
-			}
-		}
-		if !sections.TLS && len(tlsIDs) > 0 {
-			ids := make([]uint, 0, len(tlsIDs))
-			for id := range tlsIDs {
-				ids = append(ids, id)
-			}
-			if err := db.Where("id IN ?", ids).Find(&template.TLS).Error; err != nil {
-				return nil, err
-			}
-			if len(template.TLS) != len(tlsIDs) {
-				return nil, common.NewError("所选入站引用了不存在的 TLS 配置")
-			}
-		}
-	}
 	if sections.Outbounds {
 		var outbounds []model.Outbound
 		if err := db.Find(&outbounds).Error; err != nil {
@@ -247,28 +191,6 @@ func (s *FleetService) CaptureFleetTemplate(name string, sections FleetTemplateS
 				Type: outbound.Type, Tag: outbound.Tag, Options: append(json.RawMessage(nil), outbound.Options...),
 			})
 		}
-	}
-	if sections.Clients {
-		var inbounds []model.Inbound
-		if err := db.Select("id", "tag").Find(&inbounds).Error; err != nil {
-			return nil, err
-		}
-		for _, inbound := range inbounds {
-			template.InboundRefs[inbound.Id] = inbound.Tag
-		}
-		if err := db.Find(&template.Clients).Error; err != nil {
-			return nil, err
-		}
-		for index := range template.Clients {
-			template.Clients[index].Up = 0
-			template.Clients[index].Down = 0
-			template.Clients[index].TotalUp = 0
-			template.Clients[index].TotalDown = 0
-			template.Clients[index].History = nil
-		}
-	}
-	for _, tls := range template.TLS {
-		template.TLSRefs[tls.Id] = tls.Name
 	}
 	if sections.Route || sections.DNS {
 		configValue, err := s.GetConfig()
@@ -348,12 +270,18 @@ func (s *FleetService) PreviewFleetTemplateTargets(templateID string, targetIDs 
 	if err != nil {
 		return nil, err
 	}
+	if err := validateFleetTemplateNoServerLocalCopy(*template); err != nil {
+		return nil, err
+	}
 	return s.runFleetTemplateTargets(*template, targetIDs, "", true)
 }
 
 func (s *FleetService) DeployFleetTemplate(templateID string, targetIDs []string, canaryID string) ([]FleetTemplateTargetResult, error) {
 	template, err := s.FindFleetTemplate(templateID)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateFleetTemplateNoServerLocalCopy(*template); err != nil {
 		return nil, err
 	}
 	return s.runFleetTemplateTargets(*template, targetIDs, canaryID, false)
@@ -507,6 +435,9 @@ func (s *ConfigService) PreviewFleetTemplate(template FleetTemplate, hostname st
 	if err := validateFleetTemplateFormat(template); err != nil {
 		return nil, err
 	}
+	if err := validateFleetTemplateNoServerLocalCopy(template); err != nil {
+		return nil, err
+	}
 	preview := &FleetTemplatePreview{}
 	db := database.GetDB()
 	if err := validateFleetTemplateOutbounds(template.Outbounds); err != nil {
@@ -573,6 +504,9 @@ func (s *ConfigService) PreviewFleetTemplate(template FleetTemplate, hostname st
 }
 
 func (s *ConfigService) ApplyFleetTemplate(template FleetTemplate, hostname string) error {
+	if err := validateFleetTemplateNoServerLocalCopy(template); err != nil {
+		return err
+	}
 	saveConfigMu.Lock()
 	defer saveConfigMu.Unlock()
 
@@ -622,17 +556,18 @@ func (s *ConfigService) applyFleetTemplateTx(tx *gorm.DB, template FleetTemplate
 	if err := validateFleetTemplateFormat(template); err != nil {
 		return err
 	}
+	if err := validateFleetTemplateNoServerLocalCopy(template); err != nil {
+		return err
+	}
 	if err := validateFleetTemplateOutbounds(template.Outbounds); err != nil {
 		return err
 	}
-	tlsIDs := make(map[uint]uint)
 	for _, source := range template.TLS {
 		var target model.Tls
 		err := tx.Where("name = ?", source.Name).First(&target).Error
 		if err != nil && !database.IsNotFound(err) {
 			return err
 		}
-		oldID := source.Id
 		if database.IsNotFound(err) {
 			target = model.Tls{Name: source.Name}
 		}
@@ -641,97 +576,6 @@ func (s *ConfigService) applyFleetTemplateTx(tx *gorm.DB, template FleetTemplate
 		if err := tx.Save(&target).Error; err != nil {
 			return err
 		}
-		tlsIDs[oldID] = target.Id
-	}
-
-	inboundIDs := make(map[uint]uint)
-	for _, source := range template.Inbounds {
-		var target model.Inbound
-		err := tx.Where("tag = ?", source.Tag).First(&target).Error
-		if err != nil && !database.IsNotFound(err) {
-			return err
-		}
-		isNew := database.IsNotFound(err)
-		if isNew {
-			target = model.Inbound{Tag: source.Tag}
-		}
-		oldInbound := target
-		options, err := sanitizeFleetInboundOptions(source.Options)
-		if err != nil {
-			return fmt.Errorf("sanitize inbound %q options: %w", source.Tag, err)
-		}
-		target.Type = source.Type
-		target.ExcludeFromSub = source.ExcludeFromSub
-		target.Addrs = replaceFleetTemplateHost(source.Addrs, template.SourceHost, hostname)
-		target.Options = replaceFleetTemplateHost(options, template.SourceHost, hostname)
-		if mapped, ok := tlsIDs[source.TLSID]; ok {
-			target.TlsId = mapped
-			var targetTLS model.Tls
-			if err := tx.First(&targetTLS, mapped).Error; err != nil {
-				return err
-			}
-			target.Tls = &targetTLS
-		} else if source.TLSID == 0 {
-			target.TlsId = 0
-			target.Tls = nil
-		} else if tlsName := template.TLSRefs[source.TLSID]; tlsName != "" {
-			var existingTLS model.Tls
-			err := tx.Where("name = ?", tlsName).First(&existingTLS).Error
-			if database.IsNotFound(err) {
-				return common.NewErrorf("入站 %s 需要目标机已有 TLS %s，或在模板中同时勾选 TLS", source.Tag, tlsName)
-			}
-			if err != nil {
-				return err
-			}
-			target.TlsId = existingTLS.Id
-			target.Tls = &existingTLS
-		}
-		if target.Type == "masque" {
-			var previous *model.Inbound
-			if !isNew {
-				previous = &oldInbound
-			}
-			if err := prepareMasqueInbound(tx, &target, previous, hostname); err != nil {
-				return fmt.Errorf("prepare MASQUE inbound %q: %w", target.Tag, err)
-			}
-		} else if isNew || oldInbound.Type != target.Type || len(bytes.TrimSpace(target.OutJson)) == 0 {
-			// FillOutJson needs an object to merge generated client settings into.
-			target.OutJson = json.RawMessage(`{}`)
-		}
-		if target.Type != "masque" && oldInbound.Type == "masque" {
-			target.MasqueTLSCertificate = ""
-			target.MasqueTLSKey = ""
-		}
-		if target.Type == "mieru" {
-			if _, err := parseMieruInbound(&target); err != nil {
-				return err
-			}
-		}
-		if target.Type == "masque" {
-			target.OutJson, err = buildMasqueClientTemplate(&target)
-		} else {
-			err = util.FillOutJson(&target, hostname)
-		}
-		if err != nil {
-			return err
-		}
-		if spec, err := collectInboundForwardSpec(&target); err != nil {
-			return err
-		} else {
-			if err := validateInboundPortRangesAgainstSSHProtocols(&target, spec.portRanges, spec.protocols); err != nil {
-				return err
-			}
-			if err := validateManagedPortRangeProtocolConflicts(tx, "入站", target.Tag, target.Id, 0, spec.portRanges, spec.protocols); err != nil {
-				return err
-			}
-		}
-		if err := tx.Save(&target).Error; err != nil {
-			return err
-		}
-		if err := syncManagedPortEntriesForInboundTx(tx, &target); err != nil {
-			return err
-		}
-		inboundIDs[source.ID] = target.Id
 	}
 
 	for _, source := range template.Outbounds {
@@ -782,15 +626,11 @@ func (s *ConfigService) applyFleetTemplateTx(tx *gorm.DB, template FleetTemplate
 		}
 		mappedIDs := make([]uint, 0, len(sourceInboundIDs))
 		for _, sourceID := range sourceInboundIDs {
-			if targetID, ok := inboundIDs[sourceID]; ok {
-				mappedIDs = append(mappedIDs, targetID)
-				continue
-			}
 			if tag := template.InboundRefs[sourceID]; tag != "" {
 				var existingInbound model.Inbound
 				err := tx.Select("id").Where("tag = ?", tag).First(&existingInbound).Error
 				if database.IsNotFound(err) {
-					return common.NewErrorf("用户 %s 需要目标机已有入站 %s，或在模板中同时勾选入站", source.Name, tag)
+					return common.NewErrorf("用户 %s 需要目标机预先存在入站 %s；配置模板不会创建入站", source.Name, tag)
 				}
 				if err != nil {
 					return err

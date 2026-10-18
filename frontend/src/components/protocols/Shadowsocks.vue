@@ -26,7 +26,7 @@
       </v-col>
     </v-row>
     <v-row v-if="data.method != 'none' || direction == 'out'">
-      <v-col cols="12" sm="8">
+      <v-col v-if="!hideCredentials" cols="12" sm="8">
         <v-text-field
           v-model="data.password"
           :label="$t('types.pw')"
@@ -45,7 +45,7 @@ import UoT from '@/components/UoT.vue'
 import RandomUtil from '@/plugins/randomUtil'
 
 export default {
-  props: ['direction','data'],
+  props: ['direction','data','hideCredentials'],
   data() {
     return {
       ssMethods: [

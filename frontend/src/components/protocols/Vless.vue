@@ -1,7 +1,7 @@
 <template>
   <v-card subtitle="VLESS">
     <v-row>
-      <v-col cols="12" sm="6">
+      <v-col v-if="!hideCredentials" cols="12" sm="6">
         <v-text-field v-model="data.uuid" label="UUID" hide-details></v-text-field>
       </v-col>
       <v-col cols="12" sm="6" md="4">
@@ -33,7 +33,7 @@
 import Network from '@/components/Network.vue'
 
 export default {
-  props: ['data'],
+  props: ['data', 'hideCredentials'],
   data() {
     return {}
   },
