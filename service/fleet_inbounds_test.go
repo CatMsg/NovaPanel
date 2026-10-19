@@ -101,6 +101,52 @@ func TestFleetInboundTLSRequirementByProtocol(t *testing.T) {
 	}
 }
 
+func TestFleetInboundNamesStayUniqueAcrossSeparateTargetSelections(t *testing.T) {
+	initFleetInboundTestDB(t)
+	capabilities := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/apiv2/fleet-inbound-capabilities" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"obj": FleetInboundCapabilities{
+				Hostname: "target.example", SubscriptionHost: "target.example",
+				TLSProfiles: []FleetInboundTLSProfile{}, InboundTags: []string{},
+			},
+		})
+	})
+	first := httptest.NewServer(capabilities)
+	defer first.Close()
+	second := httptest.NewServer(capabilities)
+	defer second.Close()
+	fleet := &FleetService{}
+	if err := fleet.SaveFleet([]FleetServerInput{
+		{ID: "west-shared-a", Name: "LA East", URL: first.URL, Token: "test-token-a", Enabled: true},
+		{ID: "west-shared-b", Name: "LA-East", URL: second.URL, Token: "test-token-b", Enabled: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, selected := range [][]string{{"west-shared-a"}, {"west-shared-b"}, {"west-shared-a", "west-shared-b"}} {
+		targets := make([]FleetInboundTargetSelection, 0, len(selected))
+		for _, id := range selected {
+			targets = append(targets, FleetInboundTargetSelection{ID: id, ListenPort: 18081})
+		}
+		jobs, results, err := fleet.buildFleetInboundJobs(FleetInboundCreatePlan{
+			InboundDraft: json.RawMessage(`{"type":"socks"}`), Targets: targets,
+		})
+		if err != nil || len(jobs) != len(selected) {
+			t.Fatalf("build targets %v: results=%+v err=%v", selected, results, err)
+		}
+		for index, id := range selected {
+			if want := "la-east-" + id + "-socks"; results[index].Tag != want {
+				t.Fatalf("targets %v: name = %q, want %q", selected, results[index].Tag, want)
+			}
+		}
+	}
+}
+
 func TestFleetInboundPayloadIsBuiltFromFreshDraftOnly(t *testing.T) {
 	draft := json.RawMessage(`{
 		"id":77,"type":"anytls","tag":"cn2-source","tls_id":99,
@@ -404,11 +450,66 @@ func TestCreateFleetInboundPreflightsEveryTargetBeforeWriting(t *testing.T) {
 	}
 }
 
-func TestCreateFleetInboundUsesTargetNamePortAndTLS(t *testing.T) {
+func TestFleetInboundRejectsBlankExistingAndDuplicateCustomNames(t *testing.T) {
+	initFleetInboundTestDB(t)
+	var postRequests atomic.Int32
+	capabilities := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/apiv2/fleet-inbound-capabilities" {
+			postRequests.Add(1)
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true, "obj": FleetInboundCapabilities{
+				Hostname: "target.example", SubscriptionHost: "target.example",
+				TLSProfiles: []FleetInboundTLSProfile{}, InboundTags: []string{"existing-http"},
+			},
+		})
+	})
+	la := httptest.NewServer(capabilities)
+	defer la.Close()
+	tk := httptest.NewServer(capabilities)
+	defer tk.Close()
+	fleet := &FleetService{}
+	if err := fleet.SaveFleet([]FleetServerInput{
+		{ID: "la", Name: "LA", URL: la.URL, Token: "test-la", Enabled: true},
+		{ID: "tk", Name: "TK", URL: tk.URL, Token: "test-tk", Enabled: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	blank, existing, first, second := "  ", "  EXISTING-HTTP ", "shared-name", " SHARED-NAME "
+	for _, item := range []struct {
+		name    string
+		targets []FleetInboundTargetSelection
+		message string
+	}{
+		{"blank", []FleetInboundTargetSelection{{ID: "la", ListenPort: 18081, Tag: &blank}}, "不能为空"},
+		{"existing", []FleetInboundTargetSelection{{ID: "la", ListenPort: 18081, Tag: &existing}}, "已存在"},
+		{"duplicate", []FleetInboundTargetSelection{{ID: "la", ListenPort: 18081, Tag: &first}, {ID: "tk", ListenPort: 18081, Tag: &second}}, "重复"},
+	} {
+		t.Run(item.name, func(t *testing.T) {
+			results, err := fleet.CreateFleetInbound(FleetInboundCreatePlan{InboundDraft: json.RawMessage(`{"type":"socks"}`), Targets: item.targets})
+			if err != nil || len(results) != len(item.targets) {
+				t.Fatalf("invalid plan result: %+v, %v", results, err)
+			}
+			for _, result := range results {
+				if result.Success || result.Created || !strings.Contains(result.Error, item.message) {
+					t.Fatalf("invalid name was not rejected: %+v", result)
+				}
+			}
+			if got := postRequests.Load(); got != 0 {
+				t.Fatalf("invalid names reached a remote preflight or create endpoint: %d", got)
+			}
+		})
+	}
+}
+
+func TestCreateFleetInboundUsesCustomAndDefaultNamesPortAndTLS(t *testing.T) {
 	_ = testutil.NewManagedPortSandbox(t)
 	initFleetInboundTestDB(t)
 	var preflights atomic.Int32
-	newTarget := func(targetName string, tlsID, inboundID uint) *httptest.Server {
+	newTarget := func(targetName, wantTag string, tlsID, inboundID uint) *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			switch {
@@ -419,6 +520,16 @@ func TestCreateFleetInboundUsesTargetNamePortAndTLS(t *testing.T) {
 				}})
 				_, _ = w.Write(body)
 			case r.Method == http.MethodPost && r.URL.Path == "/apiv2/fleet-inbound-preflight":
+				var request FleetInboundRemoteRequest
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Errorf("decode preflight request: %v", err)
+				}
+				var draft struct {
+					Tag string `json:"tag"`
+				}
+				if err := json.Unmarshal(request.InboundDraft, &draft); err != nil || draft.Tag != wantTag {
+					t.Errorf("preflight tag = %q, want %q: %v", draft.Tag, wantTag, err)
+				}
 				preflights.Add(1)
 				_, _ = w.Write([]byte(`{"success":true,"msg":"","obj":{"valid":true,"checks":[]}}`))
 			case r.Method == http.MethodPost && r.URL.Path == "/apiv2/fleet-inbound-create":
@@ -442,7 +553,6 @@ func TestCreateFleetInboundUsesTargetNamePortAndTLS(t *testing.T) {
 				if err := json.Unmarshal(request.InboundDraft, &inbound); err != nil {
 					t.Errorf("decode target draft: %v", err)
 				}
-				wantTag := targetName + "-hy2"
 				if inbound.Tag != wantTag || inbound.Type != "hysteria2" || inbound.ListenPort == 0 || inbound.TLSID != tlsID || len(inbound.Addrs) != 1 || inbound.Addrs[0].Server != targetName+".example" || inbound.Addrs[0].Port != inbound.ListenPort {
 					t.Errorf("target payload = %+v, want target-specific TLS, tag and address", inbound)
 				}
@@ -453,9 +563,9 @@ func TestCreateFleetInboundUsesTargetNamePortAndTLS(t *testing.T) {
 			}
 		}))
 	}
-	la := newTarget("la", 11, 21)
+	la := newTarget("la", "la-stream-hy2", 11, 21)
 	defer la.Close()
-	tk := newTarget("tk", 22, 22)
+	tk := newTarget("tk", "tk-hy2", 22, 22)
 	defer tk.Close()
 	fleet := &FleetService{}
 	if err := fleet.SaveFleet([]FleetServerInput{
@@ -464,17 +574,18 @@ func TestCreateFleetInboundUsesTargetNamePortAndTLS(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	customName := "  la-stream-hy2  "
 	results, err := fleet.CreateFleetInbound(FleetInboundCreatePlan{
 		InboundDraft: json.RawMessage(`{"type":"hysteria2","up_mbps":100,"down_mbps":100}`),
 		Targets: []FleetInboundTargetSelection{
-			{ID: "la", TLSID: 11, ListenPort: 18081},
+			{ID: "la", TLSID: 11, ListenPort: 18081, Tag: &customName},
 			{ID: "tk", TLSID: 22, ListenPort: 18082},
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(results) != 2 || results[0].Tag != "la-hy2" || results[1].Tag != "tk-hy2" {
+	if len(results) != 2 || results[0].Tag != "la-stream-hy2" || results[1].Tag != "tk-hy2" {
 		t.Fatalf("target-specific names = %+v", results)
 	}
 	for _, result := range results {

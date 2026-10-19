@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
@@ -11,9 +12,11 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
@@ -46,9 +49,10 @@ type FleetInboundTargetInfo struct {
 }
 
 type FleetInboundTargetSelection struct {
-	ID         string `json:"id"`
-	TLSID      uint   `json:"tlsId"`
-	ListenPort int    `json:"listenPort"`
+	ID         string  `json:"id"`
+	TLSID      uint    `json:"tlsId"`
+	ListenPort int     `json:"listenPort"`
+	Tag        *string `json:"tag,omitempty"`
 }
 
 type FleetInboundCreatePlan struct {
@@ -83,8 +87,48 @@ type fleetInboundJob struct {
 	resultIndex int
 }
 
+func fleetInboundHostname(host string) string {
+	host = strings.TrimSpace(host)
+	if parsed, _, err := net.SplitHostPort(host); err == nil {
+		return strings.Trim(parsed, "[]")
+	}
+	return strings.Trim(host, "[]")
+}
+
+func (s *FleetService) fetchFleetJSON(baseURL, token, action string, payload interface{}) (fleetAPIResponse, error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return fleetAPIResponse{}, err
+	}
+	endpoint := strings.TrimRight(baseURL, "/") + "/apiv2/" + action
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(raw))
+	if err != nil {
+		return fleetAPIResponse{}, err
+	}
+	req.Header.Set("Token", token)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 45 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fleetAPIResponse{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fleetAPIResponse{}, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	var result fleetAPIResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fleetAPIResponse{}, err
+	}
+	if !result.Success {
+		return fleetAPIResponse{}, errors.New(result.Msg)
+	}
+	return result, nil
+}
+
 func (s *FleetService) LocalFleetInboundCapabilities(hostname string) (*FleetInboundCapabilities, error) {
-	localHost := fleetTemplateHostname(hostname)
+	localHost := fleetInboundHostname(hostname)
 	if localHost == "" {
 		return nil, common.NewError("无法确定本机面板域名")
 	}
@@ -92,7 +136,7 @@ func (s *FleetService) LocalFleetInboundCapabilities(hostname string) (*FleetInb
 	if err != nil {
 		return nil, err
 	}
-	subscriptionHost = fleetTemplateHostname(subscriptionHost)
+	subscriptionHost = fleetInboundHostname(subscriptionHost)
 	if subscriptionHost == "" {
 		subscriptionHost = localHost
 	}
@@ -384,11 +428,9 @@ func (s *FleetService) buildFleetInboundJobs(plan FleetInboundCreatePlan) ([]fle
 	for _, config := range configs {
 		byID[config.ID] = config
 	}
-	nameCounts := make(map[string]int, len(plan.Targets))
-	for _, selection := range plan.Targets {
-		if config, ok := byID[strings.TrimSpace(selection.ID)]; ok {
-			nameCounts[normalizedFleetServerName(config.Name)]++
-		}
+	nameCounts := make(map[string]int, len(configs))
+	for _, config := range configs {
+		nameCounts[fleetInboundTagPrefix(config)]++
 	}
 	type capabilityResult struct {
 		capabilities *FleetInboundCapabilities
@@ -483,7 +525,23 @@ func (s *FleetService) buildFleetInboundJobs(plan FleetInboundCreatePlan) ([]fle
 			results[index].Error = "所选 TLS 配置不属于目标服务器或服务端 TLS 未启用，请刷新目标列表后重试"
 			continue
 		}
-		tag := fleetInboundTargetTagForProtocol(config, draft.Type, nameCounts[normalizedFleetServerName(config.Name)] > 1, capabilities.InboundTags)
+		tag := fleetInboundTargetTagForProtocol(config, draft.Type, nameCounts[fleetInboundTagPrefix(config)] > 1, capabilities.InboundTags)
+		if selection.Tag != nil {
+			tag = strings.TrimSpace(*selection.Tag)
+			if tag == "" {
+				results[index].Error = "入站名称不能为空"
+				continue
+			}
+			for _, existing := range capabilities.InboundTags {
+				if strings.EqualFold(strings.TrimSpace(existing), tag) {
+					results[index].Error = fmt.Sprintf("目标机已存在入站名称 %q，请修改名称", tag)
+					break
+				}
+			}
+			if results[index].Error != "" {
+				continue
+			}
+		}
 		payload, payloadErr := buildFleetInboundRemotePayload(plan.InboundDraft, capabilities.SubscriptionHost, tag, port, tlsID)
 		if payloadErr != nil {
 			results[index].Error = payloadErr.Error()
@@ -497,11 +555,28 @@ func (s *FleetService) buildFleetInboundJobs(plan FleetInboundCreatePlan) ([]fle
 		results[index].Tag = tag
 		jobs = append(jobs, fleetInboundJob{config: config, token: token, tag: tag, payload: payload, resultIndex: index})
 	}
-	return jobs, results, nil
+	seenTags := make(map[string]int, len(jobs))
+	for _, job := range jobs {
+		key := strings.ToLower(job.tag)
+		if previous, exists := seenTags[key]; exists {
+			detail := fmt.Sprintf("所选目标的入站名称 %q 重复，请分别设置不同名称", job.tag)
+			results[previous].Error = detail
+			results[job.resultIndex].Error = detail
+		} else {
+			seenTags[key] = job.resultIndex
+		}
+	}
+	validJobs := jobs[:0]
+	for _, job := range jobs {
+		if results[job.resultIndex].Error == "" {
+			validJobs = append(validJobs, job)
+		}
+	}
+	return validJobs, results, nil
 }
 
 func buildFleetInboundRemotePayload(draftJSON json.RawMessage, targetHost, targetTag string, listenPort int, tlsID uint) (FleetInboundRemoteRequest, error) {
-	targetHost = fleetTemplateHostname(targetHost)
+	targetHost = fleetInboundHostname(targetHost)
 	if targetHost == "" {
 		return FleetInboundRemoteRequest{}, errors.New("目标机订阅域名为空")
 	}
@@ -592,12 +667,9 @@ func mustMarshalRaw(value interface{}) json.RawMessage {
 }
 
 func fleetInboundTargetTagForProtocol(server FleetServer, inboundType string, duplicateName bool, existingTags []string) string {
-	serverPart := fleetInboundTagSlug(server.Name)
-	if serverPart == "" {
-		serverPart = fleetInboundTagSlug(server.ID)
-	}
+	serverPart := fleetInboundTagPrefix(server)
 	if duplicateName {
-		serverPart += "-" + fleetInboundTagSlug(shortFleetServerID(server.ID))
+		serverPart += "-" + fleetInboundTagSlug(server.ID)
 	}
 	protocolPart := inboundType
 	if inboundType == "hysteria" {
@@ -639,17 +711,11 @@ func fleetInboundTagSlug(value string) string {
 	return strings.Trim(result.String(), "-")
 }
 
-func normalizedFleetServerName(name string) string {
-	return strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(name)), " "))
-}
-
-func shortFleetServerID(id string) string {
-	id = strings.TrimSpace(id)
-	runes := []rune(id)
-	if len(runes) > 6 {
-		return string(runes[:6])
+func fleetInboundTagPrefix(server FleetServer) string {
+	if name := fleetInboundTagSlug(server.Name); name != "" {
+		return name
 	}
-	return id
+	return fleetInboundTagSlug(server.ID)
 }
 
 func fleetInboundProtocolSupported(inboundType string) bool {

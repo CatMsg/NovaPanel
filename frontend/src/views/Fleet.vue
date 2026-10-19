@@ -54,10 +54,6 @@
               <v-icon icon="mdi-server-plus" start />
               {{ $t('ui.fleet.manage') }}
             </v-btn>
-            <v-btn variant="outlined" color="secondary" :disabled="loading" @click="openOrchestration">
-              <v-icon icon="mdi-layers-triple-outline" start />
-              {{ $t('ui.fleet.orchestration') }}
-            </v-btn>
             <v-btn variant="tonal" color="primary" :disabled="loading" @click="openRemoteInboundDialog">
               <v-icon icon="mdi-server-plus" start />
               {{ $t('ui.fleet.remoteInboundCreate') }}
@@ -308,145 +304,11 @@
       </v-card>
     </v-dialog>
 
-    <v-dialog v-model="showOrchestration" max-width="840" scrollable>
-      <v-card rounded="xl" class="fleet-dialog fleet-rollout">
-        <header class="fleet-rollout__header">
-          <div>
-            <span class="fleet-rollout__eyebrow">{{ $t('ui.fleet.safeRollout') }}</span>
-            <h2>{{ $t('ui.fleet.orchestrationTitle') }}</h2>
-            <p>{{ $t('ui.fleet.orchestrationHint') }}</p>
-          </div>
-          <v-btn icon="mdi-close" variant="text" :aria-label="$t('actions.close')" @click="showOrchestration = false" />
-        </header>
-
-        <nav class="fleet-rollout__steps" :aria-label="$t('ui.fleet.rolloutProgress')">
-          <button v-for="step in 3" :key="step" type="button" :class="{ 'is-active': orchestrationStep === step, 'is-done': orchestrationStep > step }" :disabled="step > orchestrationStep" @click="orchestrationStep = step">
-            <span>{{ orchestrationStep > step ? '✓' : step }}</span>
-            <strong>{{ $t(`ui.fleet.rolloutStep${step}`) }}</strong>
-          </button>
-        </nav>
-
-        <v-card-text class="fleet-rollout__body">
-          <v-window v-model="orchestrationStep" :touch="false">
-            <v-window-item :value="1">
-              <section class="fleet-rollout__panel">
-                <div class="fleet-rollout__section-head">
-                  <div class="fleet-rollout__section-icon"><v-icon icon="mdi-layers-outline" /></div>
-                  <div><h3>{{ $t('ui.fleet.chooseTemplate') }}</h3><p>{{ $t('ui.fleet.chooseTemplateHint') }}</p></div>
-                </div>
-
-                <div class="fleet-template-mode" role="group" :aria-label="$t('ui.fleet.chooseTemplate')">
-                  <button type="button" :aria-pressed="templateMode === 'saved'" :class="{ 'is-active': templateMode === 'saved' }" @click="templateMode = 'saved'">
-                    {{ $t('ui.fleet.templateModeSaved') }}
-                  </button>
-                  <button type="button" :aria-pressed="templateMode === 'create'" :class="{ 'is-active': templateMode === 'create' }" @click="templateMode = 'create'">
-                    {{ $t('ui.fleet.templateModeCreate') }}
-                  </button>
-                </div>
-
-                <div v-if="templateMode === 'saved' && templates.length" class="fleet-template-list">
-                  <button v-for="item in templates" :key="item.id" type="button" class="fleet-template-card" :class="{ 'is-selected': selectedTemplateId === item.id }" @click="selectTemplate(item.id)">
-                    <span class="fleet-template-card__icon"><v-icon icon="mdi-file-document-check-outline" /></span>
-                    <span class="fleet-template-card__copy">
-                      <strong>{{ item.name }}</strong>
-                      <small v-if="hasServerLocalSnapshot(item)" class="fleet-template-card__warning">{{ $t('ui.fleet.legacyServerLocalTemplate') }}</small>
-                      <small v-else>{{ templateSectionLabels(item).join(' · ') }}</small>
-                    </span>
-                    <v-icon :icon="selectedTemplateId === item.id ? 'mdi-check-circle' : 'mdi-chevron-right'" />
-                  </button>
-                  <div v-if="selectedTemplateId" class="fleet-template-list__actions">
-                    <v-btn size="small" color="error" variant="text" @click="deleteTemplate"><v-icon icon="mdi-delete-outline" start />{{ $t('actions.del') }}</v-btn>
-                    <v-btn color="primary" :disabled="selectedTemplateHasUnsafeData" @click="goToTargets"><v-icon icon="mdi-arrow-right" end />{{ $t('ui.fleet.useTemplate') }}</v-btn>
-                  </div>
-                  <v-alert v-if="selectedTemplateHasUnsafeData" type="warning" variant="tonal" density="compact">
-                    {{ $t('ui.fleet.legacyServerLocalTemplateHint') }}
-                  </v-alert>
-                </div>
-                <div v-else-if="templateMode === 'saved'" class="fleet-rollout__empty"><v-icon icon="mdi-file-plus-outline" /><span>{{ $t('ui.fleet.noTemplates') }}</span></div>
-
-                <div v-else class="fleet-template-create">
-                  <v-text-field v-model="templateName" :label="$t('ui.fleet.templateName')" :placeholder="$t('ui.fleet.templateNameExample')" variant="outlined" density="comfortable" hide-details />
-                  <div class="fleet-template-scope">
-                    <button v-for="option in templateSectionOptions" :key="option.key" type="button" :aria-pressed="templateSections[option.key]" :class="{ 'is-selected': templateSections[option.key] }" @click="toggleTemplateSection(option.key)">
-                      <v-icon :icon="option.icon" />
-                      <span><strong>{{ option.label }}</strong><small>{{ option.hint }}</small></span>
-                      <v-icon :icon="templateSections[option.key] ? 'mdi-check-circle' : 'mdi-circle-outline'" />
-                    </button>
-                  </div>
-                  <v-btn color="primary" size="large" :loading="orchestrationLoading === 'capture'" :disabled="!canCaptureTemplate" @click="captureTemplate">
-                    <v-icon icon="mdi-content-save-plus-outline" start />{{ $t('ui.fleet.saveAndContinue') }}
-                  </v-btn>
-                </div>
-              </section>
-            </v-window-item>
-
-            <v-window-item :value="2">
-              <section class="fleet-rollout__panel">
-                <div class="fleet-rollout__section-head">
-                  <div class="fleet-rollout__section-icon"><v-icon icon="mdi-server-network-outline" /></div>
-                  <div><h3>{{ $t('ui.fleet.chooseTargets') }}</h3><p>{{ $t('ui.fleet.chooseTargetsHint') }}</p></div>
-                </div>
-                <div class="fleet-rollout__selection-summary"><span>{{ $t('ui.fleet.selectedTemplate') }}</span><strong>{{ selectedTemplate?.name }}</strong></div>
-                <div class="fleet-target-grid">
-                  <button v-for="server in deployableServers" :key="server.id" type="button" :aria-pressed="selectedTargets.includes(server.id)" :class="{ 'is-selected': selectedTargets.includes(server.id) }" @click="toggleTarget(server.id)">
-                    <span class="fleet-target-grid__check"><v-icon :icon="selectedTargets.includes(server.id) ? 'mdi-check' : 'mdi-plus'" /></span>
-                    <span><strong>{{ server.name }}</strong><small>{{ server.id === 'local' ? $t('ui.common.local') : server.url }}</small></span>
-                    <em>{{ server.latencyMs ? `${server.latencyMs} ms` : $t('ui.common.online') }}</em>
-                  </button>
-                </div>
-                <v-alert v-if="!selectedTargets.length" type="warning" variant="tonal" density="compact">{{ $t('ui.fleet.selectTargetsFirst') }}</v-alert>
-                <div v-else class="fleet-canary-box">
-                  <div><strong>{{ $t('ui.fleet.canaryServer') }}</strong><span>{{ $t('ui.fleet.canaryHint') }}</span></div>
-                  <v-select v-model="canaryTarget" :items="selectedTargetItems" :placeholder="$t('ui.fleet.noCanary')" clearable variant="outlined" density="comfortable" hide-details />
-                </div>
-                <div class="fleet-rollout__order"><v-icon icon="mdi-sort-ascending" /><span>{{ rolloutOrderLabel }}</span></div>
-              </section>
-            </v-window-item>
-
-            <v-window-item :value="3">
-              <section class="fleet-rollout__panel">
-                <div class="fleet-rollout__section-head">
-                  <div class="fleet-rollout__section-icon"><v-icon :icon="deploymentComplete ? 'mdi-check-decagram-outline' : 'mdi-file-search-outline'" /></div>
-                  <div><h3>{{ deploymentComplete ? $t('ui.fleet.rolloutComplete') : $t('ui.fleet.reviewChanges') }}</h3><p>{{ deploymentComplete ? $t('ui.fleet.rolloutCompleteHint') : $t('ui.fleet.reviewChangesHint') }}</p></div>
-                </div>
-                <div class="fleet-rollout__review-meta">
-                  <div><span>{{ $t('ui.fleet.selectedTemplate') }}</span><strong>{{ selectedTemplate?.name }}</strong></div>
-                  <div><span>{{ $t('ui.fleet.targetServers') }}</span><strong>{{ selectedTargetNames.join('、') }}</strong></div>
-                </div>
-                <div class="fleet-orchestration__results">
-                  <div v-for="result in templateResults" :key="result.id" class="fleet-orchestration__result" :class="result.success ? 'is-success' : 'is-error'">
-                    <div>
-                      <strong>{{ result.name }}</strong>
-                      <span v-if="result.preview">{{ previewSummary(result.preview) }}</span>
-                      <span v-else-if="result.error">{{ result.error }}</span>
-                      <span v-else>{{ $t('ui.fleet.deployed') }}</span>
-                    </div>
-                    <v-icon :icon="result.success ? 'mdi-check-circle' : 'mdi-alert-circle'" />
-                  </div>
-                </div>
-                <v-alert v-if="!deploymentComplete" :type="canDeployTemplate ? 'success' : 'error'" variant="tonal" density="compact">
-                  {{ canDeployTemplate ? $t('ui.fleet.previewPassed') : $t('ui.fleet.previewFailed') }}
-                </v-alert>
-              </section>
-            </v-window-item>
-          </v-window>
-        </v-card-text>
-
-        <v-card-actions class="fleet-rollout__footer">
-          <v-btn v-if="orchestrationStep > 1 && !deploymentComplete" variant="text" @click="orchestrationStep -= 1"><v-icon icon="mdi-arrow-left" start />{{ $t('ui.fleet.previousStep') }}</v-btn>
-          <v-spacer />
-          <v-btn variant="text" @click="showOrchestration = false">{{ deploymentComplete ? $t('ui.common.close') : $t('ui.common.cancel') }}</v-btn>
-          <v-btn v-if="orchestrationStep === 2" color="primary" :loading="orchestrationLoading === 'preview'" :disabled="!canRunTemplate" @click="previewTemplate"><v-icon icon="mdi-file-compare" start />{{ $t('ui.fleet.previewChanges') }}</v-btn>
-          <v-btn v-if="orchestrationStep === 3 && !deploymentComplete" color="primary" :loading="orchestrationLoading === 'deploy'" :disabled="!canDeployTemplate" @click="deployTemplate"><v-icon icon="mdi-rocket-launch-outline" start />{{ $t('ui.fleet.confirmRollout') }}</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-
     <v-dialog v-model="showRemoteInbound" max-width="980" scrollable>
       <v-card rounded="xl" class="fleet-dialog fleet-remote-inbound">
-        <header class="fleet-rollout__header">
+        <header class="fleet-remote-inbound__header">
           <div>
-            <span class="fleet-rollout__eyebrow">{{ $t('ui.fleet.remoteInboundEyebrow') }}</span>
+            <span class="fleet-remote-inbound__eyebrow">{{ $t('ui.fleet.remoteInboundEyebrow') }}</span>
             <h2>{{ $t('ui.fleet.remoteInboundTitle') }}</h2>
             <p>{{ $t('ui.fleet.remoteInboundHint') }}</p>
           </div>
@@ -457,8 +319,8 @@
           <FleetInboundDraftEditor v-model="remoteInboundDraft" />
 
           <section class="fleet-remote-inbound__section">
-            <div class="fleet-rollout__section-head">
-              <div class="fleet-rollout__section-icon"><v-icon icon="mdi-server-network-outline" /></div>
+            <div class="fleet-remote-inbound__section-head">
+              <div class="fleet-remote-inbound__section-icon"><v-icon icon="mdi-server-network-outline" /></div>
               <div><h3>{{ $t('ui.fleet.targetServers') }}</h3><p>{{ $t('ui.fleet.remoteInboundTargetsHint') }}</p></div>
             </div>
             <div class="fleet-target-grid">
@@ -488,12 +350,15 @@
               </header>
               <div v-if="remoteTargetInfo(id)?.success && remoteTargetSettings[id]" class="fleet-remote-target__settings">
                 <v-text-field
-                  :model-value="remoteGeneratedTag(id)"
+                  :model-value="remoteTargetSettings[id].tag"
                   :label="$t('ui.fleet.remoteInboundGeneratedName')"
-                  readonly
+                  :hint="$t('ui.fleet.remoteInboundNameHint')"
+                  :error-messages="remoteInboundTagError(id)"
+                  :disabled="remoteInboundLoading !== ''"
                   variant="outlined"
                   density="comfortable"
-                  hide-details
+                  hide-details="auto"
+                  @update:model-value="updateRemoteInboundTag(id, $event)"
                 />
                 <v-text-field
                   v-model.number="remoteTargetSettings[id].listenPort"
@@ -536,7 +401,7 @@
               <p v-else-if="remoteTargetInfo(id)?.error" class="fleet-remote-target__error">{{ remoteTargetInfo(id)?.error }}</p>
               <p v-else class="fleet-remote-target__hint">{{ $t('ui.fleet.remoteInboundWaiting') }}</p>
               <footer>
-                {{ $t('ui.fleet.remoteInboundGeneratedName') }}: <strong>{{ remoteGeneratedTag(id) }}</strong>
+                {{ $t('ui.fleet.remoteInboundGeneratedName') }}: <strong>{{ remoteTargetTag(id) }}</strong>
               </footer>
             </article>
           </div>
@@ -544,8 +409,8 @@
           <v-alert v-if="remoteInboundPreviewResults.length" :type="remoteInboundPreviewPassed ? 'success' : 'error'" variant="tonal" density="compact">
             {{ remoteInboundPreviewPassed ? $t('ui.fleet.remoteInboundPreviewPassed') : $t('ui.fleet.remoteInboundPreviewFailed') }}
           </v-alert>
-          <div v-if="remoteInboundPreviewResults.length" class="fleet-orchestration__results">
-            <div v-for="result in remoteInboundPreviewResults" :key="result.id" class="fleet-orchestration__result" :class="result.success ? 'is-success' : 'is-error'">
+          <div v-if="remoteInboundPreviewResults.length" class="fleet-remote-inbound__results">
+            <div v-for="result in remoteInboundPreviewResults" :key="result.id" class="fleet-remote-inbound__result" :class="result.success ? 'is-success' : 'is-error'">
               <div>
                 <strong>{{ result.name }}</strong>
                 <span>{{ result.tag }}</span>
@@ -557,7 +422,7 @@
             </div>
           </div>
         </v-card-text>
-        <v-card-actions class="fleet-rollout__footer">
+        <v-card-actions class="fleet-remote-inbound__footer">
           <v-spacer />
           <v-btn variant="text" @click="showRemoteInbound = false">{{ $t('ui.common.close') }}</v-btn>
           <v-btn
@@ -756,39 +621,12 @@ type FleetConfig = {
   enabled: boolean
 }
 
-type FleetTemplateSectionKey = 'outbounds' | 'route' | 'dns'
-type FleetTemplateSections = Partial<Record<FleetTemplateSectionKey | 'tls' | 'inbounds' | 'clients', boolean>>
 type FleetRemoteTLSProfile = { id: number; name: string; serverEnabled: boolean; serverName?: string; acmeDomains?: string[]; certificateFingerprint?: string }
 type FleetRemoteInboundCapabilities = { hostname: string; subscriptionHost: string; tlsProfiles: FleetRemoteTLSProfile[]; inboundTags: string[] }
 type FleetRemoteInboundTarget = { id: string; name: string; success: boolean; capabilities?: FleetRemoteInboundCapabilities; error?: string }
 type FleetRemoteInboundCheck = { name: string; status: string; detail: string }
 type FleetRemoteInboundResult = { id: string; name: string; tag?: string; success: boolean; created: boolean; error?: string; preview?: { valid: boolean; checks?: FleetRemoteInboundCheck[] } }
-type FleetRemoteInboundTargetSettings = { tlsId: number | null; listenPort: number }
-
-type FleetTemplate = {
-  id: string
-  name: string
-  createdAt: string
-  sections: FleetTemplateSections
-  unsafeServerLocalData?: boolean
-  inbounds?: unknown[]
-  clients?: unknown[]
-  tls?: unknown[]
-}
-
-type FleetTemplatePreview = {
-  outboundAdd: number
-  outboundUpdate: number
-  configUpdates?: string[]
-}
-
-type FleetTemplateResult = {
-  id: string
-  name: string
-  success: boolean
-  preview?: FleetTemplatePreview
-  error?: string
-}
+type FleetRemoteInboundTargetSettings = { tlsId: number | null; listenPort: number; tag: string; nameEdited: boolean }
 
 const t = i18n.global.t
 const remoteInboundTLSProtocols = ['http', 'vmess', 'trojan', 'naive', 'hysteria', 'tuic', 'hysteria2', 'vless', 'anytls']
@@ -798,10 +636,7 @@ const loading = ref(true)
 const saving = ref(false)
 const showConfig = ref(false)
 const showDetails = ref(false)
-const showOrchestration = ref(false)
 const showRemoteInbound = ref(false)
-const orchestrationStep = ref(1)
-const deploymentComplete = ref(false)
 const servers = ref<FleetServer[]>([])
 const configs = ref<FleetConfig[]>([])
 const checkedAt = ref('')
@@ -815,15 +650,6 @@ const actionLoading = ref(false)
 const batchAction = ref<'' | 'update' | 'restart'>('')
 const batchMessage = ref('')
 const batchMessageType = ref<'info' | 'success' | 'warning' | 'error'>('info')
-const templates = ref<FleetTemplate[]>([])
-const templateMode = ref<'saved' | 'create'>('saved')
-const templateName = ref('')
-const templateSections = ref<Record<FleetTemplateSectionKey, boolean>>({ outbounds: false, route: false, dns: false })
-const selectedTemplateId = ref('')
-const selectedTargets = ref<string[]>([])
-const canaryTarget = ref<string | null>(null)
-const templateResults = ref<FleetTemplateResult[]>([])
-const orchestrationLoading = ref<'' | 'capture' | 'preview' | 'deploy'>('')
 const remoteInboundDraft = ref<Inbound>(createInbound('socks', { id: 0, tag: '', listen: '::', listen_port: 0, addrs: [], out_json: {} }) as Inbound)
 const remoteInboundTargetIds = ref<string[]>([])
 const remoteInboundTargets = ref<FleetRemoteInboundTarget[]>([])
@@ -912,9 +738,6 @@ const onlineUsersTotal = computed(() => servers.value.reduce((total, server) => 
 const endpointTotal = computed(() => servers.value.reduce((total, server) => total + server.Endpoints, 0))
 const driftServerCount = computed(() => servers.value.filter((server) => server.driftCount > 0).length)
 const initialLoading = computed(() => loading.value && servers.value.length === 0)
-const deployableServers = computed(() => servers.value.filter(server => server.reachable && server.enabled))
-const selectedTemplate = computed(() => templates.value.find(item => item.id === selectedTemplateId.value))
-const selectedTemplateHasUnsafeData = computed(() => Boolean(selectedTemplate.value && hasServerLocalSnapshot(selectedTemplate.value)))
 const remoteInboundServers = computed(() => remoteServers.value.filter(server => server.reachable && server.enabled))
 const remoteInboundTLSCapable = computed(() => remoteInboundTLSProtocols.includes(remoteInboundDraft.value.type))
 const remoteInboundTLSRequired = computed(() => remoteInboundRequiredTLSProtocols.includes(remoteInboundDraft.value.type)
@@ -930,47 +753,10 @@ const canPreviewRemoteInbound = computed(() => Boolean(
   && remoteInboundTargets.value.every(target => target.success)
   && remoteInboundTargetIds.value.every(id => {
     const settings = remoteTargetSettings.value[id]
-    return Boolean(settings && settings.listenPort >= 1 && settings.listenPort <= 65535
+    return Boolean(settings && !remoteInboundTagError(id) && settings.listenPort >= 1 && settings.listenPort <= 65535
       && (!remoteInboundTLSRequired.value || (settings.tlsId !== null && settings.tlsId > 0)))
   }),
 ))
-const selectedTargetItems = computed(() => deployableServers.value
-  .filter(server => selectedTargets.value.includes(server.id))
-  .map(server => ({ title: server.name, value: server.id })))
-const selectedTargetNames = computed(() => deployableServers.value.filter(server => selectedTargets.value.includes(server.id)).map(server => server.name))
-const templateSectionOptions = computed<Array<{ key: FleetTemplateSectionKey; label: string; hint: string; icon: string }>>(() => [
-  { key: 'outbounds', label: t('pages.outbounds'), hint: t('ui.fleet.scopeOutbounds'), icon: 'mdi-upload-network-outline' },
-  { key: 'route', label: t('pages.rules'), hint: t('ui.fleet.scopeRoute'), icon: 'mdi-routes' },
-  { key: 'dns', label: 'DNS', hint: t('ui.fleet.scopeDns'), icon: 'mdi-dns-outline' },
-])
-const canCaptureTemplate = computed(() => Boolean(
-  templateName.value.trim()
-  && Object.values(templateSections.value).some(Boolean)
-))
-const canRunTemplate = computed(() => Boolean(selectedTemplateId.value && selectedTargets.value.length && !selectedTemplateHasUnsafeData.value))
-const canDeployTemplate = computed(() => canRunTemplate.value && templateResults.value.length > 0 && templateResults.value.every(result => result.success))
-const rolloutOrderLabel = computed(() => {
-  if (!selectedTargets.value.length) return t('ui.fleet.noTargetsSelected')
-  const names = [...selectedTargetNames.value]
-  if (canaryTarget.value) {
-    const canary = deployableServers.value.find(server => server.id === canaryTarget.value)?.name
-    const currentIndex = canary ? names.indexOf(canary) : -1
-    if (canary && currentIndex >= 0) {
-      names.splice(currentIndex, 1)
-      names.unshift(t('ui.fleet.rolloutMarker', { name: canary, role: t('ui.fleet.canary') }))
-    }
-  }
-  const localIndex = selectedTargets.value.indexOf('local')
-  if (localIndex >= 0) {
-    const localName = deployableServers.value.find(server => server.id === 'local')?.name
-    if (localName) {
-      const currentIndex = names.indexOf(localName)
-      if (currentIndex >= 0) names.splice(currentIndex, 1)
-      names.push(t('ui.fleet.rolloutMarker', { name: localName, role: t('ui.fleet.last') }))
-    }
-  }
-  return t('ui.fleet.rolloutOrder', { targets: names.join(' → ') })
-})
 const formattedCheckedAt = computed(() => {
   if (!checkedAt.value) return '-'
   const date = new Date(checkedAt.value)
@@ -1132,50 +918,6 @@ const saveConfig = async () => {
   saving.value = false
 }
 
-const loadTemplates = async () => {
-  const response = await HttpUtils.get('api/fleetTemplates')
-  if (response.success) {
-    templates.value = Array.isArray(response.obj) ? response.obj : []
-    if (selectedTemplateId.value && !templates.value.some(item => item.id === selectedTemplateId.value)) selectedTemplateId.value = ''
-  }
-}
-
-const openOrchestration = async () => {
-  orchestrationStep.value = 1
-  deploymentComplete.value = false
-  templateName.value = ''
-  templateSections.value = { outbounds: false, route: false, dns: false }
-  templateResults.value = []
-  selectedTargets.value = []
-  canaryTarget.value = null
-  selectedTemplateId.value = ''
-  await loadTemplates()
-  templateMode.value = templates.value.length ? 'saved' : 'create'
-  showOrchestration.value = true
-}
-
-const selectTemplate = (id: string) => {
-  selectedTemplateId.value = id
-  selectedTargets.value = []
-  canaryTarget.value = null
-  templateResults.value = []
-  deploymentComplete.value = false
-}
-
-const templateSectionLabels = (template: FleetTemplate) => templateSectionOptions.value
-  .filter(option => template.sections?.[option.key])
-  .map(option => option.label)
-
-const hasServerLocalSnapshot = (template: FleetTemplate) => Boolean(
-  template.unsafeServerLocalData
-  || template.sections?.inbounds || template.sections?.clients || template.sections?.tls
-  || template.inbounds?.length || template.clients?.length || template.tls?.length,
-)
-
-const toggleTemplateSection = (key: FleetTemplateSectionKey) => {
-  templateSections.value[key] = !templateSections.value[key]
-}
-
 const openRemoteInboundDialog = async () => {
   showRemoteInbound.value = true
   remoteInboundDraft.value = createInbound('socks', { id: 0, tag: '', listen: '::', listen_port: 0, addrs: [], out_json: {} }) as Inbound
@@ -1195,11 +937,14 @@ const resetRemoteInboundTargetSettings = () => {
   const nextSettings: Record<string, FleetRemoteInboundTargetSettings> = {}
   for (const target of remoteInboundTargets.value) {
     const profiles = (target.capabilities?.tlsProfiles ?? []).filter(profile => profile.serverEnabled)
+    const previous = remoteTargetSettings.value[target.id]
     nextSettings[target.id] = {
-      listenPort: Math.floor(Math.random() * 40000) + 20000,
-      tlsId: remoteInboundTLSRequired.value
+      listenPort: previous?.listenPort ?? Math.floor(Math.random() * 40000) + 20000,
+      tlsId: previous?.tlsId ?? (remoteInboundTLSRequired.value
           ? (profiles.length === 1 ? profiles[0].id : null)
-          : null,
+          : null),
+      tag: previous?.nameEdited ? previous.tag : remoteGeneratedTag(target.id),
+      nameEdited: previous?.nameEdited ?? false,
     }
   }
   remoteTargetSettings.value = nextSettings
@@ -1210,6 +955,7 @@ watch(() => [remoteInboundDraft.value.type, (remoteInboundDraft.value as any).ve
   for (const target of remoteInboundTargets.value) {
     const settings = remoteTargetSettings.value[target.id]
     if (!settings) continue
+    if (!settings.nameEdited) settings.tag = remoteGeneratedTag(target.id)
     const profiles = (target.capabilities?.tlsProfiles ?? []).filter(profile => profile.serverEnabled)
     if (!remoteInboundTLSCapable.value || remoteInboundDraft.value.type === 'masque') {
       settings.tlsId = null
@@ -1228,10 +974,10 @@ const toggleRemoteInboundTarget = async (id: string) => {
     : [...remoteInboundTargetIds.value, id]
   remoteInboundTargetIds.value = selected
   remoteInboundTargets.value = []
-  remoteTargetSettings.value = {}
   clearRemoteInboundPreview()
   const requestRevision = ++remoteTargetRequestRevision
   if (!selected.length) {
+    remoteTargetSettings.value = {}
     remoteInboundLoading.value = ''
     return
   }
@@ -1259,22 +1005,40 @@ const remoteInboundServer = (id: string) => remoteServers.value.find(server => s
 const remoteTagSlug = (value: string) => value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 const remoteGeneratedTag = (id: string) => {
   const server = remoteInboundServer(id)
-  const name = (server?.name ?? id).trim().replace(/\s+/g, ' ')
-  const matchingTargets = remoteInboundTargetIds.value.filter(targetID =>
-    (remoteInboundServer(targetID)?.name ?? targetID).trim().replace(/\s+/g, ' ').toLowerCase() === name.toLowerCase(),
+  let serverPart = remoteTagSlug(server?.name ?? '') || remoteTagSlug(id)
+  const matchingServers = remoteServers.value.filter(candidate =>
+    (remoteTagSlug(candidate.name) || remoteTagSlug(candidate.id)) === serverPart,
   )
-  let serverPart = remoteTagSlug(name) || remoteTagSlug(id)
-  if (matchingTargets.length > 1) serverPart += `-${remoteTagSlug(id.slice(0, 6))}`
+  if (matchingServers.length > 1) serverPart += `-${remoteTagSlug(id)}`
   const protocol = remoteInboundDraft.value.type === 'hysteria' ? 'hy'
     : remoteInboundDraft.value.type === 'hysteria2' ? 'hy2'
       : remoteInboundDraft.value.type === 'shadowsocks' ? 'ss'
         : remoteTagSlug(remoteInboundDraft.value.type)
   const base = `${serverPart}-${protocol}`
-  const used = new Set((remoteTargetInfo(id)?.capabilities?.inboundTags ?? []).map(tag => tag.toLowerCase()))
+  const used = new Set((remoteTargetInfo(id)?.capabilities?.inboundTags ?? []).map(tag => tag.trim().toLowerCase()))
   if (!used.has(base.toLowerCase())) return base
   let suffix = 2
   while (used.has(`${base}-${suffix}`.toLowerCase())) suffix++
   return `${base}-${suffix}`
+}
+const remoteTargetTag = (id: string) => remoteTargetSettings.value[id]?.tag.trim() ?? remoteGeneratedTag(id)
+const remoteInboundTagError = (id: string) => {
+  const tag = remoteTargetTag(id).toLowerCase()
+  if (!tag) return t('ui.fleet.remoteInboundNameRequired')
+  if ((remoteTargetInfo(id)?.capabilities?.inboundTags ?? []).some(existing => existing.trim().toLowerCase() === tag)) {
+    return t('ui.fleet.remoteInboundNameTaken')
+  }
+  if (remoteInboundTargetIds.value.some(other => other !== id && remoteTargetTag(other).toLowerCase() === tag)) {
+    return t('ui.fleet.remoteInboundNameDuplicate')
+  }
+  return ''
+}
+const updateRemoteInboundTag = (id: string, value: string | null) => {
+  const settings = remoteTargetSettings.value[id]
+  if (!settings) return
+  settings.tag = value ?? ''
+  settings.nameEdited = settings.tag !== remoteGeneratedTag(id)
+  clearRemoteInboundPreview()
 }
 const remoteTlsItems = (id: string) => (remoteTargetInfo(id)?.capabilities?.tlsProfiles ?? []).filter(profile => profile.serverEnabled).map(profile => ({
   title: profile.serverName ? `${profile.name} · ${profile.serverName}` : profile.name,
@@ -1296,6 +1060,7 @@ const previewRemoteInbound = async () => {
     inboundDraft: remoteInboundDraft.value,
     targets: remoteInboundTargetIds.value.map(id => ({
       id,
+      tag: remoteTargetTag(id),
       tlsId: remoteTargetSettings.value[id]?.tlsId ?? 0,
       listenPort: remoteTargetSettings.value[id]?.listenPort ?? 0,
     })),
@@ -1305,7 +1070,7 @@ const previewRemoteInbound = async () => {
   else if (!response.success) remoteInboundPreviewResults.value = remoteInboundTargetIds.value.map(id => ({
     id,
     name: remoteInboundServer(id)?.name ?? id,
-    tag: remoteGeneratedTag(id),
+    tag: remoteTargetTag(id),
     success: false,
     created: false,
     error: response.msg || t('ui.fleet.remoteInboundTargetsFailed'),
@@ -1323,6 +1088,7 @@ const createRemoteInbound = async () => {
     inboundDraft: remoteInboundDraft.value,
     targets: remoteInboundTargetIds.value.map(id => ({
       id,
+      tag: remoteTargetTag(id),
       tlsId: remoteTargetSettings.value[id]?.tlsId ?? 0,
       listenPort: remoteTargetSettings.value[id]?.listenPort ?? 0,
     })),
@@ -1335,7 +1101,7 @@ const createRemoteInbound = async () => {
     remoteInboundPreviewResults.value = remoteInboundTargetIds.value.map(id => ({
       id,
       name: remoteInboundServer(id)?.name ?? id,
-      tag: remoteGeneratedTag(id),
+      tag: remoteTargetTag(id),
       success: false,
       created: false,
       error: `${response.msg || t('ui.fleet.remoteInboundCreateFailed')} · ${t('ui.fleet.remoteInboundVerifyBeforeRetry')}`,
@@ -1343,85 +1109,6 @@ const createRemoteInbound = async () => {
   }
   remoteInboundLoading.value = ''
 }
-
-const goToTargets = () => {
-  if (!selectedTemplateId.value || selectedTemplateHasUnsafeData.value) return
-  orchestrationStep.value = 2
-}
-
-const toggleTarget = (id: string) => {
-  if (selectedTargets.value.includes(id)) {
-    selectedTargets.value = selectedTargets.value.filter(target => target !== id)
-    if (canaryTarget.value === id) canaryTarget.value = null
-  } else {
-    selectedTargets.value = [...selectedTargets.value, id]
-  }
-  templateResults.value = []
-  deploymentComplete.value = false
-}
-
-const captureTemplate = async () => {
-  orchestrationLoading.value = 'capture'
-  const response = await HttpUtils.post('api/fleetTemplateCapture', {
-    name: templateName.value,
-    sections: JSON.stringify(templateSections.value),
-  })
-  if (response.success) {
-    templateName.value = ''
-    await loadTemplates()
-    selectedTemplateId.value = response.obj?.id ?? ''
-    orchestrationStep.value = 2
-  }
-  orchestrationLoading.value = ''
-}
-
-const deleteTemplate = async () => {
-  if (!selectedTemplateId.value || !window.confirm(t('ui.fleet.confirmDeleteTemplate'))) return
-  const response = await HttpUtils.post('api/fleetTemplateDelete', { id: selectedTemplateId.value })
-  if (response.success) {
-    selectedTemplateId.value = ''
-    templateResults.value = []
-    orchestrationStep.value = 1
-    await loadTemplates()
-  }
-}
-
-const previewTemplate = async () => {
-  orchestrationLoading.value = 'preview'
-  templateResults.value = []
-  const response = await HttpUtils.post('api/fleetTemplatePreview', {
-    id: selectedTemplateId.value,
-    targets: JSON.stringify(selectedTargets.value),
-  })
-  if (response.success) {
-    templateResults.value = response.obj ?? []
-    orchestrationStep.value = 3
-    deploymentComplete.value = false
-  }
-  orchestrationLoading.value = ''
-}
-
-const deployTemplate = async () => {
-  if (!window.confirm(t('ui.fleet.confirmDeployTemplate'))) return
-  orchestrationLoading.value = 'deploy'
-  const response = await HttpUtils.post('api/fleetTemplateDeploy', {
-    id: selectedTemplateId.value,
-    targets: JSON.stringify(selectedTargets.value),
-    canary: canaryTarget.value ?? '',
-  })
-  if (response.success) {
-    templateResults.value = response.obj ?? []
-    deploymentComplete.value = templateResults.value.length > 0 && templateResults.value.every(result => result.success)
-    await loadFleet(true)
-  }
-  orchestrationLoading.value = ''
-}
-
-const previewSummary = (preview: FleetTemplatePreview) => t('ui.fleet.previewSummary', {
-  outboundAdd: preview.outboundAdd ?? 0,
-  outboundUpdate: preview.outboundUpdate ?? 0,
-  config: preview.configUpdates?.join(' / ') || '-',
-})
 
 const openDetails = (server: FleetServer) => {
   selectedServer.value = server
@@ -1736,68 +1423,15 @@ onBeforeUnmount(() => {
 .fleet-dialog__title { display: flex; align-items: center; justify-content: space-between; }
 .fleet-config-row { display: grid; grid-template-columns: 0.8fr 1.5fr 1.3fr auto auto; align-items: center; gap: 10px; padding: 10px 0; }
 .fleet-dialog__add { margin-top: 8px; }
-.fleet-rollout { overflow: hidden; }
-.fleet-rollout__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 22px 24px 16px; border-bottom: 1px solid var(--np-border); }
-.fleet-rollout__header > div { min-width: 0; }
-.fleet-rollout__header h2 { margin: 3px 0 4px; font-size: 1.35rem; letter-spacing: -.025em; }
-.fleet-rollout__header p { max-width: 650px; margin: 0; color: var(--np-text-muted); font-size: .82rem; line-height: 1.55; }
-.fleet-rollout__eyebrow { color: rgb(var(--v-theme-primary)); font-size: .67rem; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
-.fleet-rollout__steps { display: grid; grid-template-columns: repeat(3, 1fr); padding: 12px 24px; border-bottom: 1px solid var(--np-border); background: var(--np-surface-muted); }
-.fleet-rollout__steps button { position: relative; display: flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; padding: 8px 10px; color: var(--np-text-muted); }
-.fleet-rollout__steps button:not(:last-child)::after { position: absolute; right: -10%; width: 20%; height: 1px; background: var(--np-border); content: ''; }
-.fleet-rollout__steps button > span { display: grid; flex: 0 0 26px; width: 26px; height: 26px; place-items: center; border: 1px solid var(--np-border); border-radius: 50%; background: var(--np-surface); font-size: .72rem; font-weight: 800; }
-.fleet-rollout__steps button strong { overflow: hidden; font-size: .78rem; text-overflow: ellipsis; white-space: nowrap; }
-.fleet-rollout__steps button.is-active { color: rgb(var(--v-theme-primary)); }
-.fleet-rollout__steps button.is-active > span { border-color: rgb(var(--v-theme-primary)); background: rgb(var(--v-theme-primary)); color: white; box-shadow: 0 5px 14px rgba(37, 99, 235, .22); }
-.fleet-rollout__steps button.is-done { color: rgb(var(--v-theme-success)); }
-.fleet-rollout__steps button.is-done > span { border-color: rgba(34, 197, 94, .35); background: rgba(34, 197, 94, .12); }
-.fleet-rollout__body { padding: 22px 24px 18px; }
-.fleet-rollout__panel { display: grid; gap: 18px; min-height: 350px; }
-.fleet-rollout__section-head { display: flex; align-items: center; gap: 12px; }
-.fleet-rollout__section-head h3 { margin: 0 0 3px; font-size: 1rem; }
-.fleet-rollout__section-head p { margin: 0; color: var(--np-text-muted); font-size: .78rem; line-height: 1.5; }
-.fleet-rollout__section-icon { display: grid; flex: 0 0 42px; width: 42px; height: 42px; place-items: center; border-radius: 14px; background: rgba(10, 132, 255, .11); color: rgb(var(--v-theme-primary)); }
-.fleet-template-mode { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; padding: 4px; border-radius: 13px; background: var(--np-surface-muted); }
-.fleet-template-mode button { min-width: 0; padding: 9px 12px; border: 1px solid transparent; border-radius: 10px; color: var(--np-text-muted); font-size: .8rem; font-weight: 650; }
-.fleet-template-mode button.is-active { border-color: var(--np-border); background: var(--np-surface); color: var(--np-text); box-shadow: 0 2px 6px rgba(15, 23, 42, .07); }
-.fleet-template-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.fleet-template-card { display: flex; align-items: center; gap: 11px; min-width: 0; padding: 13px; border: 1px solid var(--np-border); border-radius: 15px; background: var(--np-surface); color: var(--np-text); text-align: left; transition: border-color .18s ease, background .18s ease, transform .18s ease; }
-.fleet-template-card:hover { border-color: rgba(10, 132, 255, .34); transform: translateY(-1px); }
-.fleet-template-card.is-selected { border-color: rgba(10, 132, 255, .52); background: rgba(10, 132, 255, .08); }
-.fleet-template-card__icon { display: grid; flex: 0 0 38px; width: 38px; height: 38px; place-items: center; border-radius: 12px; background: var(--np-surface-muted); color: rgb(var(--v-theme-primary)); }
-.fleet-template-card__copy { display: grid; flex: 1; gap: 3px; min-width: 0; }
-.fleet-template-card__copy strong, .fleet-template-card__copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fleet-template-card__copy strong { font-size: .86rem; }
-.fleet-template-card__copy small { color: var(--np-text-muted); font-size: .7rem; }
-.fleet-template-list__actions { display: flex; grid-column: 1 / -1; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 2px; }
-.fleet-rollout__empty { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 82px; border: 1px dashed var(--np-border); border-radius: 15px; color: var(--np-text-muted); font-size: .8rem; }
-.fleet-rollout__divider { display: flex; align-items: center; gap: 12px; color: var(--np-text-muted); font-size: .72rem; }
-.fleet-rollout__divider::before, .fleet-rollout__divider::after { flex: 1; height: 1px; background: var(--np-border); content: ''; }
-.fleet-template-create { display: grid; gap: 13px; padding: 16px; border: 1px solid var(--np-border); border-radius: 18px; background: var(--np-surface-muted); }
-.fleet-template-scope { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.fleet-template-scope button { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; min-width: 0; padding: 11px 12px; border: 1px solid var(--np-border); border-radius: 13px; background: var(--np-surface); color: var(--np-text); text-align: left; }
-.fleet-template-scope button.is-selected { border-color: rgba(10, 132, 255, .42); background: rgba(10, 132, 255, .07); color: rgb(var(--v-theme-primary)); }
-.fleet-template-scope button > span { display: grid; gap: 2px; min-width: 0; }
-.fleet-template-scope button strong { color: var(--np-text); font-size: .8rem; }
-.fleet-template-scope button small { overflow: hidden; color: var(--np-text-muted); font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
-.fleet-inbound-picker { display: grid; gap: 9px; padding: 12px; border: 1px solid var(--np-border); border-radius: 14px; background: var(--np-surface); }
-.fleet-inbound-picker__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
-.fleet-inbound-picker__head strong { font-size: .78rem; }
-.fleet-inbound-picker__head > div { display: flex; gap: 8px; }
-.fleet-inbound-picker__head button { padding: 5px 8px; border-radius: 8px; color: rgb(var(--v-theme-primary)); font-size: .72rem; font-weight: 650; }
-.fleet-inbound-picker__head button:disabled { color: var(--np-text-muted); opacity: .55; }
-.fleet-inbound-picker__list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; max-height: 230px; overflow-y: auto; }
-.fleet-inbound-picker__item { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 9px; min-width: 0; padding: 9px 10px; border: 1px solid var(--np-border); border-radius: 11px; background: var(--np-surface-muted); }
-.fleet-inbound-picker__item.is-selected { border-color: rgba(10, 132, 255, .42); background: rgba(10, 132, 255, .07); }
-.fleet-inbound-picker__item input { width: 16px; height: 16px; accent-color: rgb(var(--v-theme-primary)); }
-.fleet-inbound-picker__item > span { display: grid; gap: 2px; min-width: 0; }
-.fleet-inbound-picker__item strong, .fleet-inbound-picker__item small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fleet-inbound-picker__item strong { font-size: .76rem; }
-.fleet-inbound-picker__item small, .fleet-inbound-picker__empty, .fleet-inbound-picker > p { color: var(--np-text-muted); font-size: .68rem; }
-.fleet-inbound-picker__empty { padding: 16px; text-align: center; }
-.fleet-inbound-picker > p { margin: 0; line-height: 1.45; }
-.fleet-rollout__selection-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 14px; border-radius: 13px; background: rgba(10, 132, 255, .08); }
-.fleet-rollout__selection-summary span { color: var(--np-text-muted); font-size: .72rem; }
+.fleet-remote-inbound__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 22px 24px 16px; border-bottom: 1px solid var(--np-border); }
+.fleet-remote-inbound__header > div { min-width: 0; }
+.fleet-remote-inbound__header h2 { margin: 3px 0 4px; font-size: 1.35rem; letter-spacing: -.025em; }
+.fleet-remote-inbound__header p { max-width: 650px; margin: 0; color: var(--np-text-muted); font-size: .82rem; line-height: 1.55; }
+.fleet-remote-inbound__eyebrow { color: rgb(var(--v-theme-primary)); font-size: .67rem; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
+.fleet-remote-inbound__section-head { display: flex; align-items: center; gap: 12px; }
+.fleet-remote-inbound__section-head h3 { margin: 0 0 3px; font-size: 1rem; }
+.fleet-remote-inbound__section-head p { margin: 0; color: var(--np-text-muted); font-size: .78rem; line-height: 1.5; }
+.fleet-remote-inbound__section-icon { display: grid; flex: 0 0 42px; width: 42px; height: 42px; place-items: center; border-radius: 14px; background: rgba(10, 132, 255, .11); color: rgb(var(--v-theme-primary)); }
 .fleet-target-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
 .fleet-target-grid button { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; min-width: 0; padding: 13px; border: 1px solid var(--np-border); border-radius: 15px; background: var(--np-surface); color: var(--np-text); text-align: left; }
 .fleet-target-grid button.is-selected { border-color: rgba(10, 132, 255, .52); background: rgba(10, 132, 255, .08); }
@@ -1807,25 +1441,16 @@ onBeforeUnmount(() => {
 .fleet-target-grid button strong, .fleet-target-grid button small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fleet-target-grid button strong { font-size: .84rem; }
 .fleet-target-grid button small, .fleet-target-grid button em { color: var(--np-text-muted); font-size: .68rem; font-style: normal; }
-.fleet-canary-box { display: grid; grid-template-columns: minmax(0, .8fr) minmax(260px, 1.2fr); align-items: center; gap: 14px; padding: 14px; border: 1px solid var(--np-border); border-radius: 15px; background: var(--np-surface-muted); }
-.fleet-canary-box > div { display: grid; gap: 3px; }
-.fleet-canary-box span { color: var(--np-text-muted); font-size: .7rem; line-height: 1.45; }
-.fleet-rollout__order { display: flex; align-items: flex-start; gap: 9px; padding: 11px 13px; border-radius: 13px; background: rgba(14, 165, 233, .09); color: rgb(var(--v-theme-info)); font-size: .76rem; line-height: 1.5; }
-.fleet-rollout__review-meta { display: grid; grid-template-columns: .7fr 1.3fr; gap: 9px; }
-.fleet-rollout__review-meta > div { display: grid; gap: 4px; padding: 11px 13px; border: 1px solid var(--np-border); border-radius: 13px; }
-.fleet-rollout__review-meta span { color: var(--np-text-muted); font-size: .7rem; }
-.fleet-rollout__review-meta strong { overflow-wrap: anywhere; font-size: .82rem; }
-.fleet-orchestration__results { display: grid; gap: 8px; }
-.fleet-orchestration__result { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--np-border); border-radius: 14px; }
-.fleet-orchestration__result > div { display: grid; gap: 3px; min-width: 0; }
-.fleet-orchestration__result span { color: var(--np-text-muted); font-size: .78rem; overflow-wrap: anywhere; }
-.fleet-orchestration__result small { color: var(--np-text-muted); font-size: .7rem; overflow-wrap: anywhere; }
-.fleet-orchestration__result.is-success { color: rgb(var(--v-theme-success)); background: rgba(34, 197, 94, .06); }
-.fleet-orchestration__result.is-error { color: rgb(var(--v-theme-error)); background: rgba(239, 68, 68, .06); }
-.fleet-rollout__footer { min-height: 64px; padding: 10px 20px; border-top: 1px solid var(--np-border); background: var(--np-surface-muted); }
+.fleet-remote-inbound__results { display: grid; gap: 8px; }
+.fleet-remote-inbound__result { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--np-border); border-radius: 14px; }
+.fleet-remote-inbound__result > div { display: grid; gap: 3px; min-width: 0; }
+.fleet-remote-inbound__result span { color: var(--np-text-muted); font-size: .78rem; overflow-wrap: anywhere; }
+.fleet-remote-inbound__result small { color: var(--np-text-muted); font-size: .7rem; overflow-wrap: anywhere; }
+.fleet-remote-inbound__result.is-success { color: rgb(var(--v-theme-success)); background: rgba(34, 197, 94, .06); }
+.fleet-remote-inbound__result.is-error { color: rgb(var(--v-theme-error)); background: rgba(239, 68, 68, .06); }
+.fleet-remote-inbound__footer { min-height: 64px; padding: 10px 20px; border-top: 1px solid var(--np-border); background: var(--np-surface-muted); }
 .fleet-remote-inbound { overflow: hidden; }
 .fleet-remote-inbound__body { display: grid; gap: 16px; max-height: min(72vh, 820px); padding: 18px 24px; }
-.fleet-remote-inbound__form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .fleet-remote-inbound__section { display: grid; gap: 12px; }
 .fleet-remote-inbound__targets { display: grid; gap: 9px; }
 .fleet-remote-target { display: grid; gap: 10px; padding: 13px; border: 1px solid var(--np-border); border-radius: 15px; background: var(--np-surface); }
@@ -1846,20 +1471,13 @@ onBeforeUnmount(() => {
   .fleet-hero__actions .v-btn { width: 100%; min-width: 0; }
   .fleet-hero__meta { flex-wrap: wrap; }
   .fleet-config-row { grid-template-columns: 1fr; padding: 14px 0; border-bottom: 1px solid var(--np-border); }
-  .fleet-rollout__header { padding: 18px 16px 14px; }
+  .fleet-remote-inbound__header { padding: 18px 16px 14px; }
   .fleet-remote-inbound__body { padding: 16px 14px; }
-  .fleet-remote-inbound__form, .fleet-remote-target__settings { grid-template-columns: 1fr; }
+  .fleet-remote-target__settings { grid-template-columns: 1fr; }
   .fleet-remote-target__certificate { grid-column: 1; }
-  .fleet-rollout__steps { padding-inline: 8px; }
-  .fleet-rollout__steps button { padding-inline: 4px; }
-  .fleet-rollout__steps button strong { font-size: .7rem; }
-  .fleet-rollout__body { padding: 18px 14px 14px; }
-  .fleet-template-list, .fleet-template-scope, .fleet-target-grid, .fleet-rollout__review-meta { grid-template-columns: 1fr; }
-  .fleet-inbound-picker__list { grid-template-columns: 1fr; }
-  .fleet-canary-box { grid-template-columns: 1fr; }
-  .fleet-template-list__actions { position: sticky; bottom: 0; padding: 8px; border-radius: 12px; background: var(--np-surface); box-shadow: 0 -8px 24px rgba(15, 23, 42, .08); }
-  .fleet-rollout__footer { flex-wrap: wrap; padding: 9px 12px; }
-  .fleet-rollout__footer .v-btn { flex: 1 1 auto; }
+  .fleet-target-grid { grid-template-columns: 1fr; }
+  .fleet-remote-inbound__footer { flex-wrap: wrap; padding: 9px 12px; }
+  .fleet-remote-inbound__footer .v-btn { flex: 1 1 auto; }
 }
 
 @media (max-width: 1279px) {

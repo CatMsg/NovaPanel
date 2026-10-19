@@ -13,7 +13,7 @@ const requiredFleetKeys = [
 ] as const
 
 const technicalSame = new Set([
-  'fleet.apiToken', 'fleet.canary', 'fleet.panel', 'fleet.rolloutMarker', 'fleet.runningAction',
+  'fleet.apiToken', 'fleet.panel', 'fleet.runningAction',
   'health.endpoint', 'health.inbound', 'health.panel', 'health.telegramChatId', 'health.telegramToken',
 ])
 
@@ -61,8 +61,7 @@ describe('navigation and resource UI translations', () => {
       expect(messages.resource.noSearchResults, `${locale}.resource.noSearchResults`).toBeTruthy()
       expect(messages.inboundForm.advanced, `${locale}.inboundForm.advanced`).toBeTruthy()
       expect(messages.rules.matchConditions, `${locale}.rules.matchConditions`).toBeTruthy()
-      expect(messages.fleet.templateModeSaved, `${locale}.fleet.templateModeSaved`).toBeTruthy()
-      expect(messages.fleet.templateModeCreate, `${locale}.fleet.templateModeCreate`).toBeTruthy()
+      expect(messages.fleet.targetServers, `${locale}.fleet.targetServers`).toBeTruthy()
     }
   })
 })

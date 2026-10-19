@@ -40,77 +40,65 @@ test('fleet loads status and renders billing-cycle traffic history', async ({ pa
   await expect(page.getByText('2 个采样点')).toBeVisible()
 })
 
-test('configuration rollout separates using a saved template from creating one', async ({ page }) => {
+test('fleet exposes remote inbound creation without template rollout or template requests', async ({ page }) => {
+  await installBaseMocks(page, true)
+  const templateRequests: string[] = []
+  page.on('request', request => {
+    if (new URL(request.url()).pathname.includes('fleetTemplate')) templateRequests.push(request.url())
+  })
+  await page.route('**/api/fleet**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json({ servers: [
+      { id: 'local', name: '本机', url: '本机', enabled: true, reachable: true, core: { running: true } },
+      { id: 'la', name: 'LA', url: 'https://la.example:9999', enabled: true, reachable: true, core: { running: true } },
+    ] }),
+  }))
+
+  await page.goto('/app/fleet')
+  await expect(page.getByRole('heading', { name: '服务器集合' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '配置编排' })).toHaveCount(0)
+  await page.getByRole('button', { name: '远程新建入站' }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('heading', { name: '在远端服务器新建入站' })).toBeVisible()
+  await expect(dialog.locator('.fleet-inbound-draft')).toBeVisible()
+  await expect(dialog.getByLabel('模板名称')).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: '使用已有模板' })).toHaveCount(0)
+  expect(templateRequests).toEqual([])
+})
+
+test('remote inbound names account for matching server prefixes outside the current selection', async ({ page }) => {
   await installBaseMocks(page, true)
   await page.route('**/api/fleet**', route => route.fulfill({
     status: 200, contentType: 'application/json',
-    body: json({ servers: [{ id: 'local', name: '本机', url: '本机', enabled: true, reachable: true, core: { running: true } }] }),
+    body: json({ servers: [
+      { id: 'local', name: '本机', url: '本机', enabled: true, reachable: true, core: { running: true } },
+      { id: 'la-shared-a', name: 'LA East', url: 'https://la-a.example', enabled: true, reachable: true, core: { running: true } },
+      { id: 'la-shared-b', name: 'LA-East', url: 'https://la-b.example', enabled: true, reachable: true, core: { running: true } },
+    ] }),
   }))
-  await page.route('**/api/fleetTemplates**', route => route.fulfill({ status: 200, contentType: 'application/json', body: json([]) }))
-  let capturedInboundIds: string | null = null
-  let capturedSections: Record<string, boolean> | undefined
-  await page.route('**/api/fleetTemplateCapture', async route => {
-    const form = new URLSearchParams(route.request().postData() ?? '')
-    capturedInboundIds = form.get('inboundIds')
-    capturedSections = JSON.parse(form.get('sections') ?? '{}')
-    await route.fulfill({ status: 200, contentType: 'application/json', body: json({ id: 'template-1', name: 'one inbound', sections: capturedSections }) })
+  await page.route('**/api/fleetInboundTargets**', route => {
+    const ids = JSON.parse(new URL(route.request().url()).searchParams.get('targets') ?? '[]') as string[]
+    return route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: json(ids.map(id => ({
+        id, name: id, success: true,
+        capabilities: { hostname: `${id}.example`, subscriptionHost: `${id}.example`, tlsProfiles: [], inboundTags: [] },
+      }))),
+    })
   })
-  await page.route('**/api/fleetTemplatePreview', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: json([{
-      id: 'local', name: '本机', success: true,
-      preview: { outboundAdd: 0, outboundUpdate: 1 },
-    }]),
-  }))
 
   await page.goto('/app/fleet')
-  await page.getByRole('button', { name: '配置编排' }).click()
-
+  await page.getByRole('button', { name: '远程新建入站' }).click()
   const dialog = page.getByRole('dialog')
-  await expect(dialog.getByLabel('模板名称')).toBeVisible()
-  await dialog.getByRole('button', { name: '使用已有模板' }).click()
-  await expect(dialog.getByText('还没有保存的模板，请在下方创建第一个模板。')).toBeVisible()
-  await expect(dialog.getByLabel('模板名称')).toBeHidden()
-  await dialog.getByRole('button', { name: '新建模板' }).click()
-  await expect(dialog.getByLabel('模板名称')).toBeVisible()
-  await expect(dialog.locator('.fleet-template-scope button')).toHaveCount(3)
-  await dialog.locator('.fleet-template-scope button').first().click()
-  await dialog.getByLabel('模板名称').fill('stream settings')
-  await dialog.getByRole('button', { name: '保存并继续' }).click()
-  await expect(dialog.getByRole('heading', { name: '选择目标服务器' })).toBeVisible()
-  expect(capturedInboundIds).toBeNull()
-  expect(capturedSections).toEqual({ outbounds: true, route: false, dns: false })
-  await dialog.getByRole('button', { name: /本机/ }).click()
-  await dialog.getByRole('button', { name: '预览差异' }).click()
-  await expect(dialog.getByText(/出站 \+0\/改1/)).toBeVisible()
-  await expect(dialog.getByText(/用户 \+/)).toHaveCount(0)
-  await expect(dialog.getByText(/TLS \d/)).toHaveCount(0)
-})
-
-test('legacy templates with server-local identity data remain visible but cannot be applied', async ({ page }) => {
-  await installBaseMocks(page, true)
-  await page.route('**/api/fleet**', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: json({ servers: [{ id: 'local', name: '本机', url: '本机', enabled: true, reachable: true, core: { running: true } }] }),
-  }))
-  await page.route('**/api/fleetTemplates**', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: json([{
-      id: 'legacy', name: '旧版服务器身份模板', createdAt: '2026-10-01T00:00:00Z',
-      sections: { tls: true, inbounds: true, outbounds: false, clients: true, route: false, dns: false },
-      unsafeServerLocalData: true,
-    }]),
-  }))
-
-  await page.goto('/app/fleet')
-  await page.getByRole('button', { name: '配置编排' }).click()
-  const dialog = page.getByRole('dialog')
-  await dialog.getByRole('button', { name: /旧版服务器身份模板/ }).click()
-  await expect(dialog.getByText('旧模板含服务器本地身份数据')).toBeVisible()
-  await expect(dialog.getByRole('button', { name: '使用这个模板' })).toBeDisabled()
+  const first = dialog.locator('.fleet-target-grid button').filter({ hasText: 'LA East' })
+  const second = dialog.locator('.fleet-target-grid button').filter({ hasText: 'LA-East' })
+  await first.click()
+  await expect(dialog.getByLabel('入站名称')).toHaveValue('la-east-la-shared-a-socks')
+  await second.click()
+  await expect(dialog.getByLabel('入站名称').nth(1)).toHaveValue('la-east-la-shared-b-socks')
+  await first.click()
+  await expect(dialog.getByLabel('入站名称')).toHaveValue('la-east-la-shared-b-socks')
 })
 
 test('remote inbound creation starts from a fresh protocol draft and target-local settings', async ({ page }) => {
@@ -135,7 +123,7 @@ test('remote inbound creation starts from a fresh protocol draft and target-loca
         hostname: `${id}.panel.example`,
         subscriptionHost: `${id}.example`,
         tlsProfiles: [{ id: id === 'la' ? 101 : 202, name: `tls-${id}`, serverEnabled: true, serverName: `${id}.example`, certificateFingerprint: `${id}1234567890abcdef` }],
-        inboundTags: [],
+        inboundTags: ['existing-hy2'],
       },
     }))
     await route.fulfill({ status: 200, contentType: 'application/json', body: json(items) })
@@ -149,7 +137,7 @@ test('remote inbound creation starts from a fresh protocol draft and target-loca
     await route.fulfill({ status: 200, contentType: 'application/json', body: json(previewPlan.targets.map((target: any) => ({
       id: target.id,
       name: target.id.toUpperCase(),
-      tag: `${target.id}-hy2`,
+      tag: target.tag,
       success: true,
       created: false,
       preview: { valid: true, checks: [{ name: '端口', status: 'ok', detail: '可用' }] },
@@ -161,7 +149,7 @@ test('remote inbound creation starts from a fresh protocol draft and target-loca
     await route.fulfill({ status: 200, contentType: 'application/json', body: json(createPlan.targets.map((target: any) => ({
       id: target.id,
       name: target.id.toUpperCase(),
-      tag: `${target.id}-hy2`,
+      tag: target.tag,
       success: true,
       created: true,
     }))) })
@@ -179,11 +167,23 @@ test('remote inbound creation starts from a fresh protocol draft and target-loca
   await dialog.locator('.fleet-inbound-draft .v-select .v-field').first().click()
   await page.getByRole('option', { name: 'Hysteria2' }).click()
   await dialog.getByRole('button', { name: /LA/ }).click()
+  const names = dialog.getByLabel('入站名称')
+  await expect(names).toHaveValue('la-hy2')
+  await names.fill('la-stream-hy2')
   await dialog.getByRole('button', { name: /KR/ }).click()
   await expect(dialog.getByText('la.example', { exact: true })).toBeVisible()
   await expect(dialog.getByText('kr.example', { exact: true })).toBeVisible()
-  await expect(dialog.getByLabel('将创建为').nth(0)).toHaveValue('la-hy2')
-  await expect(dialog.getByLabel('将创建为').nth(1)).toHaveValue('kr-hy2')
+  await expect(names.nth(0)).toHaveValue('la-stream-hy2')
+  await expect(names.nth(1)).toHaveValue('kr-hy2')
+
+  await names.nth(1).fill('LA-STREAM-HY2')
+  await expect(dialog.getByRole('button', { name: '校验全部目标' })).toBeDisabled()
+  await expect(dialog.getByText('所选服务器的入站名称不能重复。').first()).toBeVisible()
+  await names.nth(1).fill('existing-hy2')
+  await expect(dialog.getByText('目标机已存在此名称，请修改。')).toBeVisible()
+  await names.nth(1).fill('')
+  await expect(dialog.getByText('请输入入站名称。')).toBeVisible()
+  await names.nth(1).fill('kr-hy2')
 
   const ports = dialog.getByLabel('此服务器监听端口')
   await ports.nth(0).fill('8443')
@@ -193,13 +193,20 @@ test('remote inbound creation starts from a fresh protocol draft and target-loca
   expect(previewPlan).toMatchObject({
     inboundDraft: { type: 'hysteria2' },
     targets: [
-      { id: 'la', tlsId: 101, listenPort: 8443 },
-      { id: 'kr', tlsId: 202, listenPort: 9443 },
+      { id: 'la', tag: 'la-stream-hy2', tlsId: 101, listenPort: 8443 },
+      { id: 'kr', tag: 'kr-hy2', tlsId: 202, listenPort: 9443 },
     ],
   })
   expect(previewPlan).not.toHaveProperty('sourceInboundId')
   expect(previewPlan).not.toHaveProperty('baseTag')
   expect(previewPlan.inboundDraft).not.toHaveProperty('password')
+
+  await names.nth(0).fill('la-final-hy2')
+  await expect(dialog.getByText('全部目标预检通过，尚未创建入站。')).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: '在目标机创建' })).toHaveCount(0)
+  await dialog.getByRole('button', { name: '校验全部目标' }).click()
+  await expect(dialog.getByText('全部目标预检通过，尚未创建入站。')).toBeVisible()
+  expect(previewPlan.targets[0].tag).toBe('la-final-hy2')
 
   page.once('dialog', dialogEvent => dialogEvent.accept())
   await dialog.getByRole('button', { name: '在目标机创建' }).click()
@@ -231,7 +238,7 @@ test('remote inbound can select the target TLS profile for a fresh VLESS draft',
     const form = new URLSearchParams(route.request().postData() ?? '')
     previewPlan = JSON.parse(form.get('plan') ?? '{}')
     await route.fulfill({ status: 200, contentType: 'application/json', body: json([{
-      id: 'kr', name: 'KR', tag: 'kr-vless', success: true, created: false,
+      id: 'kr', name: 'KR', tag: previewPlan.targets[0].tag, success: true, created: false,
       preview: { valid: true, checks: [] },
     }]) })
   })
@@ -242,17 +249,27 @@ test('remote inbound can select the target TLS profile for a fresh VLESS draft',
   await dialog.locator('.fleet-inbound-draft .v-select .v-field').first().click()
   await page.getByRole('option', { name: 'VLESS' }).click()
   await dialog.getByRole('button', { name: /KR/ }).click()
+  const name = dialog.getByLabel('入站名称')
+  await expect(name).toHaveValue('kr-vless')
+  await dialog.locator('.fleet-inbound-draft .v-select .v-field').first().click()
+  await page.getByRole('option', { name: 'HTTP', exact: true }).click()
+  await expect(name).toHaveValue('kr-http')
+  await name.fill('kr-web-custom')
+  await dialog.locator('.fleet-inbound-draft .v-select .v-field').first().click()
+  await page.getByRole('option', { name: 'VLESS' }).click()
+  await expect(name).toHaveValue('kr-web-custom')
   const tls = dialog.getByRole('combobox', { name: '此服务器 TLS 配置' })
   await expect(tls).toBeVisible()
   await dialog.locator('.fleet-remote-target__settings .v-select .v-field').click()
   await page.getByRole('option', { name: /tls-kr/ }).click()
   await dialog.getByRole('button', { name: '校验全部目标' }).click()
   await expect(dialog.getByText('全部目标预检通过，尚未创建入站。')).toBeVisible()
-  expect(previewPlan).toMatchObject({ inboundDraft: { type: 'vless' }, targets: [{ id: 'kr', tlsId: 202 }] })
+  expect(previewPlan).toMatchObject({ inboundDraft: { type: 'vless' }, targets: [{ id: 'kr', tag: 'kr-web-custom', tlsId: 202 }] })
   expect(previewPlan.targets[0].listenPort).toBeGreaterThanOrEqual(20000)
   expect(previewPlan.targets[0].listenPort).toBeLessThanOrEqual(59999)
   await dialog.locator('.fleet-inbound-draft .v-select .v-field').first().click()
   await page.getByRole('option', { name: 'SOCKS', exact: true }).click()
+  await expect(name).toHaveValue('kr-web-custom')
   await expect(dialog.getByText('全部目标预检通过，尚未创建入站。')).toHaveCount(0)
   await expect(dialog.getByRole('button', { name: '在目标机创建' })).toHaveCount(0)
 })

@@ -51,10 +51,6 @@ func (a *APIv2Handler) postHandler(c *gin.Context) {
 		a.ApiService.RestartApp(c)
 	case "fleet-action":
 		a.ApiService.FleetAction(c)
-	case "fleet-template-preview":
-		a.ApiService.PreviewLocalFleetTemplate(c)
-	case "fleet-template-apply":
-		a.ApiService.ApplyLocalFleetTemplate(c)
 	case "fleet-inbound-preflight":
 		a.ApiService.PreflightFleetInboundCreate(c)
 	case "fleet-inbound-create":

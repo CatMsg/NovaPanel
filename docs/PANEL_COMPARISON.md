@@ -24,7 +24,7 @@
 | 请求生命周期 | [3x-ui queryClient.ts](https://github.com/MHSanaei/3x-ui/blob/a716122ef2e6e63c083ef92142ffe9806a430fe7/frontend/src/queryClient.ts) 将查询与写操作区分，mutation 不自动重试；[s-ui api.ts](https://github.com/alireza0/s-ui-frontend/blob/f859e16953cd733293618f626cc19b8466e00fd3/src/plugins/api.ts) 取消重复请求的做法仍涉及写操作 | 借鉴读写分离，不引入 React/TanStack。普通数据 GET 只共享进行中的响应；POST 不自动取消、合并或重试，写操作使旧读取不再可共享 |
 | DNS 与流量规则 | NovaPanel 已有规则目录、DNS 分流、DNS 命中诊断和系统流量规则 | 保留 DNS 解析与流量出口的区别，不把两类规则合成一个含糊的“代理规则”。分流流程补实际操作说明 |
 | 保存与故障恢复 | 本地 `service/preflight.go`、`service/config_snapshot.go` 已实现预检和失败恢复；前端保存先预检再提交 | 保留服务器端校验和回滚，不用浏览器成功提示替代核心启动验证，不盲目自动重试写请求 |
-| 多服务器运维 | 本地已有服务器状态、周期流量、模板差异预览和灰度下发 | 保留这些运维能力；不引入第二套远端用户或节点聚合模型，不重新启用已移除的坏功能 |
+| 多服务器运维 | 本地已有服务器状态、周期流量和远程新建入站 | 从空白协议草稿在目标机独立创建入站，使用目标机证书和本地用户；配置模板与灰度下发已移除 |
 | 文档组织 | [s-ui 官方 Wiki](https://github.com/alireza0/s-ui/wiki) 将 API、对象配置及订阅模板分开说明 | 采用任务导向的本地操作文档，先覆盖分享、DNS 分流、保存验证和批量下发，避免只罗列功能名 |
 | 独立订阅标识 | [3x-ui SubLinksModal.tsx](https://github.com/MHSanaei/3x-ui/blob/a716122ef2e6e63c083ef92142ffe9806a430fe7/frontend/src/pages/clients/SubLinksModal.tsx) 使用 `subId` 而非显示名称 | 有价值，但涉及已有订阅兼容与迁移，本次不悄悄改变订阅标识或让旧链接失效 |
 | 安全模块与数据库并发 | s-ui 有密码哈希和不同 SQLite 连接设置；3x-ui 有更多认证集成 | 按用户要求不新增安全能力模块。不照搬 SQLite 连接数，不在无测量和迁移方案时宣称性能提升 |
@@ -82,7 +82,7 @@ npm run build
 | 备份与恢复 | 3x-ui [备份文档](https://github.com/MHSanaei/3x-ui/blob/442b7fb1637d6ecf4f2c28f76092228856e766c9/docs/content/docs/en/operations/backup-restore.mdx) 支持定时 Telegram/Discord 异机备份 | 本地 `database/backup.go`、`service/config_snapshot.go` 已有手动备份、恢复和配置快照；自动异机备份是实用缺口。需设计保留数量、存储目的地、凭据隔离和恢复演练，本轮不直接把数据库发到第三方 |
 | 临时停核心但保留面板维护 | s-ui [service/config.go](https://github.com/alireza0/s-ui/blob/85866744774f9c1640f1292ac30baea2f72b438e/service/config.go) 的 `SetMaintenance` 和 `lifecycleMu` 使维护状态持久化，阻止 watchdog 自动重启 | NovaPanel 已有启动串行、冷却与配置失败恢复，但没有独立维护模式。属于可选运维能力，需明确哪些保存动作不能重新启动核心；本轮不增加“看似停了却被拉起”的半成品开关 |
 | 实时排障、历史和故障切换 | 不同核心具有不同连接统计与路由接口，不能简单复制字段 | 已有 `service/sessions.go`、用户历史、流量图和 `service/failover.go`；本轮未发现需要为了功能数量引入第二套统计/核心的理由。单元测试不等于 VPS 真实握手或 DNS 服务商验收 |
-| 多 VPS 管理与批量下发 | 单机面板功能不能替代集合运维 | `service/fleet.go`、`service/fleet_templates.go` 已有集合状态、配置差异、模板与灰度下发。保留失败目标恢复，不声称跨所有 VPS 的全局事务，也不恢复已删除的节点聚合功能 |
+| 多 VPS 管理与远程创建 | 单机面板功能不能替代集合运维 | `service/fleet.go`、`service/fleet_inbounds.go` 提供集合状态、配置差异及单台/批量远程新建入站。全部目标先预检，再逐台创建；配置模板与灰度下发已移除 |
 | 前端请求与编辑一致性 | 参考上轮的读写生命周期分析 | `frontend/src/plugins/api.ts` 已处理读写隔离。本轮改名基于完整配置草稿，外部独立保存资源引用旧标签时拒绝改名，避免界面改了但数据库没改 |
 
 ### 本轮已补的缺口

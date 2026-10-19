@@ -162,7 +162,7 @@ func (s *SettingService) GetAllSetting() (*map[string]string, error) {
 	delete(allSetting, "alertTrafficLastSentAt")
 	delete(allSetting, "outboundFailover")
 	delete(allSetting, fleetSettingKey)
-	delete(allSetting, fleetTemplatesSettingKey)
+	delete(allSetting, "fleetTemplates") // Retired snapshots may contain credentials.
 	delete(allSetting, fleetLastKnownSettingKey)
 	for _, key := range []string{
 		"trafficBudgetPeriodStart", "trafficBudgetAccumulatedRx", "trafficBudgetAccumulatedTx",
