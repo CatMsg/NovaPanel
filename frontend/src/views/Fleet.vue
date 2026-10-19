@@ -406,8 +406,8 @@
             </article>
           </div>
 
-          <v-alert v-if="remoteInboundPreviewResults.length" :type="remoteInboundPreviewPassed ? 'success' : 'error'" variant="tonal" density="compact">
-            {{ remoteInboundPreviewPassed ? $t('ui.fleet.remoteInboundPreviewPassed') : $t('ui.fleet.remoteInboundPreviewFailed') }}
+          <v-alert v-if="remoteInboundPreviewResults.length" :type="remoteInboundStatusType" variant="tonal" density="compact">
+            {{ remoteInboundStatusText }}
           </v-alert>
           <div v-if="remoteInboundPreviewResults.length" class="fleet-remote-inbound__results">
             <div v-for="result in remoteInboundPreviewResults" :key="result.id" class="fleet-remote-inbound__result" :class="result.success ? 'is-success' : 'is-error'">
@@ -415,8 +415,9 @@
                 <strong>{{ result.name }}</strong>
                 <span>{{ result.tag }}</span>
                 <small v-if="result.created">{{ $t('ui.fleet.remoteInboundCreated') }}</small>
+                <small v-else-if="result.success">{{ $t('ui.fleet.remoteInboundTargetPreflightPassed') }}</small>
                 <small v-else-if="result.error">{{ result.error }}</small>
-                <small v-else-if="result.preview?.checks?.length">{{ result.preview.checks.map(check => `${check.name}: ${check.detail}`).join(' · ') }}</small>
+                <small v-else-if="remoteInboundFailedChecks(result).length">{{ remoteInboundFailedChecks(result).join(' · ') }}</small>
               </div>
               <v-icon :icon="result.success ? 'mdi-check-circle' : 'mdi-alert-circle'" />
             </div>
@@ -747,6 +748,29 @@ const remoteInboundPreviewPassed = computed(() => Boolean(
   && remoteInboundPreviewResults.value.length === remoteInboundTargetIds.value.length
   && remoteInboundPreviewResults.value.every(result => result.success),
 ))
+const remoteInboundCreatedCount = computed(() => remoteInboundPreviewResults.value.filter(result => result.created).length)
+const remoteInboundCreationComplete = computed(() => Boolean(
+  remoteInboundCreateAttempted.value
+  && remoteInboundPreviewResults.value.length === remoteInboundTargetIds.value.length
+  && remoteInboundPreviewResults.value.length > 0
+  && remoteInboundPreviewResults.value.every(result => result.success && result.created),
+))
+const remoteInboundStatusType = computed(() => {
+  if (!remoteInboundCreateAttempted.value) return remoteInboundPreviewPassed.value ? 'success' : 'error'
+  if (remoteInboundLoading.value === 'create') return 'info'
+  if (remoteInboundCreationComplete.value) return 'success'
+  return remoteInboundCreatedCount.value > 0 ? 'warning' : 'error'
+})
+const remoteInboundStatusText = computed(() => {
+  if (!remoteInboundCreateAttempted.value) {
+    return remoteInboundPreviewPassed.value ? t('ui.fleet.remoteInboundPreviewPassed') : t('ui.fleet.remoteInboundPreviewFailed')
+  }
+  if (remoteInboundLoading.value === 'create') return t('ui.fleet.remoteInboundCreating')
+  if (remoteInboundCreationComplete.value) return t('ui.fleet.remoteInboundCreateComplete')
+  return remoteInboundCreatedCount.value > 0
+    ? t('ui.fleet.remoteInboundCreatePartial')
+    : t('ui.fleet.remoteInboundCreateFailedSummary')
+})
 const canPreviewRemoteInbound = computed(() => Boolean(
   remoteInboundTargetIds.value.length > 0
   && remoteInboundTargets.value.length === remoteInboundTargetIds.value.length
@@ -938,11 +962,10 @@ const resetRemoteInboundTargetSettings = () => {
   for (const target of remoteInboundTargets.value) {
     const profiles = (target.capabilities?.tlsProfiles ?? []).filter(profile => profile.serverEnabled)
     const previous = remoteTargetSettings.value[target.id]
+    const selectedTLSID = profiles.some(profile => profile.id === previous?.tlsId) ? previous?.tlsId ?? null : null
     nextSettings[target.id] = {
       listenPort: previous?.listenPort ?? Math.floor(Math.random() * 40000) + 20000,
-      tlsId: previous?.tlsId ?? (remoteInboundTLSRequired.value
-          ? (profiles.length === 1 ? profiles[0].id : null)
-          : null),
+      tlsId: selectedTLSID,
       tag: previous?.nameEdited ? previous.tag : remoteGeneratedTag(target.id),
       nameEdited: previous?.nameEdited ?? false,
     }
@@ -959,8 +982,8 @@ watch(() => [remoteInboundDraft.value.type, (remoteInboundDraft.value as any).ve
     const profiles = (target.capabilities?.tlsProfiles ?? []).filter(profile => profile.serverEnabled)
     if (!remoteInboundTLSCapable.value || remoteInboundDraft.value.type === 'masque') {
       settings.tlsId = null
-    } else if (remoteInboundTLSRequired.value && !profiles.some(profile => profile.id === settings.tlsId) && profiles.length === 1) {
-      settings.tlsId = profiles[0].id
+    } else if (settings.tlsId !== null && !profiles.some(profile => profile.id === settings.tlsId)) {
+      settings.tlsId = null
     }
   }
   clearRemoteInboundPreview()
@@ -1052,6 +1075,10 @@ const remoteTargetTlsSummary = (id: string) => {
   return parts.join(' · ') || profile.name
 }
 
+const remoteInboundFailedChecks = (result: FleetRemoteInboundResult) => (result.preview?.checks ?? [])
+  .filter(check => check.status !== 'ok')
+  .map(check => `${check.name}: ${check.detail}`)
+
 const previewRemoteInbound = async () => {
   if (!canPreviewRemoteInbound.value) return
   remoteInboundLoading.value = 'preview'
@@ -1096,6 +1123,7 @@ const createRemoteInbound = async () => {
   const response = await HttpUtils.post('api/fleetInboundCreate', { plan: JSON.stringify(plan) })
   if (response.success && Array.isArray(response.obj)) {
     remoteInboundPreviewResults.value = response.obj
+    remoteInboundLoading.value = ''
     await loadFleet(true)
   } else {
     remoteInboundPreviewResults.value = remoteInboundTargetIds.value.map(id => ({
@@ -1106,8 +1134,8 @@ const createRemoteInbound = async () => {
       created: false,
       error: `${response.msg || t('ui.fleet.remoteInboundCreateFailed')} · ${t('ui.fleet.remoteInboundVerifyBeforeRetry')}`,
     }))
+    remoteInboundLoading.value = ''
   }
-  remoteInboundLoading.value = ''
 }
 
 const openDetails = (server: FleetServer) => {

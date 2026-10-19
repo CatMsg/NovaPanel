@@ -185,11 +185,18 @@ test('remote inbound creation starts from a fresh protocol draft and target-loca
   await expect(dialog.getByText('请输入入站名称。')).toBeVisible()
   await names.nth(1).fill('kr-hy2')
 
+  await dialog.locator('.fleet-remote-target__settings .v-select .v-field').nth(0).click()
+  await page.getByRole('option', { name: /tls-la/ }).click()
+  await dialog.locator('.fleet-remote-target__settings .v-select .v-field').nth(1).click()
+  await page.getByRole('option', { name: /tls-kr/ }).click()
+
   const ports = dialog.getByLabel('此服务器监听端口')
   await ports.nth(0).fill('8443')
   await ports.nth(1).fill('9443')
   await dialog.getByRole('button', { name: '校验全部目标' }).click()
-  await expect(dialog.getByText('全部目标预检通过，尚未创建入站。')).toBeVisible()
+  await expect(dialog.getByText('校验通过，可以创建。')).toBeVisible()
+  await expect(dialog.getByText('校验通过', { exact: true })).toHaveCount(2)
+  await expect(dialog.getByText(/临时事务演练|外部操作|未复制 CN2 用户/)).toHaveCount(0)
   expect(previewPlan).toMatchObject({
     inboundDraft: { type: 'hysteria2' },
     targets: [
@@ -202,15 +209,17 @@ test('remote inbound creation starts from a fresh protocol draft and target-loca
   expect(previewPlan.inboundDraft).not.toHaveProperty('password')
 
   await names.nth(0).fill('la-final-hy2')
-  await expect(dialog.getByText('全部目标预检通过，尚未创建入站。')).toHaveCount(0)
+  await expect(dialog.getByText('校验通过，可以创建。')).toHaveCount(0)
   await expect(dialog.getByRole('button', { name: '在目标机创建' })).toHaveCount(0)
   await dialog.getByRole('button', { name: '校验全部目标' }).click()
-  await expect(dialog.getByText('全部目标预检通过，尚未创建入站。')).toBeVisible()
+  await expect(dialog.getByText('校验通过，可以创建。')).toBeVisible()
   expect(previewPlan.targets[0].tag).toBe('la-final-hy2')
 
   page.once('dialog', dialogEvent => dialogEvent.accept())
   await dialog.getByRole('button', { name: '在目标机创建' }).click()
-  await expect(dialog.getByText('已创建，并已自动绑定目标机本地用户。').first()).toBeVisible()
+  await expect(dialog.getByText('全部入站创建成功。')).toBeVisible()
+  await expect(dialog.getByText('校验通过，可以创建。')).toHaveCount(0)
+  await expect(dialog.getByText('已创建', { exact: true })).toHaveCount(2)
   expect(createPlan).toEqual(previewPlan)
   expect(inboundRequests).toEqual([])
 })
@@ -263,14 +272,14 @@ test('remote inbound can select the target TLS profile for a fresh VLESS draft',
   await dialog.locator('.fleet-remote-target__settings .v-select .v-field').click()
   await page.getByRole('option', { name: /tls-kr/ }).click()
   await dialog.getByRole('button', { name: '校验全部目标' }).click()
-  await expect(dialog.getByText('全部目标预检通过，尚未创建入站。')).toBeVisible()
+  await expect(dialog.getByText('校验通过，可以创建。')).toBeVisible()
   expect(previewPlan).toMatchObject({ inboundDraft: { type: 'vless' }, targets: [{ id: 'kr', tag: 'kr-web-custom', tlsId: 202 }] })
   expect(previewPlan.targets[0].listenPort).toBeGreaterThanOrEqual(20000)
   expect(previewPlan.targets[0].listenPort).toBeLessThanOrEqual(59999)
   await dialog.locator('.fleet-inbound-draft .v-select .v-field').first().click()
   await page.getByRole('option', { name: 'SOCKS', exact: true }).click()
   await expect(name).toHaveValue('kr-web-custom')
-  await expect(dialog.getByText('全部目标预检通过，尚未创建入站。')).toHaveCount(0)
+  await expect(dialog.getByText('校验通过，可以创建。')).toHaveCount(0)
   await expect(dialog.getByRole('button', { name: '在目标机创建' })).toHaveCount(0)
 })
 
@@ -301,6 +310,40 @@ test('TLS-required protocols cannot preview without an enabled target TLS profil
   await dialog.getByRole('button', { name: /KR/ }).click()
   await expect(dialog.getByText('目标机没有 TLS 配置，请先在该服务器添加。')).toBeVisible()
   await expect(dialog.getByRole('button', { name: '校验全部目标' })).toBeDisabled()
+})
+
+test('TLS-required remote inbound requires an explicit target certificate selection', async ({ page }) => {
+  await installBaseMocks(page, true)
+  await page.route('**/api/fleet**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json({ servers: [
+      { id: 'local', name: '本机', url: '本机', enabled: true, reachable: true, core: { running: true } },
+      { id: 'la', name: 'LA', url: 'https://la.example:9999', enabled: true, reachable: true, core: { running: true } },
+    ] }),
+  }))
+  await page.route('**/api/fleetInboundTargets**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json([{
+      id: 'la', name: 'LA', success: true,
+      capabilities: { hostname: 'la.panel.example', subscriptionHost: 'la.example', tlsProfiles: [{ id: 101, name: 'la-certificate', serverEnabled: true, serverName: 'la.example' }], inboundTags: [] },
+    }]),
+  }))
+
+  await page.goto('/app/fleet')
+  await page.getByRole('button', { name: '远程新建入站' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.locator('.fleet-inbound-draft .v-select .v-field').first().click()
+  await page.getByRole('option', { name: 'Hysteria2' }).click()
+  await dialog.getByRole('button', { name: /LA/ }).click()
+  const tls = dialog.getByRole('combobox', { name: '此服务器 TLS 配置' })
+  await expect(tls).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '校验全部目标' })).toBeDisabled()
+
+  await dialog.locator('.fleet-remote-target__settings .v-select .v-field').click()
+  await page.getByRole('option', { name: /la-certificate/ }).click()
+  await expect(dialog.getByRole('button', { name: '校验全部目标' })).toBeEnabled()
 })
 
 test('MASQUE remote creation explains its per-target ECDSA identity', async ({ page }) => {
@@ -336,5 +379,5 @@ test('MASQUE remote creation explains its per-target ECDSA identity', async ({ p
   await expect(dialog.getByText('创建时会在此目标机生成并保存独立的 ECDSA 证书和私钥。')).toBeVisible()
   await expect(dialog.getByRole('combobox', { name: '此服务器 TLS 配置' })).toHaveCount(0)
   await dialog.getByRole('button', { name: '校验全部目标' }).click()
-  await expect(dialog.getByText('全部目标预检通过，尚未创建入站。')).toBeVisible()
+  await expect(dialog.getByText('校验通过，可以创建。')).toBeVisible()
 })
