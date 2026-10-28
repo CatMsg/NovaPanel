@@ -57,6 +57,91 @@ func fleetInboundRequest(t *testing.T, draft string) json.RawMessage {
 	return raw
 }
 
+func TestFleetInboundRealityTLSCompatibility(t *testing.T) {
+	initFleetInboundTestDB(t)
+	profile := model.Tls{Name: "reality", Server: json.RawMessage(`{"enabled":true,"reality":{"enabled":true}}`), Client: json.RawMessage(`{}`)}
+	if err := database.GetDB().Create(&profile).Error; err != nil {
+		t.Fatal(err)
+	}
+	request := fleetInboundRequest(t, `{"type":"hysteria2","tag":"la-hy2","listen_port":12345,"tls_id":`+strconv.Itoa(int(profile.Id))+`}`)
+	_, _, _, err := prepareFleetInboundRemotePayloadForTarget(request, "la.example")
+	if err == nil || !strings.Contains(err.Error(), "Reality") {
+		t.Fatalf("expected incompatible Reality error, got %v", err)
+	}
+	if !fleetInboundTLSCompatible("vless", summarizeFleetInboundTLS(profile)) {
+		t.Fatal("VLESS must allow Reality")
+	}
+	if fleetInboundTLSCompatible("tuic", summarizeFleetInboundTLS(profile)) {
+		t.Fatal("TUIC must reject Reality")
+	}
+}
+
+func TestFleetInboundDeleteChecksIdentityAndPreservesHistory(t *testing.T) {
+	_ = testutil.NewManagedPortSandbox(t)
+	initFleetInboundTestDB(t)
+	runtimeCore := core.NewCore()
+	NewConfigService(runtimeCore)
+	t.Cleanup(func() { _ = runtimeCore.Stop() })
+	inbound := model.Inbound{Type: "socks", Tag: "la-socks", Options: json.RawMessage(`{"listen":"127.0.0.1","listen_port":12345}`), Addrs: json.RawMessage(`[]`), OutJson: json.RawMessage(`{}`)}
+	if err := database.GetDB().Create(&inbound).Error; err != nil {
+		t.Fatal(err)
+	}
+	capabilities, err := (&FleetService{}).LocalFleetInboundCapabilities("la.example")
+	if err != nil || len(capabilities.Inbounds) != 1 || capabilities.Inbounds[0].ID != inbound.Id || capabilities.Inbounds[0].Tag != inbound.Tag || !capabilities.TLSProfileDetails {
+		t.Fatalf("unexpected inbound capabilities: %+v, %v", capabilities, err)
+	}
+	client := addFleetInboundTestClient(t, "local-user", true, `{"socks":{"username":"u","password":"p"}}`)
+	if err := database.GetDB().Model(&client).Updates(map[string]interface{}{"inbounds": json.RawMessage("[" + strconv.Itoa(int(inbound.Id)) + "]"), "history": json.RawMessage(`[{"domain":"example.com"}]`)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := FleetInboundRemoteDelete(FleetInboundDeleteRequest{ID: inbound.Id + 1, Tag: inbound.Tag}, "admin", "la.example"); err == nil {
+		t.Fatal("mismatched ID must not delete")
+	}
+	if err := FleetInboundRemoteDelete(FleetInboundDeleteRequest{ID: inbound.Id, Tag: inbound.Tag}, "admin", "la.example"); err != nil {
+		t.Fatal(err)
+	}
+	var remaining int64
+	if err := database.GetDB().Model(&model.Inbound{}).Where("id = ?", inbound.Id).Count(&remaining).Error; err != nil || remaining != 0 {
+		t.Fatalf("inbound remains: %d, %v", remaining, err)
+	}
+	if err := database.GetDB().First(&client, client.Id).Error; err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(client.Inbounds), strconv.Itoa(int(inbound.Id))) || !strings.Contains(string(client.History), "example.com") {
+		t.Fatal("user association or history was not preserved correctly")
+	}
+}
+
+func TestFleetInboundDeleteUsesSelectedRemote(t *testing.T) {
+	initFleetInboundTestDB(t)
+	var received FleetInboundDeleteRequest
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/apiv2/fleet-inbound-delete" || r.Header.Get("Token") != "test-token" {
+			http.Error(w, "wrong target", http.StatusBadRequest)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`{"success":true}`))
+	}))
+	defer target.Close()
+	fleet := &FleetService{}
+	if err := fleet.SaveFleet([]FleetServerInput{{ID: "la", Name: "LA", URL: target.URL, Token: "test-token", Enabled: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fleet.DeleteFleetInbound(FleetInboundDeleteRequest{ServerID: "la", ID: 7, Tag: "la-hy2"}); err != nil {
+		t.Fatal(err)
+	}
+	if received.ID != 7 || received.Tag != "la-hy2" || received.ServerID != "" {
+		t.Fatalf("incorrect forwarded target: %+v", received)
+	}
+	if err := fleet.DeleteFleetInbound(FleetInboundDeleteRequest{ServerID: "local", ID: 7, Tag: "la-hy2"}); err == nil {
+		t.Fatal("local target must be rejected")
+	}
+}
+
 func TestFleetInboundTagUsesTargetAndProtocolAndAvoidsCollisions(t *testing.T) {
 	if got := fleetInboundTargetTagForProtocol(FleetServer{ID: "la", Name: "LA"}, "hysteria", false, nil); got != "la-hy" {
 		t.Fatalf("Hysteria tag = %q, want la-hy", got)
@@ -516,7 +601,7 @@ func TestCreateFleetInboundUsesCustomAndDefaultNamesPortAndTLS(t *testing.T) {
 			case r.Method == http.MethodGet && r.URL.Path == "/apiv2/fleet-inbound-capabilities":
 				body, _ := json.Marshal(map[string]interface{}{"success": true, "msg": "", "obj": FleetInboundCapabilities{
 					Hostname: targetName + ".panel.example", SubscriptionHost: targetName + ".example",
-					TLSProfiles: []FleetInboundTLSProfile{{ID: tlsID, Name: "target-tls", ServerEnabled: true}}, InboundTags: []string{},
+					TLSProfiles: []FleetInboundTLSProfile{{ID: tlsID, Name: "target-tls", ServerEnabled: true}}, InboundTags: []string{}, TLSProfileDetails: true,
 				}})
 				_, _ = w.Write(body)
 			case r.Method == http.MethodPost && r.URL.Path == "/apiv2/fleet-inbound-preflight":

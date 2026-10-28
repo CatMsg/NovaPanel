@@ -64,14 +64,13 @@ const RandomUtil = {
     return btoa(String.fromCharCode(...array))
   },
   randomShortId(): string[] {
-    let shortIds = new Array(24).fill('')
-    for (var ii = 1; ii < 24; ii++) {
-      for (var jj = 0; jj <= this.randomInt(7); jj++){
-          let randomNum = this.randomInt(256)
-          shortIds[ii] += ('0' + randomNum.toString(16)).slice(-2)
-      }
-  }
-  return shortIds
+    const shortIds = new Set<string>()
+    while (shortIds.size < 4) {
+      const bytes = new Uint8Array(8)
+      window.crypto.getRandomValues(bytes)
+      shortIds.add(Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join(''))
+    }
+    return [...shortIds]
   }
 }
 

@@ -58,6 +58,9 @@
               <v-icon icon="mdi-server-plus" start />
               {{ $t('ui.fleet.remoteInboundCreate') }}
             </v-btn>
+            <v-btn variant="outlined" :disabled="loading" @click="openRemoteDeleteDialog">
+              <v-icon icon="mdi-delete-outline" start />{{ $t('ui.fleet.remoteInboundDelete') }}
+            </v-btn>
             <v-btn color="primary" :loading="loading" @click="loadFleet">
               <v-icon icon="mdi-refresh" start />
               {{ $t('ui.fleet.refreshStatus') }}
@@ -304,6 +307,27 @@
       </v-card>
     </v-dialog>
 
+    <v-dialog v-model="showRemoteDelete" max-width="620" scrollable>
+      <v-card rounded="xl" class="fleet-dialog">
+        <v-card-title>{{ $t('ui.fleet.remoteInboundDeleteTitle') }}</v-card-title>
+        <v-card-text>
+          <v-select v-model="remoteDeleteServerID" :items="remoteInboundServers.map(server => ({ title: server.name, value: server.id }))" :label="$t('ui.fleet.targetServers')" :disabled="remoteDeleteLoading" @update:model-value="selectRemoteDeleteServer" />
+          <v-progress-linear v-if="remoteDeleteLoading" indeterminate color="primary" />
+          <v-alert v-if="remoteDeleteMessage" :type="remoteDeleteError ? 'error' : 'success'" variant="tonal">{{ remoteDeleteMessage }}</v-alert>
+          <template v-if="remoteDeleteTarget">
+            <v-alert v-if="!Array.isArray(remoteDeleteTarget.capabilities?.inbounds)" type="warning" variant="tonal">{{ $t('ui.fleet.remoteInboundDeleteUnsupported') }}</v-alert>
+            <p v-else-if="!remoteDeleteTarget.capabilities?.inbounds?.length">{{ $t('ui.fleet.remoteInboundDeleteEmpty') }}</p>
+            <v-list v-else>
+              <v-list-item v-for="inbound in remoteDeleteTarget.capabilities?.inbounds" :key="inbound.id" :title="inbound.tag" :subtitle="inbound.type">
+                <template #append><v-btn icon="mdi-delete-outline" color="error" variant="text" :disabled="remoteDeleteLoading" :aria-label="`${$t('ui.fleet.remoteInboundDelete')}: ${inbound.tag}`" @click="deleteRemoteInbound(inbound)" /></template>
+              </v-list-item>
+            </v-list>
+          </template>
+        </v-card-text>
+        <v-card-actions><v-spacer /><v-btn @click="showRemoteDelete = false">{{ $t('actions.close') }}</v-btn></v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <v-dialog v-model="showRemoteInbound" max-width="980" scrollable>
       <v-card rounded="xl" class="fleet-dialog fleet-remote-inbound">
         <header class="fleet-remote-inbound__header">
@@ -386,7 +410,7 @@
                   @update:model-value="clearRemoteInboundPreview"
                 />
                 <v-alert v-if="remoteInboundTLSRequired && remoteTlsItems(id).length === 0" class="fleet-remote-target__certificate" type="warning" variant="tonal" density="compact">
-                  {{ $t('ui.fleet.remoteInboundTLSUnavailable') }}
+                  {{ $t(remoteTargetInfo(id)?.capabilities?.tlsProfileDetails ? 'ui.fleet.remoteInboundTLSUnavailable' : 'ui.fleet.remoteInboundTLSUpgrade') }}
                 </v-alert>
                 <div v-if="remoteInboundTLSCapable && remoteTargetSettings[id]?.tlsId" class="fleet-remote-target__certificate">
                   <span>{{ $t('ui.fleet.remoteInboundCertificate') }}: {{ remoteTargetTlsSummary(id) }}</span>
@@ -622,8 +646,9 @@ type FleetConfig = {
   enabled: boolean
 }
 
-type FleetRemoteTLSProfile = { id: number; name: string; serverEnabled: boolean; serverName?: string; acmeDomains?: string[]; certificateFingerprint?: string }
-type FleetRemoteInboundCapabilities = { hostname: string; subscriptionHost: string; tlsProfiles: FleetRemoteTLSProfile[]; inboundTags: string[] }
+type FleetRemoteTLSProfile = { id: number; name: string; serverEnabled: boolean; realityEnabled?: boolean; serverName?: string; acmeDomains?: string[]; certificateFingerprint?: string }
+type FleetRemoteInboundSummary = { id: number; tag: string; type: string }
+type FleetRemoteInboundCapabilities = { hostname: string; subscriptionHost: string; tlsProfiles: FleetRemoteTLSProfile[]; inboundTags: string[]; inbounds?: FleetRemoteInboundSummary[]; tlsProfileDetails?: boolean }
 type FleetRemoteInboundTarget = { id: string; name: string; success: boolean; capabilities?: FleetRemoteInboundCapabilities; error?: string }
 type FleetRemoteInboundCheck = { name: string; status: string; detail: string }
 type FleetRemoteInboundResult = { id: string; name: string; tag?: string; success: boolean; created: boolean; error?: string; preview?: { valid: boolean; checks?: FleetRemoteInboundCheck[] } }
@@ -638,6 +663,12 @@ const saving = ref(false)
 const showConfig = ref(false)
 const showDetails = ref(false)
 const showRemoteInbound = ref(false)
+const showRemoteDelete = ref(false)
+const remoteDeleteServerID = ref<string | null>(null)
+const remoteDeleteTarget = ref<FleetRemoteInboundTarget | null>(null)
+const remoteDeleteLoading = ref(false)
+const remoteDeleteMessage = ref('')
+const remoteDeleteError = ref(false)
 const servers = ref<FleetServer[]>([])
 const configs = ref<FleetConfig[]>([])
 const checkedAt = ref('')
@@ -952,6 +983,43 @@ const openRemoteInboundDialog = async () => {
   remoteInboundCreateAttempted.value = false
 }
 
+const openRemoteDeleteDialog = () => {
+  remoteDeleteServerID.value = null
+  remoteDeleteTarget.value = null
+  remoteDeleteMessage.value = ''
+  showRemoteDelete.value = true
+}
+
+const loadRemoteDeleteInbounds = async () => {
+  const id = remoteDeleteServerID.value
+  remoteDeleteTarget.value = null
+  if (!id) return
+  remoteDeleteLoading.value = true
+  const response = await HttpUtils.get('api/fleetInboundTargets', { targets: JSON.stringify([id]) })
+  if (remoteDeleteServerID.value === id) {
+    const target = Array.isArray(response.obj) ? response.obj[0] as FleetRemoteInboundTarget : null
+    remoteDeleteTarget.value = target?.success ? target : null
+    if (!target?.success) { remoteDeleteError.value = true; remoteDeleteMessage.value = target?.error || response.msg || t('ui.fleet.remoteInboundTargetsFailed') }
+  }
+  remoteDeleteLoading.value = false
+}
+
+const selectRemoteDeleteServer = () => {
+  remoteDeleteMessage.value = ''
+  void loadRemoteDeleteInbounds()
+}
+
+const deleteRemoteInbound = async (inbound: FleetRemoteInboundSummary) => {
+  const id = remoteDeleteServerID.value
+  if (!id || !window.confirm(t('ui.fleet.remoteInboundDeleteConfirm', { server: remoteInboundServer(id)?.name || id, tag: inbound.tag }))) return
+  remoteDeleteLoading.value = true
+  const response = await HttpUtils.post('api/fleetInboundDelete', { target: JSON.stringify({ serverId: id, id: inbound.id, tag: inbound.tag }) })
+  remoteDeleteError.value = !response.success
+  remoteDeleteMessage.value = response.success ? t('ui.fleet.remoteInboundDeleted') : response.msg || t('ui.fleet.remoteInboundCreateFailed')
+  remoteDeleteLoading.value = false
+  if (response.success) { await loadRemoteDeleteInbounds(); await loadFleet(true) }
+}
+
 const clearRemoteInboundPreview = () => {
   remoteInboundPreviewResults.value = []
   remoteInboundCreateAttempted.value = false
@@ -960,7 +1028,7 @@ const clearRemoteInboundPreview = () => {
 const resetRemoteInboundTargetSettings = () => {
   const nextSettings: Record<string, FleetRemoteInboundTargetSettings> = {}
   for (const target of remoteInboundTargets.value) {
-    const profiles = (target.capabilities?.tlsProfiles ?? []).filter(profile => profile.serverEnabled)
+    const profiles = target.capabilities?.tlsProfileDetails ? (target.capabilities.tlsProfiles ?? []).filter(profile => profile.serverEnabled && remoteTlsCompatible(profile)) : []
     const previous = remoteTargetSettings.value[target.id]
     const selectedTLSID = profiles.some(profile => profile.id === previous?.tlsId) ? previous?.tlsId ?? null : null
     nextSettings[target.id] = {
@@ -979,7 +1047,7 @@ watch(() => [remoteInboundDraft.value.type, (remoteInboundDraft.value as any).ve
     const settings = remoteTargetSettings.value[target.id]
     if (!settings) continue
     if (!settings.nameEdited) settings.tag = remoteGeneratedTag(target.id)
-    const profiles = (target.capabilities?.tlsProfiles ?? []).filter(profile => profile.serverEnabled)
+    const profiles = target.capabilities?.tlsProfileDetails ? (target.capabilities.tlsProfiles ?? []).filter(profile => profile.serverEnabled && remoteTlsCompatible(profile)) : []
     if (!remoteInboundTLSCapable.value || remoteInboundDraft.value.type === 'masque') {
       settings.tlsId = null
     } else if (settings.tlsId !== null && !profiles.some(profile => profile.id === settings.tlsId)) {
@@ -1063,7 +1131,8 @@ const updateRemoteInboundTag = (id: string, value: string | null) => {
   settings.nameEdited = settings.tag !== remoteGeneratedTag(id)
   clearRemoteInboundPreview()
 }
-const remoteTlsItems = (id: string) => (remoteTargetInfo(id)?.capabilities?.tlsProfiles ?? []).filter(profile => profile.serverEnabled).map(profile => ({
+const remoteTlsCompatible = (profile: FleetRemoteTLSProfile) => !profile.realityEnabled || ['vless', 'vmess', 'trojan'].includes(remoteInboundDraft.value.type)
+const remoteTlsItems = (id: string) => (remoteTargetInfo(id)?.capabilities?.tlsProfileDetails ? remoteTargetInfo(id)?.capabilities?.tlsProfiles ?? [] : []).filter(profile => profile.serverEnabled && remoteTlsCompatible(profile)).map(profile => ({
   title: profile.serverName ? `${profile.name} · ${profile.serverName}` : profile.name,
   value: profile.id,
 }))

@@ -364,12 +364,23 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		}
 	case "del":
 		var tag string
-		err = json.Unmarshal(data, &tag)
-		if err != nil {
-			return nil, err
+		var expectedID uint
+		if err = json.Unmarshal(data, &tag); err != nil {
+			var target struct {
+				ID  uint   `json:"id"`
+				Tag string `json:"tag"`
+			}
+			if err = json.Unmarshal(data, &target); err != nil || target.ID == 0 || strings.TrimSpace(target.Tag) == "" {
+				return nil, common.NewError("入站 ID 和名称不能为空")
+			}
+			tag, expectedID = target.Tag, target.ID
 		}
 		oldInbound := &model.Inbound{}
-		err = tx.Model(model.Inbound{}).Preload("Tls").Where("tag = ?", tag).First(oldInbound).Error
+		query := tx.Model(model.Inbound{}).Preload("Tls").Where("tag = ?", tag)
+		if expectedID != 0 {
+			query = query.Where("id = ?", expectedID)
+		}
+		err = query.First(oldInbound).Error
 		if err != nil {
 			return nil, err
 		}

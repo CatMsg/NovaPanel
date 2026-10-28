@@ -67,6 +67,57 @@ test('fleet exposes remote inbound creation without template rollout or template
   expect(templateRequests).toEqual([])
 })
 
+test('HY2 offers certificate TLS but excludes Reality profiles', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await installBaseMocks(page, true)
+  await page.route('**/api/fleet**', route => route.fulfill({ status: 200, contentType: 'application/json', body: json({ servers: [
+    { id: 'la', name: 'LA', url: 'https://la.example', enabled: true, reachable: true, core: { running: true } },
+  ] }) }))
+  await page.route('**/api/fleetInboundTargets**', route => route.fulfill({ status: 200, contentType: 'application/json', body: json([{
+    id: 'la', name: 'LA', success: true, capabilities: { hostname: 'la.example', subscriptionHost: 'la.example', tlsProfileDetails: true, inboundTags: [], tlsProfiles: [
+      { id: 1, name: 'Reality', serverEnabled: true, realityEnabled: true },
+      { id: 2, name: 'Certificate', serverEnabled: true, realityEnabled: false },
+    ] },
+  }]) }))
+  await page.goto('/app/fleet')
+  await page.getByRole('button', { name: '远程新建入站' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.locator('.fleet-inbound-draft .v-select .v-field').first().click()
+  await page.getByRole('option', { name: 'Hysteria2' }).click()
+  await dialog.getByRole('button', { name: /LA/ }).click()
+  await dialog.locator('.fleet-remote-target__settings .v-select .v-field').click()
+  await expect(page.getByRole('option', { name: 'Reality' })).toHaveCount(0)
+  await expect(page.getByRole('option', { name: 'Certificate' })).toBeVisible()
+})
+
+test('remote inbound delete confirms the selected server and exact inbound', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await installBaseMocks(page, true)
+  await page.route('**/api/fleet**', route => route.fulfill({ status: 200, contentType: 'application/json', body: json({ servers: [
+    { id: 'la', name: 'LA', url: 'https://la.example', enabled: true, reachable: true, core: { running: true } },
+  ] }) }))
+  let exists = true
+  await page.route('**/api/fleetInboundTargets**', route => route.fulfill({ status: 200, contentType: 'application/json', body: json([{
+    id: 'la', name: 'LA', success: true, capabilities: { hostname: 'la.example', subscriptionHost: 'la.example', tlsProfiles: [], inboundTags: [], inbounds: exists ? [{ id: 7, tag: 'la-hy2', type: 'hysteria2' }] : [] },
+  }]) }))
+  let target: any
+  await page.route('**/api/fleetInboundDelete', async route => {
+    target = JSON.parse(new URLSearchParams(route.request().postData() ?? '').get('target') ?? '{}')
+    exists = false
+    await route.fulfill({ status: 200, contentType: 'application/json', body: json(null) })
+  })
+  await page.goto('/app/fleet')
+  await page.getByRole('button', { name: '远程删除入站' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.locator('.v-select .v-field').click()
+  await page.getByRole('option', { name: 'LA' }).click()
+  await expect(dialog.getByText('la-hy2')).toBeVisible()
+  page.once('dialog', async confirmation => { expect(confirmation.message()).toContain('la-hy2'); await confirmation.accept() })
+  await dialog.getByRole('button', { name: '远程删除入站: la-hy2' }).click()
+  await expect(dialog.getByText('该服务器没有入站。')).toBeVisible()
+  expect(target).toEqual({ serverId: 'la', id: 7, tag: 'la-hy2' })
+})
+
 test('remote inbound names account for matching server prefixes outside the current selection', async ({ page }) => {
   await installBaseMocks(page, true)
   await page.route('**/api/fleet**', route => route.fulfill({
@@ -122,6 +173,7 @@ test('remote inbound creation starts from a fresh protocol draft and target-loca
       capabilities: {
         hostname: `${id}.panel.example`,
         subscriptionHost: `${id}.example`,
+        tlsProfileDetails: true,
         tlsProfiles: [{ id: id === 'la' ? 101 : 202, name: `tls-${id}`, serverEnabled: true, serverName: `${id}.example`, certificateFingerprint: `${id}1234567890abcdef` }],
         inboundTags: ['existing-hy2'],
       },
@@ -239,7 +291,7 @@ test('remote inbound can select the target TLS profile for a fresh VLESS draft',
     contentType: 'application/json',
     body: json([{
       id: 'kr', name: 'KR', success: true,
-      capabilities: { hostname: 'kr.panel.example', subscriptionHost: 'kr.example', tlsProfiles: [{ id: 202, name: 'tls-kr', serverEnabled: true, serverName: 'kr.example' }], inboundTags: [] },
+      capabilities: { hostname: 'kr.panel.example', subscriptionHost: 'kr.example', tlsProfileDetails: true, tlsProfiles: [{ id: 202, name: 'tls-kr', serverEnabled: true, serverName: 'kr.example' }], inboundTags: [] },
     }]),
   }))
   let previewPlan: any
@@ -298,7 +350,7 @@ test('TLS-required protocols cannot preview without an enabled target TLS profil
     contentType: 'application/json',
     body: json([{
       id: 'kr', name: 'KR', success: true,
-      capabilities: { hostname: 'kr.panel.example', subscriptionHost: 'kr.example', tlsProfiles: [], inboundTags: [] },
+      capabilities: { hostname: 'kr.panel.example', subscriptionHost: 'kr.example', tlsProfileDetails: true, tlsProfiles: [], inboundTags: [] },
     }]),
   }))
 
@@ -308,7 +360,7 @@ test('TLS-required protocols cannot preview without an enabled target TLS profil
   await dialog.locator('.fleet-inbound-draft .v-select .v-field').first().click()
   await page.getByRole('option', { name: 'Hysteria2' }).click()
   await dialog.getByRole('button', { name: /KR/ }).click()
-  await expect(dialog.getByText('目标机没有 TLS 配置，请先在该服务器添加。')).toBeVisible()
+  await expect(dialog.getByText('目标机没有适用的 TLS 配置，请使用普通证书或添加兼容配置。')).toBeVisible()
   await expect(dialog.getByRole('button', { name: '校验全部目标' })).toBeDisabled()
 })
 
@@ -327,7 +379,7 @@ test('TLS-required remote inbound requires an explicit target certificate select
     contentType: 'application/json',
     body: json([{
       id: 'la', name: 'LA', success: true,
-      capabilities: { hostname: 'la.panel.example', subscriptionHost: 'la.example', tlsProfiles: [{ id: 101, name: 'la-certificate', serverEnabled: true, serverName: 'la.example' }], inboundTags: [] },
+      capabilities: { hostname: 'la.panel.example', subscriptionHost: 'la.example', tlsProfileDetails: true, tlsProfiles: [{ id: 101, name: 'la-certificate', serverEnabled: true, serverName: 'la.example' }], inboundTags: [] },
     }]),
   }))
 

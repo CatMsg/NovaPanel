@@ -28,16 +28,31 @@ type FleetInboundTLSProfile struct {
 	ID                     uint     `json:"id"`
 	Name                   string   `json:"name"`
 	ServerEnabled          bool     `json:"serverEnabled"`
+	RealityEnabled         bool     `json:"realityEnabled"`
 	ServerName             string   `json:"serverName,omitempty"`
 	ACMEDomains            []string `json:"acmeDomains,omitempty"`
 	CertificateFingerprint string   `json:"certificateFingerprint,omitempty"`
 }
 
 type FleetInboundCapabilities struct {
-	Hostname         string                   `json:"hostname"`
-	SubscriptionHost string                   `json:"subscriptionHost"`
-	TLSProfiles      []FleetInboundTLSProfile `json:"tlsProfiles"`
-	InboundTags      []string                 `json:"inboundTags"`
+	Hostname          string                   `json:"hostname"`
+	SubscriptionHost  string                   `json:"subscriptionHost"`
+	TLSProfiles       []FleetInboundTLSProfile `json:"tlsProfiles"`
+	InboundTags       []string                 `json:"inboundTags"`
+	Inbounds          []FleetInboundSummary    `json:"inbounds"`
+	TLSProfileDetails bool                     `json:"tlsProfileDetails"`
+}
+
+type FleetInboundSummary struct {
+	ID   uint   `json:"id"`
+	Tag  string `json:"tag"`
+	Type string `json:"type"`
+}
+
+type FleetInboundDeleteRequest struct {
+	ServerID string `json:"serverId,omitempty"`
+	ID       uint   `json:"id"`
+	Tag      string `json:"tag"`
 }
 
 type FleetInboundTargetInfo struct {
@@ -153,11 +168,17 @@ func (s *FleetService) LocalFleetInboundCapabilities(hostname string) (*FleetInb
 	if err := database.GetDB().Model(&model.Inbound{}).Order("tag ASC").Pluck("tag", &inboundTags).Error; err != nil {
 		return nil, err
 	}
+	inbounds := make([]FleetInboundSummary, 0)
+	if err := database.GetDB().Model(&model.Inbound{}).Select("id", "tag", "type").Order("tag ASC").Scan(&inbounds).Error; err != nil {
+		return nil, err
+	}
 	return &FleetInboundCapabilities{
-		Hostname:         localHost,
-		SubscriptionHost: subscriptionHost,
-		TLSProfiles:      profiles,
-		InboundTags:      inboundTags,
+		Hostname:          localHost,
+		SubscriptionHost:  subscriptionHost,
+		TLSProfiles:       profiles,
+		InboundTags:       inboundTags,
+		Inbounds:          inbounds,
+		TLSProfileDetails: true,
 	}, nil
 }
 
@@ -169,6 +190,11 @@ func summarizeFleetInboundTLS(tlsConfig model.Tls) FleetInboundTLSProfile {
 	}
 	_ = json.Unmarshal(server["enabled"], &profile.ServerEnabled)
 	_ = json.Unmarshal(server["server_name"], &profile.ServerName)
+	var reality struct {
+		Enabled bool `json:"enabled"`
+	}
+	_ = json.Unmarshal(server["reality"], &reality)
+	profile.RealityEnabled = reality.Enabled
 	var acme struct {
 		Domain []string `json:"domain"`
 	}
@@ -525,6 +551,18 @@ func (s *FleetService) buildFleetInboundJobs(plan FleetInboundCreatePlan) ([]fle
 			results[index].Error = "所选 TLS 配置不属于目标服务器或服务端 TLS 未启用，请刷新目标列表后重试"
 			continue
 		}
+		if tlsID > 0 && !capabilities.TLSProfileDetails {
+			results[index].Error = "目标面板版本过旧，无法检查 TLS 协议兼容性，请先更新目标面板"
+			continue
+		}
+		for _, profile := range capabilities.TLSProfiles {
+			if profile.ID == tlsID && !fleetInboundTLSCompatible(draft.Type, profile) {
+				results[index].Error = "所选 Reality TLS 配置不支持该协议，请选择普通证书 TLS 配置"
+			}
+		}
+		if results[index].Error != "" {
+			continue
+		}
 		tag := fleetInboundTargetTagForProtocol(config, draft.Type, nameCounts[fleetInboundTagPrefix(config)] > 1, capabilities.InboundTags)
 		if selection.Tag != nil {
 			tag = strings.TrimSpace(*selection.Tag)
@@ -763,6 +801,10 @@ func fleetInboundTLSProfileEnabled(profiles []FleetInboundTLSProfile, id uint) b
 	return false
 }
 
+func fleetInboundTLSCompatible(inboundType string, profile FleetInboundTLSProfile) bool {
+	return !profile.RealityEnabled || inboundType == "vless" || inboundType == "vmess" || inboundType == "trojan"
+}
+
 func decodeFleetInboundPreview(value interface{}) (*PreflightReport, error) {
 	raw, err := json.Marshal(value)
 	if err != nil {
@@ -826,8 +868,12 @@ func prepareFleetInboundRemotePayloadForTarget(data json.RawMessage, hostname st
 		if err := database.GetDB().First(&tlsConfig, inbound.TlsId).Error; err != nil {
 			return nil, "", 0, common.NewError("所选 TLS 配置不存在于目标服务器")
 		}
-		if !summarizeFleetInboundTLS(tlsConfig).ServerEnabled {
+		profile := summarizeFleetInboundTLS(tlsConfig)
+		if !profile.ServerEnabled {
 			return nil, "", 0, common.NewError("目标服务器所选 TLS 配置未启用服务端 TLS")
+		}
+		if !fleetInboundTLSCompatible(inbound.Type, profile) {
+			return nil, "", 0, common.NewError("所选 Reality TLS 配置不支持该协议，请选择普通证书 TLS 配置")
 		}
 	}
 	if inbound.Type == "shadowtls" {
@@ -1036,4 +1082,45 @@ func FleetInboundRemoteCreate(data json.RawMessage, username, hostname string) (
 		return FleetInboundRemoteCreated{}, err
 	}
 	return FleetInboundRemoteCreated{ID: inbound.Id, Tag: request.Tag}, nil
+}
+
+func (s *FleetService) DeleteFleetInbound(request FleetInboundDeleteRequest) error {
+	if request.ServerID == "" || request.ServerID == "local" || request.ID == 0 || strings.TrimSpace(request.Tag) == "" {
+		return errors.New("请选择远端服务器和入站")
+	}
+	servers, err := s.loadFleetServers()
+	if err != nil {
+		return err
+	}
+	for _, server := range servers {
+		if server.ID != request.ServerID || !server.Enabled {
+			continue
+		}
+		token, err := s.decryptFleetToken(server.TokenEnc)
+		if err != nil {
+			return err
+		}
+		request.ServerID = ""
+		_, err = s.fetchFleetJSON(server.URL, token, "fleet-inbound-delete", request)
+		return err
+	}
+	return errors.New("远端服务器不存在或已停用")
+}
+
+func FleetInboundRemoteDelete(request FleetInboundDeleteRequest, username, hostname string) error {
+	if request.ID == 0 || strings.TrimSpace(request.Tag) == "" {
+		return errors.New("入站 ID 和名称不能为空")
+	}
+	data, err := json.Marshal(request)
+	if err != nil {
+		return err
+	}
+	_, changed, err := (&ConfigService{}).Save("inbounds", "del", data, "", username, hostname)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return errors.New("入站未删除")
+	}
+	return nil
 }

@@ -55,6 +55,8 @@ func (a *APIv2Handler) postHandler(c *gin.Context) {
 		a.ApiService.PreflightFleetInboundCreate(c)
 	case "fleet-inbound-create":
 		a.ApiService.CreateLocalFleetInbound(c, username)
+	case "fleet-inbound-delete":
+		a.ApiService.DeleteLocalFleetInbound(c, username)
 	case "alertSave":
 		a.ApiService.SaveAlertSettings(c)
 	case "alertTest":

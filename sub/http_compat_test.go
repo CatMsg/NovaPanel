@@ -10,6 +10,41 @@ import (
 	"github.com/CatMsg/NovaPanel/database/model"
 )
 
+func TestInboundAddressTagPreservesSingleAddressName(t *testing.T) {
+	if got := inboundAddressTag("la-hy2", "", 0, 1); got != "la-hy2" {
+		t.Fatalf("single address tag = %q", got)
+	}
+	if got := inboundAddressTag("la-hy2", "-alt", 1, 2); got != "2.la-hy2-alt" {
+		t.Fatalf("multiple address tag = %q", got)
+	}
+}
+
+func TestSingleAddressSubscriptionRetainsInboundName(t *testing.T) {
+	inbound := &model.Inbound{Type: "socks", Tag: "la-socks", Options: json.RawMessage(`{"listen_port":1080}`), Addrs: json.RawMessage(`[{"server":"la.example","server_port":1080}]`), OutJson: json.RawMessage(`{"type":"socks","tag":"la-socks"}`)}
+	outbounds, tags, err := (&JsonService{}).getOutbounds(json.RawMessage(`{}`), []*model.Inbound{inbound})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(*tags) != 1 || (*tags)[0] != "la-socks" || (*outbounds)[0]["tag"] != "la-socks" || (*outbounds)[0]["server"] != "la.example" {
+		t.Fatalf("unexpected single-address node: %#v %#v", *outbounds, *tags)
+	}
+}
+
+func TestSingleAddressHTTPClashKeepsInboundVersionMapping(t *testing.T) {
+	inbound := &model.Inbound{Type: "http", Tag: "la-http", Options: json.RawMessage(`{"listen_port":1080,"version":1}`), Addrs: json.RawMessage(`[{"server":"la.example","server_port":1080}]`), OutJson: json.RawMessage(`{"type":"http","tag":"la-http","version":1}`)}
+	outbounds, tags, err := (&JsonService{}).getOutbounds(json.RawMessage(`{}`), []*model.Inbound{inbound})
+	if err != nil {
+		t.Fatal(err)
+	}
+	filtered, filteredTags, err := filterClashHTTPOutbounds([]*model.Inbound{inbound}, *outbounds, *tags)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered) != 1 || len(filteredTags) != 1 || filteredTags[0] != "la-http" {
+		t.Fatalf("HTTP node was not retained: %#v %#v", filtered, filteredTags)
+	}
+}
+
 func TestJSONSubscriptionDerivesAndPreservesHTTPVersionFields(t *testing.T) {
 	service := &JsonService{}
 	tests := []struct {

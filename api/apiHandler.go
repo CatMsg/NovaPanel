@@ -82,6 +82,8 @@ func (a *APIHandler) postHandler(c *gin.Context) {
 		a.ApiService.PreviewFleetInboundCreate(c)
 	case "fleetInboundCreate":
 		a.ApiService.CreateFleetInbound(c)
+	case "fleetInboundDelete":
+		a.ApiService.DeleteFleetInbound(c)
 	case "sessionClose":
 		a.ApiService.CloseSession(c)
 	case "alertSave":

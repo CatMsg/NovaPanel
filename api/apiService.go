@@ -547,6 +547,24 @@ func (a *ApiService) CreateFleetInbound(c *gin.Context) {
 	jsonObj(c, result, err)
 }
 
+func (a *ApiService) DeleteFleetInbound(c *gin.Context) {
+	var request service.FleetInboundDeleteRequest
+	if err := json.Unmarshal([]byte(c.Request.FormValue("target")), &request); err != nil {
+		jsonMsg(c, "delete", err)
+		return
+	}
+	jsonMsg(c, "delete", a.FleetService.DeleteFleetInbound(request))
+}
+
+func (a *ApiService) DeleteLocalFleetInbound(c *gin.Context, username string) {
+	var request service.FleetInboundDeleteRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		jsonMsg(c, "delete", err)
+		return
+	}
+	jsonMsg(c, "delete", service.FleetInboundRemoteDelete(request, username, getHostname(c)))
+}
+
 func (a *ApiService) GetLocalFleetInboundCapabilities(c *gin.Context) {
 	result, err := a.FleetService.LocalFleetInboundCapabilities(getHostname(c))
 	jsonObj(c, result, err)

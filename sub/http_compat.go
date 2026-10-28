@@ -27,7 +27,7 @@ func filterClashHTTPOutbounds(inbounds []*model.Inbound, outbounds []map[string]
 		}
 		for index, address := range addresses {
 			remark, _ := address["remark"].(string)
-			tag := fmt.Sprintf("%d.%s%s", index+1, inbound.Tag, remark)
+			tag := inboundAddressTag(inbound.Tag, remark, index, len(addresses))
 			inboundByTag[tag] = inbound
 		}
 	}
@@ -97,6 +97,13 @@ func filterClashHTTPOutbounds(inbounds []*model.Inbound, outbounds []map[string]
 		filteredTags = append(filteredTags, tag)
 	}
 	return filteredOutbounds, filteredTags, nil
+}
+
+func inboundAddressTag(tag, remark string, index, total int) string {
+	if total == 1 {
+		return tag + remark
+	}
+	return fmt.Sprintf("%d.%s%s", index+1, tag, remark)
 }
 
 func clampClashHTTP1ALPN(outbound map[string]interface{}) {
