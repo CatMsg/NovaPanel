@@ -77,7 +77,10 @@ func TestFleetInboundRealityTLSCompatibility(t *testing.T) {
 }
 
 func TestFleetInboundDeleteChecksIdentityAndPreservesHistory(t *testing.T) {
-	_ = testutil.NewManagedPortSandbox(t)
+	_ = testutil.NewManagedPortSandbox(t,
+		[]string{"bash", "scripts/hy2-forward.sh", "remove", "la-socks", "12345", "12345", "tcp,udp"},
+		[]string{"bash", "scripts/hy2-forward.sh", "apply", "la-socks", "12345", "12345", "tcp"},
+	)
 	initFleetInboundTestDB(t)
 	runtimeCore := core.NewCore()
 	NewConfigService(runtimeCore)
