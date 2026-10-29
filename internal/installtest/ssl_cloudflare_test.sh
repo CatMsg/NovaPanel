@@ -11,7 +11,7 @@ trap '/bin/rm -rf "${test_root}"' EXIT
 # Only file-processing utilities are reachable, even after an init mock is removed.
 utility_path="${test_root}/bin"
 /bin/mkdir -p "${utility_path}"
-for utility in awk cat chmod cp cut dirname grep head ln mkdir mktemp mv rm rmdir sha256sum stat tar tr; do
+for utility in awk cat chmod cp cut dirname grep gzip head ln mkdir mktemp mv rm rmdir sha256sum stat tar tr; do
     utility_source=''
     for directory in /usr/bin /bin /usr/sbin /sbin; do
         if [[ -x "${directory}/${utility}" ]]; then
