@@ -123,12 +123,12 @@ npm run build
 | 异地备份 | WebDAV 自动备份默认关闭；配置、状态、密钥写入保护、快照完整性与隔离恢复演练均有实现和 UI/E2E 覆盖。 | 未接入真实 WebDAV 服务商，未验证真实凭据、远端恢复与服务商行为。 |
 | 维护模式 | 持久状态、暂停代理流量、阻止 watchdog 意外重启的路径已有实现及本地回归。 | 未在生产服务器验证维护/恢复操作。 |
 | 订阅隐藏 | 入站 `exclude_from_sub` 只过滤后续订阅内容，不停止入站、不轮换凭据；已有前后端测试。 | 不撤销客户端已导入的旧配置，这是预期行为。 |
-| 本地发布门禁 | Go 包测试、race、vet、staticcheck、build、Sing-Box 源码校验、Mihomo 互通，以及前端 61 个单测、57 个 E2E、lint、typecheck、build 均通过。 | 当前改动尚未推送，所以 GitHub Windows 安装器及 Linux UFW/ACME 作业没有针对本工作树运行；本机 macOS 不能替代这些原生环境验收。 |
+| 发布门禁 | v1.6.149 已发布；GitHub Actions `40975087801` 全部通过，包含 Windows 安装器检查及 Linux 原生安装、UFW/ACME 验收。Linux 发布仅支持 amd64。 | 真实 WebDAV 服务商恢复、公网 MASQUE 互通、生产维护模式操作和 ACME 实际签发/续期仍需外部验收。 |
 | 订阅标识 | 继续采用用户名订阅 URL，按用户确认未改成随机标识。 | 无迁移或旧链接过期工作。 |
 | DNS 查询匹配 | 当前 DNS 规则编辑器支持 Sing-Box `query_type`、`query_client_subnet`、`query_dnssec`，并保留旧标量/列表写法。 | 客户端是否实际发送 EDNS Client Subnet 或 DNSSEC DO 位取决于查询端，UI 条件不保证外部查询会命中。 |
-| Linux 架构 | 用户确认服务端发行仅支持 amd64；安装器检测和 Release 构建矩阵现统一限制为 amd64。 | 该契约检查已在本地通过；此工作树还需 GitHub runner 验证原生 Linux 安装流程。 |
+| Linux 架构 | 用户确认服务端发行仅支持 amd64；安装器检测、Release 构建矩阵和文档现统一限制为 amd64；v1.6.149 hosted Linux 验收已通过。 | 无其他 Linux 架构承诺；非 amd64 主机不在支持范围内。 |
 
-当前优先补齐项不是再增加面板功能，而是获取 Windows/Linux 托管 runner 结果、真实 WebDAV 恢复验收和受控公网 canary。所有线上验收均需单独授权；本地检查不等同于发布或部署。
+当前优先补齐项不是再增加面板功能，而是安排真实 WebDAV 恢复验收、受控公网 MASQUE/canary，以及生产维护模式和 ACME 签发/续期演练。v1.6.149 的 Windows/Linux hosted gates 已通过；所有线上验收均需单独授权，本地或 CI 检查不等同于生产部署。
 
 ### 2026-10-30 上游 Release 复查
 
