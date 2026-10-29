@@ -83,6 +83,7 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 		return nil, err
 	}
 
+	engine.Use(api.LoginRequestBodyDeadlineMiddleware())
 	engine.Use(gzip.Gzip(gzip.DefaultCompression))
 	assetsBasePath := base_url + "assets/"
 
@@ -195,10 +196,17 @@ func (s *Server) Start() (err error) {
 			_ = listener.Close()
 			return err
 		}
-		c := &tls.Config{
-			Certificates: []tls.Certificate{cert},
+		c := network.NewServerTLSConfig(cert)
+		webDomain, err := s.settingService.GetWebDomain()
+		if err != nil {
+			_ = listener.Close()
+			return err
 		}
-		listener = network.NewAutoHttpsListener(listener)
+		redirectHosts := []string{webDomain}
+		if webDomain == "" {
+			redirectHosts = network.TLSCertificateHosts(cert)
+		}
+		listener = network.NewAutoHttpsListener(listener, redirectHosts...)
 		listener = tls.NewListener(listener, c)
 	}
 
@@ -209,12 +217,7 @@ func (s *Server) Start() (err error) {
 	}
 	s.listener = listener
 
-	s.httpServer = &http.Server{
-		Handler:           engine,
-		ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout:       60 * time.Second,
-		MaxHeaderBytes:    1 << 20,
-	}
+	s.httpServer = network.NewHTTPServer(engine)
 
 	go func() {
 		if serveErr := s.httpServer.Serve(listener); serveErr != nil && serveErr != http.ErrServerClosed {

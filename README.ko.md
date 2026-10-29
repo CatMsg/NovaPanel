@@ -35,13 +35,13 @@ NovaPanel은 프로토콜 구성, 구독, 포트 규칙, 모니터링 및 다중
 최신 버전 설치:
 
 ```sh
-bash <(curl -Ls https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh)
+_novas_installer_tmp="$(mktemp)" && trap 'rm -f "$_novas_installer_tmp"' EXIT && curl --proto '=https' --proto-redir '=https' -fsSL https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh -o "$_novas_installer_tmp" && bash -n "$_novas_installer_tmp" && bash "$_novas_installer_tmp"; _novas_installer_rc=$?; exit "$_novas_installer_rc"
 ```
 
 특정 버전 설치:
 
 ```sh
-bash <(curl -Ls https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh) vx.x.x
+_novas_installer_tmp="$(mktemp)" && trap 'rm -f "$_novas_installer_tmp"' EXIT && curl --proto '=https' --proto-redir '=https' -fsSL https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh -o "$_novas_installer_tmp" && bash -n "$_novas_installer_tmp" && bash "$_novas_installer_tmp" vx.x.x; _novas_installer_rc=$?; exit "$_novas_installer_rc"
 ```
 
 설치 과정에서 관리자 계정, 패널 경로 및 포트를 설정할 수 있습니다. 설치 후에는 다음 명령으로 관리할 수 있습니다.

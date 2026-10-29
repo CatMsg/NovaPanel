@@ -1,8 +1,10 @@
 package api
 
 import (
+	"net/http"
 	"strings"
 
+	"github.com/CatMsg/NovaPanel/logger"
 	"github.com/CatMsg/NovaPanel/util/common"
 
 	"github.com/gin-gonic/gin"
@@ -21,14 +23,46 @@ func NewAPIHandler(g *gin.RouterGroup, a2 *APIv2Handler) {
 }
 
 func (a *APIHandler) initRouter(g *gin.RouterGroup) {
+	g.Use(sameOriginAPIMiddleware(a.SettingService.GetLoginTrustedProxies))
 	g.Use(func(c *gin.Context) {
 		path := c.Request.URL.Path
 		if !strings.HasSuffix(path, "login") && !strings.HasSuffix(path, "logout") {
-			checkLogin(c)
+			a.checkLogin(c)
 		}
 	})
 	g.POST("/:postAction", a.postHandler)
 	g.GET("/:getAction", a.getHandler)
+}
+
+func (a *APIHandler) checkLogin(c *gin.Context) {
+	reject := func() {
+		if c.GetHeader("X-Requested-With") == "XMLHttpRequest" {
+			pureJsonMsg(c, false, "Invalid login")
+		} else {
+			c.Redirect(http.StatusTemporaryRedirect, "/login")
+		}
+		c.Abort()
+	}
+
+	if !IsLogin(c) {
+		reject()
+		return
+	}
+	currentEpoch, err := a.UserService.GetAuthSessionEpoch()
+	if err != nil {
+		logger.Warning("validate login session epoch failed: ", err)
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable, Msg{Success: false, Msg: "unable to validate login session"})
+		return
+	}
+	sessionEpoch, valid := getLoginSessionEpoch(c)
+	if !valid || sessionEpoch != currentEpoch {
+		if err := ClearSession(c); err != nil {
+			logger.Warning("clear stale login session failed: ", err)
+		}
+		reject()
+		return
+	}
+	c.Next()
 }
 
 func (a *APIHandler) postHandler(c *gin.Context) {
@@ -36,6 +70,8 @@ func (a *APIHandler) postHandler(c *gin.Context) {
 	action := c.Param("postAction")
 
 	switch action {
+	case "logout":
+		a.ApiService.Logout(c)
 	case "login":
 		a.ApiService.Login(c)
 	case "changePass":
@@ -110,7 +146,8 @@ func (a *APIHandler) getHandler(c *gin.Context) {
 
 	switch action {
 	case "logout":
-		a.ApiService.Logout(c)
+		c.Header("Allow", "POST")
+		c.AbortWithStatusJSON(http.StatusMethodNotAllowed, Msg{Success: false, Msg: "logout requires POST"})
 	case "load":
 		a.ApiService.LoadData(c)
 	case "inbounds", "outbounds", "endpoints", "services", "tls", "clients", "config":

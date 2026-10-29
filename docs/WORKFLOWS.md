@@ -11,6 +11,12 @@
 
 “暂停访问”停用该用户，不删除用户；“恢复访问”重新启用。“撤销旧凭据”需要确认，会更新协议登录凭据，旧节点需要重新导入；它不等于撤销或更换订阅 URL。订阅链接含访问标识，不应贴到公开讨论中。
 
+设置中的聚合上游订阅地址由服务器主动抓取。默认只允许解析到公网地址，且每次连接（包括重定向）都会重新校验目标；不会使用环境代理。确需读取内部网络源时，需显式将地址写成 `internal+http://` 或 `internal+https://`，并且重定向必须保持同源；内部 HTTPS 仍校验证书。公网 HTTPS 默认校验证书，可信但证书无效的公网源可显式使用 `insecure+https://`，该模式仍限制在原 HTTPS 主机和端口。
+
+## 管理 API 请求来源
+
+管理网页的写操作和登录/登出要求浏览器请求与面板同源；浏览器会自动发送 `Origin`。登出使用 `POST /api/logout`，旧的 `GET /api/logout` 返回 405。自动化集成应使用 `/apiv2` 令牌接口，不要复用浏览器会话 Cookie。
+
 ## 配置 DNS 解锁或分流
 
 1. 到“DNS”添加解析服务器，填写服务商明确支持的 UDP/TCP/加密协议、地址和端口。不要把 DNS 服务器当成流量出口节点。
@@ -28,6 +34,24 @@
 3. 面板有失败恢复机制，但浏览器超时不意味着服务器必定没写入。先刷新状态、确认实际配置，再决定是否重试。
 4. 前端不会因为重复 POST 自动取消前一个保存，也不会自动重试写操作；这不意味着重复提交变成安全操作。
 
+## 发布失败后安全重试
+
+1. 修复失败原因后可重跑同一发布工作流。若远端已有同一提交对应的未发布 Draft Release，工作流会续传该草稿，不会重新创建或覆盖 Release。
+2. 已存在的资产只会在 GitHub API SHA-256 与本次构建文件完全一致时复用；缺少摘要或摘要不同都会停止发布，不能手工覆盖后继续。
+3. 已发布 tag、指向其他提交的 tag、没有对应 Draft Release 的 tag 均不可续跑。不要删除或移动已发布 tag；检查版本号和失败草稿后走新的版本发布。
+
+Linux 发布包由实际构建作业生成 GitHub OIDC/Sigstore provenance。发布作业在创建或公开 Release 前，会验证每个压缩包的签名、仓库、发布工作流、`main` 来源和构建提交，并拒绝自托管 runner 证明。消费者可安装 GitHub CLI 后独立验证：
+
+```bash
+gh attestation verify NovaPanel-linux-amd64.tar.gz \
+  --repo CatMsg/NovaPanel \
+  --signer-workflow CatMsg/NovaPanel/.github/workflows/release.yml \
+  --source-ref refs/heads/main \
+  --deny-self-hosted-runners
+```
+
+当前安装器仍执行 SHA-256 完整性校验，但不会自动安装 GitHub CLI，也不会强制做 provenance 验证；以上命令适用于需要独立验证来源的场景。该验证仅适用于启用此工作流后构建的新发布包。
+
 ## 在远端服务器新建入站
 
 1. 进入“服务器集合 → 远程新建入站”，从空白表单选择协议及协议参数。
@@ -42,6 +66,8 @@
 
 在仓库根目录运行 `sh runNovas.sh`，使用原有 `db/novas.db` 与测试数据，不创建空库替代开发环境。默认面板为 `http://127.0.0.1:2095/app/`，实际端口和路径以现有设置为准。
 
+本地开发启动脚本仅在新建开发数据库时保留 `admin/admin` 便于调试；线上安装会清除该开发标记并设置随机/交互管理员密码。若直接运行二进制初始化全新数据库，请执行 `novas admin -reset` 生成并显示一次性登录密码；已存在的数据库不会被此行为改写。
+
 iMac/macOS 本地开发沿用 `sh runNovas.sh`、原有 `db/novas.db` 和 2095 端口，不依赖 UFW、iptables、nftables、cron 或 systemd；非 Linux 环境跳过 Linux 防火墙/NAT 集成。需要真实特权 Linux 环境的全新安装及 ACME cron 验收，仅在隔离的 GitHub-hosted Linux 作业中执行，不在 Mac 开发机上执行。
 
 单元测试与 mock API 的端到端测试用于验证界面和并发行为，不等于已验证公网 VPS、防火墙、协议握手和服务商的解锁限额。发布与线上更新另行执行。
@@ -52,10 +78,10 @@ iMac/macOS 本地开发沿用 `sh runNovas.sh`、原有 `db/novas.db` 和 2095 �
 
 ### 原生 sing-box MASQUE
 
-- 基于仓库固定的官方 sing-box `v1.15.0-alpha.12` MASQUE 实现，包含两个可复现的 identity observer hooks 和一处自动测速组选择状态的并发保护；三处文件和补丁均有固定哈希与精确重放检查，因此不是逐字节未修改的官方源码，也不是旧 NovaPanel 自研 TUN 实现。
+- 基于仓库固定的官方 sing-box `v1.15.0-alpha.13` MASQUE 实现，包含两个可复现的 identity observer hooks 和一处自动测速组选择状态的并发保护；三处文件和补丁均有固定哈希与精确重放检查，因此不是逐字节未修改的官方源码，也不是旧 NovaPanel 自研 TUN 实现。来源、补丁重放与验收细节见 [MASQUE 集成说明](SING_BOX_MASQUE_INTEGRATION.md)。
 - 客户端 endpoint 使用 HTTP/3、`system: false`、TLS 与用户名/密码。sing-box JSON 输出 `endpoints`。入站可额外开启 Mihomo 密钥认证（ECDSA 证书），Clash 订阅同步生成 `type: masque`、独立用户密钥、固定地址和原生路径；未开启时 Clash 省略此项。不创建自研系统 TUN/NAT，也不伪造通用单节点 URI。
 - 同一套 Mihomo 密钥仅支持一个同时在线隧道，多台独立客户端请使用不同用户。原生动态地址避开固定地址；正常保存不换密钥，分享页撤销会同时轮换两种认证。Mihomo 的默认路由通告只被丢弃，不获得路由权限；其他 peer route、forward 和 ICMP 功能仍禁用。证书公钥更换后需刷新订阅。
-- `scripts/test-mihomo-masque.sh` 使用官方固定摘要的 Mihomo 1.19.31 验证双客户端 TCP/UDP、地址隔离、认证/撤销及实际导出配置；CI 和发布均必须执行，不能以跳过代替通过。
+- `scripts/test-mihomo-masque.sh` 使用官方固定摘要的 Mihomo 1.19.31 验证聚合后的 XHTTP 配置可解析，以及双客户端 MASQUE TCP/UDP、地址隔离、认证/撤销及实际导出配置；CI 和发布均必须执行，不能以跳过代替通过。
 - 未验证公网客户端互通；不承诺旧客户端兼容或性能提升。
 
 ### 异地 WebDAV 备份与恢复演练
@@ -76,3 +102,12 @@ iMac/macOS 本地开发沿用 `sh runNovas.sh`、原有 `db/novas.db` 和 2095 �
 - 自动测速组与原生 endpoint 组合暴露的并发读写已修复；相同启动场景连续 20 次 race 回归通过。漏洞扫描无可达漏洞，另有一个不被调用的模块级发现。Linux amd64 非 CGO 编译检查通过，不等同于正式 musl/Cronet 发布构建或 Linux 公网运行验证。
 - 本地沿用原启动脚本、端口 2095 和 `db/novas.db`，未替换测试数据。真实 IAB 验证维护暂停、跨进程重启保留、恢复与正常停服不再误报；最终恢复为非维护且核心运行。
 - 本轮没有发布或部署；未使用真实 WebDAV 目的地，也未做公网客户端互通测试。
+
+## 2026-10-30 Sing-box alpha.13 本地验收
+
+- 当前工作树已从官方 `v1.15.0-alpha.13` 模块归档导入 `third_party/sing-box`，保留经过审查的 3 个本地源码补丁及固定回归测试。来源、校验和、ZIP 摘要、补丁重放和每个文件指纹由 `scripts/verify-sing-box.go` 锁定；细节见 `SING_BOX_MASQUE_INTEGRATION.md`。
+- 配置兼容层已适配 alpha.13 移除的 `route.action: direct`：生成独立 direct outbound 并保留旧 UDP 分片默认行为。发布工作流的 Cronet Go commit 与官方源码锁定值一致。
+- 本地通过：Go 全包测试脚本、全项目 vet/staticcheck/build、Sing-box 特性和 race 验收、真实 Mihomo 1.19.31 TCP/UDP 互通验收；前端 npm audit、61 个单测、lint、typecheck、生产构建和 57 个 Playwright E2E 全通过。macOS 构建仅出现重复 `-lobjc` 警告。
+- `govulncheck` 未发现项目可达漏洞；另报告一个项目代码未调用的模块级漏洞，不能据此声称所有依赖均无公告。
+- 修复了 CI gofmt 检查会因 alpha.13 已删除的旧文件路径而报错的问题；检查现在跳过不存在的已跟踪路径，并对当前存在的 Go 文件验证通过。
+- 尚未在 GitHub runner 验证 Windows 安装器、Linux 原生 UFW/ACME 作业；本地 E2E/回环测试不代表公网 VPS 协议互通。此变更未推送、未发布、未部署。

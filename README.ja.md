@@ -35,13 +35,13 @@ NovaPanel は、プロトコル設定、サブスクリプション、ポート�
 最新版をインストール:
 
 ```sh
-bash <(curl -Ls https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh)
+_novas_installer_tmp="$(mktemp)" && trap 'rm -f "$_novas_installer_tmp"' EXIT && curl --proto '=https' --proto-redir '=https' -fsSL https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh -o "$_novas_installer_tmp" && bash -n "$_novas_installer_tmp" && bash "$_novas_installer_tmp"; _novas_installer_rc=$?; exit "$_novas_installer_rc"
 ```
 
 特定バージョンをインストール:
 
 ```sh
-bash <(curl -Ls https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh) vx.x.x
+_novas_installer_tmp="$(mktemp)" && trap 'rm -f "$_novas_installer_tmp"' EXIT && curl --proto '=https' --proto-redir '=https' -fsSL https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh -o "$_novas_installer_tmp" && bash -n "$_novas_installer_tmp" && bash "$_novas_installer_tmp" vx.x.x; _novas_installer_rc=$?; exit "$_novas_installer_rc"
 ```
 
 インストール時に管理者アカウント、パネルパス、ポートを設定できます。インストール後は次のコマンドで管理できます。

@@ -1,6 +1,7 @@
 package sub
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -112,9 +113,15 @@ func TestSubscriptionHandlerBrowserAndLegacyFormats(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "subscription-handler.db")); err != nil {
 		t.Fatalf("init database: %v", err)
 	}
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_, _ = writer.Write([]byte("vless://upstream@proxy.example:443#node\n"))
+	}))
+	t.Cleanup(upstream.Close)
 	seedSubscriptionTestSettings(t,
 		model.Setting{Key: "subEncode", Value: "false"},
 		model.Setting{Key: "subShowInfo", Value: "false"},
+		model.Setting{Key: "subMode", Value: "master"},
+		model.Setting{Key: "subMasterSources", Value: testInternalSourceURL(upstream.URL) + "/sub"},
 	)
 	client := model.Client{
 		Enable:   true,
@@ -160,11 +167,13 @@ func TestSubscriptionHandlerBrowserAndLegacyFormats(t *testing.T) {
 	if got := browser.Header().Get("Vary"); !strings.Contains(got, "Accept") || !strings.Contains(got, "User-Agent") {
 		t.Fatalf("browser negotiation must vary on Accept and User-Agent: %q", got)
 	}
+	assertSensitiveSubscriptionHeaders(t, browser)
 
 	raw := request("/sub/alice?format=raw", "text/html", "Mozilla/5.0")
 	if raw.Code != http.StatusOK || raw.Body.String() != "test://legacy" {
 		t.Fatalf("explicit raw response regressed: status=%d body=%q", raw.Code, raw.Body.String())
 	}
+	assertSensitiveSubscriptionHeaders(t, raw)
 
 	legacy := request("/sub/alice", "*/*", "curl/8.7.1")
 	if legacy.Code != http.StatusOK || legacy.Body.String() != raw.Body.String() {
@@ -173,26 +182,153 @@ func TestSubscriptionHandlerBrowserAndLegacyFormats(t *testing.T) {
 	if got := legacy.Header().Get("Vary"); !strings.Contains(got, "Accept") || !strings.Contains(got, "User-Agent") {
 		t.Fatalf("legacy negotiated response must vary on Accept and User-Agent: %q", got)
 	}
+	assertSensitiveSubscriptionHeaders(t, legacy)
 
 	disabledInfo := request("/sub/disabled?format=info", "*/*", "curl/8.7.1")
 	if disabledInfo.Code != http.StatusOK || !strings.Contains(disabledInfo.Body.String(), `data-testid="enabled-state"><span class="dot"></span>已停用`) {
 		t.Fatalf("disabled client info did not render: status=%d body=%q", disabledInfo.Code, disabledInfo.Body.String())
 	}
+	assertSensitiveSubscriptionHeaders(t, disabledInfo)
 
 	jsonResponse := request("/sub/alice?format=json", "*/*", "sing-box/1.13")
 	if jsonResponse.Code != http.StatusOK || !strings.Contains(jsonResponse.Body.String(), `"outbounds"`) {
 		t.Fatalf("json response regressed: status=%d body=%q", jsonResponse.Code, jsonResponse.Body.String())
 	}
+	assertSensitiveSubscriptionHeaders(t, jsonResponse)
 
 	clash := request("/sub/alice?format=clash", "*/*", "curl/8.7.1")
 	if clash.Code != http.StatusOK || !strings.Contains(clash.Body.String(), "proxies:") {
 		t.Fatalf("clash response regressed: status=%d body=%q", clash.Code, clash.Body.String())
 	}
+	assertSensitiveSubscriptionHeaders(t, clash)
+
+	aggregate := request("/sub/aggregate", "*/*", "curl/8.7.1")
+	if aggregate.Code != http.StatusOK || !strings.Contains(aggregate.Body.String(), "vless://upstream@proxy.example:443#node") {
+		t.Fatalf("aggregate response regressed: status=%d body=%q", aggregate.Code, aggregate.Body.String())
+	}
+	assertSensitiveSubscriptionHeaders(t, aggregate)
 
 	head := httptest.NewRecorder()
 	headRequest := httptest.NewRequest(http.MethodHead, "/sub/alice", nil)
 	router.ServeHTTP(head, headRequest)
 	if head.Code != http.StatusOK || head.Header().Get("Subscription-Userinfo") != "upload=1073741824; download=2147483648; total=10737418240; expire=0" {
 		t.Fatalf("HEAD response regressed: status=%d headers=%v", head.Code, head.Header())
+	}
+	assertSensitiveSubscriptionHeaders(t, head)
+
+	aggregateHead := httptest.NewRecorder()
+	aggregateHeadRequest := httptest.NewRequest(http.MethodHead, "/sub/aggregate", nil)
+	router.ServeHTTP(aggregateHead, aggregateHeadRequest)
+	if aggregateHead.Code != http.StatusOK {
+		t.Fatalf("aggregate HEAD response regressed: status=%d headers=%v", aggregateHead.Code, aggregateHead.Header())
+	}
+	assertSensitiveSubscriptionHeaders(t, aggregateHead)
+
+	aggregateJSONHead := httptest.NewRecorder()
+	aggregateJSONHeadRequest := httptest.NewRequest(http.MethodHead, "/sub/aggregate?format=json", nil)
+	router.ServeHTTP(aggregateJSONHead, aggregateJSONHeadRequest)
+	if aggregateJSONHead.Code != http.StatusOK {
+		t.Fatalf("aggregate JSON HEAD response regressed: status=%d headers=%v", aggregateJSONHead.Code, aggregateJSONHead.Header())
+	}
+	assertSensitiveSubscriptionHeaders(t, aggregateJSONHead)
+}
+
+func TestAggregateRequestLimitReturnsRetryableUnavailable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for range cap(aggregateRequestSlots) {
+		aggregateRequestSlots <- struct{}{}
+	}
+	defer func() {
+		for range cap(aggregateRequestSlots) {
+			<-aggregateRequestSlots
+		}
+	}()
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, "/sub/aggregate", nil)
+	(&SubHandler{}).aggregate(context)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("overloaded aggregate status = %d, want 503", recorder.Code)
+	}
+	if recorder.Header().Get("Retry-After") != "3" {
+		t.Fatalf("overloaded aggregate Retry-After = %q, want 3", recorder.Header().Get("Retry-After"))
+	}
+}
+
+func TestBeginAggregateRequestReleaseCancelsContextAndFreesSlot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ginContext, _ := gin.CreateTestContext(recorder)
+	ginContext.Request = httptest.NewRequest(http.MethodGet, "/sub/aggregate", nil)
+
+	ctx, release, ok := beginAggregateRequest(ginContext)
+	if !ok {
+		t.Fatal("aggregate request slot was unexpectedly unavailable")
+	}
+	release()
+	if ctx.Err() != context.Canceled {
+		t.Fatalf("released aggregate context error = %v, want canceled", ctx.Err())
+	}
+	if len(aggregateRequestSlots) != 0 {
+		t.Fatalf("aggregate request slot was not released: %d slots remain occupied", len(aggregateRequestSlots))
+	}
+}
+
+func TestUserSubscriptionRequestLimitReturnsRetryableUnavailable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for range cap(userSubscriptionRequestSlots) {
+		userSubscriptionRequestSlots <- struct{}{}
+	}
+	defer func() {
+		for range cap(userSubscriptionRequestSlots) {
+			<-userSubscriptionRequestSlots
+		}
+	}()
+
+	recorder := httptest.NewRecorder()
+	ginContext, _ := gin.CreateTestContext(recorder)
+	ginContext.Request = httptest.NewRequest(http.MethodGet, "/sub/alice?format=raw", nil)
+	ginContext.Params = gin.Params{{Key: "subid", Value: "alice"}}
+	(&SubHandler{}).subs(ginContext)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("overloaded user subscription status = %d, want 503", recorder.Code)
+	}
+	if recorder.Header().Get("Retry-After") != "3" {
+		t.Fatalf("overloaded user subscription Retry-After = %q, want 3", recorder.Header().Get("Retry-After"))
+	}
+}
+
+func TestBeginUserSubscriptionRequestReleaseCancelsContextAndFreesSlot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ginContext, _ := gin.CreateTestContext(recorder)
+	ginContext.Request = httptest.NewRequest(http.MethodGet, "/sub/alice", nil)
+
+	ctx, release, ok := beginUserSubscriptionRequest(ginContext)
+	if !ok {
+		t.Fatal("user subscription request slot was unexpectedly unavailable")
+	}
+	release()
+	if ctx.Err() != context.Canceled {
+		t.Fatalf("released subscription context error = %v, want canceled", ctx.Err())
+	}
+	if len(userSubscriptionRequestSlots) != 0 {
+		t.Fatalf("user subscription request slot was not released: %d slots remain occupied", len(userSubscriptionRequestSlots))
+	}
+}
+
+func assertSensitiveSubscriptionHeaders(t *testing.T, response *httptest.ResponseRecorder) {
+	t.Helper()
+	if response.Header().Get("Cache-Control") != "private, no-store" {
+		t.Errorf("subscription response must not be cached: Cache-Control=%q", response.Header().Get("Cache-Control"))
+	}
+	if response.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Errorf("subscription response must disable MIME sniffing: X-Content-Type-Options=%q", response.Header().Get("X-Content-Type-Options"))
+	}
+	if response.Header().Get("Referrer-Policy") != "no-referrer" {
+		t.Errorf("subscription response must not expose its URL as a referrer: Referrer-Policy=%q", response.Header().Get("Referrer-Policy"))
 	}
 }

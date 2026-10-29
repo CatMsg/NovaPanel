@@ -25,6 +25,7 @@ import (
 
 type ServerHandler interface {
 	WriteInboundBuffers(packetBuffers []*buf.Buffer) error
+	WaitWriteInboundBuffers(packetBuffers []*buf.Buffer) error
 	FrontHeadroom() int
 	NewOutboundQueue(handler func(packetBuffers []*buf.Buffer)) *tun.OutboundQueue
 }
@@ -686,7 +687,7 @@ func (s *serverSession) handlePacket(buffer *buf.Buffer) {
 					observer.OnSessionPacket(s.ctx, s.user, s.peer, flow.protocol, M.SocksaddrFrom(flow.source.Addr(), flow.source.Port()), M.SocksaddrFrom(flow.dest.Addr(), flow.dest.Port()))
 				}
 			}
-			err := s.server.handler.WriteInboundBuffers([]*buf.Buffer{buffer})
+			err := s.server.handler.WaitWriteInboundBuffers([]*buf.Buffer{buffer})
 			if err != nil {
 				s.server.logger.DebugContext(s.ctx, E.Cause(err, "write packet to device"))
 			}

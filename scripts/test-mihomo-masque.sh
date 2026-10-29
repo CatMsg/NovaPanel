@@ -28,6 +28,12 @@ if [[ -z "${NOVAPANEL_MIHOMO_TEST_BINARY:-}" ]]; then
   export NOVAPANEL_MIHOMO_TEST_BINARY="$temporary/mihomo"
 fi
 
+export NOVAPANEL_MIHOMO_XHTTP_CONFIG="$temporary/aggregate-xhttp.yaml"
+GOMAXPROCS=2 bash ./scripts/go-test-sing-box.sh -mod=readonly -p 2 ./sub \
+  -run '^TestConvertRawClashProxiesPreservesXHTTPOptions$' -count=1
+mkdir -p "$temporary/home"
+HOME="$temporary/home" "$NOVAPANEL_MIHOMO_TEST_BINARY" -t -f "$NOVAPANEL_MIHOMO_XHTTP_CONFIG"
+
 GOMAXPROCS=2 bash ./scripts/go-test-sing-box.sh -mod=readonly -race -p 2 \
   ./core ./service ./sub \
   -run '^(TestManagedMASQUEMihomo.*|TestMASQUEMihomo.*)$' \

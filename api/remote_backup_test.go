@@ -57,6 +57,8 @@ func TestRemoteBackupAPIRequiresAuthentication(t *testing.T) {
 	r := backupAPIRouter(t, stub, false)
 	for _, item := range []struct{ method, path, body string }{
 		{"GET", "/api/remote-backup-status", ""},
+		{"GET", "/api/getdb", ""},
+		{"POST", "/api/importdb", ""},
 		{"POST", "/api/remoteBackupSave", `{"password":"synthetic-secret"}`},
 		{"POST", "/api/remoteBackupRun", `{"action":"download","artifact":"x.db"}`},
 	} {
@@ -64,7 +66,11 @@ func TestRemoteBackupAPIRequiresAuthentication(t *testing.T) {
 		req := httptest.NewRequest(item.method, item.path, strings.NewReader(item.body))
 		req.Header.Set("X-Requested-With", "XMLHttpRequest")
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Origin", "http://example.com")
 		r.ServeHTTP(w, req)
+		if w.Header().Get("Content-Disposition") != "" {
+			t.Fatalf("unauthenticated endpoint returned attachment: %s", item.path)
+		}
 		var msg Msg
 		if json.Unmarshal(w.Body.Bytes(), &msg) != nil || msg.Success || !strings.Contains(msg.Msg, "Invalid login") {
 			t.Fatalf("unauthenticated endpoint: %s", w.Body.String())
@@ -72,6 +78,19 @@ func TestRemoteBackupAPIRequiresAuthentication(t *testing.T) {
 	}
 	if stub.calls != 0 {
 		t.Fatal("unauthenticated request reached backup service")
+	}
+}
+
+func TestDatabaseImportRejectsCrossOriginSessionRequest(t *testing.T) {
+	r := backupAPIRouter(t, &backupAPIStub{}, true)
+	request := httptest.NewRequest(http.MethodPost, "http://example.com/api/importdb", nil)
+	request.Header.Set("Origin", "https://evil.example")
+	request.Header.Set("Content-Type", "multipart/form-data")
+	recorder := httptest.NewRecorder()
+	r.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusForbidden || !strings.Contains(recorder.Body.String(), "cross-origin request rejected") {
+		t.Fatalf("cross-origin database import status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 
@@ -89,6 +108,7 @@ func TestRemoteBackupAPIMasksSettingsAndRejectsCorruptDownload(t *testing.T) {
 	request := func(method, path, body string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Origin", "http://example.com")
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		return w

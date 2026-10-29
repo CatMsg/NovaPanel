@@ -110,7 +110,28 @@ func fleetInboundHostname(host string) string {
 	return strings.Trim(host, "[]")
 }
 
+func fleetHTTPClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+func fleetHTTPStatusError(status int) error {
+	if status >= 300 && status < 400 {
+		return fmt.Errorf("远端接口返回重定向（HTTP %d），请填写目标面板的直达地址", status)
+	}
+	return fmt.Errorf("HTTP %d", status)
+}
+
 func (s *FleetService) fetchFleetJSON(baseURL, token, action string, payload interface{}) (fleetAPIResponse, error) {
+	var err error
+	baseURL, err = normalizeFleetURL(baseURL)
+	if err != nil {
+		return fleetAPIResponse{}, err
+	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return fleetAPIResponse{}, err
@@ -123,23 +144,16 @@ func (s *FleetService) fetchFleetJSON(baseURL, token, action string, payload int
 	req.Header.Set("Token", token)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 45 * time.Second}
+	client := fleetHTTPClient(45 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fleetAPIResponse{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fleetAPIResponse{}, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return fleetAPIResponse{}, fleetHTTPStatusError(resp.StatusCode)
 	}
-	var result fleetAPIResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fleetAPIResponse{}, err
-	}
-	if !result.Success {
-		return fleetAPIResponse{}, errors.New(result.Msg)
-	}
-	return result, nil
+	return readFleetResponse(resp.Body)
 }
 
 func (s *FleetService) LocalFleetInboundCapabilities(hostname string) (*FleetInboundCapabilities, error) {
@@ -184,8 +198,12 @@ func (s *FleetService) LocalFleetInboundCapabilities(hostname string) (*FleetInb
 
 func summarizeFleetInboundTLS(tlsConfig model.Tls) FleetInboundTLSProfile {
 	profile := FleetInboundTLSProfile{ID: tlsConfig.Id, Name: tlsConfig.Name}
+	serverJSON, err := tlsConfig.ServerConfig()
+	if err != nil {
+		return profile
+	}
 	var server map[string]json.RawMessage
-	if err := json.Unmarshal(tlsConfig.Server, &server); err != nil {
+	if err := json.Unmarshal(serverJSON, &server); err != nil {
 		return profile
 	}
 	_ = json.Unmarshal(server["enabled"], &profile.ServerEnabled)
@@ -198,7 +216,13 @@ func summarizeFleetInboundTLS(tlsConfig model.Tls) FleetInboundTLSProfile {
 	var acme struct {
 		Domain []string `json:"domain"`
 	}
-	if err := json.Unmarshal(server["acme"], &acme); err == nil {
+	var provider struct {
+		Type   string   `json:"type"`
+		Domain []string `json:"domain"`
+	}
+	if err := json.Unmarshal(server["certificate_provider"], &provider); err == nil && provider.Type == "acme" {
+		profile.ACMEDomains = provider.Domain
+	} else if err := json.Unmarshal(server["acme"], &acme); err == nil {
 		profile.ACMEDomains = acme.Domain
 	}
 	var certificates []string
@@ -333,16 +357,11 @@ func (s *FleetService) CreateFleetInbound(plan FleetInboundCreatePlan) ([]FleetI
 		for index := range results {
 			if results[index].Error == "" {
 				results[index].Success = false
-				results[index].Error = "未预检：至少一台目标服务器的计划无效，本批次未创建任何入站"
-			}
-		}
-	}
-	if !allPassed {
-		for _, job := range jobs {
-			result := &results[job.resultIndex]
-			if result.Error == "" {
-				result.Success = false
-				result.Error = "未创建：至少一台目标服务器未通过预检，本批次未创建任何入站"
+				if results[index].Preview != nil && results[index].Preview.Valid {
+					results[index].Error = "预检通过，但其他目标未通过，本批次未创建"
+				} else {
+					results[index].Error = "未预检：其他目标未通过，本批次未创建"
+				}
 			}
 		}
 		return results, nil
@@ -995,6 +1014,10 @@ func FleetInboundRemotePreflight(data json.RawMessage, hostname string) (*Prefli
 	if err != nil {
 		return nil, err
 	}
+	return preflightPreparedFleetInbound(normalized, userIDs, enabledUsers, hostname)
+}
+
+func preflightPreparedFleetInbound(normalized json.RawMessage, userIDs string, enabledUsers int, hostname string) (*PreflightReport, error) {
 	report, err := (&ConfigService{}).PreflightSave("inbounds", "new", normalized, userIDs, hostname)
 	if err != nil || report == nil || !report.Valid {
 		return report, err
@@ -1053,11 +1076,11 @@ func checkFleetInboundListenPort(inbound *model.Inbound) error {
 }
 
 func FleetInboundRemoteCreate(data json.RawMessage, username, hostname string) (FleetInboundRemoteCreated, error) {
-	normalized, userIDs, _, err := prepareFleetInboundRemotePayloadForTarget(data, hostname)
+	normalized, userIDs, enabledUsers, err := prepareFleetInboundRemotePayloadForTarget(data, hostname)
 	if err != nil {
 		return FleetInboundRemoteCreated{}, err
 	}
-	report, err := FleetInboundRemotePreflight(mustMarshalRaw(FleetInboundRemoteRequest{InboundDraft: normalized}), hostname)
+	report, err := preflightPreparedFleetInbound(normalized, userIDs, enabledUsers, hostname)
 	if err != nil || report == nil || !report.Valid {
 		if err == nil {
 			err = errors.New(fleetInboundPreflightError(report))

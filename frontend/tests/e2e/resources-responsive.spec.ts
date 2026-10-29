@@ -69,3 +69,105 @@ test('inbound and outbound lists search on desktop and remain usable on mobile',
   await page.goto('/app/outbounds')
   await expect(page.locator('.resource-card').filter({ hasText: 'jp-proxy' })).toBeVisible()
 })
+
+test('TLS cards show explicit enabled states instead of yes/no action labels', async ({ page }) => {
+  await installBaseMocks(page, true)
+  await page.route('**/api/load**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json({
+      ...pageData,
+      inbounds: [{ ...pageData.inbounds[0], tls_id: 1 }],
+      tls: [{
+        id: 1,
+        name: 'VLESS-Reality',
+        server: { server_name: 'gateway.icloud.com', ech: { enabled: false }, reality: { enabled: true } },
+        client: {},
+      }],
+    }),
+  }))
+
+  await page.goto('/app/tls')
+
+  const card = page.locator('.resource-card').filter({ hasText: 'VLESS-Reality' })
+  await expect(card).toBeVisible()
+  await expect(card.getByText('已启用', { exact: true })).toBeVisible()
+  await expect(card.getByText('未启用', { exact: true })).toHaveCount(2)
+  await expect(card.getByText('确认', { exact: true })).toHaveCount(0)
+  await expect(card.getByText('取消', { exact: true })).toHaveCount(0)
+})
+
+test('editing a legacy ACME TLS profile saves certificate_provider format', async ({ page }) => {
+  await installBaseMocks(page, true)
+  await page.route('**/api/load**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json({
+      ...pageData,
+      inbounds: [{ ...pageData.inbounds[0], tls_id: 1 }],
+      tls: [{
+        id: 1,
+        name: 'legacy-acme',
+        server: {
+          enabled: true,
+          certificate_path: '/etc/novas/cert.pem',
+          key_path: '/etc/novas/key.pem',
+          acme: { domain: 'edge.example', email: 'ops@example.com' },
+        },
+        client: {},
+      }],
+    }),
+  }))
+
+  let savedTLS: { server: Record<string, unknown> } | undefined
+  await page.route('**/api/preflight', async route => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: json({ changed: true }) })
+  })
+  await page.route('**/api/save', async route => {
+    const request = route.request().postDataJSON()
+    savedTLS = JSON.parse(request.data)
+    await route.fulfill({ status: 200, contentType: 'application/json', body: json({}) })
+  })
+
+  await page.goto('/app/tls')
+  const card = page.locator('.resource-card').filter({ hasText: 'legacy-acme' })
+  await card.getByRole('button', { name: '编辑' }).click()
+  const editor = page.getByRole('dialog').last()
+  await expect(editor.getByRole('textbox', { name: '域名 （逗号分隔）' })).toHaveValue('edge.example')
+  await editor.getByRole('button', { name: '保存', exact: true }).click()
+
+  await expect.poll(() => savedTLS).toBeDefined()
+  expect(savedTLS?.server).not.toHaveProperty('acme')
+  expect(savedTLS?.server.certificate_provider).toEqual({
+    type: 'acme',
+    domain: ['edge.example'],
+    email: 'ops@example.com',
+  })
+})
+
+test('modern ACME provider accepts sing-box listable scalar domain in the editor', async ({ page }) => {
+  await installBaseMocks(page, true)
+  await page.route('**/api/load**', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: json({
+      ...pageData,
+      tls: [{
+        id: 1,
+        name: 'modern-acme',
+        server: {
+          enabled: true,
+          certificate_provider: { type: 'acme', domain: 'edge.example', email: 'ops@example.com' },
+        },
+        client: {},
+      }],
+    }),
+  }))
+
+  await page.goto('/app/tls')
+  const card = page.locator('.resource-card').filter({ hasText: 'modern-acme' })
+  await card.getByRole('button', { name: '编辑' }).click()
+  const editor = page.getByRole('dialog').last()
+  await expect(editor.getByRole('textbox', { name: '域名 （逗号分隔）' })).toHaveValue('edge.example')
+  await expect(editor.getByRole('button', { name: '保存', exact: true })).toBeEnabled()
+})

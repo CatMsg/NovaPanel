@@ -1,6 +1,7 @@
 package sub
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/CatMsg/NovaPanel/logger"
 	"github.com/CatMsg/NovaPanel/service"
@@ -59,6 +61,10 @@ func asString(value interface{}) string {
 }
 
 func (a *AggregateService) GetAggregate(format string, host string) (*string, []string, error) {
+	return a.GetAggregateContext(context.Background(), format, host)
+}
+
+func (a *AggregateService) GetAggregateContext(ctx context.Context, format string, host string) (*string, []string, error) {
 	mode, err := a.SettingService.GetSubMode()
 	if err != nil {
 		return nil, nil, err
@@ -69,20 +75,20 @@ func (a *AggregateService) GetAggregate(format string, host string) (*string, []
 
 	switch strings.ToLower(strings.TrimSpace(format)) {
 	case "clash":
-		proxies, usage, err := a.collectAggregateClashProxies(host)
+		proxies, usage, err := a.collectAggregateClashProxiesContext(ctx, host)
 		if err != nil {
 			return nil, nil, err
 		}
 		return a.buildAggregateClashProxies(proxies, usage)
 	case "json":
-		outbounds, tags, usage, err := a.collectAggregateJSONOutbounds(host)
+		outbounds, tags, usage, err := a.collectAggregateJSONOutboundsContext(ctx, host)
 		if err != nil {
 			return nil, nil, err
 		}
 		return a.buildAggregateJson(outbounds, tags, usage)
 	}
 
-	links, usage, err := a.collectAggregateLinks(host)
+	links, usage, err := a.collectAggregateLinksContext(ctx, host)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -145,7 +151,7 @@ func (a *AggregateService) buildAggregateClashProxies(proxies []map[string]inter
 	return a.aggregateFormatResult(result, usage)
 }
 
-func (a *AggregateService) collectAggregateClashProxies(host string) ([]map[string]interface{}, aggregateUsage, error) {
+func (a *AggregateService) collectAggregateClashProxiesContext(ctx context.Context, host string) ([]map[string]interface{}, aggregateUsage, error) {
 	sources, err := a.SettingService.GetSubMasterSources()
 	if err != nil {
 		return nil, aggregateUsage{}, err
@@ -161,6 +167,9 @@ func (a *AggregateService) collectAggregateClashProxies(host string) ([]map[stri
 	proxies := make([]map[string]interface{}, 0)
 	usage := aggregateUsage{}
 	for sourceIndex, source := range sources {
+		if err := ctx.Err(); err != nil {
+			return nil, aggregateUsage{}, err
+		}
 		if sameSubscriptionSource(source, selfAggregateURI) {
 			logger.Warning("aggregate: skip self source")
 			continue
@@ -176,7 +185,10 @@ func (a *AggregateService) collectAggregateClashProxies(host string) ([]map[stri
 			logger.Warning("aggregate: skip invalid source URL")
 			continue
 		}
-		data, headers := util.GetExternalLinkWithHeaders(clashSource)
+		data, headers := util.GetExternalLinkWithHeadersContext(ctx, clashSource, 15*time.Second)
+		if err := ctx.Err(); err != nil {
+			return nil, aggregateUsage{}, err
+		}
 		if strings.TrimSpace(data) == "" {
 			logger.Warning("aggregate: failed to load remote clash subscription")
 			continue
@@ -223,7 +235,7 @@ func (a *AggregateService) collectAggregateClashProxies(host string) ([]map[stri
 	return proxies, usage, nil
 }
 
-func (a *AggregateService) collectAggregateJSONOutbounds(host string) ([]map[string]interface{}, []string, aggregateUsage, error) {
+func (a *AggregateService) collectAggregateJSONOutboundsContext(ctx context.Context, host string) ([]map[string]interface{}, []string, aggregateUsage, error) {
 	sources, err := a.SettingService.GetSubMasterSources()
 	if err != nil {
 		return nil, nil, aggregateUsage{}, err
@@ -245,6 +257,9 @@ func (a *AggregateService) collectAggregateJSONOutbounds(host string) ([]map[str
 	seenNodes := make(map[string]string)
 	seenTags := map[string]struct{}{"proxy": {}, "auto": {}, "direct": {}}
 	for sourceIndex, source := range sources {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, aggregateUsage{}, err
+		}
 		if sameSubscriptionSource(source, selfAggregateURI) {
 			logger.Warning("aggregate: skip self source")
 			continue
@@ -260,7 +275,10 @@ func (a *AggregateService) collectAggregateJSONOutbounds(host string) ([]map[str
 			logger.Warning("aggregate: skip invalid source URL")
 			continue
 		}
-		data, headers := util.GetExternalLinkWithHeaders(jsonSource)
+		data, headers := util.GetExternalLinkWithHeadersContext(ctx, jsonSource, 15*time.Second)
+		if err := ctx.Err(); err != nil {
+			return nil, nil, aggregateUsage{}, err
+		}
 		if strings.TrimSpace(data) == "" {
 			logger.Warning("aggregate: failed to load remote JSON subscription")
 			continue
@@ -599,7 +617,7 @@ func (a *AggregateService) aggregateFormatResult(result string, usage aggregateU
 	return &result, a.aggregateHeaders(usage), nil
 }
 
-func (a *AggregateService) collectAggregateLinks(host string) ([]string, aggregateUsage, error) {
+func (a *AggregateService) collectAggregateLinksContext(ctx context.Context, host string) ([]string, aggregateUsage, error) {
 	sources, err := a.SettingService.GetSubMasterSources()
 	if err != nil {
 		return nil, aggregateUsage{}, err
@@ -614,6 +632,9 @@ func (a *AggregateService) collectAggregateLinks(host string) ([]string, aggrega
 	links := make([]string, 0)
 	usage := aggregateUsage{}
 	for _, source := range sources {
+		if err := ctx.Err(); err != nil {
+			return nil, aggregateUsage{}, err
+		}
 		if sameSubscriptionSource(source, selfAggregateURI) {
 			logger.Warning("aggregate: skip self source")
 			continue
@@ -624,7 +645,10 @@ func (a *AggregateService) collectAggregateLinks(host string) ([]string, aggrega
 		}
 		seenSources[sourceKey] = struct{}{}
 
-		data, headers := util.GetExternalLinkWithHeaders(source)
+		data, headers := util.GetExternalLinkWithHeadersContext(ctx, source, 15*time.Second)
+		if err := ctx.Err(); err != nil {
+			return nil, aggregateUsage{}, err
+		}
 		if len(data) == 0 {
 			logger.Warning("aggregate: failed to load remote subscription")
 			continue

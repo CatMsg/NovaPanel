@@ -35,13 +35,13 @@ NovaPanel is a Sing-Box management panel for protocol configuration, subscriptio
 Install the latest version:
 
 ```sh
-bash <(curl -Ls https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh)
+_novas_installer_tmp="$(mktemp)" && trap 'rm -f "$_novas_installer_tmp"' EXIT && curl --proto '=https' --proto-redir '=https' -fsSL https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh -o "$_novas_installer_tmp" && bash -n "$_novas_installer_tmp" && bash "$_novas_installer_tmp"; _novas_installer_rc=$?; exit "$_novas_installer_rc"
 ```
 
 Install a specific version:
 
 ```sh
-bash <(curl -Ls https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh) vx.x.x
+_novas_installer_tmp="$(mktemp)" && trap 'rm -f "$_novas_installer_tmp"' EXIT && curl --proto '=https' --proto-redir '=https' -fsSL https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh -o "$_novas_installer_tmp" && bash -n "$_novas_installer_tmp" && bash "$_novas_installer_tmp" vx.x.x; _novas_installer_rc=$?; exit "$_novas_installer_rc"
 ```
 
 During installation you can configure the administrator account, panel path, and ports. After installation, use these commands for maintenance:

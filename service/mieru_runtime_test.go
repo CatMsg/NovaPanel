@@ -53,6 +53,60 @@ esac
 	}
 }
 
+func TestWriteMitaServerConfigPayloadDoesNotFollowPredictableTempSymlink(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "mieru")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, "server.json")
+	targetPath := filepath.Join(dir, "sensitive-target")
+	tempPath := configPath + ".tmp"
+	originalTarget := []byte("do not overwrite")
+	payload := []byte(`{"users":[{"name":"client","hashedPassword":"hash"}]}`)
+	if err := os.WriteFile(targetPath, originalTarget, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetPath, tempPath); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeMitaServerConfigPayload(configPath, payload); err != nil {
+		t.Fatalf("write config payload: %v", err)
+	}
+
+	gotTarget, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotTarget) != string(originalTarget) {
+		t.Fatalf("symlink target was overwritten: %q", gotTarget)
+	}
+	info, err := os.Lstat(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("config path was replaced by a symlink")
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("config mode = %04o, want 0600", info.Mode().Perm())
+	}
+	directoryInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if directoryInfo.Mode().Perm() != 0o700 {
+		t.Fatalf("config directory mode = %04o, want 0700", directoryInfo.Mode().Perm())
+	}
+	gotConfig, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotConfig) != string(payload) {
+		t.Fatalf("config payload = %q, want %q", gotConfig, payload)
+	}
+}
+
 func TestRequiresMitaRestartOnlyForNonReloadableFields(t *testing.T) {
 	base := []byte(`{"portBindings":[{"port":20000,"protocol":"TCP"}],"users":[{"name":"one","hashedPassword":"abc"}],"loggingLevel":"INFO","mtu":1400,"dns":{"dualStack":"PREFER_IPv4"}}`)
 	reloadable := []byte(`{"portBindings":[{"port":20000,"protocol":"TCP"}],"users":[{"name":"one","hashedPassword":"abc"},{"name":"two","hashedPassword":"def"}],"loggingLevel":"DEBUG","mtu":1400,"dns":{"dualStack":"PREFER_IPv4"}}`)

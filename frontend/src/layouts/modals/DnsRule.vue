@@ -1,5 +1,11 @@
 <template>
-  <v-dialog transition="dialog-bottom-transition" width="800" @after-enter="updateData()">
+  <v-dialog
+    :model-value="visible"
+    transition="dialog-bottom-transition"
+    width="800"
+    @update:model-value="onDialogUpdate"
+    @after-enter="updateData()"
+  >
     <v-card class="rounded-lg">
       <v-card-title>
         {{ $t('actions.' + title) + " " + $t('objects.dnsrule') }}
@@ -191,6 +197,9 @@ export default {
     }
   },
   methods: {
+    onDialogUpdate(value: boolean) {
+      if (!value) this.$emit('close')
+    },
     dnsActionTitle(action:string) {
       if (action === 'evaluate') return i18n.global.t('dns.rule.action.evaluate')
       if (action === 'route-options') return i18n.global.t('dns.rule.action.routeOptions')

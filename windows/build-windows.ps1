@@ -96,7 +96,7 @@ $env:GOARCH = $Architecture
 $env:CGO_ENABLED = "0"
 Write-Host "Building with release-matched Windows settings (CGO disabled)..." -ForegroundColor Yellow
 
-$buildCmd = "go build -ldflags `"-w -s -checklinkname=0`" -tags `"with_quic,with_grpc,with_utls,with_acme,with_gvisor,with_tailscale`" -o novas.exe main.go"
+$buildCmd = "go build -ldflags `"-w -s -checklinkname=0`" -tags `"with_quic,with_grpc,with_utls,with_acme,with_gvisor,with_tailscale`" -o novas.exe ."
 
 try {
     Invoke-Expression $buildCmd

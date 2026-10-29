@@ -13,6 +13,34 @@ novas_deploy() (
     source_dir="" old_name="" snapshot="" stage=""
     stopped=0 deployed=0 committed=0 old_active=0 old_enabled=0
 
+    novas_secure_existing_certificates() {
+        local cert_root="${root}/root/cert"
+        local cert_dir
+        [[ -d "$cert_root" && ! -L "$cert_root" ]] || return 0
+        chmod 700 "$cert_root" || return 1
+        for cert_dir in "$cert_root"/*; do
+            [[ -d "$cert_dir" && ! -L "$cert_dir" ]] || continue
+            [[ -f "$cert_dir/fullchain.pem" && ! -L "$cert_dir/fullchain.pem" &&
+                -f "$cert_dir/privkey.pem" && ! -L "$cert_dir/privkey.pem" ]] || continue
+            chmod 600 "$cert_dir/privkey.pem" &&
+                chmod 644 "$cert_dir/fullchain.pem" &&
+                chmod 700 "$cert_dir" || return 1
+        done
+    }
+
+    novas_secure_database_storage() {
+        local db_dir="$1/db"
+        local file
+        [[ -e "$db_dir" || -L "$db_dir" ]] || return 0
+        [[ -d "$db_dir" && ! -L "$db_dir" ]] || { echo "Database directory must be a real directory" >&2; return 1; }
+        chmod 700 "$db_dir" || return 1
+        for file in "$db_dir/novas.db" "$db_dir/novas.db-wal" "$db_dir/novas.db-shm"; do
+            [[ -e "$file" || -L "$file" ]] || continue
+            [[ -f "$file" && ! -L "$file" ]] || { echo "Database storage file must be a regular file" >&2; return 1; }
+            chmod 600 "$file" || return 1
+        done
+    }
+
     for file in novas novas.sh novas.service scripts/hy2-forward.sh scripts/login-guard.sh bin/mita; do
         [[ -f "$package/$file" && ! -L "$package/$file" ]] || { echo "Incomplete novas archive: $file" >&2; exit 1; }
     done
@@ -99,6 +127,7 @@ novas_deploy() (
     cp -a "$package/." "$stage/"
     chmod 755 "$stage"
     chmod 755 "$stage/novas" "$stage/novas.sh" "$stage/scripts/"*.sh
+    novas_secure_database_storage "$stage" || { echo "Failed to secure staged database permissions" >&2; exit 1; }
     # Work on the staged offline database, never on the only rollback copy.
     (cd "$stage"; env NOVAS_DB_FOLDER="$stage/db" ./novas upgrade-db)
     (cd "$stage"; env NOVAS_DB_FOLDER="$stage/db" ./novas checkdb)
@@ -121,6 +150,13 @@ novas_deploy() (
             cp -a "$file" "$units/novas.service.d/$(basename "$file")"
         done
     fi
+    if [[ -n "$old_name" ]] && ! novas_secure_existing_certificates; then
+        echo "Failed to secure existing panel certificate permissions" >&2
+        exit 1
+    fi
+    mkdir -p "$units/novas.service.d"
+    printf '[Service]\nUMask=0077\n' > "$units/novas.service.d/90-novapanel-security.conf"
+    chmod 644 "$units/novas.service.d/90-novapanel-security.conf"
     systemctl daemon-reload
     novas_configure "$home" "$old_name"
     if [[ -z "$old_name" || "$old_enabled" == 1 ]]; then systemctl enable novas; fi

@@ -10,14 +10,16 @@ on:
         type: string
 
 permissions:
-  contents: write
-  actions: write
+  contents: read
+
+concurrency:
+  group: novapanel-release
+  cancel-in-progress: false
 
 env:
   NODE_VERSION: "25"
-  CRONET_GO_VERSION: "4d18a60dc3a8d327065b058f92fbbfc9391b84bc"
+  CRONET_GO_VERSION: "b3c2ed82ac97b79cd051f7ec59ccbd2e014bb6de"
   CRONET_GO_REPO: https://github.com/sagernet/cronet-go.git
-  BOOTLIN_BASE_URL: https://toolchains.bootlin.com/downloads/releases/toolchains
   GOPROXY: https://proxy.golang.org
   GOSUMDB: sum.golang.org
 
@@ -27,13 +29,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 检出仓库
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: recursive
           fetch-depth: 1
+          persist-credentials: false
 
       - name: 设置 Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "npm"
@@ -67,13 +70,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 检出仓库
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: recursive
           fetch-depth: 1
+          persist-credentials: false
 
       - name: 设置 Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: "npm"
@@ -89,7 +93,7 @@ jobs:
           npm run build:assets
 
       - name: 上传前端构建产物
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: frontend-dist
           path: frontend/dist/
@@ -100,10 +104,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 检出仓库
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: 设置 Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           cache: false
           go-version-file: go.mod
@@ -112,6 +118,8 @@ jobs:
         run: |
           sh -n entrypoint.sh
           bash -n install.sh novas.sh runNovas.sh build.sh scripts/*.sh
+          bash ./scripts/check-github-action-pins.sh
+          bash ./scripts/check-release-policy.sh
 
       - name: 运行静态检查
         run: |
@@ -136,16 +144,18 @@ jobs:
       contents: read
     steps:
       - name: 检出仓库
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: 设置 Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           cache: false
           go-version-file: go.mod
 
       - name: 构建原生验收用 novas
-        run: go build -o "$RUNNER_TEMP/novas-fresh-ufw-test" main.go
+        run: go build -o "$RUNNER_TEMP/novas-fresh-ufw-test" .
 
       - name: 运行真实 UFW 与 SSH 验收
         env:
@@ -189,7 +199,9 @@ jobs:
       contents: read
     steps:
       - name: 检出仓库
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: 运行真实 ACME cron 验收
         env:
@@ -224,28 +236,52 @@ jobs:
             NOVAS_WORKSPACE="$NOVAS_WORKSPACE" \
             bash "$GITHUB_WORKSPACE/scripts/test-acme-cron-linux.sh"
 
+  test-windows-installer-prereqs:
+    name: Windows installer source and dependency checks
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: WinSW 摘要与安装器行为回归测试
+        shell: pwsh
+        run: ./windows/test-winsw-verifier.ps1
+
   build-linux:
     name: 构建-${{ matrix.platform }}
     needs:
       - build-frontend
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { platform: amd64, arch: amd64, goarm: "", bootlin: x86-64, naive: true }
+          - platform: amd64
+            arch: amd64
+            goarm: ""
+            naive: true
+            file_arch: x86-64
     runs-on: ubuntu-latest
     steps:
       - name: 检出仓库
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: 下载前端构建产物
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: frontend-dist
           path: web/html
 
       - name: 设置 Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           cache: false
           go-version-file: go.mod
@@ -302,40 +338,12 @@ jobs:
           echo "GOARCH=${{ matrix.arch }}" >> $GITHUB_ENV
           if [ -n "${{ matrix.goarm }}" ]; then echo "GOARM=${{ matrix.goarm }}" >> $GITHUB_ENV; fi
 
-      - name: 设置 Bootlin musl（非 naive 平台）
-        if: ${{ matrix.naive != true }}
-        run: |
-          set -e
-          BOOTLIN_ARCH="${{ matrix.bootlin }}"
-          echo "正在解析 arch=$BOOTLIN_ARCH 的 Bootlin musl 工具链（平台=${{ matrix.platform }}）"
-          TARBALL_BASE="${{ env.BOOTLIN_BASE_URL }}/$BOOTLIN_ARCH/tarballs/"
-          TARBALL_URL=$(curl -fsSL "$TARBALL_BASE" | grep -oE "${BOOTLIN_ARCH}--musl--stable-[^\"]+\\.tar\\.xz" | sort -r | head -n1)
-          [ -z "$TARBALL_URL" ] && { echo "未找到 arch=$BOOTLIN_ARCH 的 Bootlin musl 工具链" >&2; exit 1; }
-          echo "正在下载：$TARBALL_URL"
-          cd /tmp
-          curl -fL -sS -o "$(basename "$TARBALL_URL")" "$TARBALL_BASE/$TARBALL_URL"
-          tar -xf "$(basename "$TARBALL_URL")"
-          TOOLCHAIN_DIR=$(find . -maxdepth 1 -type d -name "${BOOTLIN_ARCH}--musl--stable-*" | head -n1)
-          TOOLCHAIN_DIR="$(realpath "$TOOLCHAIN_DIR")"
-          BIN_DIR="$TOOLCHAIN_DIR/bin"
-          echo "PATH=$BIN_DIR:$PATH" >> $GITHUB_ENV
-          CC=$(find "$BIN_DIR" -maxdepth 1 \( -name '*-gcc.br_real' -o -name '*-gcc' \) -type f -executable 2>/dev/null | grep -v g++ | head -n1)
-          [ -z "$CC" ] && { echo "在 $BIN_DIR 中未找到 gcc" >&2; exit 1; }
-          echo "CC=$(realpath "$CC")" >> $GITHUB_ENV
-          SYSROOT=""
-          F=$(find "$TOOLCHAIN_DIR" -name "libc-header-start.h" 2>/dev/null | head -1)
-          if [ -n "$F" ]; then SYSROOT=$(dirname "$(dirname "$(dirname "$(dirname "$F")")")"); fi
-          if [ -n "$SYSROOT" ] && [ -d "$SYSROOT" ]; then
-            echo "CGO_CFLAGS=--sysroot=$SYSROOT" >> $GITHUB_ENV
-            echo "CGO_LDFLAGS=--sysroot=$SYSROOT -static" >> $GITHUB_ENV
-          fi
-
       - name: 构建 NovaPanel
         run: |
           set -e
           BUILD_TAGS="with_quic,with_grpc,with_utls,with_acme,with_gvisor,badlinkname,tfogo_checklinkname0,with_tailscale"
           [ "${{ matrix.naive }}" = "true" ] && BUILD_TAGS="${BUILD_TAGS},with_naive_outbound,with_musl"
-          go build -ldflags="-w -s -checklinkname=0 -linkmode external -extldflags '-static'" -tags "$BUILD_TAGS" -o novas main.go
+          go build -ldflags="-w -s -checklinkname=0 -linkmode external -extldflags '-static'" -tags "$BUILD_TAGS" -o novas .
           file novas
           ldd novas 2>/dev/null || echo "已确认静态二进制文件"
 
@@ -350,17 +358,34 @@ jobs:
           set -e
           CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} bash ./scripts/build-mita.sh release/novas/bin/mita
           chmod 755 release/novas/bin/mita
-          release/novas/bin/mita version
+
+      - name: 验证 Linux 二进制
+        run: |
+          set -euo pipefail
+          bash ./scripts/verify-linux-release-binaries.sh \
+            "${{ matrix.platform }}" \
+            "${{ matrix.file_arch }}" \
+            ./novas \
+            ./release/novas/bin/mita
+          if [[ "${{ matrix.platform }}" == "amd64" ]]; then
+            release/novas/bin/mita version
+            CC=gcc CGO_CFLAGS= CGO_LDFLAGS= NOVAS_TEST_BINARY="$PWD/novas" go test ./cmd -run TestRuntimeBinarySmoke -count=1
+          fi
 
       - name: 打包
         run: |
           set -e
-          CC=gcc CGO_CFLAGS= CGO_LDFLAGS= NOVAS_TEST_BINARY="$PWD/novas" go test ./cmd -run TestRuntimeBinarySmoke -count=1
           tar -zcvf NovaPanel-linux-${{ matrix.platform }}.tar.gz -C release novas
           sha256sum NovaPanel-linux-${{ matrix.platform }}.tar.gz > NovaPanel-linux-${{ matrix.platform }}.tar.gz.sha256
+          sha256sum --check NovaPanel-linux-${{ matrix.platform }}.tar.gz.sha256
+
+      - name: 生成构建来源证明
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: NovaPanel-linux-${{ matrix.platform }}.tar.gz
 
       - name: 上传构建产物
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: NovaPanel-linux-${{ matrix.platform }}
           path: ./NovaPanel-linux-${{ matrix.platform }}.tar.gz*
@@ -374,30 +399,66 @@ jobs:
       - test-backend
       - test-fresh-ufw-linux
       - test-acme-cron-linux
+      - test-windows-installer-prereqs
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      attestations: read
     steps:
       - name: 检出仓库
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: 规范化发布标签
         id: vars
+        env:
+          TAG_INPUT: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           VERSION="$(tr -d '[:space:]' < config/version)"
-          TAG="${{ inputs.tag }}"
-          if [ -z "$TAG" ]; then
-            TAG="v$VERSION"
-          fi
-          case "$TAG" in
-            v*) echo "tag=$TAG" >> "$GITHUB_OUTPUT" ;;
-            *) echo "tag=v$TAG" >> "$GITHUB_OUTPUT" ;;
-          esac
+          bash ./scripts/prepare-release-tag.sh "$TAG_INPUT" "$VERSION" "$GITHUB_REF" "$GITHUB_SHA"
 
       - name: 下载构建产物
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: NovaPanel-*
           path: release-assets
           merge-multiple: true
+
+      - name: 验证构建来源证明
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          archives=(release-assets/NovaPanel-linux-*.tar.gz)
+          if [[ ${#archives[@]} -eq 0 ]]; then
+            echo "没有找到待验证的 Linux 发布包" >&2
+            exit 1
+          fi
+          for archive in "${archives[@]}"; do
+            verified=0
+            for attempt in 1 2 3 4 5; do
+              if gh attestation verify "$archive" \
+                --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+                --source-ref "$GITHUB_REF" \
+                --source-digest "$GITHUB_SHA" \
+                --deny-self-hosted-runners; then
+                verified=1
+                break
+              fi
+              if [[ "$attempt" -lt 5 ]]; then
+                sleep $((attempt * 5))
+              fi
+            done
+            [[ "$verified" -eq 1 ]] || {
+              echo "构建来源证明验证失败: $archive" >&2
+              exit 1
+            }
+          done
 
       - name: 准备 Release 说明
         id: body
@@ -411,25 +472,20 @@ jobs:
           fi
           echo "body_path=$BODY_PATH" >> "$GITHUB_OUTPUT"
 
-      - name: 创建或更新 Release
+      - name: 创建 Draft Release
+        if: steps.vars.outputs.resume != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.vars.outputs.tag }}
           BODY_PATH: ${{ steps.body.outputs.body_path }}
         run: |
           set -euo pipefail
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit "$TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "NovaPanel $TAG" \
-              --notes-file "$BODY_PATH"
-          else
-            gh release create "$TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
-              --title "NovaPanel $TAG" \
-              --notes-file "$BODY_PATH"
-          fi
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "NovaPanel $TAG" \
+            --notes-file "$BODY_PATH" \
+            --draft
 
       - name: 上传 Release 资产
         env:
@@ -445,27 +501,60 @@ jobs:
           fi
 
           max_attempts=5
-          for attempt in $(seq 1 "$max_attempts"); do
-            if gh release upload "$TAG" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"; then
-              break
-            fi
-            if [ "$attempt" -ge "$max_attempts" ]; then
-              echo "Release 资产上传连续失败 $max_attempts 次" >&2
-              exit 1
-            fi
-            delay=$((attempt * 15))
-            echo "Release 资产上传失败（$attempt/$max_attempts），${delay} 秒后重试"
-            sleep "$delay"
-          done
-
-          uploaded="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
           for asset in "${assets[@]}"; do
             name="$(basename "$asset")"
-            if ! grep -Fxq "$name" <<<"$uploaded"; then
-              echo "Release 缺少资产: $name" >&2
+            expected_digest="sha256:$(sha256sum "$asset" | awk '{print $1}')"
+            uploaded_asset=0
+            for attempt in $(seq 1 "$max_attempts"); do
+              if gh release upload "$TAG" "$asset" --repo "$GITHUB_REPOSITORY"; then
+                uploaded_asset=1
+                break
+              fi
+
+              # The upload may have succeeded even if the client lost its response.
+              if release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")"; then
+                uploaded_digest="$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .digest // empty' <<<"$release_json")"
+                if [[ -n "$uploaded_digest" ]]; then
+                  if [[ "$uploaded_digest" != "$expected_digest" ]]; then
+                    echo "Release asset digest mismatch for $name: $uploaded_digest" >&2
+                    exit 1
+                  fi
+                  uploaded_asset=1
+                  break
+                fi
+              fi
+              if [ "$attempt" -lt "$max_attempts" ]; then
+                delay=$((attempt * 15))
+                echo "Release 资产上传失败（$attempt/$max_attempts），${delay} 秒后重试: $name"
+                sleep "$delay"
+              fi
+            done
+            if [ "$uploaded_asset" -ne 1 ]; then
+              echo "Release 资产上传连续失败 $max_attempts 次: $name" >&2
               exit 1
             fi
           done
+
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")"
+          for asset in "${assets[@]}"; do
+            name="$(basename "$asset")"
+            expected_digest="sha256:$(sha256sum "$asset" | awk '{print $1}')"
+            actual_digest="$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .digest // empty' <<<"$release_json")"
+            if [[ "$actual_digest" != "$expected_digest" ]]; then
+              echo "Release 缺少资产或 SHA-256 不匹配: $name" >&2
+              exit 1
+            fi
+          done
+
+      - name: 发布已验证的 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.vars.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
+          draft="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')"
+          [[ "$draft" == "false" ]] || { echo "Release still marked as draft" >&2; exit 1; }
 
   cleanup-failed-runs:
     name: 清理失败的旧 Run
@@ -473,6 +562,9 @@ jobs:
       - publish-release
     if: ${{ needs.publish-release.result == 'success' }}
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
     steps:
       - name: 删除同提交失败的旧 Run
         env:

@@ -1,5 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
+set NOVAS_DEVELOPMENT_DEFAULT_ADMIN=
 
 echo ========================================
 echo NovaPanel Windows Installer
@@ -18,6 +19,8 @@ cd /d "%~dp0"
 REM Set installation directory
 set "INSTALL_DIR=C:\Program Files\novas"
 set "SERVICE_NAME=novas"
+set "SERVICE_RUNNING=0"
+set "INSTALL_EXIT_CODE=0"
 
 sc query novas >nul 2>&1
 if %errorLevel% equ 0 (
@@ -35,38 +38,80 @@ if not exist "%INSTALL_DIR%\db" mkdir "%INSTALL_DIR%\db"
 if not exist "%INSTALL_DIR%\logs" mkdir "%INSTALL_DIR%\logs"
 if not exist "%INSTALL_DIR%\cert" mkdir "%INSTALL_DIR%\cert"
 
+REM Keep program files readable, but protect database credentials and private keys.
+icacls "%INSTALL_DIR%" /grant "*S-1-5-32-545:(OI)(CI)RX" /T >nul
+if !errorLevel! neq 0 (
+    echo Error: Failed to set installation directory permissions.
+    exit /b 1
+)
+icacls "%INSTALL_DIR%\db" /inheritance:r /remove:g "*S-1-5-32-545" /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" /T >nul
+if !errorLevel! neq 0 (
+    echo Error: Failed to protect the database directory.
+    exit /b 1
+)
+icacls "%INSTALL_DIR%\cert" /inheritance:r /remove:g "*S-1-5-32-545" /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" /T >nul
+if !errorLevel! neq 0 (
+    echo Error: Failed to protect the certificate directory.
+    exit /b 1
+)
+icacls "%INSTALL_DIR%\logs" /inheritance:r /remove:g "*S-1-5-32-545" /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" /T >nul
+if !errorLevel! neq 0 (
+    echo Error: Failed to protect the log directory.
+    exit /b 1
+)
+
 REM Copy files
 echo Copying files...
-copy "novas.exe" "%INSTALL_DIR%\" >nul
-copy "novas-windows.xml" "%INSTALL_DIR%\" >nul
-copy "novas-windows.bat" "%INSTALL_DIR%\" >nul
+copy /Y "novas.exe" "%INSTALL_DIR%\" >nul
+if !errorLevel! neq 0 (
+    echo Error: Failed to copy novas.exe to the installation directory.
+    exit /b 1
+)
+copy /Y "novas-windows.xml" "%INSTALL_DIR%\" >nul
+if !errorLevel! neq 0 (
+    echo Error: Failed to copy the Windows service configuration.
+    exit /b 1
+)
+copy /Y "novas-windows.bat" "%INSTALL_DIR%\" >nul
+if !errorLevel! neq 0 (
+    echo Error: Failed to copy the Windows management script.
+    exit /b 1
+)
 
-REM Check if WinSW is available
+REM Verify the pinned WinSW release before using or replacing it.
 set "WINSW_PATH=%INSTALL_DIR%\winsw.exe"
-if not exist "%WINSW_PATH%" (
-    echo Downloading WinSW...
-    powershell -Command "& {Invoke-WebRequest -Uri 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe' -OutFile '%WINSW_PATH%'}"
-    if exist "%WINSW_PATH%" (
-        echo WinSW downloaded successfully
-    ) else (
-        echo Warning: Failed to download WinSW. Service installation will be skipped.
-        echo You can manually download WinSW from: https://github.com/winsw/winsw/releases
-    )
+set "WINSW_READY=0"
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0verify-winsw.ps1" -Path "%WINSW_PATH%" -DownloadIfMissing
+if !errorLevel! equ 0 (
+    set "WINSW_READY=1"
+) else (
+    echo Warning: WinSW could not be verified or downloaded. Service installation will be skipped.
+    echo See https://github.com/winsw/winsw/releases for the pinned release.
 )
 
 REM Install Windows Service
-if exist "%WINSW_PATH%" (
+set "SERVICE_INSTALLED=0"
+if "!WINSW_READY!"=="1" (
     echo Installing Windows Service...
     cd /d "%INSTALL_DIR%"
-    copy "winsw.exe" "novas-service.exe" >nul
-    copy "novas-windows.xml" "novas-service.xml" >nul
-
-    REM Install service
-    novas-service.exe install
-    if %errorLevel% equ 0 (
-        echo Service installed successfully
+    copy /Y "winsw.exe" "novas-service.exe" >nul
+    if !errorLevel! equ 0 (
+        copy /Y "novas-windows.xml" "novas-service.xml" >nul
+        if !errorLevel! equ 0 (
+            REM Install service
+            novas-service.exe install
+            if !errorLevel! equ 0 (
+                echo Service installed successfully
+            ) else (
+                echo Service installation command failed; checking whether it is already registered...
+            )
+            sc qc %SERVICE_NAME% | find /i "%INSTALL_DIR%\novas-service.exe" >nul
+            if !errorLevel! equ 0 set "SERVICE_INSTALLED=1"
+        ) else (
+            echo Warning: Failed to install the verified service configuration.
+        )
     ) else (
-        echo Warning: Failed to install service. You can install it manually later.
+        echo Warning: Failed to copy the verified service wrapper.
     )
 )
 
@@ -114,6 +159,10 @@ echo.
 echo Applying settings...
 cd /d "%INSTALL_DIR%"
 novas.exe setting -port %panel_port% -path "%panel_path%" -subPort %sub_port% -subPath "%sub_path%"
+if !errorLevel! neq 0 (
+    echo Error: Failed to save the panel and subscription settings.
+    exit /b 1
+)
 
 REM Get admin credentials
 echo.
@@ -124,24 +173,34 @@ echo ========================================
 set /p admin_username="Enter admin username (default: admin): "
 if "%admin_username%"=="" set "admin_username=admin"
 
-set /p admin_password="Enter admin password: "
-if "%admin_password%"=="" (
-    echo Error: Password cannot be empty
+REM Set admin credentials
+echo Setting admin credentials...
+novas.exe admin -username "%admin_username%" -password-prompt
+if %errorLevel% neq 0 (
+    echo Error: Failed to set admin credentials
     pause
     exit /b 1
 )
 
-REM Set admin credentials
-echo Setting admin credentials...
-novas.exe admin -username "%admin_username%" -password "%admin_password%"
-
 REM Start service
+if "!SERVICE_INSTALLED!"=="1" (
     echo Starting NovaPanel service...
-net start %SERVICE_NAME%
-if %errorLevel% equ 0 (
-    echo Service started successfully
+    net start %SERVICE_NAME%
+    if !errorLevel! equ 0 (
+        set "SERVICE_RUNNING=1"
+        echo Service started successfully
+    ) else (
+        sc query %SERVICE_NAME% | find "RUNNING" >nul
+        if !errorLevel! equ 0 (
+            set "SERVICE_RUNNING=1"
+            echo Service is already running.
+        ) else (
+            set "INSTALL_EXIT_CODE=1"
+            echo Warning: Failed to start the service. Check the Windows service logs.
+        )
+    )
 ) else (
-    echo Warning: Failed to start service. You can start it manually later.
+    echo Warning: Windows service is not registered. Run novas-windows.bat and choose "Run NovaPanel Manually".
 )
 
 REM Create desktop shortcut
@@ -161,12 +220,6 @@ if exist "%START_MENU%" (
     echo Start Menu shortcut created
 )
 
-REM Set permissions
-echo Setting permissions...
-icacls "%INSTALL_DIR%" /grant "Users:(OI)(CI)RX" /T >nul
-icacls "%INSTALL_DIR%\db" /grant "Users:(OI)(CI)F" /T >nul
-icacls "%INSTALL_DIR%\logs" /grant "Users:(OI)(CI)F" /T >nul
-
 REM Create environment variable
 echo Setting environment variable...
 setx NOVAS_HOME "%INSTALL_DIR%" /M >nul
@@ -174,7 +227,15 @@ setx NOVAS_HOME "%INSTALL_DIR%" /M >nul
 REM Show final configuration
 echo.
 echo ========================================
-echo Installation completed successfully!
+if "!SERVICE_RUNNING!"=="1" (
+    echo Installation completed and the NovaPanel service is running.
+) else (
+    if "!SERVICE_INSTALLED!"=="1" (
+        echo Installation files are ready, but the NovaPanel service did not start.
+    ) else (
+        echo Installation files are ready. Windows service is unavailable; use manual launch.
+    )
+)
 echo ========================================
 echo.
 echo NovaPanel has been installed to: %INSTALL_DIR%
@@ -204,3 +265,4 @@ echo.
 echo You can also use the desktop shortcut or Start Menu item.
 echo.
 pause
+exit /b !INSTALL_EXIT_CODE!

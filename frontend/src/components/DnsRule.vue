@@ -170,6 +170,40 @@
       <v-expansion-panel value="dns-conditions">
         <v-expansion-panel-title>{{ $t('dns.condition.advanced') }}</v-expansion-panel-title>
         <v-expansion-panel-text>
+          <v-row>
+            <v-col cols="12" sm="6">
+              <v-combobox
+                v-model="queryType"
+                :items="queryTypes"
+                :label="$t('dns.condition.queryType')"
+                :hint="$t('dns.condition.queryTypeHint')"
+                multiple
+                chips
+                closable-chips
+                persistent-hint
+                hide-details="auto"
+              ></v-combobox>
+            </v-col>
+            <v-col cols="12" sm="6">
+              <v-text-field
+                v-model="queryClientSubnet"
+                :label="$t('dns.condition.queryClientSubnet') + ' ' + $t('commaSeparated')"
+                :hint="$t('dns.condition.queryClientSubnetHint')"
+                persistent-hint
+                hide-details="auto"
+              ></v-text-field>
+            </v-col>
+            <v-col cols="12">
+              <v-switch
+                v-model="queryDnssec"
+                color="primary"
+                :label="$t('dns.condition.queryDnssec')"
+                :hint="$t('dns.condition.queryDnssecHint')"
+                persistent-hint
+                hide-details="auto"
+              ></v-switch>
+            </v-col>
+          </v-row>
           <DnsTagMap :rule="rule" :servers="dnsServers" field="dns_server_address" />
           <DnsTagMap :rule="rule" :servers="dnsServers" field="dns_search_domain" />
         </v-expansion-panel-text>
@@ -230,6 +264,7 @@ export default {
       portKeys: ['port', 'port_range'],
       srcIPKeys: ['source_ip_cidr', 'source_ip_is_private'],
       srcPortKeys: ['source_port', 'source_port_range'],
+      queryTypes: ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'PTR', 'SOA', 'SRV', 'TXT', 'HTTPS', 'SVCB', 'CAA', 'ANY'],
       domainOption: 'domain',
       portOption: 'port',
       srcIPOption: 'source_ip_cidr',
@@ -264,6 +299,41 @@ export default {
     },
   },
   computed: {
+    queryType: {
+      get() {
+        const value = this.$props.rule.query_type
+        if (value === undefined || value === null || value === '') return []
+        return (Array.isArray(value) ? value : [value]).map((item: unknown) => String(item))
+      },
+      set(value: unknown) {
+        const values = (Array.isArray(value) ? value : [value])
+          .filter((item: unknown) => item !== undefined && item !== null)
+          .map((item: unknown) => String(item).trim())
+          .filter((item: string) => item.length > 0)
+          .map((item: string) => /^\d+$/.test(item) ? Number(item) : item)
+        if (values.length > 0) this.$props.rule.query_type = values
+        else delete this.$props.rule.query_type
+      },
+    },
+    queryClientSubnet: {
+      get() {
+        const value = this.$props.rule.query_client_subnet
+        if (value === undefined || value === null || value === '') return ''
+        return (Array.isArray(value) ? value : [value]).map((item: unknown) => String(item)).join(', ')
+      },
+      set(value: string) {
+        const values = value.split(',').map(item => item.trim()).filter(item => item.length > 0)
+        if (values.length > 0) this.$props.rule.query_client_subnet = values
+        else delete this.$props.rule.query_client_subnet
+      },
+    },
+    queryDnssec: {
+      get() { return this.$props.rule.query_dnssec === true },
+      set(value: boolean) {
+        if (value) this.$props.rule.query_dnssec = true
+        else delete this.$props.rule.query_dnssec
+      },
+    },
     optionInbound: {
       get() { return this.$props.rule.inbound != undefined },
       set(v:boolean) { this.$props.rule.inbound = v ? [] : undefined }

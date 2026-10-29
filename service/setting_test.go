@@ -615,3 +615,40 @@ func TestSaveConfigReturnsNoChangesForIdenticalPayload(t *testing.T) {
 	}
 	_ = tx.Rollback()
 }
+
+func TestSaveConfigRejectsAmbiguousSingBox116FieldsWithoutChangingStoredConfig(t *testing.T) {
+	if err := database.InitDB(filepath.Join(t.TempDir(), "config-singbox116.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+	svc := &SettingService{}
+	if _, err := svc.GetAllSetting(); err != nil {
+		t.Fatalf("initialize settings: %v", err)
+	}
+	before := `{"dns":{"servers":[],"rules":[]},"route":{"rules":[]}}`
+	if err := svc.SetConfig(before); err != nil {
+		t.Fatalf("seed valid config: %v", err)
+	}
+	storedBefore, err := svc.GetConfig()
+	if err != nil {
+		t.Fatalf("read initial config: %v", err)
+	}
+
+	tx := database.GetDB().Begin()
+	if tx.Error != nil {
+		t.Fatalf("begin transaction: %v", tx.Error)
+	}
+	invalid := json.RawMessage(`{"dns":{"servers":[],"rules":[{"action":"route","server":"local","strategy":"ipv4_only"}]},"route":{"rules":[]}}`)
+	if err := svc.SaveConfig(tx, invalid); err == nil || !strings.Contains(err.Error(), "dns.rules[0].strategy") {
+		_ = tx.Rollback()
+		t.Fatalf("expected path-specific 1.16 compatibility error, got %v", err)
+	}
+	_ = tx.Rollback()
+
+	storedAfter, err := svc.GetConfig()
+	if err != nil {
+		t.Fatalf("read stored config after rejection: %v", err)
+	}
+	if storedAfter != storedBefore {
+		t.Fatalf("rejected config changed persisted settings\nbefore: %s\nafter: %s", storedBefore, storedAfter)
+	}
+}

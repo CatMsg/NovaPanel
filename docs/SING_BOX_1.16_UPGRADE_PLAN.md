@@ -1,25 +1,33 @@
 # sing-box 1.16 Upgrade Plan
 
-Status: planned; do not upgrade production before an official 1.16 release and completion of the compatibility gates below.
+Status: compatibility preparation in progress; do not upgrade production before an official 1.16 release and completion of the gates below.
 
 ## Recommendation
 
 Upgrade when 1.16 is stable and the panel passes its compatibility and canary checks. Do not upgrade solely for a speed increase: the new TUN stack is not expected to materially improve the panel's usual VPS proxy-inbound workload.
 
-Current source baseline: sing-box `v1.15.0-alpha.12`, replaced by the pinned local source at `third_party/sing-box`. The default configuration already declares `http_clients` and `route.default_http_client`. The TLS ACME editor still writes legacy inline `tls.acme`, and arbitrary saved Sing-Box JSON can preserve old fields, so an engine bump alone is unsafe.
+Current source baseline: sing-box `v1.15.0-alpha.13`, replaced by the pinned local source at `third_party/sing-box` with the audited MASQUE and URLTest patches documented in `SING_BOX_MASQUE_INTEGRATION.md`. The default configuration already declares `http_clients` and `route.default_http_client`. The TLS editor and runtime path previously used inline `tls.acme`; arbitrary saved Sing-Box JSON can also preserve deprecated fields, so an engine bump alone is unsafe.
+
+Implementation progress (2026-10-29): the local TLS UI and runtime-config path now convert legacy inline ACME to `certificate_provider` without rewriting stored JSON during runtime generation; TLS template edits save the modern form. Empty legacy drafts remain stored but are omitted from runtime config. Configuration validation migrates legacy remote-rule-set `download_detour`, removes `independent_cache`, migrates `store_rdrc` to `store_dns`, and materializes the old implicit remote-rule-set HTTP-client behavior as an explicit client using the prior default outbound (`route.final`, or sing-box's generated direct fallback when unset). Existing HTTP-client lists retain their first-client default. Ambiguous DNS action strategies, `rule_set_ip_cidr_accept_empty=true`, old response-address filters, and `rdrc_timeout` fail with a field path rather than being discarded. The local development database was read-only scanned for these deprecated fields; none were found in its settings, TLS, inbound, or service config JSON. ACME issuance/renewal and actual sing-box 1.16 startup have not been exercised, so the compatibility gate remains open.
+
+Interim upstream review (2026-10-30): official upstream lists sing-box `1.14.4` as latest stable and `1.15.0-alpha.13` as prerelease; no 1.16 release is available. The alpha.12-to-alpha.13 comparison contains 109 commits, including MASQUE, HTTP proxy, DNS cache persistence, TUN, gVisor removal, and UDP/QUIC changes. Alpha.13 has now been imported from its pinned official module archive; the exact source-integrity verifier, release Cronet pin, and CI baseline were updated. The actual checked-in source passes the local project gates recorded below. GitHub-hosted Windows and Linux-native installer jobs have not run for these unpushed changes, so hosted CI acceptance and any release remain pending.
+
+Additional alpha.13 compatibility review (2026-10-30): alpha.13 removes the route `action: direct` variant. The config normalizer moves its dialer options to a generated direct outbound and rewrites the rule to `action: route`, preserving rule matches and avoiding tag collisions. Since direct outbounds default UDP fragmentation on while the old action defaulted it off, migration writes `udp_fragment: false` when the old option was absent or null. These migrations pass the pinned alpha.13 parser. The checked-in alpha.13 tree passed full Go tests, vet, staticcheck, build, vulnerability scan, feature-tagged Sing-Box race acceptance, and digest-pinned Mihomo TCP/UDP/auth/subscription acceptance. The frontend checks and all 57 E2E tests also pass. `govulncheck` reports no reachable vulnerabilities and one module-only finding not called by the project. Local verification does not substitute for the unrun hosted Windows/Linux jobs or public-network protocol validation.
 
 ## Before 1.16 Is Stable
 
-- [ ] Replace the TLS UI/config path from inline `tls.acme` with the certificate-provider model. Preserve existing TLS template behavior, ACME account/provider settings, certificate selection, and renewals.
-- [ ] Inventory persisted and user-supplied Sing-Box JSON for fields scheduled for removal: remote rule-set `download_detour`, implicit HTTP-client fallback, inline `tls.acme`, DNS action `strategy`, `rule_set_ip_cidr_accept_empty`, DNS `independent_cache`, cache-file `store_rdrc`, and legacy DNS response address filters (`ip_cidr` / `ip_is_private` without `match_response`).
-- [ ] For old saved configurations, implement either a tested, lossless migration or a preflight error that identifies the exact unsupported field. Never silently drop user configuration.
-- [ ] Add regression coverage for existing TLS templates, saved legacy configurations, rejected saves leaving persisted state unchanged, and ACME issue/renewal behavior.
-- [ ] Keep the explicit HTTP-client setup and add a regression proving remote rule-set downloads do not rely on the removed implicit fallback.
+- [x] Replace the TLS UI/config path from inline `tls.acme` with the certificate-provider model. Existing TLS template behavior, ACME settings, and certificate selection are preserved; live issuance and renewal remain to be tested.
+- [x] Inventory persisted and user-supplied JSON for the 1.16 removal set, including cache-file `rdrc_timeout`; the current local development DB scan found no deprecated occurrences in its settings, TLS, inbound, or service config JSON.
+- [x] Apply tested, lossless migrations where upstream documents a direct replacement; reject ambiguous fields with an exact JSON path instead of silently discarding them.
+- [x] Add regression coverage for migrations, conflicts, implicit HTTP-client fallback, and rejected saves leaving persisted state unchanged. ACME issue/renewal behavior remains to be tested.
+- [x] Keep explicit HTTP-client setup while migrating old implicit-client configs to the equivalent explicit default outbound.
+- [x] Reassess the next official 1.15 prerelease and replay the local MASQUE integration patch against an isolated alpha.13 source copy; preserve the upstream blocking packet-write semantics.
+- [x] Import alpha.13 into the project, update source-integrity and CI pins, and rerun local regression plus native/Mihomo MASQUE TCP/UDP acceptance against the checked-in source. Hosted Windows/Linux CI and public-network validation remain pending before release.
 
 ## After Official 1.16 Release
 
 - [ ] Review the final migration guide and release notes; update this plan if removals or schema semantics changed.
-- [ ] Import the exact official source into `third_party/sing-box`; update module/version checksums, source-integrity verifier, patch/test fingerprints, build tags, and any required Go toolchain pins. Review upstream API changes rather than carrying alpha.12 assumptions forward.
+- [ ] Import the exact official 1.16 source into `third_party/sing-box`; update module/version checksums, source-integrity verifier, patch/test fingerprints, build tags, and any required Go toolchain pins. Review API changes against the current alpha.13 integration rather than assuming prerelease compatibility.
 - [ ] Run the full release-pinned Go test/build/vet/race gates and front-end checks. Confirm generated and saved configurations parse and start under the actual 1.16 binary.
 - [ ] Preserve and pass protocol acceptance: HTTP/1, HTTP/2, HTTP/3 and CONNECT-UDP; native sing-box MASQUE; Mihomo MASQUE authentication plus real TCP/UDP round trips; DNS/rule-set behavior; TLS/ACME renewal.
 

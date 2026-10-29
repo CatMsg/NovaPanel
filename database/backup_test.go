@@ -5,9 +5,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/CatMsg/NovaPanel/config"
 	"github.com/CatMsg/NovaPanel/database/model"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -118,6 +120,129 @@ func TestPreserveRestoreMaintenanceBeforeSwap(t *testing.T) {
 	}
 	sqlDB, _ := conn.DB()
 	_ = sqlDB.Close()
+}
+
+func TestImportDBAdvancesAuthSessionEpochFromLiveDatabase(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("NOVAS_DB_FOLDER", dir)
+	if err := InitDB(config.GetDBPath()); err != nil {
+		t.Fatalf("initialize live database: %v", err)
+	}
+	if err := GetDB().Create(&model.Setting{Key: AuthSessionEpochSettingKey, Value: "7"}).Error; err != nil {
+		t.Fatalf("set live auth session epoch: %v", err)
+	}
+
+	backupPath := filepath.Join(t.TempDir(), "legacy-backup.db")
+	backupDB, err := gorm.Open(sqlite.Open(backupPath), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	createCompleteTestSchema(t, backupDB)
+	settings := []model.Setting{
+		{Key: "maintenanceMode", Value: "false"},
+		{Key: "remoteBackupConfig", Value: ""},
+		{Key: "remoteBackupOwner", Value: ""},
+		{Key: "remoteBackupState", Value: ""},
+		{Key: "webCertFile", Value: ""},
+		{Key: "webKeyFile", Value: ""},
+		{Key: "webDomain", Value: ""},
+		{Key: "subCertFile", Value: ""},
+		{Key: "subKeyFile", Value: ""},
+		{Key: "subDomain", Value: ""},
+		{Key: "fleetServers", Value: "[]"},
+	}
+	if err := backupDB.Create(&settings).Error; err != nil {
+		t.Fatalf("prepare legacy backup: %v", err)
+	}
+	backupSQL, err := backupDB.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := backupSQL.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	backupFile, err := os.Open(backupPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backupFile.Close()
+	previousRestart := requestRestartAfterDatabaseRestore
+	requestRestartAfterDatabaseRestore = func() error { return nil }
+	t.Cleanup(func() { requestRestartAfterDatabaseRestore = previousRestart })
+
+	if err := ImportDBWithMaintenance(backupFile, false); err != nil {
+		t.Fatalf("import legacy backup: %v", err)
+	}
+	if epoch, err := GetAuthSessionEpoch(GetDB()); err != nil || epoch != 9 {
+		t.Fatalf("restored auth session epoch = %d, err=%v; want 9", epoch, err)
+	}
+}
+
+func TestImportDBUsesPrivateRandomTemporaryFile(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "novas.db")
+	tempFile, err := createRestoreTempFile(dbPath)
+	if err != nil {
+		t.Fatalf("create restore temp file: %v", err)
+	}
+	info, err := tempFile.Stat()
+	if err != nil {
+		t.Fatalf("stat restore temp file: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("restore temp permissions = %o, want 600", info.Mode().Perm())
+	}
+	if filepath.Dir(tempFile.Name()) != dir || tempFile.Name() == dbPath+".temp" {
+		t.Fatalf("restore temp path = %q, want unique file beside live DB", tempFile.Name())
+	}
+	if err := tempFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(tempFile.Name()); err != nil {
+		t.Fatalf("remove permission-test temp file: %v", err)
+	}
+
+	t.Setenv("NOVAS_DB_FOLDER", dir)
+	if err := InitDB(config.GetDBPath()); err != nil {
+		t.Fatalf("initialize live database: %v", err)
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("creating a symlink may require elevated privileges on Windows")
+	}
+
+	legacyTempPath := dbPath + ".temp"
+	victimPath := filepath.Join(t.TempDir(), "victim")
+	if err := os.Symlink(victimPath, legacyTempPath); err != nil {
+		t.Fatalf("plant legacy dangling symlink: %v", err)
+	}
+	uploadPath := filepath.Join(t.TempDir(), "invalid-upload.db")
+	if err := os.WriteFile(uploadPath, []byte("SQLite format 3\x00"), 0o600); err != nil {
+		t.Fatalf("write invalid SQLite upload: %v", err)
+	}
+	upload, err := os.Open(uploadPath)
+	if err != nil {
+		t.Fatalf("open invalid SQLite upload: %v", err)
+	}
+	if err := ImportDBWithMaintenance(upload, false); err == nil {
+		t.Fatal("invalid backup unexpectedly imported")
+	}
+	if err := upload.Close(); err != nil {
+		t.Fatalf("close upload: %v", err)
+	}
+	if _, err := os.Lstat(legacyTempPath); err != nil {
+		t.Fatalf("legacy path should remain untouched: %v", err)
+	}
+	if _, err := os.Lstat(victimPath); !os.IsNotExist(err) {
+		t.Fatalf("dangling symlink target was created: err=%v", err)
+	}
+	restoreTemps, err := filepath.Glob(filepath.Join(dir, ".novas.db.restore-*"))
+	if err != nil {
+		t.Fatalf("find leftover restore temp files: %v", err)
+	}
+	if len(restoreTemps) != 0 {
+		t.Fatalf("failed import left restore temp files: %v", restoreTemps)
+	}
 }
 
 func TestValidateAndSanitizeRestoreDB(t *testing.T) {

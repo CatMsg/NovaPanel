@@ -23,6 +23,8 @@ export interface iTls {
   client_certificate?: string[]
   client_certificate_path?: string[]
   client_certificate_public_key_sha256?: string[]
+  certificate_provider?: string | { type: string; [key: string]: unknown }
+  /** @deprecated Normalize to certificate_provider before editing or saving. */
   acme?: acme
   ech?: ech
   reality?: reality
@@ -32,7 +34,7 @@ export interface iTls {
 }
 
 export interface acme {
-  domain: string[]
+  domain: string[] | string
   data_directory?: string
   default_server_name?: string
   email?: string
@@ -47,7 +49,35 @@ export interface acme {
   }
   dns01_challenge?: {
     provider: string
-    [key: string]: string
+    [key: string]: unknown
+  }
+  account_key?: string
+  key_type?: 'ed25519' | 'p256' | 'p384' | 'rsa2048' | 'rsa4096'
+  http_client?: string | Record<string, unknown>
+}
+
+export interface acmeCertificateProvider extends acme {
+  type: 'acme'
+  domain: string[] | string
+  [key: string]: unknown
+}
+
+export function normalizeLegacyAcme(server: iTls): iTls {
+  if (server.acme === undefined || server.certificate_provider != null) return { ...server }
+
+  const { acme: legacy, ...rest } = server
+  const legacyDomain = legacy?.domain
+  const domains = Array.isArray(legacyDomain)
+    ? [...legacyDomain]
+    : typeof legacyDomain === 'string' && legacyDomain.trim().length > 0 ? [legacyDomain] : []
+
+  return {
+    ...rest,
+    certificate_provider: {
+      type: 'acme',
+      ...(legacy ?? {}),
+      domain: domains,
+    } as acmeCertificateProvider,
   }
 }
 

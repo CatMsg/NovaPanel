@@ -1,6 +1,7 @@
 package sub
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"strings"
@@ -17,6 +18,16 @@ type SubService struct {
 }
 
 func (s *SubService) GetSubs(subId string) (*string, []string, error) {
+	return s.GetSubsContext(context.Background(), subId)
+}
+
+func (s *SubService) GetSubsContext(ctx context.Context, subId string) (*string, []string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	client, err := s.getClientBySubId(subId)
 	if err != nil {
 		return nil, nil, err
@@ -39,7 +50,10 @@ func (s *SubService) GetSubs(subId string) (*string, []string, error) {
 		clientInfo = s.getClientInfo(client)
 	}
 
-	linksArray := s.LinkService.GetLinks(&client.Links, "all", clientInfo)
+	linksArray, err := s.LinkService.GetLinksContext(ctx, &client.Links, "all", clientInfo)
+	if err != nil {
+		return nil, nil, err
+	}
 	result := strings.Join(linksArray, "\n")
 
 	headers := s.getClientHeaders(client)

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -90,6 +91,85 @@ func TestConvertRawClashProxiesKeepsMasqueAndDeduplicatesNames(t *testing.T) {
 	}
 }
 
+func TestConvertRawClashProxiesPreservesXHTTPOptions(t *testing.T) {
+	service := ClashService{}
+	input := []map[string]interface{}{{
+		"name": "edge-xhttp", "type": "vless", "server": "edge.example.com", "port": 443,
+		"uuid": "client-id", "network": "xhttp", "tls": true,
+		"servername": "edge.example.com", "alpn": []interface{}{"h2"},
+		"xhttp-opts": map[string]interface{}{
+			"path":                "/upload",
+			"host":                "front.example.com",
+			"mode":                "packet-up",
+			"no-grpc-header":      true,
+			"x-padding-bytes":     "100-1000",
+			"x-padding-obfs-mode": true,
+			"headers":             map[string]interface{}{"x-edge": "preserve-me"},
+			"reuse-settings": map[string]interface{}{
+				"max-concurrency":     "16-32",
+				"max-connections":     "0",
+				"h-max-request-times": "600-900",
+			},
+			"download-settings": map[string]interface{}{
+				"path": "/download",
+				"host": "download.example.com",
+			},
+		},
+	}}
+
+	result, err := service.ConvertRawClashProxies(input, basicClashConfig)
+	if err != nil {
+		t.Fatalf("render raw XHTTP proxy: %v", err)
+	}
+	if outputPath := os.Getenv("NOVAPANEL_MIHOMO_XHTTP_CONFIG"); outputPath != "" {
+		if err := os.WriteFile(outputPath, []byte(result), 0o600); err != nil {
+			t.Fatalf("write generated XHTTP config for Mihomo acceptance: %v", err)
+		}
+	}
+	var config struct {
+		Proxies []map[string]interface{} `yaml:"proxies"`
+	}
+	if err := yaml.Unmarshal([]byte(result), &config); err != nil {
+		t.Fatalf("parse rendered raw XHTTP proxy: %v", err)
+	}
+	if len(config.Proxies) != 1 {
+		t.Fatalf("rendered proxies = %#v, want one XHTTP proxy", config.Proxies)
+	}
+	proxy := config.Proxies[0]
+	if proxy["type"] != "vless" || proxy["network"] != "xhttp" || proxy["servername"] != "edge.example.com" || proxy["tls"] != true {
+		t.Fatalf("XHTTP proxy connection fields changed: %#v", proxy)
+	}
+	alpn, ok := proxy["alpn"].([]interface{})
+	if !ok || len(alpn) != 1 || alpn[0] != "h2" {
+		t.Fatalf("XHTTP ALPN = %#v, want [h2]", proxy["alpn"])
+	}
+	options, ok := proxy["xhttp-opts"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("xhttp-opts type = %T, want map", proxy["xhttp-opts"])
+	}
+	want := map[string]interface{}{
+		"path": "/upload", "host": "front.example.com", "mode": "packet-up",
+		"no-grpc-header": true, "x-padding-bytes": "100-1000", "x-padding-obfs-mode": true,
+	}
+	for key, value := range want {
+		if options[key] != value {
+			t.Errorf("xhttp-opts[%q] = %#v, want %#v", key, options[key], value)
+		}
+	}
+	headers, ok := options["headers"].(map[string]interface{})
+	if !ok || headers["x-edge"] != "preserve-me" {
+		t.Fatalf("XHTTP headers changed: %#v", options["headers"])
+	}
+	reuseSettings, ok := options["reuse-settings"].(map[string]interface{})
+	if !ok || reuseSettings["max-concurrency"] != "16-32" || reuseSettings["max-connections"] != "0" || reuseSettings["h-max-request-times"] != "600-900" {
+		t.Fatalf("XHTTP reuse settings changed: %#v", options["reuse-settings"])
+	}
+	downloadSettings, ok := options["download-settings"].(map[string]interface{})
+	if !ok || downloadSettings["path"] != "/download" || downloadSettings["host"] != "download.example.com" {
+		t.Fatalf("XHTTP download settings changed: %#v", options["download-settings"])
+	}
+}
+
 func TestConvertRawClashHTTPProxiesKeepsOnlyH1AndClampsALPN(t *testing.T) {
 	service := ClashService{}
 	input := []map[string]interface{}{
@@ -163,14 +243,15 @@ func TestAggregateJSONPreservesStructuredHTTPAndFallsBackForPlainSource(t *testi
 	if err := database.InitDB(filepath.Join(t.TempDir(), "aggregate-json.db")); err != nil {
 		t.Fatalf("init temporary DB: %v", err)
 	}
-	structuredSource := server.URL + "/structured?token=source-token"
+	baseURL := testInternalSourceURL(server.URL)
+	structuredSource := baseURL + "/structured?token=source-token"
 	seedSubscriptionTestSettings(t,
 		model.Setting{Key: "subMode", Value: "master"},
 		model.Setting{Key: "subMasterSources", Value: strings.Join([]string{
 			structuredSource,
 			structuredSource + "&format=clash",
-			server.URL + "/collision",
-			server.URL + "/plain",
+			baseURL + "/collision",
+			baseURL + "/plain",
 		}, "\n")},
 		model.Setting{Key: "subJsonExt", Value: `{"dns":{"servers":[{"type":"local","tag":"local-dns"}],"rules":[]}}`},
 		model.Setting{Key: "subUpdates", Value: "24"},
@@ -254,9 +335,9 @@ func TestAggregateClashRenamesSameNameNodesAndKeepsDistinctServers(t *testing.T)
 	seedSubscriptionTestSettings(t,
 		model.Setting{Key: "subMode", Value: "master"},
 		model.Setting{Key: "subMasterSources", Value: strings.Join([]string{
-			server.URL + "/north",
-			server.URL + "/south",
-			server.URL + "/duplicate",
+			testInternalSourceURL(server.URL) + "/north",
+			testInternalSourceURL(server.URL) + "/south",
+			testInternalSourceURL(server.URL) + "/duplicate",
 		}, "\n")},
 		model.Setting{Key: "subUpdates", Value: "24"},
 	)
@@ -502,7 +583,7 @@ func TestAggregateJSONKeepsMasqueClientEndpointAndDeduplicatesSource(t *testing.
 	if err := database.InitDB(filepath.Join(t.TempDir(), "aggregate-masque.db")); err != nil {
 		t.Fatalf("init temporary DB: %v", err)
 	}
-	source := server.URL + "/profile?token=source-token"
+	source := testInternalSourceURL(server.URL) + "/profile?token=source-token"
 	seedSubscriptionTestSettings(t,
 		model.Setting{Key: "subMode", Value: "master"},
 		model.Setting{Key: "subMasterSources", Value: strings.Join([]string{source, source}, "\n")},

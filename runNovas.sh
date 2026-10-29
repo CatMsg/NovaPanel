@@ -1,5 +1,6 @@
 #!/bin/sh
 set -e
+umask 077
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -68,7 +69,7 @@ status_existing_novas() {
 start_novas() {
   sh "$SCRIPT_DIR/build.sh"
   : > "$LOG_FILE"
-  env NOVAS_DB_FOLDER="db" NOVAS_DEBUG=true ./novas >>"$LOG_FILE" 2>&1 &
+  env NOVAS_DB_FOLDER="db" NOVAS_DEBUG=true NOVAS_DEVELOPMENT_DEFAULT_ADMIN=1 ./novas >>"$LOG_FILE" 2>&1 &
   APP_PID=$!
   printf '%s\n' "$APP_PID" > "$PID_FILE"
   tail -f "$LOG_FILE" &

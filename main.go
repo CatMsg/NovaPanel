@@ -43,6 +43,7 @@ func runApp() {
 }
 
 func main() {
+	setPrivateUmask()
 	if len(os.Args) < 2 {
 		runApp()
 		return

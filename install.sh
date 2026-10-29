@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# A local development convenience must never leak into a production install.
+unset NOVAS_DEVELOPMENT_DEFAULT_ADMIN
+
 red='\033[0;31m'
 green='\033[0;32m'
 yellow='\033[0;33m'
@@ -13,12 +16,6 @@ github_api_url="https://api.github.com/repos/CatMsg/NovaPanel/releases/latest"
 arch() {
     case "$(uname -m)" in
     x86_64 | x64 | amd64) echo 'amd64' ;;
-    i*86 | x86) echo '386' ;;
-    armv8* | armv8 | arm64 | aarch64) echo 'arm64' ;;
-    armv7* | armv7 | arm) echo 'armv7' ;;
-    armv6* | armv6) echo 'armv6' ;;
-    armv5* | armv5) echo 'armv5' ;;
-    s390x) echo 's390x' ;;
     *) echo -e "${green}不支持的 CPU 架构！${plain}" && rm -f install.sh && exit 1 ;;
     esac
 }
@@ -27,12 +24,12 @@ download_to_file() {
     local url="$1"
     local dest="$2"
 
-    if command -v curl >/dev/null 2>&1; then
-        curl -fsSL --retry 3 --retry-delay 2 -o "$dest" "$url"
-        return $?
+    if ! command -v curl >/dev/null 2>&1; then
+        echo "需要安装支持 HTTPS 重定向限制的 curl；已停止下载。" >&2
+        return 1
     fi
 
-    wget -q --show-progress -O "$dest" "$url"
+    curl --proto '=https' --proto-redir '=https' -fsSL --retry 3 --retry-delay 2 -o "$dest" "$url"
 }
 
 verify_archive_checksum() {
@@ -61,11 +58,7 @@ verify_archive_checksum() {
 
 get_latest_release_tag() {
     local response
-    if command -v curl >/dev/null 2>&1; then
-        response=$(curl -fsSL --retry 3 --retry-delay 2 "$github_api_url") || return 1
-    else
-        response=$(wget -qO- "$github_api_url") || return 1
-    fi
+    response=$(curl --proto '=https' --proto-redir '=https' -fsSL --retry 3 --retry-delay 2 "$github_api_url") || return 1
 
     printf '%s\n' "$response" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | head -n1
 }
@@ -73,19 +66,31 @@ get_latest_release_tag() {
 install_base() {
     case "${release}" in
     centos | almalinux | rocky | oracle)
-        yum -y update && yum install -y -q wget curl tar tzdata util-linux
+        yum install -y -q curl tar tzdata util-linux
         ;;
     fedora)
-        dnf -y update && dnf install -y -q wget curl tar tzdata util-linux
+        dnf install -y -q curl tar tzdata util-linux
         ;;
     arch | manjaro | parch)
-        pacman -Syu && pacman -Syu --noconfirm wget curl tar tzdata util-linux
+        if pacman -Q curl tar tzdata util-linux >/dev/null 2>&1; then
+            echo "基础软件包已安装，跳过 Arch 系统升级。"
+        else
+            if [[ -t 0 ]]; then
+                local allow_arch_upgrade
+                read -r -p "Arch 缺少安装依赖；为避免部分升级，安装将同步并升级整个系统。继续？[y/N] " allow_arch_upgrade
+                [[ "$allow_arch_upgrade" =~ ^[Yy]$ ]] || { echo "已取消 Arch 系统升级。" >&2; return 1; }
+            elif [[ "${NOVAS_ALLOW_ARCH_SYSTEM_UPGRADE:-0}" != 1 ]]; then
+                echo "Arch 缺少安装依赖；非交互安装不会静默升级整个系统。确认后设置 NOVAS_ALLOW_ARCH_SYSTEM_UPGRADE=1 重试。" >&2
+                return 1
+            fi
+            pacman -Syu --noconfirm --needed curl tar tzdata util-linux
+        fi
         ;;
     opensuse-tumbleweed)
-        zypper refresh && zypper -q install -y wget curl tar timezone util-linux
+        zypper refresh && zypper -q install -y curl tar timezone util-linux
         ;;
     *)
-        apt-get update && apt-get install -y -q wget curl tar tzdata util-linux
+        apt-get update && apt-get install -y -q curl tar tzdata util-linux
         ;;
     esac
 }
@@ -370,19 +375,28 @@ install_login_protection() {
     return 0
 }
 
+generate_admin_password() {
+    local generated_password
+    generated_password="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')" || return 1
+    if [[ ! "${generated_password}" =~ ^[0-9a-f]{48}$ ]]; then
+        return 1
+    fi
+    printf '%s' "${generated_password}"
+}
+
 config_after_install() {
     local home="${1:-/usr/local/novas}" root="${2:-}"
 
     if [[ "${AUTO_UPGRADE}" == "1" ]]; then
         if [[ ! -f "$home/db/novas.db" ]]; then
-            local usernameTemp=$(head -c 6 /dev/urandom | base64)
-            local passwordTemp=$(head -c 6 /dev/urandom | base64)
+            local passwordTemp
+            passwordTemp="$(generate_admin_password)" || return 1
             echo -e "检测到自动安装模式，已生成随机登录信息："
             echo -e "###############################################"
-            echo -e "${green}用户名：${usernameTemp}${plain}"
+            echo -e "${green}用户名：admin${plain}"
             echo -e "${green}密码：${passwordTemp}${plain}"
             echo -e "###############################################"
-            "$home/novas" admin -username "${usernameTemp}" -password "${passwordTemp}" || return 1
+            printf '%s\n' "${passwordTemp}" | "$home/novas" admin -username "admin" -password-stdin || return 1
         else
             echo -e "${green}检测到自动升级模式，已保留现有配置并跳过交互提示。${plain}"
         fi
@@ -422,27 +436,40 @@ config_after_install() {
         if [[ "${admin_confirm}" == "y" || "${admin_confirm}" == "Y" ]]; then
             # 首个管理员账号密码
             read -p "请设置用户名：" config_account
-            read -p "请设置密码：" config_password
 
             # 设置账号密码
             echo -e "${yellow}正在初始化，请稍候...${plain}"
-            "$home/novas" admin -username "${config_account}" -password "${config_password}" || return 1
+            "$home/novas" admin -username "${config_account}" -password-prompt || return 1
         else
-            echo -e "${yellow}当前管理员账号密码：${plain}"
-            "$home/novas" admin -show || return 1
+            if [[ "${FRESH_INSTALL:-0}" == 1 ]]; then
+                local generated_password
+                generated_password="$(generate_admin_password)" || {
+                    echo -e "${red}无法生成安全的初始管理员密码，安装中止。${plain}"
+                    return 1
+                }
+                echo -e "这是全新安装，已生成一次性管理员密码："
+                echo -e "###############################################"
+                echo -e "${green}用户名：admin${plain}"
+                echo -e "${green}密码：${generated_password}${plain}"
+                echo -e "###############################################"
+                printf '%s\n' "${generated_password}" | "$home/novas" admin -username "admin" -password-stdin || return 1
+            else
+                echo -e "${yellow}现有管理员账号已保留。密码采用不可逆哈希保存，无法显示；忘记密码时可在服务器运行 novas 管理菜单重置。${plain}"
+                "$home/novas" admin -show || return 1
+            fi
         fi
     else
         echo -e "${red}已取消...${plain}"
         if [[ ! -f "$home/db/novas.db" ]]; then
-            local usernameTemp=$(head -c 6 /dev/urandom | base64)
-            local passwordTemp=$(head -c 6 /dev/urandom | base64)
+            local passwordTemp
+            passwordTemp="$(generate_admin_password)" || return 1
             echo -e "这是全新安装，出于安全考虑将生成随机登录信息："
             echo -e "###############################################"
-            echo -e "${green}用户名：${usernameTemp}${plain}"
+            echo -e "${green}用户名：admin${plain}"
             echo -e "${green}密码：${passwordTemp}${plain}"
             echo -e "###############################################"
             echo -e "${red}如果忘记登录信息，可以输入 ${green}novas${red}打开配置菜单${plain}"
-            "$home/novas" admin -username "${usernameTemp}" -password "${passwordTemp}" || return 1
+            printf '%s\n' "${passwordTemp}" | "$home/novas" admin -username "admin" -password-stdin || return 1
         else
             echo -e "${red}这是升级安装，将保留旧设置；如果忘记登录信息，可以输入 ${green}novas${red}打开配置菜单${plain}"
         fi

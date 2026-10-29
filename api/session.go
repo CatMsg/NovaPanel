@@ -3,7 +3,7 @@ package api
 import (
 	"encoding/gob"
 	"net/http"
-	"strings"
+	"strconv"
 
 	"github.com/CatMsg/NovaPanel/database/model"
 
@@ -12,7 +12,9 @@ import (
 )
 
 const (
-	loginUser = "LOGIN_USER"
+	loginUser           = "LOGIN_USER"
+	loginSessionEpoch   = "LOGIN_SESSION_EPOCH"
+	initialSessionEpoch = uint64(1)
 )
 
 func init() {
@@ -21,9 +23,8 @@ func init() {
 
 func sessionOptions(c *gin.Context) sessions.Options {
 	secure := c.Request.TLS != nil
-	if !secure {
-		proto := strings.ToLower(c.GetHeader("X-Forwarded-Proto"))
-		secure = proto == "https" || strings.EqualFold(c.GetHeader("X-Forwarded-SSL"), "on")
+	if scheme, ok := c.Get(requestSchemeContextKey); ok {
+		secure = scheme == "https"
 	}
 
 	return sessions.Options{
@@ -34,7 +35,7 @@ func sessionOptions(c *gin.Context) sessions.Options {
 	}
 }
 
-func SetLoginUser(c *gin.Context, userName string, maxAge int) error {
+func SetLoginUser(c *gin.Context, userName string, maxAge int, epoch uint64) error {
 	options := sessionOptions(c)
 	if maxAge > 0 {
 		options.MaxAge = maxAge * 60
@@ -42,9 +43,23 @@ func SetLoginUser(c *gin.Context, userName string, maxAge int) error {
 
 	s := sessions.Default(c)
 	s.Set(loginUser, userName)
+	s.Set(loginSessionEpoch, strconv.FormatUint(epoch, 10))
 	s.Options(options)
 
 	return s.Save()
+}
+
+func getLoginSessionEpoch(c *gin.Context) (uint64, bool) {
+	value := sessions.Default(c).Get(loginSessionEpoch)
+	if value == nil {
+		return initialSessionEpoch, true
+	}
+	encoded, ok := value.(string)
+	if !ok {
+		return 0, false
+	}
+	epoch, err := strconv.ParseUint(encoded, 10, 64)
+	return epoch, err == nil && epoch > 0
 }
 
 func SetMaxAge(c *gin.Context) error {

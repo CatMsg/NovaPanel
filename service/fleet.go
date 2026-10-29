@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -713,7 +714,35 @@ func (s *FleetService) fetchFleetAPI(baseURL, token, action, query string) (flee
 	return s.fetchFleetAPIRequest(http.MethodGet, baseURL, token, action, query, nil)
 }
 
+const fleetResponseLimit = 2 << 20
+
+func readFleetResponse(body io.Reader) (fleetAPIResponse, error) {
+	raw, err := io.ReadAll(io.LimitReader(body, fleetResponseLimit+1))
+	if err != nil {
+		return fleetAPIResponse{}, err
+	}
+	if len(raw) > fleetResponseLimit {
+		return fleetAPIResponse{}, fmt.Errorf("远端接口响应超过 %d 字节", fleetResponseLimit)
+	}
+	var result fleetAPIResponse
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return fleetAPIResponse{}, err
+	}
+	if !result.Success {
+		if result.Msg == "" {
+			result.Msg = "远端接口返回失败"
+		}
+		return fleetAPIResponse{}, errors.New(result.Msg)
+	}
+	return result, nil
+}
+
 func (s *FleetService) fetchFleetAPIRequest(method, baseURL, token, action, query string, requestBody io.Reader) (fleetAPIResponse, error) {
+	var err error
+	baseURL, err = normalizeFleetURL(baseURL)
+	if err != nil {
+		return fleetAPIResponse{}, err
+	}
 	endpoint := strings.TrimRight(baseURL, "/") + "/apiv2/" + action
 	if query != "" {
 		endpoint += "?" + query
@@ -727,30 +756,16 @@ func (s *FleetService) fetchFleetAPIRequest(method, baseURL, token, action, quer
 	if requestBody != nil {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := fleetHTTPClient(5 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fleetAPIResponse{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fleetAPIResponse{}, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return fleetAPIResponse{}, fleetHTTPStatusError(resp.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
-	if err != nil {
-		return fleetAPIResponse{}, err
-	}
-	var result fleetAPIResponse
-	if err := json.Unmarshal(body, &result); err != nil {
-		return fleetAPIResponse{}, err
-	}
-	if !result.Success {
-		if result.Msg == "" {
-			result.Msg = "远端接口返回失败"
-		}
-		return fleetAPIResponse{}, errors.New(result.Msg)
-	}
-	return result, nil
+	return readFleetResponse(resp.Body)
 }
 
 func (s *FleetService) encryptFleetToken(token string) (string, error) {
@@ -805,10 +820,22 @@ func normalizeFleetURL(raw string) (string, error) {
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return "", fmt.Errorf("服务器地址必须是 http 或 https URL")
 	}
+	if parsed.Scheme == "http" && !fleetLoopbackHost(parsed.Hostname()) {
+		return "", errors.New("远端服务器地址必须使用 HTTPS；仅允许 localhost 或回环 IP 使用 HTTP")
+	}
 	if parsed.User != nil || parsed.Fragment != "" || parsed.RawQuery != "" {
 		return "", fmt.Errorf("服务器地址不能包含账号、查询参数或片段")
 	}
 	return strings.TrimRight(value, "/"), nil
+}
+
+func fleetLoopbackHost(host string) bool {
+	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func fleetSliceLength(value interface{}) int {

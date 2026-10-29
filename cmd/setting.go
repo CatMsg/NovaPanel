@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -11,39 +12,35 @@ import (
 	"github.com/shirou/gopsutil/v4/net"
 )
 
-func resetSetting() {
+func resetSetting() error {
 	err := database.InitDB(config.GetDBPath())
 	if err != nil {
-		fmt.Println(err)
-		return
+		return fmt.Errorf("initialize database: %w", err)
 	}
 
 	settingService := service.SettingService{}
 	err = settingService.ResetSettings()
 	if err != nil {
-		fmt.Println("reset setting failed:", err)
-	} else {
-		fmt.Println("reset setting success")
+		return fmt.Errorf("reset settings: %w", err)
 	}
+	fmt.Println("reset setting success")
+	return nil
 }
 
-func updateSetting(port int, path string, subPort int, subPath string, webCertFile string, webKeyFile string, subCertFile string, subKeyFile string, clearWebTLS bool, clearSubTLS bool) {
+func updateSetting(port int, path string, subPort int, subPath string, webCertFile string, webKeyFile string, subCertFile string, subKeyFile string, clearWebTLS bool, clearSubTLS bool) error {
 	err := database.InitDB(config.GetDBPath())
 	if err != nil {
-		fmt.Println(err)
-		return
+		return fmt.Errorf("initialize database: %w", err)
 	}
 
 	settingService := service.SettingService{}
 	oldWebPort, err := settingService.GetPort()
 	if err != nil {
-		fmt.Println("get current port failed:", err)
-		return
+		return fmt.Errorf("get current panel port: %w", err)
 	}
 	oldSubPort, err := settingService.GetSubPort()
 	if err != nil {
-		fmt.Println("get current sub port failed:", err)
-		return
+		return fmt.Errorf("get current subscription port: %w", err)
 	}
 	newWebPort := oldWebPort
 	newSubPort := oldSubPort
@@ -55,143 +52,115 @@ func updateSetting(port int, path string, subPort int, subPath string, webCertFi
 	}
 	if newWebPort != oldWebPort || newSubPort != oldSubPort {
 		if err := service.ValidateManagedPanelPorts(newWebPort, newSubPort); err != nil {
-			fmt.Println("validate panel ports failed:", err)
-			return
+			return fmt.Errorf("validate panel ports: %w", err)
 		}
+	}
+	set := func(label string, update func() error) error {
+		if err := update(); err != nil {
+			return fmt.Errorf("%s: %w", label, err)
+		}
+		fmt.Println(label + " success")
+		return nil
 	}
 
 	if port > 0 {
-		err := settingService.SetPort(port)
-		if err != nil {
-			fmt.Println("set port failed:", err)
-		} else {
-			fmt.Println("set port success")
+		if err := set("set port", func() error { return settingService.SetPort(port) }); err != nil {
+			return err
 		}
 	}
 	if path != "" {
-		err := settingService.SetWebPath(path)
-		if err != nil {
-			fmt.Println("set path failed:", err)
-		} else {
-			fmt.Println("set path success")
+		if err := set("set path", func() error { return settingService.SetWebPath(path) }); err != nil {
+			return err
 		}
 	}
 	if subPort > 0 {
-		err := settingService.SetSubPort(subPort)
-		if err != nil {
-			fmt.Println("set sub port failed:", err)
-		} else {
-			fmt.Println("set sub port success")
+		if err := set("set sub port", func() error { return settingService.SetSubPort(subPort) }); err != nil {
+			return err
 		}
 	}
 	if subPath != "" {
-		err := settingService.SetSubPath(subPath)
-		if err != nil {
-			fmt.Println("set sub path failed:", err)
-		} else {
-			fmt.Println("set sub path success")
+		if err := set("set sub path", func() error { return settingService.SetSubPath(subPath) }); err != nil {
+			return err
 		}
 	}
 	if webCertFile != "" {
-		err := settingService.SetCertFile(webCertFile)
-		if err != nil {
-			fmt.Println("set web cert file failed:", err)
-		} else {
-			fmt.Println("set web cert file success")
+		if err := set("set web cert file", func() error { return settingService.SetCertFile(webCertFile) }); err != nil {
+			return err
 		}
 	}
 	if webKeyFile != "" {
-		err := settingService.SetKeyFile(webKeyFile)
-		if err != nil {
-			fmt.Println("set web key file failed:", err)
-		} else {
-			fmt.Println("set web key file success")
+		if err := set("set web key file", func() error { return settingService.SetKeyFile(webKeyFile) }); err != nil {
+			return err
 		}
 	}
 	if subCertFile != "" {
-		err := settingService.SetSubCertFile(subCertFile)
-		if err != nil {
-			fmt.Println("set sub cert file failed:", err)
-		} else {
-			fmt.Println("set sub cert file success")
+		if err := set("set subscription cert file", func() error { return settingService.SetSubCertFile(subCertFile) }); err != nil {
+			return err
 		}
 	}
 	if subKeyFile != "" {
-		err := settingService.SetSubKeyFile(subKeyFile)
-		if err != nil {
-			fmt.Println("set sub key file failed:", err)
-		} else {
-			fmt.Println("set sub key file success")
+		if err := set("set subscription key file", func() error { return settingService.SetSubKeyFile(subKeyFile) }); err != nil {
+			return err
 		}
 	}
 	if clearWebTLS {
-		err := settingService.SetCertFile("")
-		if err != nil {
-			fmt.Println("clear web cert file failed:", err)
-		} else {
-			fmt.Println("clear web cert file success")
+		if err := set("clear web cert file", func() error { return settingService.SetCertFile("") }); err != nil {
+			return err
 		}
-		err = settingService.SetKeyFile("")
-		if err != nil {
-			fmt.Println("clear web key file failed:", err)
-		} else {
-			fmt.Println("clear web key file success")
+		if err := set("clear web key file", func() error { return settingService.SetKeyFile("") }); err != nil {
+			return err
 		}
 	}
 	if clearSubTLS {
-		err := settingService.SetSubCertFile("")
-		if err != nil {
-			fmt.Println("clear sub cert file failed:", err)
-		} else {
-			fmt.Println("clear sub cert file success")
+		if err := set("clear subscription cert file", func() error { return settingService.SetSubCertFile("") }); err != nil {
+			return err
 		}
-		err = settingService.SetSubKeyFile("")
-		if err != nil {
-			fmt.Println("clear sub key file failed:", err)
-		} else {
-			fmt.Println("clear sub key file success")
+		if err := set("clear subscription key file", func() error { return settingService.SetSubKeyFile("") }); err != nil {
+			return err
 		}
 	}
 
 	currentWebPort, err := settingService.GetPort()
 	if err != nil {
-		fmt.Println("get panel port after update failed:", err)
-		return
+		return fmt.Errorf("get panel port after update: %w", err)
 	}
 	currentSubPort, err := settingService.GetSubPort()
 	if err != nil {
-		fmt.Println("get sub port after update failed:", err)
-		return
+		return fmt.Errorf("get subscription port after update: %w", err)
 	}
 	if currentWebPort != oldWebPort || currentSubPort != oldSubPort {
 		if err := settingService.SyncManagedPanelPortForwarding(oldWebPort, currentWebPort, oldSubPort, currentSubPort); err != nil {
-			fmt.Println("sync panel port forwarding failed:", err)
+			rollbackErrors := []error{fmt.Errorf("sync panel port forwarding: %w", err)}
 			if currentWebPort != oldWebPort {
 				if rollbackErr := settingService.SetPort(oldWebPort); rollbackErr != nil {
-					fmt.Println("rollback panel port failed:", rollbackErr)
+					rollbackErrors = append(rollbackErrors, fmt.Errorf("rollback panel port: %w", rollbackErr))
 				}
 			}
 			if currentSubPort != oldSubPort {
 				if rollbackErr := settingService.SetSubPort(oldSubPort); rollbackErr != nil {
-					fmt.Println("rollback sub port failed:", rollbackErr)
+					rollbackErrors = append(rollbackErrors, fmt.Errorf("rollback subscription port: %w", rollbackErr))
 				}
 			}
+			return errors.Join(rollbackErrors...)
 		} else {
 			fmt.Println("sync panel port forwarding success")
 		}
 	}
+	return nil
 }
 
-func showSetting() {
+func showSetting() error {
 	err := database.InitDB(config.GetDBPath())
 	if err != nil {
-		fmt.Println(err)
-		return
+		return fmt.Errorf("initialize database: %w", err)
 	}
 	settingService := service.SettingService{}
 	allSetting, err := settingService.GetAllSetting()
 	if err != nil {
-		fmt.Println("get current port failed,error info:", err)
+		return fmt.Errorf("get current settings: %w", err)
+	}
+	if allSetting == nil {
+		return fmt.Errorf("get current settings: no settings returned")
 	}
 	fmt.Println("Current panel settings:")
 	fmt.Println("\tPanel port:\t", (*allSetting)["webPort"])
@@ -230,25 +199,43 @@ func showSetting() {
 	if (*allSetting)["subKeyFile"] != "" {
 		fmt.Println("\tSub Key:\t", (*allSetting)["subKeyFile"])
 	}
+	return nil
 }
 
 func getPublicIP() string {
 	return (&service.ServerService{}).GetPublicIP()
 }
 
-func getPanelURI() {
+func getPanelURI() error {
 	err := database.InitDB(config.GetDBPath())
 	if err != nil {
-		fmt.Println(err)
-		return
+		return fmt.Errorf("initialize database: %w", err)
 	}
 	settingService := service.SettingService{}
-	Port, _ := settingService.GetPort()
-	BasePath, _ := settingService.GetWebPath()
-	Listen, _ := settingService.GetListen()
-	Domain, _ := settingService.GetWebDomain()
-	KeyFile, _ := settingService.GetKeyFile()
-	CertFile, _ := settingService.GetCertFile()
+	Port, err := settingService.GetPort()
+	if err != nil {
+		return fmt.Errorf("get panel port: %w", err)
+	}
+	BasePath, err := settingService.GetWebPath()
+	if err != nil {
+		return fmt.Errorf("get panel path: %w", err)
+	}
+	Listen, err := settingService.GetListen()
+	if err != nil {
+		return fmt.Errorf("get panel listen address: %w", err)
+	}
+	Domain, err := settingService.GetWebDomain()
+	if err != nil {
+		return fmt.Errorf("get panel domain: %w", err)
+	}
+	KeyFile, err := settingService.GetKeyFile()
+	if err != nil {
+		return fmt.Errorf("get panel key file: %w", err)
+	}
+	CertFile, err := settingService.GetCertFile()
+	if err != nil {
+		return fmt.Errorf("get panel certificate file: %w", err)
+	}
 	TLS := false
 	if KeyFile != "" && CertFile != "" {
 		TLS = true
@@ -265,14 +252,17 @@ func getPanelURI() {
 	}
 	if len(Domain) > 0 {
 		fmt.Println(Proto + Domain + PortText + BasePath)
-		return
+		return nil
 	}
 	if len(Listen) > 0 {
 		fmt.Println(Proto + Listen + PortText + BasePath)
-		return
+		return nil
 	}
 	fmt.Println("Local address:")
-	netInterfaces, _ := net.Interfaces()
+	netInterfaces, err := net.Interfaces()
+	if err != nil {
+		return fmt.Errorf("enumerate network interfaces: %w", err)
+	}
 	for i := 0; i < len(netInterfaces); i++ {
 		if interfaceIsUp(netInterfaces[i].Flags) {
 			addrs := netInterfaces[i].Addrs
@@ -290,6 +280,7 @@ func getPanelURI() {
 	if pubIP != "" {
 		fmt.Printf("\nGlobal address:\n%s%s%s\n", Proto, pubIP, PortText+BasePath)
 	}
+	return nil
 }
 
 func interfaceIsUp(flags []string) bool {

@@ -11,9 +11,9 @@ trap '/bin/rm -rf "${test_root}"' EXIT
 # Only file-processing utilities are reachable, even after an init mock is removed.
 utility_path="${test_root}/bin"
 /bin/mkdir -p "${utility_path}"
-for utility in awk cat chmod cp cut dirname grep head ln mkdir mktemp mv rm rmdir stat tr; do
+for utility in awk cat chmod cp cut dirname grep head ln mkdir mktemp mv rm rmdir sha256sum stat tar tr; do
     utility_source=''
-    for directory in /usr/bin /bin; do
+    for directory in /usr/bin /bin /usr/sbin /sbin; do
         if [[ -x "${directory}/${utility}" ]]; then
             utility_source="${directory}/${utility}"
             break
@@ -42,7 +42,8 @@ for function_name in \
     ensure_acme_cron prepare_cloudflare_acme install_acme_payload install_acme \
     resolve_acme_cert_files validate_cf_domain validate_cf_account_id validate_cf_token \
     issue_cloudflare_certificate run_cloudflare_acme_issue \
-    restore_cloudflare_certificate_backup install_cloudflare_certificate; do
+    restore_cloudflare_certificate_backup install_cloudflare_certificate \
+    secure_issued_certificate_permissions; do
     extract_function "${function_name}" >> "${extracted_functions}"
 done
 source "${extracted_functions}"
@@ -105,6 +106,70 @@ mv() {
 LOGE() { printf 'error: %s\n' "$*" >&2; }
 LOGI() { printf 'info: %s\n' "$*"; }
 LOGD() { printf 'debug: %s\n' "$*"; }
+
+test_pinned_acme_bootstrap() {
+    local fixture_parent="${test_root}/acme-fixture"
+    local fixture_archive="${test_root}/acme-fixture.tar.gz"
+    local fixture_root="${fixture_parent}/acme.sh-test-commit"
+    local marker="${test_root}/acme-bootstrap-marker"
+    local expected_url="https://github.com/acmesh-official/acme.sh/archive/test-commit.tar.gz"
+
+    mkdir -p "${fixture_root}" "${test_root}/acme-bootstrap-home"
+    cat > "${fixture_root}/acme.sh" <<'ACME_BOOTSTRAP_STUB'
+#!/bin/sh
+[ "$1" = "--install" ] || exit 21
+[ "$BRANCH" = "test-version" ] || exit 22
+printf 'installed\n' > "$ACME_INSTALL_MARKER"
+ACME_BOOTSTRAP_STUB
+    tar -czf "${fixture_archive}" -C "${fixture_parent}" acme.sh-test-commit
+
+    ACME_SH_VERSION="test-version"
+    ACME_SH_COMMIT="test-commit"
+    ACME_SH_ARCHIVE_SHA256=$(sha256sum "${fixture_archive}" | awk '{print $1}')
+    ACME_INSTALL_MARKER="${marker}"
+    HOME="${test_root}/acme-bootstrap-home"
+    export ACME_INSTALL_MARKER HOME
+
+    sh() { /bin/sh "$@"; }
+    curl() {
+        local url="" output=""
+        local proto_seen=0 proto_redir_seen=0
+        while (($#)); do
+            case "$1" in
+                -fsSL) shift ;;
+                --proto)
+                    [[ "${2:-}" == "=https" ]] || return 96
+                    proto_seen=1
+                    shift 2
+                    ;;
+                --proto-redir)
+                    [[ "${2:-}" == "=https" ]] || return 96
+                    proto_redir_seen=1
+                    shift 2
+                    ;;
+                --max-time) [[ "${2:-}" == "120" ]] || return 97; shift 2 ;;
+                -o) output="${2:-}"; shift 2 ;;
+                https://*) url="$1"; shift ;;
+                *) return 98 ;;
+            esac
+        done
+        [[ "${url}" == "${expected_url}" && -n "${output}" && "${proto_seen}" == 1 && "${proto_redir_seen}" == 1 ]] || return 99
+        cp "${fixture_archive}" "${output}"
+    }
+
+    assert install_acme_payload
+    assert_file_contains installed "${marker}"
+
+    rm -f "${marker}"
+    ACME_SH_ARCHIVE_SHA256="$(printf '%064d' 0)"
+    if install_acme_payload; then
+        fail "ACME bootstrap accepted an archive with a mismatched SHA-256"
+    fi
+    [[ ! -e "${marker}" ]] || fail "ACME bootstrap executed a checksum-mismatched archive"
+    unset -f curl sh
+}
+
+test_pinned_acme_bootstrap
 
 apt-get() {
     event "pkg:apt-get:$*"
@@ -355,6 +420,19 @@ assert_event_before() {
 assert_eq() {
     [[ "$1" == "$2" ]] || fail "$3"
 }
+
+permission_fixture="${test_root}/issued-certificate-permissions"
+mkdir -p "${permission_fixture}"
+printf 'certificate\n' > "${permission_fixture}/fullchain.pem"
+printf 'private key\n' > "${permission_fixture}/privkey.pem"
+chmod 755 "${permission_fixture}" "${permission_fixture}/fullchain.pem" "${permission_fixture}/privkey.pem"
+assert secure_issued_certificate_permissions "${permission_fixture}"
+cert_dir_mode="$(stat -c '%a' "${permission_fixture}" 2>/dev/null || stat -f '%Lp' "${permission_fixture}")"
+cert_file_mode="$(stat -c '%a' "${permission_fixture}/fullchain.pem" 2>/dev/null || stat -f '%Lp' "${permission_fixture}/fullchain.pem")"
+key_file_mode="$(stat -c '%a' "${permission_fixture}/privkey.pem" 2>/dev/null || stat -f '%Lp' "${permission_fixture}/privkey.pem")"
+assert_eq "${cert_dir_mode}" 700 "certificate directory permissions were unsafe"
+assert_eq "${cert_file_mode}" 644 "public certificate permissions were incorrect"
+assert_eq "${key_file_mode}" 600 "private key permissions were unsafe"
 
 seed_certificate_case() {
     reset_case "$1" "$2"

@@ -2,7 +2,10 @@ package sub
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"net"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -22,12 +25,57 @@ type SubHandler struct {
 	UserCenterService
 }
 
+const aggregateRequestTimeout = 60 * time.Second
+
+var aggregateRequestSlots = make(chan struct{}, 2)
+
+const userSubscriptionRequestTimeout = 60 * time.Second
+
+var userSubscriptionRequestSlots = make(chan struct{}, 8)
+
+func beginAggregateRequest(c *gin.Context) (context.Context, func(), bool) {
+	select {
+	case aggregateRequestSlots <- struct{}{}:
+		ctx, cancel := context.WithTimeout(c.Request.Context(), aggregateRequestTimeout)
+		return ctx, func() {
+			cancel()
+			<-aggregateRequestSlots
+		}, true
+	default:
+		c.Header("Retry-After", "3")
+		c.String(http.StatusServiceUnavailable, "Aggregate subscription is busy; retry shortly.")
+		return nil, nil, false
+	}
+}
+
+func beginUserSubscriptionRequest(c *gin.Context) (context.Context, func(), bool) {
+	select {
+	case userSubscriptionRequestSlots <- struct{}{}:
+		ctx, cancel := context.WithTimeout(c.Request.Context(), userSubscriptionRequestTimeout)
+		return ctx, func() {
+			cancel()
+			<-userSubscriptionRequestSlots
+		}, true
+	default:
+		c.Header("Retry-After", "3")
+		c.String(http.StatusServiceUnavailable, "Subscription service is busy; retry shortly.")
+		return nil, nil, false
+	}
+}
+
 func NewSubHandler(g *gin.RouterGroup) {
 	a := &SubHandler{}
 	a.initRouter(g)
 }
 
 func (s *SubHandler) initRouter(g *gin.RouterGroup) {
+	g.Use(func(c *gin.Context) {
+		// Subscription responses contain client credentials and must not be
+		// retained by shared caches or forwarded as a referrer.
+		c.Header("Cache-Control", "private, no-store")
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("Referrer-Policy", "no-referrer")
+	})
 	g.GET("/aggregate", s.aggregate)
 	g.HEAD("/aggregate", s.aggregateHeaders)
 	g.GET("/:subid", s.subs)
@@ -35,13 +83,27 @@ func (s *SubHandler) initRouter(g *gin.RouterGroup) {
 }
 
 func (s *SubHandler) aggregate(c *gin.Context) {
+	ctx, release, ok := beginAggregateRequest(c)
+	if !ok {
+		return
+	}
+	defer release()
+
 	format, _, negotiated := requestedSubscriptionFormat(c)
 	if negotiated {
 		c.Header("Vary", "User-Agent")
 	}
-	result, headers, err := s.AggregateService.GetAggregate(format, requestHost(c))
+	result, headers, err := s.AggregateService.GetAggregateContext(ctx, format, requestHost(c))
+	if errors.Is(err, context.Canceled) {
+		return
+	}
 	if err != nil || result == nil {
 		logger.Error(err)
+		if errors.Is(err, context.DeadlineExceeded) {
+			c.Header("Retry-After", "5")
+			c.String(http.StatusServiceUnavailable, "Aggregate subscription timed out; retry shortly.")
+			return
+		}
 		c.String(400, "Error!")
 		return
 	}
@@ -51,6 +113,12 @@ func (s *SubHandler) aggregate(c *gin.Context) {
 }
 
 func (s *SubHandler) aggregateHeaders(c *gin.Context) {
+	ctx, release, ok := beginAggregateRequest(c)
+	if !ok {
+		return
+	}
+	defer release()
+
 	mode, err := s.SettingService.GetSubMode()
 	if err != nil {
 		logger.Error(err)
@@ -66,13 +134,24 @@ func (s *SubHandler) aggregateHeaders(c *gin.Context) {
 		c.Header("Vary", "User-Agent")
 	}
 	var usage aggregateUsage
-	if format == "clash" {
-		_, usage, err = s.AggregateService.collectAggregateClashProxies(requestHost(c))
-	} else {
-		_, usage, err = s.AggregateService.collectAggregateLinks(requestHost(c))
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "clash":
+		_, usage, err = s.AggregateService.collectAggregateClashProxiesContext(ctx, requestHost(c))
+	case "json":
+		_, _, usage, err = s.AggregateService.collectAggregateJSONOutboundsContext(ctx, requestHost(c))
+	default:
+		_, usage, err = s.AggregateService.collectAggregateLinksContext(ctx, requestHost(c))
+	}
+	if errors.Is(err, context.Canceled) {
+		return
 	}
 	if err != nil {
 		logger.Error(err)
+		if errors.Is(err, context.DeadlineExceeded) {
+			c.Header("Retry-After", "5")
+			c.Status(http.StatusServiceUnavailable)
+			return
+		}
 		c.String(400, "Error!")
 		return
 	}
@@ -81,38 +160,48 @@ func (s *SubHandler) aggregateHeaders(c *gin.Context) {
 }
 
 func (s *SubHandler) subs(c *gin.Context) {
-	var headers []string
-	var result *string
-	var err error
 	subId := c.Param("subid")
 	format, isFormat, negotiated := requestedUserSubscriptionFormat(c)
 	if negotiated {
 		c.Header("Vary", "User-Agent, Accept")
 	}
+	if isFormat && (format == "info" || format == "html") {
+		s.userCenter(c, subId)
+		return
+	}
+	ctx, release, ok := beginUserSubscriptionRequest(c)
+	if !ok {
+		return
+	}
+	defer release()
+
+	var headers []string
+	var result *string
+	var err error
 	if isFormat {
 		switch format {
 		case "json":
-			result, headers, err = s.JsonService.GetJson(subId, format)
+			result, headers, err = s.JsonService.GetJsonContext(ctx, subId, format)
 		case "clash":
-			result, headers, err = s.ClashService.GetClash(subId, requestHost(c))
+			result, headers, err = s.ClashService.GetClashContext(ctx, subId, requestHost(c))
 		case "raw":
-			result, headers, err = s.SubService.GetSubs(subId)
-		case "info", "html":
-			s.userCenter(c, subId)
-			return
-		}
-		if err != nil || result == nil {
-			logger.Error(err)
-			c.String(400, "Error!")
-			return
+			result, headers, err = s.SubService.GetSubsContext(ctx, subId)
 		}
 	} else {
-		result, headers, err = s.SubService.GetSubs(subId)
-		if err != nil || result == nil {
-			logger.Error(err)
-			c.String(400, "Error!")
+		result, headers, err = s.SubService.GetSubsContext(ctx, subId)
+	}
+	if errors.Is(err, context.Canceled) {
+		return
+	}
+	if err != nil || result == nil {
+		logger.Error(err)
+		if errors.Is(err, context.DeadlineExceeded) {
+			c.Header("Retry-After", "5")
+			c.String(http.StatusServiceUnavailable, "Subscription request timed out; retry shortly.")
 			return
 		}
+		c.String(400, "Error!")
+		return
 	}
 
 	s.addHeaders(c, headers)

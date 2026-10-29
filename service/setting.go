@@ -147,6 +147,7 @@ func (s *SettingService) GetAllSetting() (*map[string]string, error) {
 
 	// Due to security principles
 	delete(allSetting, "secret")
+	delete(allSetting, authSessionEpochKey)
 	delete(allSetting, "config")
 	delete(allSetting, "version")
 	for key := range allSetting {

@@ -73,14 +73,18 @@ func (i Inbound) MarshalJSON() ([]byte, error) {
 	combined["type"] = i.Type
 	combined["tag"] = i.Tag
 	if i.Tls != nil {
+		tlsServer, err := i.Tls.ServerConfig()
+		if err != nil {
+			return nil, err
+		}
 		if i.Type == "tuic" {
 			var tls map[string]interface{}
-			if err := json.Unmarshal(i.Tls.Server, &tls); err != nil {
+			if err := json.Unmarshal(tlsServer, &tls); err != nil {
 				return nil, err
 			}
 			combined["tls"] = ensureTuicALPN(tls)
 		} else {
-			combined["tls"] = i.Tls.Server
+			combined["tls"] = tlsServer
 		}
 	}
 

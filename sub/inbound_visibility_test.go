@@ -107,7 +107,7 @@ func TestExcludedInboundIsHiddenFromUserAndAggregateSubscriptions(t *testing.T) 
 		model.Setting{Key: "subJsonExt", Value: "{}"},
 		model.Setting{Key: "subClashExt", Value: ""},
 		model.Setting{Key: "subMode", Value: "master"},
-		model.Setting{Key: "subMasterSources", Value: server.URL + "/sub/" + client.Name},
+		model.Setting{Key: "subMasterSources", Value: testInternalSourceURL(server.URL) + "/sub/" + client.Name},
 		model.Setting{Key: "subURI", Value: server.URL + "/sub/"},
 	)
 

@@ -35,13 +35,13 @@ NovaPanel — панель управления Sing-Box для настройк
 Установить последнюю версию:
 
 ```sh
-bash <(curl -Ls https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh)
+_novas_installer_tmp="$(mktemp)" && trap 'rm -f "$_novas_installer_tmp"' EXIT && curl --proto '=https' --proto-redir '=https' -fsSL https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh -o "$_novas_installer_tmp" && bash -n "$_novas_installer_tmp" && bash "$_novas_installer_tmp"; _novas_installer_rc=$?; exit "$_novas_installer_rc"
 ```
 
 Установить конкретную версию:
 
 ```sh
-bash <(curl -Ls https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh) vx.x.x
+_novas_installer_tmp="$(mktemp)" && trap 'rm -f "$_novas_installer_tmp"' EXIT && curl --proto '=https' --proto-redir '=https' -fsSL https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh -o "$_novas_installer_tmp" && bash -n "$_novas_installer_tmp" && bash "$_novas_installer_tmp" vx.x.x; _novas_installer_rc=$?; exit "$_novas_installer_rc"
 ```
 
 Во время установки можно настроить учётную запись администратора, путь панели и порты. После установки доступны следующие команды:

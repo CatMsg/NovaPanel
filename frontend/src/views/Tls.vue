@@ -68,21 +68,27 @@
             </v-col>
           </v-row>
           <v-row>
-            <v-col>ACME</v-col>
+            <v-col>{{ $t('tls.certificateProvider') }}</v-col>
             <v-col>
-              {{ $t(item.server?.acme == undefined ? 'no' : 'yes') }}
+              <v-chip size="small" :color="item.server?.certificate_provider != undefined || item.server?.acme != undefined ? 'success' : 'default'">
+                {{ $t(item.server?.certificate_provider != undefined || item.server?.acme != undefined ? 'enabled' : 'disabled') }}
+              </v-chip>
             </v-col>
           </v-row>
           <v-row>
             <v-col>ECH</v-col>
             <v-col>
-              {{ $t(item.server?.ech == undefined ? 'no' : 'yes') }}
+              <v-chip size="small" :color="item.server?.ech?.enabled ? 'success' : 'default'">
+                {{ $t(item.server?.ech?.enabled ? 'enabled' : 'disabled') }}
+              </v-chip>
             </v-col>
           </v-row>
           <v-row>
             <v-col>Reality</v-col>
             <v-col>
-              {{ $t(item.server?.reality == undefined ? 'no' : 'yes') }}
+              <v-chip size="small" :color="item.server?.reality?.enabled ? 'success' : 'default'">
+                {{ $t(item.server?.reality?.enabled ? 'enabled' : 'disabled') }}
+              </v-chip>
             </v-col>
           </v-row>
         </v-card-text>
@@ -124,7 +130,7 @@
 import Data from '@/store/modules/data'
 import { computed, defineAsyncComponent, ref } from 'vue'
 import { Inbound } from '@/types/inbounds'
-import { tls } from '@/types/tls'
+import { normalizeLegacyAcme, tls } from '@/types/tls'
 import EmptyState from '@/components/EmptyState.vue'
 
 const TlsVue = defineAsyncComponent(() => import('@/layouts/modals/Tls.vue'))
@@ -166,7 +172,8 @@ const closeModal = () => {
   modal.value.visible = false
 }
 const saveModal = async (data:tls) => {
-  const success = await Data().save("tls", data.id > 0 ? "edit" : "new", data)
+  const normalized = { ...data, server: normalizeLegacyAcme(data.server) }
+  const success = await Data().save("tls", normalized.id > 0 ? "edit" : "new", normalized)
   if (success) modal.value.visible = false
 }
 

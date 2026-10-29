@@ -2,14 +2,77 @@ package database
 
 import (
 	"database/sql"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/CatMsg/NovaPanel/database/model"
+	"github.com/CatMsg/NovaPanel/security"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestOpenDBCreatesPrivateDatabaseStorage(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "private-db")
+	path := filepath.Join(dir, "novas.db")
+	if err := InitDB(path); err != nil {
+		t.Fatalf("initialize database: %v", err)
+	}
+	if err := CloseDB(); err != nil {
+		t.Fatalf("close database: %v", err)
+	}
+	if runtime.GOOS == "windows" {
+		return // Windows ACLs are enforced by the installer, not chmod bits.
+	}
+	for target, want := range map[string]os.FileMode{dir: 0o700, path: 0o600} {
+		info, err := os.Stat(target)
+		if err != nil {
+			t.Fatalf("stat %s: %v", target, err)
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Fatalf("permissions for %s = %04o, want %04o", target, got, want)
+		}
+	}
+
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := InitDB(path); err != nil {
+		t.Fatalf("reopen database with permissive legacy mode: %v", err)
+	}
+	if err := CloseDB(); err != nil {
+		t.Fatalf("close reopened database: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("legacy database permissions = %04o, want 0600", got)
+	}
+}
+
+func TestOpenDBRejectsDatabaseSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated Windows privileges in some environments")
+	}
+	target := filepath.Join(t.TempDir(), "target.db")
+	if err := InitDB(target); err != nil {
+		t.Fatalf("initialize target database: %v", err)
+	}
+	if err := CloseDB(); err != nil {
+		t.Fatalf("close target database: %v", err)
+	}
+	link := filepath.Join(t.TempDir(), "linked.db")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := OpenDB(link); err == nil || !strings.Contains(err.Error(), "regular file") {
+		t.Fatalf("expected database symlink rejection, got %v", err)
+	}
+}
 
 func createCompleteTestSchema(t *testing.T, conn *gorm.DB) {
 	t.Helper()
@@ -22,6 +85,7 @@ func createCompleteTestSchema(t *testing.T, conn *gorm.DB) {
 }
 
 func TestInitDBCreatesAndValidatesFreshSchema(t *testing.T) {
+	t.Setenv("NOVAS_DEVELOPMENT_DEFAULT_ADMIN", "1")
 	path := filepath.Join(t.TempDir(), "fresh.db")
 	if err := InitDB(path); err != nil {
 		t.Fatalf("initialize fresh database: %v", err)
@@ -37,6 +101,32 @@ func TestInitDBCreatesAndValidatesFreshSchema(t *testing.T) {
 	var user model.User
 	if err := GetDB().Where("username = ?", "admin").First(&user).Error; err != nil {
 		t.Fatalf("fresh database has no initial administrator: %v", err)
+	}
+	if user.Password == "admin" {
+		t.Fatal("fresh database stored the default administrator password in plaintext")
+	}
+	valid, needsUpgrade, err := security.VerifyPassword(user.Password, "admin")
+	if err != nil || !valid || needsUpgrade || !security.IsDefaultUserPassword(user.Username, user.Password) {
+		t.Fatalf("fresh administrator credential is not securely verifiable and detectable: valid=%v upgrade=%v err=%v", valid, needsUpgrade, err)
+	}
+}
+
+func TestInitDBDoesNotSeedPublicAdminPasswordOutsideDevelopment(t *testing.T) {
+	t.Setenv("NOVAS_DEVELOPMENT_DEFAULT_ADMIN", "")
+	path := filepath.Join(t.TempDir(), "fresh-production.db")
+	if err := InitDB(path); err != nil {
+		t.Fatalf("initialize fresh database: %v", err)
+	}
+	var user model.User
+	if err := GetDB().Where("username = ?", "admin").First(&user).Error; err != nil {
+		t.Fatalf("fresh database has no initial administrator: %v", err)
+	}
+	if security.IsDefaultUserPassword(user.Username, user.Password) {
+		t.Fatal("production database was seeded with the public default administrator credential")
+	}
+	valid, _, err := security.VerifyPassword(user.Password, "admin")
+	if err != nil || valid {
+		t.Fatalf("public default password still works: valid=%v err=%v", valid, err)
 	}
 }
 

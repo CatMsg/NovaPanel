@@ -9,6 +9,7 @@ WorkingDirectory=/usr/local/novas/
 ExecStart=/usr/local/novas/novas
 Restart=on-failure
 RestartSec=10s
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target

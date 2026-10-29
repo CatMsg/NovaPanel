@@ -303,6 +303,7 @@
           color="primary"
           variant="tonal"
           :loading="loading"
+          :disabled="hasInvalidCertificateProvider"
           @click="saveChanges"
         >
           {{ $t('actions.save') }}
@@ -313,7 +314,7 @@
 </template>
 
 <script lang="ts">
-import { tls, iTls, defaultInTls, oTls, defaultOutTls } from '@/types/tls'
+import { tls, iTls, defaultInTls, oTls, defaultOutTls, normalizeLegacyAcme } from '@/types/tls'
 import AcmeVue from '@/components/tls/Acme.vue'
 import EchVue from '@/components/tls/Ech.vue'
 import HttpUtils from '@/plugins/httputil'
@@ -380,6 +381,7 @@ export default {
         const newData = <tls>JSON.parse(this.$props.data)
         this.tls = newData
         if (this.tls.server == null) this.tls.server = { enabled: true }
+        this.tls.server = normalizeLegacyAcme(this.tls.server)
         if (this.tls.client == null) this.tls.client = {}
         this.tlsType = newData.server?.reality == undefined ? 0 : 1
         this.usePath = newData.server?.key == undefined ? 0 : 1
@@ -503,6 +505,16 @@ export default {
     }
   },
   computed: {
+    hasInvalidCertificateProvider(): boolean {
+      const server = this.tls.server
+      if (server.acme != undefined && server.certificate_provider != undefined) return true
+      const provider = server.certificate_provider
+      if (!provider || typeof provider !== 'object' || provider.type !== 'acme') return false
+      const domains = provider.domain
+      return Array.isArray(domains)
+        ? !domains.some(domain => typeof domain === 'string' && domain.trim().length > 0)
+        : typeof domains !== 'string' || domains.trim().length === 0
+    },
     inTls(): iTls {
       return this.tls.server
     },

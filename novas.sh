@@ -32,13 +32,16 @@ fi
 
 echo "当前系统发行版为：$release"
 
-readonly NOVAS_INSTALL_SCRIPT_URL="https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh"
 readonly NOVAS_UPDATE_STATE_DIR="/var/lib/novas"
 readonly NOVAS_UPDATE_LOG="${NOVAS_UPDATE_STATE_DIR}/update.log"
 readonly NOVAS_UPDATE_STATUS="${NOVAS_UPDATE_STATE_DIR}/update.status"
 readonly NOVAS_UPDATE_PID="${NOVAS_UPDATE_STATE_DIR}/update.pid"
 readonly NOVAS_UPDATE_LOCK_DIR="${NOVAS_UPDATE_STATE_DIR}/update.lock"
 readonly NOVAS_UPDATE_UNIT_FILE="${NOVAS_UPDATE_STATE_DIR}/update.unit"
+# Update only after reviewing the official release and verifying its archive digest.
+readonly ACME_SH_VERSION="3.1.6"
+readonly ACME_SH_COMMIT="807da6498377ee5e0cf43a78091f46f12dc59a89"
+readonly ACME_SH_ARCHIVE_SHA256="ddbe1bcbd1a44a2623a2af167ebdc678669e6e2eb396742f2d1d28e02dc14220"
 
 confirm() {
     if [[ $# > 1 ]]; then
@@ -81,6 +84,24 @@ install() {
     fi
 }
 
+valid_release_tag() {
+    [[ "${1:-}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
+get_latest_release_tag() {
+    local tag
+    tag=$(curl --proto '=https' --proto-redir '=https' -fsSL --max-time 30 "https://api.github.com/repos/CatMsg/NovaPanel/releases/latest" | sed -nE 's/^[[:space:]]*"tag_name":[[:space:]]*"([^"]+)".*/\1/p' | head -n1)
+    valid_release_tag "${tag}" || return 1
+    printf '%s' "${tag}"
+}
+
+release_source_url() {
+    local tag="${1:-}" file="${2:-}"
+    valid_release_tag "${tag}" || return 1
+    [[ "${file}" == "install.sh" || "${file}" == "novas.sh" ]] || return 1
+    printf 'https://raw.githubusercontent.com/CatMsg/NovaPanel/%s/%s' "${tag}" "${file}"
+}
+
 update() {
     current_version=""
     latest_version=""
@@ -88,7 +109,10 @@ update() {
         current_version=$(/usr/local/novas/novas -v 2>/dev/null | awk '/^NovaPanel Panel[[:space:]]+/ {print $NF}' | head -n1)
         current_version="v${current_version#v}"
     fi
-    latest_version=$(curl -fsSL --max-time 30 "https://api.github.com/repos/CatMsg/NovaPanel/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    latest_version=$(get_latest_release_tag) || {
+        LOGE "无法从 Github 获取有效的最新版本号，已停止升级"
+        return 1
+    }
     if [[ -n "${current_version}" && -n "${latest_version}" && "${current_version}" == "${latest_version}" && "${NOVAS_AUTO_UPGRADE:-}" != "1" ]]; then
         confirm "当前版本 ${current_version} 与最新版本一致，是否仍然覆盖安装？" "n"
         if [[ $? != 0 ]]; then
@@ -99,7 +123,7 @@ update() {
             return 0
         fi
     fi
-    NOVAS_AUTO_UPGRADE=1 run_install_script
+    NOVAS_AUTO_UPGRADE=1 run_install_script "${latest_version}"
     if [[ $? == 0 ]]; then
         LOGI "更新完成，面板已自动重启"
         return 0
@@ -216,9 +240,10 @@ custom_version() {
 }
 
 download_install_script() {
-    local installer_path
+    local target_version="${1:-}" installer_path installer_url
+    installer_url=$(release_source_url "${target_version}" "install.sh") || return 1
     installer_path=$(mktemp /tmp/novapanel-install.XXXXXX.sh) || return 1
-    if ! curl -fsSL "${NOVAS_INSTALL_SCRIPT_URL}" -o "${installer_path}"; then
+    if ! curl --proto '=https' --proto-redir '=https' -fsSL --max-time 60 "${installer_url}" -o "${installer_path}" || ! bash -n "${installer_path}"; then
         rm -f "${installer_path}"
         return 1
     fi
@@ -229,17 +254,23 @@ download_install_script() {
 run_install_script() {
     local target_version="${1:-}"
     local installer_path
-    installer_path=$(download_install_script)
+    if [[ -z "${target_version}" ]]; then
+        target_version=$(get_latest_release_tag) || {
+            LOGE "无法从 Github 获取有效的最新版本号，已停止安装"
+            return 1
+        }
+    fi
+    valid_release_tag "${target_version}" || {
+        LOGE "版本号无效：${target_version}"
+        return 1
+    }
+    installer_path=$(download_install_script "${target_version}")
     if [[ -z "${installer_path}" ]]; then
         LOGE "下载安装脚本失败，请检查当前机器是否可以连接 Github"
         return 1
     fi
 
-    if [[ -n "${target_version}" ]]; then
-        bash "${installer_path}" "${target_version}"
-    else
-        bash "${installer_path}"
-    fi
+    bash "${installer_path}" "${target_version}"
     local status=$?
     rm -f "${installer_path}"
     return ${status}
@@ -281,8 +312,8 @@ uninstall() {
 }
 
 reset_admin() {
-    echo "不建议将管理员账号密码设置为默认值！"
-    confirm "确定要将管理员账号密码重置为默认值吗？" "n"
+	echo "将生成一次性随机管理员密码；重置后请立即保存终端显示的密码。"
+	confirm "确定重置管理员账号密码吗？" "n"
     if [[ $? == 0 ]]; then
         /usr/local/novas/novas admin -reset
     fi
@@ -292,8 +323,7 @@ reset_admin() {
 set_admin() {
     echo "不建议将管理员账号密码设置为过于复杂的文本。"
     read -p "请设置用户名：" config_account
-    read -p "请设置密码：" config_password
-    /usr/local/novas/novas admin -username ${config_account} -password ${config_password}
+    /usr/local/novas/novas admin -username "${config_account}" -password-prompt
     before_show_menu
 }
 
@@ -373,14 +403,14 @@ start() {
 }
 
 stop() {
-    check_status $1
+    check_status "$1"
     if [[ $? == 1 ]]; then
         echo ""
         LOGI "${1} 已停止，无需再次停止！"
     else
-        systemctl stop $1
+        systemctl stop "$1"
         sleep 2
-        check_status
+        check_status "$1"
         if [[ $? == 1 ]]; then
             LOGI "${1} 停止成功"
         else
@@ -456,9 +486,14 @@ show_log() {
 }
 
 update_shell() {
-    local temp_script
+    local latest_version temp_script script_url
+    latest_version=$(get_latest_release_tag) || {
+        LOGE "无法从 Github 获取有效的最新版本号，已停止管理脚本更新"
+        return 1
+    }
+    script_url=$(release_source_url "${latest_version}" "novas.sh") || return 1
     temp_script=$(mktemp /usr/bin/.novas.XXXXXX) || return 1
-    if ! curl -fsSL --max-time 60 https://raw.githubusercontent.com/CatMsg/NovaPanel/main/novas.sh -o "$temp_script" || ! bash -n "$temp_script"; then
+    if ! curl --proto '=https' --proto-redir '=https' -fsSL --max-time 60 "${script_url}" -o "$temp_script" || ! bash -n "$temp_script"; then
         rm -f "$temp_script"
         echo ""
         LOGE "下载脚本失败，请检查当前机器是否可以连接 Github"
@@ -968,24 +1003,42 @@ prepare_cloudflare_acme() {
 }
 
 install_acme_payload() {
-    local installer_path=""
+    local temp_dir="" archive_path="" source_dir="" actual_sha256=""
 
-    installer_path=$(mktemp "${TMPDIR:-/tmp}/novas-acme-install.XXXXXX") || {
+    temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/novas-acme-install.XXXXXX") || {
         LOGE "创建 acme.sh 安装临时文件失败"
         return 1
     }
+    archive_path="${temp_dir}/acme.sh.tar.gz"
+    source_dir="${temp_dir}/acme.sh-${ACME_SH_COMMIT}"
+
     LOGI "正在安装 acme..."
-    if ! curl -fsSL --max-time 120 "https://get.acme.sh" -o "${installer_path}"; then
-        rm -f "${installer_path}"
+    if ! curl --proto '=https' --proto-redir '=https' -fsSL --max-time 120 "https://github.com/acmesh-official/acme.sh/archive/${ACME_SH_COMMIT}.tar.gz" -o "${archive_path}"; then
+        rm -rf -- "${temp_dir}"
         LOGE "安装 acme 失败"
         return 1
     fi
-    if ! (cd "${HOME}" && unset CF_Token CF_Account_ID CF_Key CF_Email CF_Zone_ID && sh "${installer_path}"); then
-        rm -f "${installer_path}"
+
+    actual_sha256=$(sha256sum "${archive_path}" | awk '{print $1}')
+    if [[ "${actual_sha256}" != "${ACME_SH_ARCHIVE_SHA256}" ]]; then
+        rm -rf -- "${temp_dir}"
+        LOGE "acme.sh 官方归档 SHA-256 校验失败，已停止安装"
+        return 1
+    fi
+
+    if ! tar -xzf "${archive_path}" -C "${temp_dir}" || [[ ! -f "${source_dir}/acme.sh" ]]; then
+        rm -rf -- "${temp_dir}"
+        LOGE "acme.sh 官方归档解压失败，已停止安装"
+        return 1
+    fi
+
+    if ! (cd "${source_dir}" && unset CF_Token CF_Account_ID CF_Key CF_Email CF_Zone_ID && BRANCH="${ACME_SH_VERSION}" sh ./acme.sh --install); then
+        rm -rf -- "${temp_dir}"
         LOGE "安装 acme 失败"
         return 1
     fi
-    rm -f "${installer_path}"
+
+    rm -rf -- "${temp_dir}"
     LOGI "安装 acme 成功"
 }
 
@@ -1017,6 +1070,18 @@ ssl_cert_issue_main() {
             ;;
         *) echo "无效选择" ;;
     esac
+}
+
+secure_issued_certificate_permissions() {
+    local cert_dir="${1:-}"
+    local cert_file="${cert_dir}/fullchain.pem"
+    local key_file="${cert_dir}/privkey.pem"
+
+    [[ -d "${cert_dir}" && ! -L "${cert_dir}" ]] || return 1
+    [[ -f "${cert_file}" && ! -L "${cert_file}" && -f "${key_file}" && ! -L "${key_file}" ]] || return 1
+    chmod 600 "${key_file}" &&
+        chmod 644 "${cert_file}" &&
+        chmod 700 "${cert_dir}"
 }
 
 ssl_cert_issue() {
@@ -1102,16 +1167,19 @@ ssl_cert_issue() {
         LOGI "安装证书成功，正在启用自动续签..."
     fi
 
+    if ! secure_issued_certificate_permissions "${certPath}"; then
+        LOGE "证书文件权限设置失败，已停止后续操作"
+        exit 1
+    fi
+
     ~/.acme.sh/acme.sh --upgrade --auto-upgrade
     if [ $? -ne 0 ]; then
         LOGE "自动续签失败，证书详情："
         ls -lah cert/*
-        chmod 755 $certPath/*
         exit 1
     else
         LOGI "自动续签成功，证书详情："
         ls -lah cert/*
-        chmod 755 $certPath/*
     fi
 }
 

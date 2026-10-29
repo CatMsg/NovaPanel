@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -47,7 +48,7 @@ func TestRuntimeBinarySmoke(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "ufw"), []byte("#!/bin/sh\necho 'Status: active'\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	env := append(os.Environ(), "NOVAS_DB_FOLDER="+dir, "NOVAS_LOG_LEVEL=error", "PATH="+dir+":"+os.Getenv("PATH"))
+	env := append(os.Environ(), "NOVAS_DB_FOLDER="+dir, "NOVAS_LOG_LEVEL=error", "NOVAS_DEVELOPMENT_DEFAULT_ADMIN=", "PATH="+dir+":"+os.Getenv("PATH"))
 	run := func(args ...string) []byte {
 		t.Helper()
 		cmd := exec.Command(binary, args...)
@@ -72,7 +73,45 @@ func TestRuntimeBinarySmoke(t *testing.T) {
 		subPort = freePort()
 	}
 	run("setting", "-port", panelPort, "-path", "/runtime-test/", "-subPort", subPort)
-	run("admin", "-username", "runtime-smoke", "-password", "temporary-test-only")
+	setAdmin := exec.Command(binary, "admin", "-username", "runtime-smoke", "-password-stdin")
+	setAdmin.Env, setAdmin.Dir = env, dir
+	setAdmin.Stdin = strings.NewReader("temporary-test-only\n")
+	if output, err := setAdmin.CombinedOutput(); err != nil {
+		t.Fatalf("runtime admin password update failed: %v: %s", err, output)
+	}
+	blockedDBFolder := filepath.Join(dir, "not-a-directory")
+	if err := os.WriteFile(blockedDBFolder, []byte("block"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	failureEnv := make([]string, 0, len(env)+1)
+	for _, item := range env {
+		if !strings.HasPrefix(item, "NOVAS_DB_FOLDER=") {
+			failureEnv = append(failureEnv, item)
+		}
+	}
+	failureEnv = append(failureEnv, "NOVAS_DB_FOLDER="+blockedDBFolder)
+	failureCases := []struct {
+		name  string
+		args  []string
+		stdin string
+	}{
+		{name: "missing subcommand"},
+		{name: "admin update", args: []string{"admin", "-username", "runtime-smoke", "-password-stdin"}, stdin: "temporary-test-only\n"},
+		{name: "admin reset", args: []string{"admin", "-reset"}},
+		{name: "admin show", args: []string{"admin", "-show"}},
+		{name: "setting update", args: []string{"setting", "-path", "/runtime-test/"}},
+		{name: "setting reset", args: []string{"setting", "-reset"}},
+		{name: "setting show", args: []string{"setting", "-show"}},
+		{name: "panel uri", args: []string{"uri"}},
+	}
+	for _, test := range failureCases {
+		failedCommand := exec.Command(binary, test.args...)
+		failedCommand.Env, failedCommand.Dir = failureEnv, dir
+		failedCommand.Stdin = strings.NewReader(test.stdin)
+		if output, err := failedCommand.CombinedOutput(); err == nil {
+			t.Errorf("%s command reported success when its database could not open: %s", test.name, output)
+		}
+	}
 	before := run("admin", "-show")
 	run("upgrade-db")
 	run("checkdb")

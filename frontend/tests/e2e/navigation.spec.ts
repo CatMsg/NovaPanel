@@ -18,7 +18,7 @@ test('command palette opens by shortcut and navigates to a filtered page', async
   await page.getByRole('button', { name: '快速跳转' }).click()
   await expect(dialog).toBeVisible()
   await page.keyboard.press('Escape')
-  await page.keyboard.press('Control+k')
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k')
   await expect(dialog).toBeVisible()
   const search = dialog.getByRole('textbox')
   await search.fill('DNS')

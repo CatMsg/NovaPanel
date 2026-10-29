@@ -2,11 +2,16 @@ package installtest
 
 import (
 	"bytes"
+	"encoding/pem"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 )
@@ -21,6 +26,431 @@ func TestFlockHelper(t *testing.T) {
 		os.Exit(1)
 	}
 	os.Exit(0)
+}
+
+func TestUpdaterUsesValidatedReleaseTaggedSources(t *testing.T) {
+	_, source, _, _ := runtime.Caller(0)
+	root := filepath.Clean(filepath.Join(filepath.Dir(source), "../.."))
+	updater, err := os.ReadFile(filepath.Join(root, "novas.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(updater)
+	for _, mutableURL := range []string{
+		"raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh",
+		"raw.githubusercontent.com/CatMsg/NovaPanel/main/novas.sh",
+	} {
+		if strings.Contains(text, mutableURL) {
+			t.Fatalf("updater still fetches a mutable main-branch script: %s", mutableURL)
+		}
+	}
+	for lineNumber, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, "curl ") && strings.Contains(line, "https://") {
+			if !strings.Contains(line, "--proto '=https'") || !strings.Contains(line, "--proto-redir '=https'") {
+				t.Fatalf("HTTPS download at novas.sh:%d does not forbid protocol downgrade: %s", lineNumber+1, line)
+			}
+		}
+	}
+	installer, err := os.ReadFile(filepath.Join(root, "install.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for lineNumber, line := range strings.Split(string(installer), "\n") {
+		if strings.Contains(line, "curl ") && strings.Contains(line, "https://") {
+			if !strings.Contains(line, "--proto '=https'") || !strings.Contains(line, "--proto-redir '=https'") {
+				t.Fatalf("HTTPS download at install.sh:%d does not forbid protocol downgrade: %s", lineNumber+1, line)
+			}
+		}
+	}
+
+	extract := func(name string) string {
+		t.Helper()
+		start := strings.Index(text, name+"() {")
+		if start < 0 {
+			t.Fatalf("missing shell helper %s", name)
+		}
+		end := strings.Index(text[start:], "\n}\n")
+		if end < 0 {
+			t.Fatalf("unterminated shell helper %s", name)
+		}
+		return text[start : start+end+3]
+	}
+	script := extract("valid_release_tag") + extract("release_source_url") + `
+set -eu
+[[ "$(release_source_url v1.2.3 install.sh)" == "https://raw.githubusercontent.com/CatMsg/NovaPanel/v1.2.3/install.sh" ]]
+[[ "$(release_source_url v1.2.3 novas.sh)" == "https://raw.githubusercontent.com/CatMsg/NovaPanel/v1.2.3/novas.sh" ]]
+if release_source_url main install.sh || release_source_url v1.2.3 ../../evil; then exit 1; fi
+`
+	if output, err := exec.Command("bash", "-c", script).CombinedOutput(); err != nil {
+		t.Fatalf("release source URL validation failed: %v\n%s", err, output)
+	}
+}
+
+func TestInstallerHTTPSDownloaderRejectsDowngradeRedirect(t *testing.T) {
+	if _, err := exec.LookPath("curl"); err != nil {
+		t.Skip("curl is required for the installer download policy test")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash is required for the installer download policy test")
+	}
+
+	var downgradeHits atomic.Int32
+	httpTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		downgradeHits.Add(1)
+		_, _ = io.WriteString(w, "insecure payload")
+	}))
+	defer httpTarget.Close()
+	secureTarget := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "trusted payload")
+	}))
+	defer secureTarget.Close()
+	origin := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/downgrade" {
+			http.Redirect(w, r, httpTarget.URL, http.StatusFound)
+			return
+		}
+		http.Redirect(w, r, secureTarget.URL, http.StatusFound)
+	}))
+	defer origin.Close()
+
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	installer, err := os.ReadFile(filepath.Join(root, "../../install.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(installer)
+	start := strings.Index(text, "download_to_file() {")
+	if start < 0 {
+		t.Fatal("missing installer download helper")
+	}
+	end := strings.Index(text[start:], "\n}\n")
+	if end < 0 {
+		t.Fatal("unterminated installer download helper")
+	}
+	helper := text[start : start+end+3]
+	caBundle := filepath.Join(t.TempDir(), "test-ca.pem")
+	var certs bytes.Buffer
+	for _, server := range []*httptest.Server{origin, secureTarget} {
+		if err := pem.Encode(&certs, &pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(caBundle, certs.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	downloaded := filepath.Join(t.TempDir(), "download.bin")
+	script := helper + `
+set -eu
+download_to_file "$SAFE_URL" "$SAFE_OUTPUT"
+[[ "$(cat "$SAFE_OUTPUT")" == "trusted payload" ]]
+if download_to_file "$HTTP_URL" "$HTTP_OUTPUT"; then
+  echo "plain HTTP download was accepted" >&2
+  exit 1
+fi
+if download_to_file "$DOWNGRADE_URL" "$DOWNGRADE_OUTPUT"; then
+  echo "HTTPS-to-HTTP redirect was accepted" >&2
+  exit 1
+fi
+`
+	command := exec.Command("bash", "-c", script)
+	command.Env = append(os.Environ(),
+		"CURL_CA_BUNDLE="+caBundle,
+		"NO_PROXY=127.0.0.1,localhost",
+		"no_proxy=127.0.0.1,localhost",
+		"SAFE_URL="+origin.URL+"/secure",
+		"SAFE_OUTPUT="+downloaded,
+		"DOWNGRADE_URL="+origin.URL+"/downgrade",
+		"DOWNGRADE_OUTPUT="+downloaded+".insecure",
+		"HTTP_URL="+httpTarget.URL,
+		"HTTP_OUTPUT="+downloaded+".plain-http",
+	)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("HTTPS downloader policy failed: %v\n%s", err, output)
+	}
+	if downgradeHits.Load() != 0 {
+		t.Fatal("curl followed an HTTPS download redirect to HTTP")
+	}
+	if _, err := os.Stat(downloaded + ".insecure"); !os.IsNotExist(err) {
+		t.Fatal("insecure redirect left a downloaded file")
+	}
+	if _, err := os.Stat(downloaded + ".plain-http"); !os.IsNotExist(err) {
+		t.Fatal("plain HTTP request left a downloaded file")
+	}
+}
+
+func TestInstallerDoesNotInstallUnusedWget(t *testing.T) {
+	_, source, _, _ := runtime.Caller(0)
+	root := filepath.Clean(filepath.Join(filepath.Dir(source), "../.."))
+	installer, err := os.ReadFile(filepath.Join(root, "install.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(installer)
+	start := strings.Index(text, "install_base() {")
+	if start < 0 {
+		t.Fatal("missing install_base helper")
+	}
+	end := strings.Index(text[start:], "\n}\n")
+	if end < 0 {
+		t.Fatal("unterminated install_base helper")
+	}
+	if strings.Contains(text[start:start+end], "wget") {
+		t.Fatal("install_base still installs wget although the installer uses curl exclusively")
+	}
+}
+
+func TestReadmeInstallerBootstrapValidatesHTTPSDownloadBeforeExecution(t *testing.T) {
+	_, source, _, _ := runtime.Caller(0)
+	root := filepath.Clean(filepath.Join(filepath.Dir(source), "../.."))
+	readmes, err := filepath.Glob(filepath.Join(root, "README*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(readmes) != 6 {
+		t.Fatalf("expected six localized README files, found %d", len(readmes))
+	}
+	for _, path := range readmes {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		count := 0
+		for lineNumber, line := range strings.Split(string(content), "\n") {
+			if !strings.Contains(line, "raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh") {
+				continue
+			}
+			count++
+			for _, required := range []string{
+				`curl --proto '=https' --proto-redir '=https' -fsSL`,
+				`-o "$_novas_installer_tmp"`,
+				`bash -n "$_novas_installer_tmp"`,
+				`bash "$_novas_installer_tmp"`,
+				`trap 'rm -f "$_novas_installer_tmp"' EXIT`,
+				`exit "$_novas_installer_rc"`,
+			} {
+				if !strings.Contains(line, required) {
+					t.Fatalf("%s:%d installer bootstrap is missing %q", filepath.Base(path), lineNumber+1, required)
+				}
+			}
+			if strings.Contains(line, "bash <(curl") {
+				t.Fatalf("%s:%d executes the response stream without validation", filepath.Base(path), lineNumber+1)
+			}
+		}
+		if count != 2 {
+			t.Fatalf("%s contains %d installer bootstrap examples, want latest and pinned-version examples", filepath.Base(path), count)
+		}
+	}
+}
+
+func TestReadmeInstallerBootstrapExecutionOrderAndExitCode(t *testing.T) {
+	_, source, _, _ := runtime.Caller(0)
+	root := filepath.Clean(filepath.Join(filepath.Dir(source), "../.."))
+	readme, err := os.ReadFile(filepath.Join(root, "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var examples []string
+	for _, line := range strings.Split(string(readme), "\n") {
+		if strings.Contains(line, "raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh") {
+			examples = append(examples, line)
+		}
+	}
+	if len(examples) != 2 {
+		t.Fatalf("expected latest and pinned-version install examples, got %d", len(examples))
+	}
+
+	testRoot := t.TempDir()
+	bin := filepath.Join(testRoot, "bin")
+	write(t, filepath.Join(bin, "mktemp"), "#!/bin/sh\nset -eu\n: > \"$TEST_TMP\"\nchmod 600 \"$TEST_TMP\"\nprintf '%s\\n' \"$TEST_TMP\"\n", 0755)
+	write(t, filepath.Join(bin, "curl"), "#!/bin/sh\nset -eu\noutput=\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = -o ]; then output=$2; shift 2; else shift; fi\ndone\n[ -n \"$output\" ]\nprintf '%s\\n' '#!/bin/sh' 'exit 0' > \"$output\"\nprintf 'curl\\n' >> \"$TEST_ACTIONS\"\n", 0755)
+	write(t, filepath.Join(bin, "bash"), "#!/bin/sh\nset -eu\nif [ \"$1\" = -n ]; then\n  [ -f \"$2\" ]\n  printf 'syntax\\n' >> \"$TEST_ACTIONS\"\n  exit 0\nfi\n[ -f \"$1\" ]\nshift\nprintf 'run:%s\\n' \"$*\" >> \"$TEST_ACTIONS\"\nexit \"$INSTALL_RC\"\n", 0755)
+
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash is required for installer bootstrap execution tests")
+	}
+	shells := []string{bash}
+	if zsh, err := exec.LookPath("zsh"); err == nil {
+		shells = append(shells, zsh)
+	}
+	for _, shell := range shells {
+		for exampleIndex, example := range examples {
+			name := filepath.Base(shell) + "/example-" + string(rune('1'+exampleIndex))
+			t.Run(name, func(t *testing.T) {
+				testTemp := filepath.Join(testRoot, "installer.tmp")
+				actions := filepath.Join(testRoot, "actions")
+				command := exec.Command(shell, "-c", example)
+				env := append([]string(nil), os.Environ()...)
+				for _, key := range []string{"PATH", "TEST_TMP", "TEST_ACTIONS", "INSTALL_RC"} {
+					prefix := key + "="
+					filtered := env[:0]
+					for _, item := range env {
+						if !strings.HasPrefix(item, prefix) {
+							filtered = append(filtered, item)
+						}
+					}
+					env = filtered
+				}
+				env = append(env,
+					"PATH="+bin+":"+os.Getenv("PATH"),
+					"TEST_TMP="+testTemp,
+					"TEST_ACTIONS="+actions,
+					"INSTALL_RC=23",
+				)
+				command.Env = env
+				output, runErr := command.CombinedOutput()
+				exitErr, ok := runErr.(*exec.ExitError)
+				if !ok || exitErr.ExitCode() != 23 {
+					t.Fatalf("bootstrap did not preserve installer exit code 23: err=%v output=%s", runErr, output)
+				}
+				result, err := os.ReadFile(actions)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := "curl\nsyntax\nrun:"
+				if exampleIndex == 1 {
+					want += "vx.x.x"
+				}
+				want += "\n"
+				if string(result) != want {
+					t.Fatalf("bootstrap execution order/arguments = %q, want %q", result, want)
+				}
+				if _, err := os.Stat(testTemp); !os.IsNotExist(err) {
+					t.Fatalf("bootstrap temporary file was not removed: %v", err)
+				}
+				if err := os.Remove(actions); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+	}
+}
+
+func TestInstallerBaseAvoidsUnrelatedSystemUpgrades(t *testing.T) {
+	tests := []struct {
+		name        string
+		release     string
+		manager     string
+		archHasDeps bool
+		want        []string
+		avoid       []string
+	}{
+		{name: "centos", release: "centos", manager: "yum", want: []string{"package yum install -y -q curl tar tzdata util-linux"}, avoid: []string{"yum -y update"}},
+		{name: "fedora", release: "fedora", manager: "dnf", want: []string{"package dnf install -y -q curl tar tzdata util-linux"}, avoid: []string{"dnf -y update"}},
+		{name: "ubuntu", release: "ubuntu", manager: "apt-get", want: []string{"package apt-get update", "package apt-get install -y -q curl tar tzdata util-linux"}, avoid: []string{"apt-get upgrade"}},
+		{name: "opensuse", release: "opensuse-tumbleweed", manager: "zypper", want: []string{"package zypper refresh", "package zypper -q install -y curl tar timezone util-linux"}, avoid: []string{"zypper dup", "zypper update"}},
+		{name: "arch-dependencies-present", release: "arch", manager: "pacman", archHasDeps: true, want: []string{"package pacman -Q curl tar tzdata util-linux"}, avoid: []string{"pacman -Syu"}},
+		{name: "arch-dependencies-missing", release: "arch", manager: "pacman", want: []string{"package pacman -Q curl tar tzdata util-linux", "package pacman -Syu --noconfirm --needed curl tar tzdata util-linux"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root, bin, installer := installerFixture(t)
+			manager := test.manager
+			script := `#!/bin/bash
+set -eu
+echo "package ${0##*/} $*" >> "$TEST_ROOT/actions"
+if [[ "${0##*/}" == pacman && "$1" == -Q ]]; then
+  [[ "$SCENARIO" == arch-dependencies-present ]]
+fi
+`
+			write(t, filepath.Join(bin, manager), script, 0755)
+			scenario := test.name
+			if test.archHasDeps {
+				scenario = "arch-dependencies-present"
+			}
+			env := []string{"SCENARIO=" + scenario}
+			if test.name == "arch-dependencies-missing" {
+				env = append(env, "NOVAS_ALLOW_ARCH_SYSTEM_UPGRADE=1")
+			}
+			output, err := runInstallerFixture(t, root, bin, installer, `release=`+test.release+`; install_base`, env...)
+			if err != nil {
+				t.Fatalf("install_base: %v\n%s", err, output)
+			}
+			actions, err := os.ReadFile(filepath.Join(root, "actions"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			log := string(actions)
+			for _, want := range test.want {
+				if !strings.Contains(log, want) {
+					t.Fatalf("missing package operation %q in %q", want, log)
+				}
+			}
+			for _, avoid := range test.avoid {
+				if strings.Contains(log, avoid) {
+					t.Fatalf("unexpected unrelated system update %q in %q", avoid, log)
+				}
+			}
+		})
+	}
+}
+
+func TestArchInstallerRequiresExplicitSystemUpgradeAuthorization(t *testing.T) {
+	root, bin, installer := installerFixture(t)
+	write(t, filepath.Join(bin, "pacman"), `#!/bin/bash
+set -eu
+echo "package pacman $*" >> "$TEST_ROOT/actions"
+if [[ "$1" == -Q ]]; then exit 1; fi
+`, 0755)
+	output, err := runInstallerFixture(t, root, bin, installer, `release=arch; install_base`, "SCENARIO=arch-dependencies-missing")
+	if err == nil || !bytes.Contains(output, []byte("NOVAS_ALLOW_ARCH_SYSTEM_UPGRADE=1")) {
+		t.Fatalf("missing Arch packages triggered an unapproved system upgrade: %v\n%s", err, output)
+	}
+	actions, readErr := os.ReadFile(filepath.Join(root, "actions"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if bytes.Contains(actions, []byte("pacman -Syu")) {
+		t.Fatalf("pacman system upgrade ran without authorization: %s", actions)
+	}
+}
+
+func TestStopChecksStatusOfSelectedService(t *testing.T) {
+	_, source, _, _ := runtime.Caller(0)
+	root := filepath.Clean(filepath.Join(filepath.Dir(source), "../.."))
+	updater, err := os.ReadFile(filepath.Join(root, "novas.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(updater)
+	start := strings.Index(text, "stop() {")
+	if start < 0 {
+		t.Fatal("missing stop helper")
+	}
+	end := strings.Index(text[start:], "\n}\n")
+	if end < 0 {
+		t.Fatal("unterminated stop helper")
+	}
+	script := text[start:start+end+3] + `
+set -u
+running=1
+check_status() {
+  if [[ "$#" -ne 1 || "$1" != "novas" ]]; then
+    echo "status check did not receive the selected service name" >&2
+    return 2
+  fi
+  [[ "$running" -eq 1 ]]
+}
+systemctl() {
+  [[ "$1" == "stop" && "$2" == "novas" ]] || return 2
+  running=0
+}
+sleep() { :; }
+LOGI() { printf '%s\n' "$*"; }
+LOGE() { printf 'ERROR: %s\n' "$*"; }
+before_show_menu() { exit 99; }
+stop novas 0
+`
+	output, err := exec.Command("bash", "-c", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("stop command failed: %v\n%s", err, output)
+	}
+	if !bytes.Contains(output, []byte("novas 停止成功")) || bytes.Contains(output, []byte("停止失败")) {
+		t.Fatalf("stop result was incorrect: %s", output)
+	}
 }
 
 func write(t *testing.T, path, data string, mode os.FileMode) {
@@ -58,8 +488,15 @@ func TestOfflineDeployment(t *testing.T) {
 			oldName := "novas"
 			units := filepath.Join(root, "etc/systemd/system")
 			if !fresh {
-				write(t, filepath.Join(old, "db/novas.db"), "user-data", 0600)
+				write(t, filepath.Join(old, "db/novas.db"), "user-data", 0644)
 				write(t, filepath.Join(old, "cert/key.pem"), "preserve-key", 0600)
+				write(t, filepath.Join(root, "root/cert/example.com/fullchain.pem"), "public certificate", 0755)
+				write(t, filepath.Join(root, "root/cert/example.com/privkey.pem"), "private key", 0755)
+				write(t, filepath.Join(root, "external-cert/linked.example/fullchain.pem"), "external certificate", 0755)
+				write(t, filepath.Join(root, "external-cert/linked.example/privkey.pem"), "external private key", 0755)
+				if err := os.Symlink(filepath.Join(root, "external-cert/linked.example"), filepath.Join(root, "root/cert/linked.example")); err != nil {
+					t.Fatal(err)
+				}
 				write(t, filepath.Join(old, "novas"), "old-binary", 0755)
 				write(t, filepath.Join(units, oldName+".service"), "[Service]\nExecStart=/usr/local/novas/novas\nWorkingDirectory=/usr/local/novas\nLimitNOFILE=65536\n", 0644)
 				write(t, filepath.Join(units, oldName+".service.d/limits.conf"), "[Service]\nLimitNPROC=4096\n", 0644)
@@ -153,6 +590,10 @@ source "$1"; novas_deploy "$2" "$3"`
 				}
 			}
 			if success {
+				securityDropIn, err := os.ReadFile(filepath.Join(units, "novas.service.d/90-novapanel-security.conf"))
+				if err != nil || string(securityDropIn) != "[Service]\nUMask=0077\n" {
+					t.Fatalf("strict systemd umask drop-in missing or invalid: %q, %v", securityDropIn, err)
+				}
 				if scenario == "fresh-callback" || scenario == "concurrent-current" {
 					actions, _ := os.ReadFile(filepath.Join(root, "callback-actions"))
 					want := ""
@@ -167,6 +608,33 @@ source "$1"; novas_deploy "$2" "$3"`
 					t.Fatal("new service not started", err)
 				}
 				if !fresh {
+					for path, want := range map[string]os.FileMode{
+						filepath.Join(home, "db"):          0700,
+						filepath.Join(home, "db/novas.db"): 0600,
+					} {
+						info, err := os.Stat(path)
+						if err != nil {
+							t.Fatalf("stat protected database path %s: %v", path, err)
+						}
+						if got := info.Mode().Perm(); got != want {
+							t.Fatalf("database permission for %s = %04o, want %04o", path, got, want)
+						}
+					}
+					for path, want := range map[string]os.FileMode{
+						filepath.Join(root, "root/cert"):                                0700,
+						filepath.Join(root, "root/cert/example.com"):                    0700,
+						filepath.Join(root, "root/cert/example.com/fullchain.pem"):      0644,
+						filepath.Join(root, "root/cert/example.com/privkey.pem"):        0600,
+						filepath.Join(root, "external-cert/linked.example/privkey.pem"): 0755,
+					} {
+						info, err := os.Stat(path)
+						if err != nil {
+							t.Fatalf("stat certificate path %s: %v", path, err)
+						}
+						if got := info.Mode().Perm(); got != want {
+							t.Fatalf("certificate permission for %s = %v, want %v", path, got, want)
+						}
+					}
 					data, _ := os.ReadFile(filepath.Join(home, "db/novas.db"))
 					if string(data) != "user-data" {
 						t.Fatal("lost database")
@@ -219,6 +687,8 @@ func installerFixture(t *testing.T) (string, string, string) {
 			t.Fatal(err)
 		}
 	}
+	write(t, filepath.Join(bin, "od"), "#!/bin/bash\nprintf '0123456789abcdef0123456789abcdef0123456789abcdef\\n'\n", 0755)
+	write(t, filepath.Join(bin, "tr"), "#!/bin/bash\nIFS= read -r value\nprintf '%s' \"$value\"\n", 0755)
 	write(t, filepath.Join(bin, "sshd"), `#!/bin/bash
 [[ "$*" == -T ]] || exit 90
 [[ "$SCENARIO" != sshd-failure ]] || exit 1
@@ -310,8 +780,14 @@ esac
 if [[ "$SCENARIO" == interactive ]]; then
   case "$1 $2" in
     'setting -port')
-      [[ "$(cat "$TEST_ROOT/ufw-state")" == active && "$NOVAS_DB_FOLDER" == '' ]] || exit 90
+      [[ "$(cat "$TEST_ROOT/ufw-state")" == active && "$NOVAS_DB_FOLDER" == '' && -z "${NOVAS_DEVELOPMENT_DEFAULT_ADMIN:-}" ]] || exit 90
       echo cli-settings >> "$TEST_ROOT/actions"
+      exit 0;;
+    'admin -username')
+      [[ "$3" == admin && "$4" == -password-stdin ]] || exit 90
+      password="$(cat)"
+      [[ "$password" =~ ^[0-9a-f]{48}$ ]] || exit 90
+      echo cli-admin-generated >> "$TEST_ROOT/actions"
       exit 0;;
     'admin -show') echo cli-admin-show >> "$TEST_ROOT/actions"; exit 0;;
   esac
@@ -663,7 +1139,7 @@ y
 
 n
 INPUT
-`, "SCENARIO=interactive")
+`, "SCENARIO=interactive", "NOVAS_DEVELOPMENT_DEFAULT_ADMIN=1")
 	if err != nil {
 		t.Fatalf("interactive fresh install: %v\n%s", err, output)
 	}
@@ -681,5 +1157,101 @@ INPUT
 	}
 	if strings.Contains(log, "allow 2095/tcp") || strings.Contains(log, "allow 2096/tcp") || strings.Contains(log, "iptables") {
 		t.Fatal("opened unused defaults or used iptables", log)
+	}
+	if !strings.Contains(log, "cli-admin-generated") || !strings.Contains(string(output), "0123456789abcdef0123456789abcdef0123456789abcdef") {
+		t.Fatalf("fresh install did not create and display a one-time random admin password: actions=%s output=%s", log, output)
+	}
+}
+
+func TestWindowsInstallerReportsConfigurationAndServiceFailures(t *testing.T) {
+	_, source, _, _ := runtime.Caller(0)
+	root := filepath.Clean(filepath.Join(filepath.Dir(source), "../.."))
+	installer, err := os.ReadFile(filepath.Join(root, "windows/install-windows.bat"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(installer)
+	rootRead := strings.Index(text, `icacls "%INSTALL_DIR%" /grant "*S-1-5-32-545:(OI)(CI)RX" /T`)
+	databaseACL := strings.Index(text, `icacls "%INSTALL_DIR%\db" /inheritance:r /remove:g "*S-1-5-32-545"`)
+	certificateACL := strings.Index(text, `icacls "%INSTALL_DIR%\cert" /inheritance:r /remove:g "*S-1-5-32-545"`)
+	logsACL := strings.Index(text, `icacls "%INSTALL_DIR%\logs" /inheritance:r /remove:g "*S-1-5-32-545"`)
+	databasePreflight := strings.Index(text, "novas.exe upgrade-db")
+	serviceStart := strings.Index(text, "net start %SERVICE_NAME%")
+	if rootRead < 0 || databaseACL < rootRead || certificateACL < rootRead || logsACL < rootRead ||
+		databasePreflight < databaseACL || serviceStart < databaseACL || strings.Contains(text, `Users:(OI)(CI)F`) {
+		t.Fatal("Windows installer must secure database, certificate, and log ACLs before database access/service start")
+	}
+	ordered := []string{
+		`novas.exe setting -port %panel_port% -path "%panel_path%" -subPort %sub_port% -subPath "%sub_path%"`,
+		`if !errorLevel! neq 0 (`,
+		`echo Error: Failed to save the panel and subscription settings.`,
+		`exit /b 1`,
+		`net start %SERVICE_NAME%`,
+		`set "SERVICE_RUNNING=1"`,
+		`set "INSTALL_EXIT_CODE=1"`,
+		`echo Installation completed and the NovaPanel service is running.`,
+		`echo Installation files are ready, but the NovaPanel service did not start.`,
+		`echo Installation files are ready. Windows service is unavailable; use manual launch.`,
+		`exit /b !INSTALL_EXIT_CODE!`,
+	}
+	searchFrom := 0
+	for _, token := range ordered {
+		index := strings.Index(text[searchFrom:], token)
+		if index < 0 {
+			t.Fatalf("Windows installer does not handle/report failure in expected order near %q", token)
+		}
+		searchFrom += index + len(token)
+	}
+	if strings.Contains(text, "Installation completed successfully!") {
+		t.Fatal("Windows installer still claims unconditional success")
+	}
+
+	controller, err := os.ReadFile(filepath.Join(root, "windows/novas-windows.bat"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(controller), "Failed to install service. Error code: !errorLevel!") ||
+		!strings.Contains(string(controller), "Failed to uninstall service. Error code: !errorLevel!") {
+		t.Fatal("Windows service management error messages must use delayed error-level expansion")
+	}
+	if !strings.Contains(string(controller), "Manual mode needs Administrator access") ||
+		!strings.Contains(string(controller), "Viewing database-backed settings needs Administrator access") ||
+		!strings.Contains(string(controller), "Viewing local service logs needs Administrator access") ||
+		strings.Contains(string(controller), "net session >nul 2>&1") {
+		t.Fatal("Windows manual mode and protected data views must use a reliable administrator check")
+	}
+}
+
+func TestWindowsUninstallerFailsClosedUntilServiceIsRemoved(t *testing.T) {
+	_, source, _, _ := runtime.Caller(0)
+	root := filepath.Clean(filepath.Join(filepath.Dir(source), "../.."))
+	uninstaller, err := os.ReadFile(filepath.Join(root, "windows/uninstall-windows.bat"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(uninstaller)
+	ordered := []string{
+		"sc query %SERVICE_NAME% >nul 2>&1",
+		`set "SERVICE_QUERY_RESULT=!errorLevel!"`,
+		`if not "!SERVICE_QUERY_RESULT!"=="0" if not "!SERVICE_QUERY_RESULT!"=="1060" (`,
+		`if "!SERVICE_QUERY_RESULT!"=="0" (`,
+		`if not exist "%INSTALL_DIR%\novas-service.exe" (`,
+		`"%INSTALL_DIR%\novas-service.exe" uninstall >nul 2>&1`,
+		"sc query %SERVICE_NAME% >nul 2>&1",
+		`set "SERVICE_QUERY_RESULT=!errorLevel!"`,
+		`if not "!SERVICE_QUERY_RESULT!"=="1060" (`,
+		"No application files, user data, shortcuts, or firewall rules have been removed.",
+		"exit /b 1",
+		"REM Remove desktop shortcut",
+		"REM Ask user if they want to keep data",
+		"REM Remove firewall rules",
+	}
+	searchFrom := 0
+	for _, token := range ordered {
+		index := strings.Index(text[searchFrom:], token)
+		if index < 0 {
+			t.Fatalf("Windows uninstaller does not fail closed in the expected order near %q", token)
+		}
+		searchFrom += index + len(token)
 	}
 }

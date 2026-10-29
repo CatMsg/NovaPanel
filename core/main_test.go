@@ -30,3 +30,35 @@ func TestValidateConfigAcceptsSingBox115Options(t *testing.T) {
 		t.Fatalf("expected sing-box 1.15 options to be accepted: %v", err)
 	}
 }
+
+func TestValidateConfigAcceptsInlineACMECertificateProvider(t *testing.T) {
+	logger.InitLogger(logging.ERROR)
+	runtime := NewCore()
+	err := runtime.ValidateConfig([]byte(`{
+		"inbounds":[{
+			"type":"vless",
+			"tag":"vless-in",
+			"listen":"::",
+			"listen_port":443,
+			"users":[],
+			"tls":{
+				"enabled":true,
+				"certificate_provider":{
+					"type":"acme",
+					"domain":["edge.example"],
+					"provider":"letsencrypt",
+					"profile":"shortlived",
+					"account_key":"account-key",
+					"key_type":"p256",
+					"external_account":{"key_id":"account-id","mac_key":"account-mac"},
+					"dns01_challenge":{"provider":"cloudflare","api_token":"dns-token"}
+				}
+			}
+		}],
+		"outbounds":[{"type":"direct","tag":"direct"}],
+		"route":{"final":"direct"}
+	}`))
+	if err != nil {
+		t.Fatalf("expected inline ACME certificate provider options to parse: %v", err)
+	}
+}

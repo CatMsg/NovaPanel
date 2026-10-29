@@ -26,8 +26,11 @@ import (
 	"gorm.io/gorm"
 )
 
-const maxDatabaseBackupSize int64 = 1 << 30
+// MaxDatabaseBackupSize is the maximum size of an imported database snapshot.
+const MaxDatabaseBackupSize int64 = 1 << 30
 const restoreValidationTimeout = 3 * time.Minute
+
+var requestRestartAfterDatabaseRestore = SendSighup
 
 func CreateDBBackup(exclude string) (string, func(), error) {
 	return CreateDBBackupContext(context.Background(), exclude)
@@ -298,32 +301,23 @@ func ImportDBWithMaintenance(file multipart.File, preserveMaintenance bool) erro
 		return common.NewErrorf("Error resetting file reader: %v", err)
 	}
 
-	// Save the file as temporary file
-	tempPath := fmt.Sprintf("%s.temp", config.GetDBPath())
-	// Remove the existing fallback file (if any) before creating one
-	_, err = os.Stat(tempPath)
-	if err == nil {
-		errRemove := os.Remove(tempPath)
-		if errRemove != nil {
-			return common.NewErrorf("Error removing existing temporary db file: %v", errRemove)
-		}
-	}
-	// Create the temporary file
-	tempFile, err := os.Create(tempPath)
+	dbPath := config.GetDBPath()
+	tempFile, err := createRestoreTempFile(dbPath)
 	if err != nil {
 		return common.NewErrorf("Error creating temporary db file: %v", err)
 	}
-	defer tempFile.Close()
-
-	// Remove temp file before returning
-	defer os.Remove(tempPath)
+	tempPath := tempFile.Name()
+	defer func() {
+		_ = tempFile.Close()
+		_ = os.Remove(tempPath)
+	}()
 
 	// Save uploaded file to temporary file
-	written, err := io.Copy(tempFile, io.LimitReader(file, maxDatabaseBackupSize+1))
+	written, err := io.Copy(tempFile, io.LimitReader(file, MaxDatabaseBackupSize+1))
 	if err != nil {
 		return common.NewErrorf("Error saving db: %v", err)
 	}
-	if written > maxDatabaseBackupSize {
+	if written > MaxDatabaseBackupSize {
 		return common.NewError("Database backup exceeds 1 GiB limit")
 	}
 	if err := tempFile.Sync(); err != nil {
@@ -352,6 +346,10 @@ func ImportDBWithMaintenance(file multipart.File, preserveMaintenance bool) erro
 			return common.NewError("Error preserving maintenance state in replacement db")
 		}
 	}
+	if err := AdvanceRestoredAuthSessionEpoch(db, newDb); err != nil {
+		_ = newSQLDB.Close()
+		return common.NewError("Error advancing restored authentication session epoch")
+	}
 	if err := newSQLDB.Close(); err != nil {
 		return common.NewErrorf("Error closing validated db: %v", err)
 	}
@@ -367,38 +365,44 @@ func ImportDBWithMaintenance(file multipart.File, preserveMaintenance bool) erro
 	if err := oldDB.Close(); err != nil {
 		return common.NewErrorf("Error closing current db: %v", err)
 	}
-	removeSQLiteSidecars(config.GetDBPath())
+	removeSQLiteSidecars(dbPath)
 
 	// Backup the current database for fallback
-	fallbackPath := fmt.Sprintf("%s.backup", config.GetDBPath())
+	fallbackPath := fmt.Sprintf("%s.backup", dbPath)
 	// Remove the existing fallback file (if any)
 	_, err = os.Stat(fallbackPath)
 	if err == nil {
 		errRemove := os.Remove(fallbackPath)
 		if errRemove != nil {
-			reopenErr := InitDB(config.GetDBPath())
+			reopenErr := InitDB(dbPath)
 			return errors.Join(common.NewErrorf("Error removing existing fallback db file: %v", errRemove), reopenErr)
 		}
 	}
 	removeSQLiteSidecars(fallbackPath)
 	// Move the current database to the fallback location
-	err = os.Rename(config.GetDBPath(), fallbackPath)
+	err = os.Rename(dbPath, fallbackPath)
 	if err != nil {
-		reopenErr := InitDB(config.GetDBPath())
+		reopenErr := InitDB(dbPath)
 		return errors.Join(common.NewErrorf("Error backing up current db file: %v", err), reopenErr)
 	}
 
 	// Move temp to DB path
-	err = os.Rename(tempPath, config.GetDBPath())
+	err = os.Rename(tempPath, dbPath)
 	if err != nil {
-		restoreErr := restoreFallbackDatabase(config.GetDBPath(), fallbackPath)
+		restoreErr := restoreFallbackDatabase(dbPath, fallbackPath)
 		return errors.Join(common.NewErrorf("Error moving db file: %v", err), restoreErr)
 	}
 
-	err = InitDB(config.GetDBPath())
+	err = InitDB(dbPath)
 	if err != nil {
-		restoreErr := restoreFallbackDatabase(config.GetDBPath(), fallbackPath)
+		restoreErr := restoreFallbackDatabase(dbPath, fallbackPath)
 		return errors.Join(common.NewErrorf("Error opening restored db: %v", err), restoreErr)
+	}
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		return RotateAuthSessionEpoch(tx)
+	}); err != nil {
+		restoreErr := restoreFallbackDatabase(dbPath, fallbackPath)
+		return errors.Join(common.NewError("Error rotating restored authentication session epoch"), restoreErr)
 	}
 
 	if err := cleanupRestoredInboundConflicts(); err != nil {
@@ -410,12 +414,17 @@ func ImportDBWithMaintenance(file multipart.File, preserveMaintenance bool) erro
 	logger.Info("database restore completed; fallback database kept at ", fallbackPath)
 
 	// Restart app
-	err = SendSighup()
+	err = requestRestartAfterDatabaseRestore()
 	if err != nil {
 		return common.NewErrorf("Error restarting app: %v", err)
 	}
 
 	return nil
+}
+
+func createRestoreTempFile(dbPath string) (*os.File, error) {
+	pattern := "." + filepath.Base(dbPath) + ".restore-*"
+	return os.CreateTemp(filepath.Dir(dbPath), pattern)
 }
 
 func preserveRestoreMaintenance(conn *gorm.DB) error {
@@ -542,12 +551,12 @@ func ValidateDB(file multipart.File) (map[string]interface{}, error) {
 	}
 	tempPath := tempFile.Name()
 	defer os.Remove(tempPath)
-	written, err := io.Copy(tempFile, io.LimitReader(file, maxDatabaseBackupSize+1))
+	written, err := io.Copy(tempFile, io.LimitReader(file, MaxDatabaseBackupSize+1))
 	if err != nil {
 		_ = tempFile.Close()
 		return nil, err
 	}
-	if written > maxDatabaseBackupSize {
+	if written > MaxDatabaseBackupSize {
 		_ = tempFile.Close()
 		return nil, common.NewError("Database backup exceeds 1 GiB limit")
 	}

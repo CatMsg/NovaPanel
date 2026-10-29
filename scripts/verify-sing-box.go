@@ -27,14 +27,14 @@ import (
 
 const (
 	singBoxModule  = "github.com/sagernet/sing-box"
-	singBoxVersion = "v1.15.0-alpha.12"
-	singBoxSum     = "h1:mAzZow7/pGOmTLVcFUnmXKgkLEmVmOUDswNjTdYf3Ns="
-	singBoxModSum  = "h1:1gZ6h/h1qzAEVu8bQhvtVQWW/gy1EsueQcJ9uCl+vCU="
-	singBoxZipSHA  = "7d6e28f0b3380a92f34f30cd22bca2bc05e88384dfe6f3b6cc19f9848a84414f"
+	singBoxVersion = "v1.15.0-alpha.13"
+	singBoxSum     = "h1:O6728RBadOUoC186Lsky8Mt0f6Ulca0XcM2EQFVOtEQ="
+	singBoxModSum  = "h1:ZammbTArdjjUecHmXdXatOHMWI4lZNgKh/i+yvY+rng="
+	singBoxZipSHA  = "8a037ba62bde6b1fd70bde56fee523e90ca36aa9d36d62fb6f0d3fa4740d0b7e"
 	singBoxTest    = "route/network_started_test.go"
 	singBoxTestSHA = "2f7b8eb0aa76ccc1348dca086e1ee8bd4eb68d360041a030fc8592b58898c0c2"
-	masquePatch    = "docs/patches/sing-box-v1.15.0-alpha.12-masque-integration.patch"
-	masquePatchSHA = "76eccb382c92d11a94aaef7efe6ad14418aff3517e9d736698d84e36c16103ff"
+	masquePatch    = "docs/patches/sing-box-v1.15.0-alpha.13-masque-integration.patch"
+	masquePatchSHA = "790ea3fb2fe68faa77ff84b32037c63fb9e55f214afb6af01cd33fc45a8db6fa"
 )
 
 type sourcePatchPin struct {
@@ -43,9 +43,9 @@ type sourcePatchPin struct {
 
 // Only these reviewed hooks and the URLTest selection race fix may differ.
 var masquePatchPins = [3]sourcePatchPin{
-	{"protocol/masque/server.go", "9cd47ca60adbcc0ff440ae4ab04c1b7ba44c1e9ba111812e21d8e7d5b86ea45e", "b8a77ff30e5036999c21702856694e8c1c1d9483179477f42cf587bb45e1cb57"},
-	{"transport/masque/server.go", "75e07c475865fe3539cf1470fe7fa15d019d3261958111c341ebba5f38157086", "2662161eae854e01a8af3a78ffd687144b27295008f049e5bfa491a7c69f4d98"},
-	{"protocol/group/urltest.go", "fc3d26ed1cecf664f23c870b5caa3f96af868dd4cdbca4d46bc6a309fdaff2c2", "edc7dd0a2a91d19e81b036f65786b3b3a96ab0b5c11fbf543249b0874ee95779"},
+	{"protocol/masque/server.go", "9403cf920cf5c6cfa7b35aaa77924298037125b3ad8c1bacba12210ddb9cd15a", "3269efd045bedc4cc7f800abda8f3b78d001c519cb1d7870441647956c231163"},
+	{"transport/masque/server.go", "eedbba857ea834f38ca5873b039c7ae7a8d7034c37ea70525fbcfb0da197ddbc", "9d293dc4e545292e6995a858f5185453b6f8cda2870f66987e49540b02cc2c04"},
+	{"protocol/group/urltest.go", "88ecf28c540d9eeebec0ea6463306d23cdb16231f45d91dd1cd5d57b8073bf98", "bad4a29061ed4505b44aa91444ddc1837c1ac3a2d1f06f28d38b3f8c22f0c8de"},
 }
 
 type moduleInfo struct {

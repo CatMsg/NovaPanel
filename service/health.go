@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/CatMsg/NovaPanel/database"
+	"github.com/CatMsg/NovaPanel/database/model"
+	"github.com/CatMsg/NovaPanel/security"
 )
 
 type HealthCheck struct {
@@ -328,11 +330,15 @@ func (s *HealthService) checkDefaultCredentials() HealthCheck {
 	if db == nil {
 		return HealthCheck{ID: "credentials", Title: "管理员凭据", Status: "warning", Summary: "无法检查管理员凭据"}
 	}
-	var count int64
-	if err := db.Table("users").Where("username = ? AND password = ?", "admin", "admin").Count(&count).Error; err != nil {
+	var user model.User
+	err := db.Model(&model.User{}).Select("username", "password").Where("username = ?", "admin").First(&user).Error
+	if database.IsNotFound(err) {
+		return HealthCheck{ID: "credentials", Title: "管理员凭据", Status: "ok", Summary: "未使用默认管理员凭据"}
+	}
+	if err != nil {
 		return HealthCheck{ID: "credentials", Title: "管理员凭据", Status: "warning", Summary: "默认凭据检查失败", Detail: err.Error()}
 	}
-	if count > 0 {
+	if security.IsDefaultUserPassword(user.Username, user.Password) {
 		return HealthCheck{ID: "credentials", Title: "管理员凭据", Status: "error", Summary: "仍在使用 admin/admin", Action: "admins"}
 	}
 	return HealthCheck{ID: "credentials", Title: "管理员凭据", Status: "ok", Summary: "未使用默认管理员凭据"}

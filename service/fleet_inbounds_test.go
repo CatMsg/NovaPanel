@@ -17,6 +17,7 @@ import (
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
 	"github.com/CatMsg/NovaPanel/internal/testutil"
+	"gorm.io/gorm"
 )
 
 func initFleetInboundTestDB(t *testing.T) {
@@ -30,6 +31,30 @@ func initFleetInboundTestDB(t *testing.T) {
 	previousCore := corePtr
 	NewConfigService(&core.Core{})
 	t.Cleanup(func() { corePtr = previousCore })
+}
+
+func fleetInboundTestPort(t *testing.T) int {
+	t.Helper()
+	seed, err := net.Listen("tcp", "[::]:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := seed.Addr().(*net.TCPAddr).Port
+	_ = seed.Close()
+
+	const firstPort = 20000
+	const portCount = 49152 - firstPort
+	start = firstPort + start%portCount
+	for offset := 0; offset < portCount; offset++ {
+		port := firstPort + (start-firstPort+offset)%portCount
+		listener, err := net.Listen("tcp", net.JoinHostPort("::", strconv.Itoa(port)))
+		if err == nil {
+			_ = listener.Close()
+			return port
+		}
+	}
+	t.Fatal("no free non-ephemeral TCP port found for fleet inbound test")
+	return 0
 }
 
 func addFleetInboundTestClient(t *testing.T, name string, enabled bool, config string) model.Client {
@@ -142,6 +167,63 @@ func TestFleetInboundDeleteUsesSelectedRemote(t *testing.T) {
 	}
 	if err := fleet.DeleteFleetInbound(FleetInboundDeleteRequest{ServerID: "local", ID: 7, Tag: "la-hy2"}); err == nil {
 		t.Fatal("local target must be rejected")
+	}
+}
+
+func TestFleetRequestsDoNotFollowRedirects(t *testing.T) {
+	var redirected atomic.Int32
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirected.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer destination.Close()
+
+	for _, status := range []int{http.StatusFound, http.StatusTemporaryRedirect} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, destination.URL, status)
+			}))
+			defer server.Close()
+			fleet := &FleetService{}
+			if _, err := fleet.fetchFleetAPI(server.URL, "secret", "status", ""); err == nil || !strings.Contains(err.Error(), "直达地址") {
+				t.Fatalf("fleet status request did not report redirect: %v", err)
+			}
+			if _, err := fleet.fetchFleetJSON(server.URL, "secret", "fleet-inbound-delete", struct{}{}); err == nil || !strings.Contains(err.Error(), "直达地址") {
+				t.Fatalf("fleet management request did not report redirect: %v", err)
+			}
+			if got := redirected.Load(); got != 0 {
+				t.Fatalf("redirect target received %d requests", got)
+			}
+		})
+	}
+}
+
+func TestFleetResponsesHaveSizeLimit(t *testing.T) {
+	const prefix = `{"success":true,"obj":"`
+	const suffix = `"}`
+	for _, size := range []int{len(prefix) + len(suffix), fleetResponseLimit, fleetResponseLimit + 1} {
+		t.Run(strconv.Itoa(size), func(t *testing.T) {
+			payload := prefix + strings.Repeat("x", size-len(prefix)-len(suffix)) + suffix
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(payload))
+			}))
+			defer server.Close()
+			fleet := &FleetService{}
+			for _, request := range []func() (fleetAPIResponse, error){
+				func() (fleetAPIResponse, error) { return fleet.fetchFleetAPI(server.URL, "secret", "status", "") },
+				func() (fleetAPIResponse, error) {
+					return fleet.fetchFleetJSON(server.URL, "secret", "fleet-inbound-preflight", struct{}{})
+				},
+			} {
+				_, err := request()
+				if size <= fleetResponseLimit && err != nil {
+					t.Fatalf("valid response of %d bytes rejected: %v", size, err)
+				}
+				if size > fleetResponseLimit && (err == nil || !strings.Contains(err.Error(), "响应超过")) {
+					t.Fatalf("oversized response of %d bytes not rejected: %v", size, err)
+				}
+			}
+		})
 	}
 }
 
@@ -375,12 +457,7 @@ func TestFleetInboundRemotePreflightRejectsBusyPortAndRequiresLocalUsers(t *test
 	if err := database.GetDB().Where("1 = 1").Delete(&model.Client{}).Error; err != nil {
 		t.Fatal(err)
 	}
-	freePort, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	free := freePort.Addr().(*net.TCPAddr).Port
-	_ = freePort.Close()
+	free := fleetInboundTestPort(t)
 	request = fleetInboundRequest(t, `{"type":"socks","tag":"la-socks","listen":"::","listen_port":`+strconv.Itoa(free)+`}`)
 	if _, err := FleetInboundRemotePreflight(request, "target.example"); err == nil || !strings.Contains(err.Error(), "没有启用用户") {
 		t.Fatalf("remote preflight without local users = %v, want enabled-user validation", err)
@@ -388,12 +465,7 @@ func TestFleetInboundRemotePreflightRejectsBusyPortAndRequiresLocalUsers(t *test
 }
 
 func TestFleetInboundRemoteCreateBindsAllLocalUsersAndDoesNotCopyCN2Data(t *testing.T) {
-	probe, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := probe.Addr().(*net.TCPAddr).Port
-	_ = probe.Close()
+	port := fleetInboundTestPort(t)
 	portArg := strconv.Itoa(port)
 	forwardCall := []string{"bash", "scripts/hy2-forward.sh", "apply", "la-socks", portArg, portArg, "tcp"}
 	hostCommands := testutil.NewHostCommandSandbox(t, forwardCall[1:])
@@ -477,6 +549,53 @@ func TestFleetInboundRemoteCreateBindsAllLocalUsersAndDoesNotCopyCN2Data(t *test
 	}
 }
 
+func TestFleetInboundRemoteCreatePreflightsSavedSecrets(t *testing.T) {
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := probe.Addr().(*net.TCPAddr).Port
+	_ = probe.Close()
+	portArg := strconv.Itoa(port)
+	forwardCall := []string{"bash", "scripts/hy2-forward.sh", "apply", "la-ss", portArg, portArg, "tcp,udp"}
+	hostCommands := testutil.NewManagedPortSandbox(t, forwardCall)
+	initFleetInboundTestDB(t)
+	previousTrafficBlock := trafficBudgetBlocked.Load()
+	trafficBudgetBlocked.Store(true)
+	t.Cleanup(func() { trafficBudgetBlocked.Store(previousTrafficBlock) })
+	addFleetInboundTestClient(t, "local-user", true, `{"shadowsocks":{"password":"local-password"}}`)
+
+	var passwords []string
+	db := database.GetDB()
+	const callback = "test:capture-fleet-inbound-password"
+	if err := db.Callback().Create().Before("gorm:create").Register(callback, func(tx *gorm.DB) {
+		inbound, ok := tx.Statement.Dest.(*model.Inbound)
+		if !ok || inbound.Tag != "la-ss" {
+			return
+		}
+		var options struct {
+			Password string `json:"password"`
+		}
+		if json.Unmarshal(inbound.Options, &options) == nil {
+			passwords = append(passwords, options.Password)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Create().Remove(callback) })
+
+	request := fleetInboundRequest(t, `{"type":"shadowsocks","tag":"la-ss","listen":"127.0.0.1","listen_port":`+portArg+`,"method":"aes-128-gcm"}`)
+	if _, err := FleetInboundRemoteCreate(request, "fleet-admin", "la.example"); err != nil {
+		t.Fatalf("remote create failed: %v", err)
+	}
+	if len(passwords) != 2 || passwords[0] == "" || passwords[0] != passwords[1] {
+		t.Fatalf("preflight and saved inbound used different generated passwords (captured %d)", len(passwords))
+	}
+	if runtime.GOOS == "linux" {
+		hostCommands.AssertCalls(t, [][]string{forwardCall})
+	}
+}
+
 func TestCreateFleetInboundPreflightsEveryTargetBeforeWriting(t *testing.T) {
 	_ = testutil.NewManagedPortSandbox(t)
 	initFleetInboundTestDB(t)
@@ -534,6 +653,12 @@ func TestCreateFleetInboundPreflightsEveryTargetBeforeWriting(t *testing.T) {
 	for _, result := range results {
 		if result.Created {
 			t.Fatalf("target %q was created before all preflights passed: %+v", result.ID, result)
+		}
+		if result.ID == "good" && (result.Success || result.Preview == nil || !result.Preview.Valid || !strings.Contains(result.Error, "预检通过") || !strings.Contains(result.Error, "未创建")) {
+			t.Fatalf("passed target should be reported as preflighted but not created: %+v", result)
+		}
+		if result.ID == "bad" && (result.Success || result.Error == "") {
+			t.Fatalf("failed target must retain its preflight error: %+v", result)
 		}
 	}
 }

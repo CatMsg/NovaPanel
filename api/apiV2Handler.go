@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"sync"
 	"time"
@@ -79,8 +80,6 @@ func (a *APIv2Handler) postHandler(c *gin.Context) {
 		a.ApiService.LinkConvert(c)
 	case "subConvert":
 		a.ApiService.SubConvert(c)
-	case "importdb":
-		a.ApiService.ImportDb(c)
 	case "session-close":
 		a.ApiService.CloseLocalSession(c)
 	default:
@@ -142,8 +141,6 @@ func (a *APIv2Handler) getHandler(c *gin.Context) {
 		a.ApiService.CheckChanges(c)
 	case "keypairs":
 		a.ApiService.GetKeypairs(c)
-	case "getdb":
-		a.ApiService.GetDb(c)
 	case "checkOutbound":
 		a.ApiService.GetCheckOutbound(c)
 	case "ruleset-health":
@@ -165,16 +162,24 @@ func (a *APIv2Handler) findUsername(c *gin.Context) string {
 	defer a.tokensMu.Unlock()
 	for index := 0; index < len(a.tokens); {
 		t := a.tokens[index]
-		if t.Expiry > 0 && t.Expiry < time.Now().Unix() {
+		if tokenExpired(t.Expiry, time.Now().Unix()) {
 			a.tokens = append(a.tokens[:index], a.tokens[index+1:]...)
 			continue
 		}
-		if t.Token == token {
+		if apiTokenMatches(t.Token, token) {
 			return t.Username
 		}
 		index++
 	}
 	return ""
+}
+
+func apiTokenMatches(stored, candidate string) bool {
+	return subtle.ConstantTimeCompare([]byte(stored), []byte(candidate)) == 1
+}
+
+func tokenExpired(expiry, now int64) bool {
+	return expiry > 0 && expiry <= now
 }
 
 func (a *APIv2Handler) checkToken(c *gin.Context) {
@@ -188,18 +193,28 @@ func (a *APIv2Handler) checkToken(c *gin.Context) {
 }
 
 func (a *APIv2Handler) ReloadTokens() {
-	tokens, err := a.ApiService.LoadTokens()
+	a.reloadTokens(a.ApiService.LoadTokens)
+}
+
+func (a *APIv2Handler) reloadTokens(load func() ([]byte, error)) {
+	tokens, err := load()
 	if err == nil {
 		var newTokens []TokenInMemory
 		err = json.Unmarshal(tokens, &newTokens)
 		if err != nil {
+			a.replaceTokenCache(nil)
 			logger.Error("unable to load tokens: ", err)
 			return
 		}
-		a.tokensMu.Lock()
-		a.tokens = newTokens
-		a.tokensMu.Unlock()
-	} else {
-		logger.Error("unable to load tokens: ", err)
+		a.replaceTokenCache(newTokens)
+		return
 	}
+	a.replaceTokenCache(nil)
+	logger.Error("unable to load tokens: ", err)
+}
+
+func (a *APIv2Handler) replaceTokenCache(tokens []TokenInMemory) {
+	a.tokensMu.Lock()
+	a.tokens = tokens
+	a.tokensMu.Unlock()
 }

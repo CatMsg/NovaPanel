@@ -18,7 +18,7 @@ type Tls struct {
 type User struct {
 	Id         uint   `json:"id" form:"id" gorm:"primaryKey;autoIncrement"`
 	Username   string `json:"username" form:"username"`
-	Password   string `json:"password" form:"password"`
+	Password   string `json:"-" form:"-"`
 	LastLogins string `json:"lastLogin"`
 }
 

@@ -60,7 +60,7 @@ set "CGO_ENABLED=0"
 set "GOOS=windows"
 set "GOARCH=amd64"
 
-go build -ldflags="-w -s -checklinkname=0" -tags "with_quic,with_grpc,with_utls,with_acme,with_gvisor,with_tailscale" -o novas.exe main.go
+go build -ldflags="-w -s -checklinkname=0" -tags "with_quic,with_grpc,with_utls,with_acme,with_gvisor,with_tailscale" -o novas.exe .
 if errorlevel 1 (
     echo Error: Failed to build backend
     pause

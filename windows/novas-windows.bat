@@ -95,6 +95,12 @@ pause
 goto menu
 
 :view_logs
+fltmc >nul 2>&1
+if !errorLevel! neq 0 (
+    echo Viewing local service logs needs Administrator access because logs are protected.
+    pause
+    goto menu
+)
 echo Opening NovaPanel logs...
 if exist "%INSTALL_DIR%\logs" (
     start "" "%INSTALL_DIR%\logs"
@@ -112,6 +118,13 @@ pause
 goto menu
 
 :run_manual
+fltmc >nul 2>&1
+if !errorLevel! neq 0 (
+    echo Manual mode needs Administrator access because the database and private keys are protected.
+    echo Close this window and run NovaPanel Control Panel as Administrator.
+    pause
+    goto menu
+)
 echo Running NovaPanel manually...
 if exist "%INSTALL_DIR%\novas.exe" (
     cd /d "%INSTALL_DIR%"
@@ -148,12 +161,12 @@ echo Installing Windows Service...
 if exist "%INSTALL_DIR%\novas-service.exe" (
     cd /d "%INSTALL_DIR%"
     novas-service.exe install
-    if %errorLevel% equ 0 (
+    if !errorLevel! equ 0 (
         echo Service installed successfully!
         echo Starting service...
         net start %SERVICE_NAME%
     ) else (
-        echo Failed to install service. Error code: %errorLevel%
+        echo Failed to install service. Error code: !errorLevel!
     )
 ) else (
     echo Service wrapper not found. Please run the installer first.
@@ -167,10 +180,10 @@ if exist "%INSTALL_DIR%\novas-service.exe" (
     cd /d "%INSTALL_DIR%"
     net stop %SERVICE_NAME% >nul 2>&1
     novas-service.exe uninstall
-    if %errorLevel% equ 0 (
+    if !errorLevel! equ 0 (
         echo Service uninstalled successfully!
     ) else (
-        echo Failed to uninstall service. Error code: %errorLevel%
+        echo Failed to uninstall service. Error code: !errorLevel!
     )
 ) else (
     echo Service wrapper not found.
@@ -189,6 +202,12 @@ pause
 goto menu
 
 :show_config
+fltmc >nul 2>&1
+if !errorLevel! neq 0 (
+    echo Viewing database-backed settings needs Administrator access.
+    pause
+    goto menu
+)
 echo.
 echo ========================================
 echo NovaPanel Configuration

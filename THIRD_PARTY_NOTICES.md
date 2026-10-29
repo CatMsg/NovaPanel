@@ -2,13 +2,13 @@
 
 ## Sing-Box
 
-NovaPanel includes `github.com/sagernet/sing-box v1.15.0-alpha.12`, official
-commit `25b0d5ea3e466d246c708ac0f20d0448110e566c`, without local production
-source patches. Upstream's scoped lifecycle supersedes the former atomic
-start-state patch; a local lifecycle regression test is retained.
-The complete corresponding source, original license, provenance, checksums,
-and verification instructions are included in the NovaPanel source repository
-under `third_party/sing-box` and `third_party/SING_BOX_PATCH.md`.
+NovaPanel includes `github.com/sagernet/sing-box v1.15.0-alpha.13`, official
+commit `824dbcfb4dd0a95921840b1737b950cde590241e`, with a narrowly scoped,
+hash-pinned local integration patch. The patch adds optional MASQUE identity,
+address and peer-route policy hooks, plus synchronization for URLTest selection
+snapshots. The official archive, exact patch, regression test, checksums,
+provenance, license, and verification instructions are included in
+`third_party/sing-box` and `docs/SING_BOX_MASQUE_INTEGRATION.md`.
 
 Copyright (C) 2022 by nekohasekai. Sing-Box is licensed under GPL-3.0-or-later,
 without warranty. Its license additionally prohibits using the application's

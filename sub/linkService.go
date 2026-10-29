@@ -1,9 +1,11 @@
 package sub
 
 import (
+	"context"
 	"encoding/json"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/CatMsg/NovaPanel/logger"
 	"github.com/CatMsg/NovaPanel/util"
@@ -19,18 +21,35 @@ type LinkService struct {
 }
 
 func (s *LinkService) GetLinks(linkJson *json.RawMessage, types string, clientInfo string) []string {
+	result, _ := s.GetLinksContext(context.Background(), linkJson, types, clientInfo)
+	return result
+}
+
+func (s *LinkService) GetLinksContext(ctx context.Context, linkJson *json.RawMessage, types string, clientInfo string) ([]string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	links := []Link{}
 	var result []string
 	err := json.Unmarshal(*linkJson, &links)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	for _, link := range links {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		switch link.Type {
 		case "external":
 			result = append(result, link.Uri)
 		case "sub":
-			subLinks := util.GetExternalLink(link.Uri)
+			subLinks, _ := util.GetExternalLinkWithHeadersContext(ctx, link.Uri, 15*time.Second)
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			result = append(result, strings.Split(subLinks, "\n")...)
 		case "local":
 			if types == "all" {
@@ -38,7 +57,7 @@ func (s *LinkService) GetLinks(linkJson *json.RawMessage, types string, clientIn
 			}
 		}
 	}
-	return result
+	return result, nil
 }
 
 func (s *LinkService) addClientInfo(uri string, clientInfo string) string {

@@ -2,39 +2,285 @@ package service
 
 import (
 	"encoding/json"
-	"reflect"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/CatMsg/NovaPanel/core"
 )
 
-func TestValidateSingBoxConfigDoesNotRewriteFields(t *testing.T) {
+func TestValidateSingBoxConfigMigratesLosslessSingBox116Fields(t *testing.T) {
 	raw := []byte(`{
-		"http_clients":[{"tag":"novapanel-default","detour":"direct"}],
-		"dns":{"independent_cache":true,"rules":[{"ip_cidr":["10.0.0.0/8"],"strategy":"ipv4_only"}]},
-		"inbounds":[{"type":"tun","tag":"tun-in","stack":"system","tls":{"acme":{"domain":["example.com"]}}}],
-		"route":{"rule_set":[{"type":"remote","tag":"rules","url":"https://example.com/rules.srs","download_detour":"direct"}]},
-		"experimental":{"cache_file":{"store_rdrc":true,"rdrc_timeout":"7d"}}
+		"dns":{"independent_cache":true,"strategy":"ipv4_only","rules":[{"rule_set_ip_cidr_accept_empty":false}]},
+		"route":{"rule_set":[{"type":"remote","tag":"rules","url":"https://example.com/rules.srs","download_detour":"proxy"}]},
+		"experimental":{"cache_file":{"store_rdrc":true}}
 	}`)
 
 	validated, err := ValidateSingBoxConfig(raw)
 	if err != nil {
 		t.Fatalf("validate config: %v", err)
 	}
-	var want, got map[string]interface{}
-	if err := json.Unmarshal(raw, &want); err != nil {
-		t.Fatal(err)
-	}
+	var got map[string]interface{}
 	if err := json.Unmarshal(validated, &got); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("validation rewrote configuration fields\nwant: %#v\ngot: %#v", want, got)
+	if _, exists := objectValue(got["dns"])["independent_cache"]; exists {
+		t.Fatal("deprecated independent_cache was not removed")
+	}
+	if objectValue(got["dns"])["strategy"] != "ipv4_only" {
+		t.Fatalf("current DNS strategy was unexpectedly changed: %#v", got["dns"])
+	}
+	if _, exists := objectList(objectValue(got["dns"])["rules"])[0]["rule_set_ip_cidr_accept_empty"]; exists {
+		t.Fatal("false rule_set_ip_cidr_accept_empty was not removed")
+	}
+	ruleSet := objectList(objectValue(got["route"])["rule_set"])[0]
+	if _, exists := ruleSet["download_detour"]; exists {
+		t.Fatal("deprecated download_detour was not removed")
+	}
+	if objectValue(ruleSet["http_client"])["detour"] != "proxy" {
+		t.Fatalf("download_detour was not migrated: %#v", ruleSet)
+	}
+	cacheFile := objectValue(objectValue(got["experimental"])["cache_file"])
+	if _, exists := cacheFile["store_rdrc"]; exists || !boolValue(cacheFile["store_dns"]) {
+		t.Fatalf("store_rdrc was not migrated to store_dns: %#v", cacheFile)
+	}
+	if string(raw) != `{
+		"dns":{"independent_cache":true,"strategy":"ipv4_only","rules":[{"rule_set_ip_cidr_accept_empty":false}]},
+		"route":{"rule_set":[{"type":"remote","tag":"rules","url":"https://example.com/rules.srs","download_detour":"proxy"}]},
+		"experimental":{"cache_file":{"store_rdrc":true}}
+	}` {
+		t.Fatal("normalization mutated the caller's input buffer")
+	}
+}
+
+func TestValidateSingBoxConfigRejectsAmbiguousSingBox116Fields(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  string
+		wantErr string
+	}{
+		{name: "DNS action strategy", config: `{"dns":{"rules":[{"action":"route","server":"local","strategy":"ipv4_only"}]}}`, wantErr: "dns.rules[0].strategy"},
+		{name: "rule set accepts empty IP match", config: `{"dns":{"rules":[{"rule_set":"geoip","rule_set_ip_cidr_accept_empty":true}]}}`, wantErr: "dns.rules[0].rule_set_ip_cidr_accept_empty"},
+		{name: "DNS response CIDR", config: `{"dns":{"rules":[{"ip_cidr":"10.0.0.0/8","action":"route","server":"local"}]}}`, wantErr: "dns.rules[0] uses deprecated DNS response address matching"},
+		{name: "DNS private IP response", config: `{"dns":{"rules":[{"ip_is_private":true,"action":"route","server":"local"}]}}`, wantErr: "dns.rules[0] uses deprecated DNS response address matching"},
+		{name: "DNS response matcher with explicit migration", config: `{"dns":{"rules":[{"ip_cidr":"10.0.0.0/8","match_response":true,"action":"route","server":"local"}]}}`},
+		{name: "RDRC timeout", config: `{"experimental":{"cache_file":{"rdrc_timeout":"7d"}}}`, wantErr: "experimental.cache_file.rdrc_timeout"},
+		{name: "store DNS conflict", config: `{"experimental":{"cache_file":{"store_rdrc":true,"store_dns":false}}}`, wantErr: "conflicts with store_dns=false"},
+		{name: "remote ruleset invalid default HTTP client", config: `{"route":{"default_http_client":{},"rule_set":[{"type":"remote","tag":"rules","url":"https://example.com/rules.srs"}]}}`, wantErr: "route.default_http_client must be a string"},
+		{name: "remote ruleset invalid final outbound", config: `{"route":{"final":{},"rule_set":[{"type":"remote","tag":"rules","url":"https://example.com/rules.srs"}]}}`, wantErr: "route.final must be a string"},
+		{name: "remote ruleset inline HTTP client", config: `{"route":{"rule_set":[{"type":"remote","tag":"rules","url":"https://example.com/rules.srs","http_client":{"detour":"proxy-a"}}]}}`},
+		{name: "remote ruleset explicit default HTTP client", config: `{"http_clients":[{"tag":"default-client"}],"route":{"default_http_client":"default-client","rule_set":[{"type":"remote","tag":"rules","url":"https://example.com/rules.srs"}]}}`},
+		{name: "remote ruleset unknown named HTTP client", config: `{"route":{"rule_set":[{"type":"remote","tag":"rules","url":"https://example.com/rules.srs","http_client":"missing"}]}}`, wantErr: "route.rule_set[0].http_client 引用了不存在的 HTTP 客户端"},
+		{name: "conflicting rule set clients", config: `{"route":{"rule_set":[{"type":"remote","tag":"rules","url":"https://example.com/rules.srs","download_detour":"proxy-a","http_client":{"detour":"proxy-b"}}]}}`, wantErr: "download_detour conflicts with http_client.detour"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := ValidateSingBoxConfig([]byte(test.config))
+			if test.wantErr == "" {
+				if err != nil {
+					t.Fatalf("valid config rejected: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("error = %v, want substring %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateSingBoxConfigMigratesLegacyDirectRouteActions(t *testing.T) {
+	raw := []byte(`{
+		"outbounds":[{"type":"direct","tag":"novapanel-direct-action-0"}],
+		"route":{"rules":[
+			{"domain":"example.com","action":"direct","bind_interface":"eth0","routing_mark":42,"tcp_fast_open":true},
+			{"type":"logical","mode":"and","rules":[{"domain":"nested.example"}]},
+			{"domain":"other.example","action":"direct","reuse_addr":true,"udp_fragment":true}
+		]}
+	}`)
+	validated, err := ValidateSingBoxConfig(raw)
+	if err != nil {
+		t.Fatalf("migrate config: %v", err)
+	}
+	var config map[string]interface{}
+	if err := json.Unmarshal(validated, &config); err != nil {
+		t.Fatal(err)
+	}
+	rules := objectList(objectValue(config["route"])["rules"])
+	if rules[0]["action"] != "route" || rules[0]["outbound"] != "novapanel-direct-action-0-2" {
+		t.Fatalf("top-level direct action was not rewritten safely: %#v", rules[0])
+	}
+	if _, exists := rules[0]["bind_interface"]; exists {
+		t.Fatal("legacy dialer option remained on the route rule")
+	}
+	nested := objectList(rules[1]["rules"])
+	if len(nested) != 1 || nested[0]["domain"] != "nested.example" || nested[0]["action"] != nil {
+		t.Fatalf("logical match rule was unexpectedly modified: %#v", nested)
+	}
+	if rules[2]["action"] != "route" || rules[2]["outbound"] != "novapanel-direct-action-2" {
+		t.Fatalf("second direct action was not migrated: %#v", rules[2])
+	}
+	outbounds := objectList(config["outbounds"])
+	if len(outbounds) != 3 {
+		t.Fatalf("expected existing outbound and two generated outbounds, got %#v", config["outbounds"])
+	}
+	generated := outbounds[1:]
+	if generated[0]["type"] != "direct" || generated[0]["bind_interface"] != "eth0" || generated[0]["routing_mark"] != float64(42) || generated[0]["tcp_fast_open"] != true || generated[0]["udp_fragment"] != false {
+		t.Fatalf("top-level dialer options were not preserved: %#v", generated[0])
+	}
+	if generated[1]["type"] != "direct" || generated[1]["tag"] != "novapanel-direct-action-2" || generated[1]["reuse_addr"] != true || generated[1]["udp_fragment"] != true {
+		t.Fatalf("nested dialer options were not preserved: %#v", generated[1])
+	}
+	if err := core.NewCore().ValidateConfig(validated); err != nil {
+		t.Fatalf("pinned sing-box parser rejected migrated config: %v", err)
+	}
+}
+
+func TestValidateSingBoxConfigMigratesImplicitRuleSetHTTPClient(t *testing.T) {
+	tests := []struct {
+		name             string
+		config           string
+		wantDefaultTag   string
+		wantClientTag    string
+		wantClientDetour string
+		wantClientCount  int
+	}{
+		{
+			name:            "generated direct fallback",
+			config:          `{"route":{"rule_set":[{"type":"remote","tag":"rules","url":"https://example.com/rules.srs"}]}}`,
+			wantDefaultTag:  "novapanel-default",
+			wantClientTag:   "novapanel-default",
+			wantClientCount: 1,
+		},
+		{
+			name:             "configured final outbound",
+			config:           `{"outbounds":[{"type":"socks","tag":"proxy-a","server":"proxy.example","server_port":1080}],"route":{"final":"proxy-a","rule_set":[{"type":"remote","tag":"rules","url":"https://example.com/rules.srs"}]}}`,
+			wantDefaultTag:   "novapanel-default",
+			wantClientTag:    "novapanel-default",
+			wantClientDetour: "proxy-a",
+			wantClientCount:  1,
+		},
+		{
+			name:            "no final outbound retains generated direct despite other outbounds",
+			config:          `{"outbounds":[{"type":"socks","tag":"proxy-a","server":"proxy.example","server_port":1080}],"route":{"rule_set":[{"type":"remote","tag":"rules","url":"https://example.com/rules.srs"}]}}`,
+			wantDefaultTag:  "novapanel-default",
+			wantClientTag:   "novapanel-default",
+			wantClientCount: 1,
+		},
+		{
+			name:            "existing client list uses core default first entry",
+			config:          `{"http_clients":[{"tag":"first-client"},{"tag":"second-client"}],"route":{"rule_set":[{"type":"remote","tag":"rules","url":"https://example.com/rules.srs"}]}}`,
+			wantDefaultTag:  "first-client",
+			wantClientTag:   "first-client",
+			wantClientCount: 2,
+		},
+		{
+			name:            "existing direct outbound stays direct",
+			config:          `{"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct","rule_set":[{"type":"remote","tag":"rules","url":"https://example.com/rules.srs"}]}}`,
+			wantDefaultTag:  "novapanel-default",
+			wantClientTag:   "novapanel-default",
+			wantClientCount: 1,
+		},
+		{
+			name:             "configured direct outbound settings are retained",
+			config:           `{"outbounds":[{"type":"direct","tag":"direct","bind_interface":"eth0"}],"route":{"final":"direct","rule_set":[{"type":"remote","tag":"rules","url":"https://example.com/rules.srs"}]}}`,
+			wantDefaultTag:   "novapanel-default",
+			wantClientTag:    "novapanel-default",
+			wantClientDetour: "direct",
+			wantClientCount:  1,
+		},
+		{
+			name:            "zero direct timeout remains equivalent to direct fallback",
+			config:          `{"outbounds":[{"type":"direct","tag":"direct","connect_timeout":"0s"}],"route":{"final":"direct","rule_set":[{"type":"remote","tag":"rules","url":"https://example.com/rules.srs"}]}}`,
+			wantDefaultTag:  "novapanel-default",
+			wantClientTag:   "novapanel-default",
+			wantClientCount: 1,
+		},
+		{
+			name:             "empty explicit resolver pointer is retained",
+			config:           `{"outbounds":[{"type":"direct","tag":"direct","domain_resolver":{}}],"route":{"final":"direct","rule_set":[{"type":"remote","tag":"rules","url":"https://example.com/rules.srs"}]}}`,
+			wantDefaultTag:   "novapanel-default",
+			wantClientTag:    "novapanel-default",
+			wantClientDetour: "direct",
+			wantClientCount:  1,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			validated, err := ValidateSingBoxConfig([]byte(test.config))
+			if err != nil {
+				t.Fatalf("validate config: %v", err)
+			}
+			var config map[string]interface{}
+			if err := json.Unmarshal(validated, &config); err != nil {
+				t.Fatal(err)
+			}
+			route := objectValue(config["route"])
+			if route["default_http_client"] != test.wantDefaultTag {
+				t.Fatalf("default_http_client = %#v, want %q", route["default_http_client"], test.wantDefaultTag)
+			}
+			clients := objectList(config["http_clients"])
+			if len(clients) != test.wantClientCount || stringValue(clients[0]["tag"]) != test.wantClientTag {
+				t.Fatalf("http_clients = %#v, want %d entries beginning with %q", clients, test.wantClientCount, test.wantClientTag)
+			}
+			if got := stringValue(clients[0]["detour"]); got != test.wantClientDetour {
+				t.Fatalf("default client detour = %q, want %q", got, test.wantClientDetour)
+			}
+		})
+	}
+}
+
+func TestImplicitRuleSetHTTPClientMigrationParsesWithPinnedCore(t *testing.T) {
+	configs := []string{
+		`{"route":{"rule_set":[{"type":"remote","tag":"rules","url":"https://example.com/rules.srs"}]}}`,
+		`{"outbounds":[{"type":"socks","tag":"proxy-a","server":"proxy.example","server_port":1080}],"route":{"final":"proxy-a","rule_set":[{"type":"remote","tag":"rules","url":"https://example.com/rules.srs"}]}}`,
+		`{"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct","rule_set":[{"type":"remote","tag":"rules","url":"https://example.com/rules.srs"}]}}`,
+	}
+	for index, raw := range configs {
+		t.Run(strconv.Itoa(index), func(t *testing.T) {
+			validated, err := ValidateSingBoxConfig([]byte(raw))
+			if err != nil {
+				t.Fatalf("migrate config: %v", err)
+			}
+			if err := core.NewCore().ValidateConfig(validated); err != nil {
+				t.Fatalf("pinned sing-box parser rejected migrated config: %v", err)
+			}
+		})
 	}
 }
 
 func TestValidateSingBoxConfigRequiresObject(t *testing.T) {
 	if _, err := ValidateSingBoxConfig([]byte(`null`)); err == nil || !strings.Contains(err.Error(), "JSON object") {
 		t.Fatalf("expected a root object validation error, got %v", err)
+	}
+	if _, err := ValidateSingBoxConfig([]byte(`{} {}`)); err == nil || !strings.Contains(err.Error(), "multiple JSON values") {
+		t.Fatalf("expected trailing JSON values to be rejected, got %v", err)
+	}
+}
+
+func TestValidateSingBoxConfigPreservesLargeIntegerDuringMigration(t *testing.T) {
+	raw := []byte(`{"experimental":{"cache_file":{"store_rdrc":false}},"inbounds":[{"type":"openvpn","renegotiate_bytes":9007199254740993}]}`)
+	validated, err := ValidateSingBoxConfig(raw)
+	if err != nil {
+		t.Fatalf("validate config: %v", err)
+	}
+	if !strings.Contains(string(validated), `"renegotiate_bytes": 9007199254740993`) {
+		t.Fatalf("large integer was changed during migration: %s", validated)
+	}
+}
+
+func TestDefaultConfigUsesExplicitHTTPClientForRemoteRuleSets(t *testing.T) {
+	validated, err := ValidateSingBoxConfig([]byte(defaultConfig))
+	if err != nil {
+		t.Fatalf("validate default config: %v", err)
+	}
+	var config map[string]interface{}
+	if err := json.Unmarshal(validated, &config); err != nil {
+		t.Fatal(err)
+	}
+	route := objectValue(config["route"])
+	if route["default_http_client"] != "novapanel-default" || !hasHTTPClientTag(config["http_clients"], "novapanel-default") {
+		t.Fatalf("default config lacks an explicit default HTTP client: %#v", config)
 	}
 }
 

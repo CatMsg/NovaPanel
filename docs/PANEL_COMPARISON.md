@@ -92,9 +92,9 @@ npm run build
 3. **后端兜底**：保存/预检校验 DNS 标签、引用和显式解析器依赖环，错误带字段路径；兼容核心的匿名索引标签及默认 local 解析器生命周期。仅遍历已知配置容器，不修改请求头或 hosts 自定义映射。
 4. **订阅信息页**：自动重置统一显示“每月 1 日”，使用面板时区显示下次重置；未启用自动重置时，首次使用后的有效天数保持原行为。
 
-### 后续可选项
+### 2026-10-11 后续可选项（历史计划）
 
-优先级建议：自动异机备份与恢复演练 > 明确的维护模式 > 订阅隐藏开关。独立订阅随机标识涉及旧链接迁移，仍单独设计，不混进这次补丁。没有新加安全能力模块、Xray 专属字段或旁路核心，也没有做无依据的性能提升承诺。
+当时的优先级建议是自动异机备份与恢复演练、明确的维护模式、订阅隐藏开关；这些功能已在 2026-10-13 补充中记录为实现。独立随机订阅标识没有采用，且用户已确认继续使用用户名订阅 URL，不属于待实现项。没有新加安全能力模块、Xray 专属字段或旁路核心，也没有做无依据的性能提升承诺。
 
 ### 本轮验证
 
@@ -112,3 +112,32 @@ npm run build
 | 订阅隐藏 | `exclude_from_sub` 只影响后续订阅过滤，入站继续运行，不轮换凭据或撤销既有客户端配置；本地 UI、单测与 race 回归已验证。 |
 
 本地验证：前端全套 E2E 36 项、单测 46 项、typecheck、lint 与生产构建通过。默认 Go 全包测试、核心与业务层 race、vet 和发布所用 staticcheck 通过；QUIC 测试强制执行，不可用时仅跳过对应运行态子测试。聚合原生配置启动的并发修复连续 20 次回归通过。本地 IAB 验证维护状态跨进程保留及恢复，原数据库数据保留。未发布、未部署，未验证真实 WebDAV 目的地、外部凭据恢复或公网客户端互通；没有性能提升测量。
+
+## 2026-10-30 状态复核
+
+上面的 2026-10-02、10-11 和 10-13 比较快照保留当时的上游源码版本与测试结果，不代表本日重新比较了 s-ui/3x-ui 的完整源码。下表核对 NovaPanel 当前工作树状态；本日上游 Release 说明另见后文。
+
+| 领域 | 当前证据 | 仍未验证或处理 |
+| --- | --- | --- |
+| MASQUE | sing-box 已固定为官方 `v1.15.0-alpha.13`，来源、补丁、回归文件和 Cronet pin 有完整哈希校验；本地 sing-box race 和 Mihomo 1.19.31 TCP/UDP 互通门禁通过。 | 未做公网客户端互通、性能测量或生产 VPS canary；1.16 正式版尚未进入升级验收。 |
+| 异地备份 | WebDAV 自动备份默认关闭；配置、状态、密钥写入保护、快照完整性与隔离恢复演练均有实现和 UI/E2E 覆盖。 | 未接入真实 WebDAV 服务商，未验证真实凭据、远端恢复与服务商行为。 |
+| 维护模式 | 持久状态、暂停代理流量、阻止 watchdog 意外重启的路径已有实现及本地回归。 | 未在生产服务器验证维护/恢复操作。 |
+| 订阅隐藏 | 入站 `exclude_from_sub` 只过滤后续订阅内容，不停止入站、不轮换凭据；已有前后端测试。 | 不撤销客户端已导入的旧配置，这是预期行为。 |
+| 本地发布门禁 | Go 包测试、race、vet、staticcheck、build、Sing-Box 源码校验、Mihomo 互通，以及前端 61 个单测、57 个 E2E、lint、typecheck、build 均通过。 | 当前改动尚未推送，所以 GitHub Windows 安装器及 Linux UFW/ACME 作业没有针对本工作树运行；本机 macOS 不能替代这些原生环境验收。 |
+| 订阅标识 | 继续采用用户名订阅 URL，按用户确认未改成随机标识。 | 无迁移或旧链接过期工作。 |
+| DNS 查询匹配 | 当前 DNS 规则编辑器支持 Sing-Box `query_type`、`query_client_subnet`、`query_dnssec`，并保留旧标量/列表写法。 | 客户端是否实际发送 EDNS Client Subnet 或 DNSSEC DO 位取决于查询端，UI 条件不保证外部查询会命中。 |
+| Linux 架构 | 用户确认服务端发行仅支持 amd64；安装器检测和 Release 构建矩阵现统一限制为 amd64。 | 该契约检查已在本地通过；此工作树还需 GitHub runner 验证原生 Linux 安装流程。 |
+
+当前优先补齐项不是再增加面板功能，而是获取 Windows/Linux 托管 runner 结果、真实 WebDAV 恢复验收和受控公网 canary。所有线上验收均需单独授权；本地检查不等同于发布或部署。
+
+### 2026-10-30 上游 Release 复查
+
+截至本日读取官方 GitHub Release 页面：[s-ui v1.6.6](https://github.com/alireza0/s-ui/releases/tag/v1.6.6) 于 10 月 24 日发布；[3x-ui v3.11.0](https://github.com/MHSanaei/3x-ui/releases/tag/v3.11.0) 于 10 月 25 日发布。这里复核的是 Release 说明和与当前代码直接相关的功能点，不是对两套上游源码的完整逐文件比较。
+
+| 上游变化 | 与 NovaPanel 的关系 | 结论 |
+| --- | --- | --- |
+| s-ui 修复 QUIC 用户会话来源地址在 NAT 重绑定后长期留存，并补充外部 Clash 订阅的 XHTTP 参数保留 | s-ui 改的是独立用户会话来源注册表；NovaPanel 的 `ConnTracker` 跟踪 sing-box 路由后的 TCP/UDP 连接，并在包装连接关闭或读写终止时移除记录，生命周期模型不同 | 暂无证据表明是同一类缺陷，不移植清理策略；需要时应针对 NovaPanel 的 QUIC 在线用户/历史另设回归，而不能把实时连接表当作用户会话注册表 |
+| 两家上游都改善 XHTTP 到 Clash/Mihomo 订阅的参数传递；3x-ui 还明确提到传递 XMUX 设置 | NovaPanel 的聚合器只对原始 Clash 节点做格式过滤和名称合并，不应丢弃未知的嵌套传输参数 | 新增 `TestConvertRawClashProxiesPreservesXHTTPOptions`，覆盖 XHTTP、TLS/ALPN、headers、padding、reuse-settings 和 download-settings；CI/发布脚本将真实生成配置交给固定摘要的 Mihomo 1.19.31 `-t` 解析，且全套 MASQUE TCP/UDP 门禁通过 |
+| 3x-ui v3.11.0 的缓存、索引、gRPC 连接池及 AmneziaWG 优化 | 主要依赖 Xray、特定内核数据面或大规模部署负载 | 不按 Release 文案直接移植；先有 NovaPanel 自身可复现的性能剖析和基准数据再立项。其安全改动不在本次范围内 |
+
+**支持边界：**NovaPanel 当前验证的是把外部 Mihomo XHTTP 节点配置原样聚合，并由 Mihomo 解析通过；没有验证与真实 XHTTP 服务端连通，也不代表面板可原生创建 XHTTP 入站。当前官方 sing-box [V2Ray transport 配置](https://sing-box.sagernet.org/configuration/shared/v2ray-transport/)列出 HTTP、WebSocket、QUIC、gRPC 和 HTTPUpgrade，没有 XHTTP。原生入站/订阅生成仍是未支持项，不应在没有核心或数据面支持时伪装成已完成。Mihomo 的 XHTTP 和 XMUX 字段以其[官方传输配置](https://wiki.metacubex.one/en/config/proxies/transport/)为准。

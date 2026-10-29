@@ -35,13 +35,13 @@ NovaPanel 是一个 Sing-Box 管理面板，提供协议配置、订阅、端口
 安装最新版本：
 
 ```sh
-bash <(curl -Ls https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh)
+_novas_installer_tmp="$(mktemp)" && trap 'rm -f "$_novas_installer_tmp"' EXIT && curl --proto '=https' --proto-redir '=https' -fsSL https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh -o "$_novas_installer_tmp" && bash -n "$_novas_installer_tmp" && bash "$_novas_installer_tmp"; _novas_installer_rc=$?; exit "$_novas_installer_rc"
 ```
 
 安装指定版本：
 
 ```sh
-bash <(curl -Ls https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh) vx.x.x
+_novas_installer_tmp="$(mktemp)" && trap 'rm -f "$_novas_installer_tmp"' EXIT && curl --proto '=https' --proto-redir '=https' -fsSL https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh -o "$_novas_installer_tmp" && bash -n "$_novas_installer_tmp" && bash "$_novas_installer_tmp" vx.x.x; _novas_installer_rc=$?; exit "$_novas_installer_rc"
 ```
 
 安装时可设置管理员账号、面板路径和端口。安装后可使用以下命令维护：

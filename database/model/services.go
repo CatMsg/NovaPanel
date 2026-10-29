@@ -52,7 +52,11 @@ func (i Service) MarshalJSON() ([]byte, error) {
 	combined["type"] = i.Type
 	combined["tag"] = i.Tag
 	if i.Tls != nil {
-		combined["tls"] = i.Tls.Server
+		tlsServer, err := i.Tls.ServerConfig()
+		if err != nil {
+			return nil, err
+		}
+		combined["tls"] = tlsServer
 	}
 
 	if i.Options != nil {

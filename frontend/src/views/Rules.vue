@@ -612,6 +612,7 @@ function dnsRuleMatchLabel(rule: any): string {
     rule?.domain_suffix,
     rule?.domain_keyword,
     rule?.query_type,
+    rule?.query_client_subnet,
     rule?.inbound,
     rule?.auth_user,
     rule?.source_ip_cidr,
@@ -620,6 +621,7 @@ function dnsRuleMatchLabel(rule: any): string {
     const values = listRuleValues(candidate)
     if (values.length > 0) return compactRuleValues(values)
   }
+  if (rule?.query_dnssec) return 'DNSSEC'
   return '全部 DNS 查询'
 }
 

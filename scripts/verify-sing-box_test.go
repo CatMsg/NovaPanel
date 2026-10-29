@@ -366,7 +366,7 @@ func TestOfficialArchiveIntegrity(t *testing.T) {
 			case "module-path":
 				altered.Path = "example.org/other"
 			case "module-version":
-				altered.Version = "v1.15.0-alpha.13"
+				altered.Version = "v1.15.0-alpha.12"
 			case "replacement":
 				altered.Replace = &moduleInfo{Path: "../untrusted"}
 			case "module-sum":

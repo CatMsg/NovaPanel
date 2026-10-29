@@ -44,7 +44,7 @@ describe('API request lifetimes', () => {
       readApi('api/clients', { params: { id: 17 } }),
       readApi('api/clients', { params: { id: 18 } }),
       readApi('api/clients', { params: { id: 17 }, signal: new AbortController().signal }),
-      readApi('api/logout'), readApi('api/logout'),
+      readApi('api/checkLogin'), readApi('api/checkLogin'),
     ]
     await vi.waitFor(() => expect(requests).toHaveLength(5))
     requests.forEach(request => request.resolve())

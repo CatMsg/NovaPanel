@@ -1,8 +1,18 @@
 <template>
   <v-card subtitle="ACME" style="background-color: inherit;">
+    <v-alert v-if="hasConflict" type="warning" density="compact" class="mb-3">
+      {{ $t('tls.acme.legacyConflict') }}
+      <v-btn size="small" variant="text" @click="removeLegacyAcme">{{ $t('tls.acme.removeLegacy') }}</v-btn>
+    </v-alert>
+    <v-alert v-else-if="hasProviderReference" type="info" density="compact" class="mb-3">
+      {{ $t('tls.acme.providerReference') }}
+    </v-alert>
+    <v-alert v-if="enabled && hasACME && !hasConflict && !hasProviderReference && !hasDomains" type="warning" density="compact" class="mb-3">
+      {{ $t('tls.acme.domainRequired') }}
+    </v-alert>
     <v-row>
       <v-col cols="12" sm="6" md="4">
-        <v-switch color="primary" :label="$t('enable')" v-model="enabled" hide-details></v-switch>
+        <v-switch color="primary" :label="$t('enable')" v-model="enabled" :disabled="hasProviderReference || hasConflict" hide-details></v-switch>
       </v-col>
       <v-col cols="12" md="8" v-if="enabled">
         <v-text-field
@@ -12,7 +22,7 @@
         </v-text-field>
       </v-col>
     </v-row>
-    <template v-if="enabled">
+    <template v-if="enabled && hasACME && !hasConflict && !hasProviderReference">
       <v-row>
         <v-col cols="12" sm="6" md="4" v-if="optionDir">
           <v-text-field
@@ -24,7 +34,7 @@
         <v-col cols="12" sm="6" md="4" v-if="optionDefault">
           <v-combobox
             v-model="acme.default_server_name"
-            :items="acme.domain"
+            :items="domainOptions"
             :label="$t('tls.acme.defaultDomain')"
             hide-details
           ></v-combobox>
@@ -161,7 +171,7 @@
 </template>
 
 <script lang="ts">
-import { acme } from '@/types/tls'
+import { acmeCertificateProvider } from '@/types/tls'
 
 export default {
   props: ['tls'],
@@ -181,15 +191,52 @@ export default {
     }
   },
   computed: {
-    acme() {
-      return <acme>this.$props.tls.acme
+    acme(): acmeCertificateProvider {
+      const provider = this.$props.tls.certificate_provider
+      if (provider && typeof provider === 'object' && provider.type === 'acme') {
+        return <acmeCertificateProvider>provider
+      }
+      return undefined as unknown as acmeCertificateProvider
+    },
+    hasACME(): boolean {
+      const provider = this.$props.tls.certificate_provider
+      return provider != undefined && typeof provider === 'object' && provider.type === 'acme'
+    },
+    hasConflict(): boolean {
+      return this.$props.tls.acme != undefined && this.$props.tls.certificate_provider != undefined
+    },
+    hasProviderReference(): boolean {
+      const provider = this.$props.tls.certificate_provider
+      return provider != undefined && !(typeof provider === 'object' && provider.type === 'acme')
+    },
+    hasDomains(): boolean {
+      const domains = this.acme?.domain
+      return Array.isArray(domains)
+        ? domains.some(domain => domain.trim().length > 0)
+        : typeof domains === 'string' && domains.trim().length > 0
+    },
+    domainOptions(): string[] {
+      const domains = this.acme?.domain
+      return Array.isArray(domains) ? domains : typeof domains === 'string' && domains.length > 0 ? [domains] : []
     },
     enabled: {
-      get() { return this.acme != undefined },
-      set(v: boolean) { this.$props.tls.acme = v ? { domain: [] } : undefined }
+      get() { return this.hasACME || this.$props.tls.acme != undefined },
+      set(v: boolean) {
+        if (v) {
+          if (!this.hasProviderReference && !this.hasConflict && !this.hasACME) {
+            this.$props.tls.certificate_provider = { type: 'acme', domain: [] }
+          }
+        } else {
+          if (this.hasACME) delete this.$props.tls.certificate_provider
+          delete this.$props.tls.acme
+        }
+      }
     },
     domains: {
-      get() { return this.acme?.domain ? this.acme.domain.join(',') : "" },
+      get() {
+        const domains = this.acme?.domain
+        return Array.isArray(domains) ? domains.join(',') : domains ?? ''
+      },
       set(v: string) {
         if(!v.endsWith(',')) {
           this.acme.domain = v.length > 0 ? v.split(',') : []
@@ -253,6 +300,11 @@ export default {
           delete this.acme.dns01_challenge
         }
       }
+    },
+  },
+  methods: {
+    removeLegacyAcme() {
+      delete this.$props.tls.acme
     },
   }
 }

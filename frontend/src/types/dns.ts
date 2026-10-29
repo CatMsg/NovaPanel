@@ -103,7 +103,9 @@ export interface logicalDnsRule extends generalDnsRule {
 export interface dnsRule extends generalDnsRule {
   inbound?: string[]
   ip_version?: 4 | 6
-  query_type?: string
+  query_type?: string | number | Array<string | number>
+  query_client_subnet?: string | string[]
+  query_dnssec?: boolean
   network?: string[]
   auth_user?: string[]
   protocol?: string[]

@@ -34,7 +34,7 @@ func TestAggregateNativeMASQUEEndpointsAndSourceReferences(t *testing.T) {
 	}
 	seedSubscriptionTestSettings(t,
 		model.Setting{Key: "subMode", Value: "master"},
-		model.Setting{Key: "subMasterSources", Value: server.URL + "/native-only\n" + server.URL + "/mixed"},
+		model.Setting{Key: "subMasterSources", Value: testInternalSourceURL(server.URL) + "/native-only\n" + testInternalSourceURL(server.URL) + "/mixed"},
 		model.Setting{Key: "subUpdates", Value: "24"},
 	)
 	result, headers, err := (&AggregateService{}).GetAggregate("json", "panel.invalid")

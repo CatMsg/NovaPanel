@@ -307,7 +307,7 @@
       </v-card>
     </v-dialog>
 
-    <v-dialog v-model="showRemoteDelete" max-width="620" scrollable>
+    <v-dialog v-model="showRemoteDelete" max-width="620" scrollable :persistent="remoteDeleteDeleting">
       <v-card rounded="xl" class="fleet-dialog">
         <v-card-title>{{ $t('ui.fleet.remoteInboundDeleteTitle') }}</v-card-title>
         <v-card-text>
@@ -324,11 +324,15 @@
             </v-list>
           </template>
         </v-card-text>
-        <v-card-actions><v-spacer /><v-btn @click="showRemoteDelete = false">{{ $t('actions.close') }}</v-btn></v-card-actions>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn v-if="remoteDeleteServerID" variant="text" :disabled="remoteDeleteLoading || remoteDeleteDeleting" @click="loadRemoteDeleteInbounds">{{ $t('ui.common.refresh') }}</v-btn>
+          <v-btn :disabled="remoteDeleteDeleting" @click="showRemoteDelete = false">{{ $t('actions.close') }}</v-btn>
+        </v-card-actions>
       </v-card>
     </v-dialog>
 
-    <v-dialog v-model="showRemoteInbound" max-width="980" scrollable>
+    <v-dialog v-model="showRemoteInbound" max-width="980" scrollable :persistent="remoteInboundRequestPending">
       <v-card rounded="xl" class="fleet-dialog fleet-remote-inbound">
         <header class="fleet-remote-inbound__header">
           <div>
@@ -336,11 +340,11 @@
             <h2>{{ $t('ui.fleet.remoteInboundTitle') }}</h2>
             <p>{{ $t('ui.fleet.remoteInboundHint') }}</p>
           </div>
-          <v-btn icon="mdi-close" variant="text" :aria-label="$t('actions.close')" @click="showRemoteInbound = false" />
+          <v-btn icon="mdi-close" variant="text" :aria-label="$t('actions.close')" :disabled="remoteInboundRequestPending" @click="showRemoteInbound = false" />
         </header>
         <v-card-text class="fleet-remote-inbound__body">
           <v-alert type="info" variant="tonal" density="compact">{{ $t('ui.fleet.remoteInboundSafety') }}</v-alert>
-          <FleetInboundDraftEditor v-model="remoteInboundDraft" />
+          <v-form :disabled="remoteInboundEditingLocked"><FleetInboundDraftEditor v-model="remoteInboundDraft" /></v-form>
 
           <section class="fleet-remote-inbound__section">
             <div class="fleet-remote-inbound__section-head">
@@ -354,6 +358,7 @@
                 type="button"
                 :aria-pressed="remoteInboundTargetIds.includes(server.id)"
                 :class="{ 'is-selected': remoteInboundTargetIds.includes(server.id) }"
+                :disabled="remoteInboundEditingLocked"
                 @click="toggleRemoteInboundTarget(server.id)"
               >
                 <span class="fleet-target-grid__check"><v-icon :icon="remoteInboundTargetIds.includes(server.id) ? 'mdi-check' : 'mdi-plus'" /></span>
@@ -378,7 +383,7 @@
                   :label="$t('ui.fleet.remoteInboundGeneratedName')"
                   :hint="$t('ui.fleet.remoteInboundNameHint')"
                   :error-messages="remoteInboundTagError(id)"
-                  :disabled="remoteInboundLoading !== ''"
+                  :disabled="remoteInboundLoading !== '' || remoteInboundCreateAttempted"
                   variant="outlined"
                   density="comfortable"
                   hide-details="auto"
@@ -390,6 +395,7 @@
                   min="1"
                   max="65535"
                   :label="$t('ui.fleet.remoteInboundPort')"
+                  :disabled="remoteInboundEditingLocked"
                   variant="outlined"
                   density="comfortable"
                   hide-details
@@ -402,6 +408,7 @@
                   :label="$t('ui.fleet.remoteInboundTLS')"
                   :placeholder="remoteInboundTLSRequired ? $t('ui.fleet.remoteInboundTLSSelect') : $t('ui.fleet.remoteInboundTLSOptional')"
                   :clearable="!remoteInboundTLSRequired"
+                  :disabled="remoteInboundEditingLocked"
                   item-title="title"
                   item-value="value"
                   variant="outlined"
@@ -449,7 +456,7 @@
         </v-card-text>
         <v-card-actions class="fleet-remote-inbound__footer">
           <v-spacer />
-          <v-btn variant="text" @click="showRemoteInbound = false">{{ $t('ui.common.close') }}</v-btn>
+          <v-btn variant="text" :disabled="remoteInboundRequestPending" @click="showRemoteInbound = false">{{ $t('ui.common.close') }}</v-btn>
           <v-btn
             color="primary"
             :loading="remoteInboundLoading === 'preview'"
@@ -667,6 +674,8 @@ const showRemoteDelete = ref(false)
 const remoteDeleteServerID = ref<string | null>(null)
 const remoteDeleteTarget = ref<FleetRemoteInboundTarget | null>(null)
 const remoteDeleteLoading = ref(false)
+const remoteDeleteDeleting = ref(false)
+const remoteDeleteRequestRevision = ref(0)
 const remoteDeleteMessage = ref('')
 const remoteDeleteError = ref(false)
 const servers = ref<FleetServer[]>([])
@@ -771,6 +780,8 @@ const endpointTotal = computed(() => servers.value.reduce((total, server) => tot
 const driftServerCount = computed(() => servers.value.filter((server) => server.driftCount > 0).length)
 const initialLoading = computed(() => loading.value && servers.value.length === 0)
 const remoteInboundServers = computed(() => remoteServers.value.filter(server => server.reachable && server.enabled))
+const remoteInboundRequestPending = computed(() => remoteInboundLoading.value === 'preview' || remoteInboundLoading.value === 'create')
+const remoteInboundEditingLocked = computed(() => remoteInboundRequestPending.value || remoteInboundCreateAttempted.value)
 const remoteInboundTLSCapable = computed(() => remoteInboundTLSProtocols.includes(remoteInboundDraft.value.type))
 const remoteInboundTLSRequired = computed(() => remoteInboundRequiredTLSProtocols.includes(remoteInboundDraft.value.type)
   || (remoteInboundDraft.value.type === 'http' && Number((remoteInboundDraft.value as any).version) >= 2))
@@ -974,6 +985,8 @@ const saveConfig = async () => {
 }
 
 const openRemoteInboundDialog = async () => {
+  remoteTargetRequestRevision += 1
+  remoteInboundLoading.value = ''
   showRemoteInbound.value = true
   remoteInboundDraft.value = createInbound('socks', { id: 0, tag: '', listen: '::', listen_port: 0, addrs: [], out_json: {} }) as Inbound
   remoteInboundTargetIds.value = []
@@ -984,24 +997,41 @@ const openRemoteInboundDialog = async () => {
 }
 
 const openRemoteDeleteDialog = () => {
+  remoteDeleteRequestRevision.value += 1
   remoteDeleteServerID.value = null
   remoteDeleteTarget.value = null
+  remoteDeleteLoading.value = false
+  remoteDeleteDeleting.value = false
   remoteDeleteMessage.value = ''
+  remoteDeleteError.value = false
   showRemoteDelete.value = true
 }
 
 const loadRemoteDeleteInbounds = async () => {
   const id = remoteDeleteServerID.value
+  const revision = ++remoteDeleteRequestRevision.value
   remoteDeleteTarget.value = null
-  if (!id) return
-  remoteDeleteLoading.value = true
-  const response = await HttpUtils.get('api/fleetInboundTargets', { targets: JSON.stringify([id]) })
-  if (remoteDeleteServerID.value === id) {
-    const target = Array.isArray(response.obj) ? response.obj[0] as FleetRemoteInboundTarget : null
-    remoteDeleteTarget.value = target?.success ? target : null
-    if (!target?.success) { remoteDeleteError.value = true; remoteDeleteMessage.value = target?.error || response.msg || t('ui.fleet.remoteInboundTargetsFailed') }
+  if (!id) {
+    remoteDeleteLoading.value = false
+    return
   }
-  remoteDeleteLoading.value = false
+  remoteDeleteLoading.value = true
+  try {
+    const response = await HttpUtils.get('api/fleetInboundTargets', { targets: JSON.stringify([id]) })
+    if (remoteDeleteRequestRevision.value === revision && remoteDeleteServerID.value === id) {
+      const target = Array.isArray(response.obj) ? response.obj[0] as FleetRemoteInboundTarget : null
+      remoteDeleteTarget.value = target?.success ? target : null
+      remoteDeleteError.value = !target?.success
+      remoteDeleteMessage.value = target?.success ? '' : target?.error || response.msg || t('ui.fleet.remoteInboundTargetsFailed')
+    }
+  } catch (error) {
+    if (remoteDeleteRequestRevision.value === revision && remoteDeleteServerID.value === id) {
+      remoteDeleteError.value = true
+      remoteDeleteMessage.value = error instanceof Error ? error.message : t('ui.fleet.remoteInboundTargetsFailed')
+    }
+  } finally {
+    if (remoteDeleteRequestRevision.value === revision) remoteDeleteLoading.value = false
+  }
 }
 
 const selectRemoteDeleteServer = () => {
@@ -1012,12 +1042,25 @@ const selectRemoteDeleteServer = () => {
 const deleteRemoteInbound = async (inbound: FleetRemoteInboundSummary) => {
   const id = remoteDeleteServerID.value
   if (!id || !window.confirm(t('ui.fleet.remoteInboundDeleteConfirm', { server: remoteInboundServer(id)?.name || id, tag: inbound.tag }))) return
+  remoteDeleteRequestRevision.value += 1
+  remoteDeleteDeleting.value = true
   remoteDeleteLoading.value = true
-  const response = await HttpUtils.post('api/fleetInboundDelete', { target: JSON.stringify({ serverId: id, id: inbound.id, tag: inbound.tag }) })
-  remoteDeleteError.value = !response.success
-  remoteDeleteMessage.value = response.success ? t('ui.fleet.remoteInboundDeleted') : response.msg || t('ui.fleet.remoteInboundCreateFailed')
-  remoteDeleteLoading.value = false
-  if (response.success) { await loadRemoteDeleteInbounds(); await loadFleet(true) }
+  remoteDeleteMessage.value = ''
+  try {
+    const response = await HttpUtils.post('api/fleetInboundDelete', { target: JSON.stringify({ serverId: id, id: inbound.id, tag: inbound.tag }) })
+    remoteDeleteError.value = !response.success
+    remoteDeleteMessage.value = response.success
+      ? t('ui.fleet.remoteInboundDeleted')
+      : `${response.msg || t('ui.fleet.remoteInboundCreateFailed')} · ${t('ui.fleet.remoteInboundVerifyBeforeRetry')}`
+    if (response.success) { await loadRemoteDeleteInbounds(); await loadFleet(true) }
+  } catch (error) {
+    remoteDeleteError.value = true
+    const message = error instanceof Error ? error.message : t('ui.fleet.remoteInboundCreateFailed')
+    remoteDeleteMessage.value = `${message} · ${t('ui.fleet.remoteInboundVerifyBeforeRetry')}`
+  } finally {
+    remoteDeleteDeleting.value = false
+    remoteDeleteLoading.value = false
+  }
 }
 
 const clearRemoteInboundPreview = () => {
@@ -1060,6 +1103,7 @@ watch(() => [remoteInboundDraft.value.type, (remoteInboundDraft.value as any).ve
 watch(remoteInboundDraft, clearRemoteInboundPreview, { deep: true })
 
 const toggleRemoteInboundTarget = async (id: string) => {
+  if (remoteInboundEditingLocked.value) return
   const selected = remoteInboundTargetIds.value.includes(id)
     ? remoteInboundTargetIds.value.filter(target => target !== id)
     : [...remoteInboundTargetIds.value, id]

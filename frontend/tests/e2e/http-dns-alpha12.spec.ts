@@ -258,7 +258,9 @@ test('DNS tag conditions edit and save imported maps without losing unrelated da
       rules: [{
         action: 'route',
         domain: ['example.test'],
-        query_type: ['A'],
+        query_type: 'A',
+        query_client_subnet: '192.0.2.0/24',
+        query_dnssec: true,
         server: 'dns-local',
         dns_server_address: {
           'dns-local': '192.0.2.1',
@@ -285,6 +287,15 @@ test('DNS tag conditions edit and save imported maps without losing unrelated da
   const editor = page.getByRole('dialog').last()
   await expect(editor.getByText('编辑 DNS规则', { exact: true })).toBeVisible()
   await editor.getByRole('button', { name: 'DNS 高级条件', exact: true }).click()
+  const queryType = editor.getByRole('combobox', { name: 'DNS 查询类型' })
+  await expect(queryType).toBeVisible()
+  await expect(editor.getByText('A', { exact: true })).toBeVisible()
+  await queryType.fill('AAAA')
+  await queryType.press('Enter')
+  await queryType.fill('65')
+  await queryType.press('Enter')
+  await editor.getByRole('textbox', { name: /客户端子网匹配/ }).fill('198.51.100.0/24, 2001:db8::/32')
+  await expect(editor.getByRole('checkbox', { name: '仅匹配启用 DNSSEC 的查询' })).toBeChecked()
   await expect(editor.getByText(/此导入条件引用了未知 DNS 标签 dns-orphan/)).toBeVisible()
   await expect(editor.getByText(/DNS 服务器 dns-udp 使用的传输类型 udp 不受此条件支持/)).toBeVisible()
 
@@ -305,7 +316,9 @@ test('DNS tag conditions edit and save imported maps without losing unrelated da
   expect(savedConfig.dns.rules[0]).toMatchObject({
     action: 'route',
     domain: ['example.test'],
-    query_type: ['A'],
+    query_type: ['A', 'AAAA', 65],
+    query_client_subnet: ['198.51.100.0/24', '2001:db8::/32'],
+    query_dnssec: true,
     server: 'dns-local',
   })
   expect(savedConfig.dns.rules[0].dns_server_address).toEqual({

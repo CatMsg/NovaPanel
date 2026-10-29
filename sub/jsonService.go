@@ -1,6 +1,7 @@
 package sub
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -49,6 +50,16 @@ type JsonService struct {
 }
 
 func (j *JsonService) GetJson(subId string, format string) (*string, []string, error) {
+	return j.GetJsonContext(context.Background(), subId, format)
+}
+
+func (j *JsonService) GetJsonContext(ctx context.Context, subId string, format string) (*string, []string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	client, inDatas, err := j.getData(subId)
 	if err != nil {
 		return nil, nil, err
@@ -71,7 +82,10 @@ func (j *JsonService) GetJson(subId string, format string) (*string, []string, e
 	proxyOutbounds, endpoints := splitNativeJSONEndpoints(*outbounds)
 	*outbounds = proxyOutbounds
 
-	links := j.LinkService.GetLinks(&client.Links, "external", "")
+	links, err := j.LinkService.GetLinksContext(ctx, &client.Links, "external", "")
+	if err != nil {
+		return nil, nil, err
+	}
 	tagNumEnable := 0
 	if len(links) > 1 {
 		tagNumEnable = 1

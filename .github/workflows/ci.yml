@@ -26,13 +26,14 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: 检出仓库
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: recursive
           fetch-depth: 1
+          persist-credentials: false
 
       - name: 设置 Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -79,12 +80,13 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: 检出仓库
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: 设置 Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           cache: false
           go-version-file: go.mod
@@ -93,10 +95,16 @@ jobs:
         run: |
           sh -n entrypoint.sh
           bash -n install.sh novas.sh runNovas.sh build.sh scripts/*.sh
+          bash ./scripts/check-github-action-pins.sh
+          bash ./scripts/check-release-policy.sh
 
       - name: Go 格式检查
         run: |
-          unformatted="$(git ls-files '*.go' | xargs -r gofmt -l)"
+          unformatted="$(git ls-files '*.go' | while IFS= read -r file; do
+            if [ -f "$file" ]; then
+              gofmt -l "$file"
+            fi
+          done)"
           if [ -n "$unformatted" ]; then
             echo "以下 Go 文件未通过 gofmt："
             echo "$unformatted"
@@ -124,18 +132,34 @@ jobs:
       - name: 基础 Go 构建
         run: go build ./...
 
+  windows-installer-prereqs:
+    name: Windows installer source and dependency checks
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: WinSW 摘要与安装器行为回归测试
+        shell: pwsh
+        run: ./windows/test-winsw-verifier.ps1
+
   docker:
     name: Docker 构建
     needs:
       - frontend
       - backend
+      - windows-installer-prereqs
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: 检出仓库
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           submodules: recursive
+          persist-credentials: false
 
       - name: 构建 AMD64 镜像
         run: docker build --platform linux/amd64 -t novapanel-ci .

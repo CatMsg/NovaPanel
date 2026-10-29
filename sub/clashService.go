@@ -1,6 +1,7 @@
 package sub
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 
@@ -64,6 +65,16 @@ const ProxyGroups = `- name: Proxy
 `
 
 func (s *ClashService) GetClash(subId string, requestHosts ...string) (*string, []string, error) {
+	return s.GetClashContext(context.Background(), subId, requestHosts...)
+}
+
+func (s *ClashService) GetClashContext(ctx context.Context, subId string, requestHosts ...string) (*string, []string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	hostname := ""
 	if len(requestHosts) > 0 {
 		hostname = strings.TrimSpace(requestHosts[0])
@@ -103,7 +114,10 @@ func (s *ClashService) GetClash(subId string, requestHosts ...string) (*string, 
 	outbounds, outTags = &filteredOutbounds, &filteredTags
 	s.appendMieruSubscriptionOutbounds(client.Config, inDatas, hostname, outbounds, outTags)
 
-	links := s.LinkService.GetLinks(&client.Links, "external", "")
+	links, err := s.LinkService.GetLinksContext(ctx, &client.Links, "external", "")
+	if err != nil {
+		return nil, nil, err
+	}
 	tagNumEnable := 0
 	if len(links) > 1 {
 		tagNumEnable = 1

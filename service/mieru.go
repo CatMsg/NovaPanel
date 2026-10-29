@@ -1147,15 +1147,42 @@ func mieruTrafficPatternName(pattern *mitaTrafficPattern) string {
 }
 
 func writeMitaServerConfigPayload(configPath string, payload []byte) error {
-	if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
+	directory := filepath.Dir(configPath)
+	if err := os.MkdirAll(directory, 0700); err != nil {
 		return err
 	}
-	tempPath := configPath + ".tmp"
-	if err := os.WriteFile(tempPath, payload, 0600); err != nil {
+	directoryInfo, err := os.Lstat(directory)
+	if err != nil {
+		return err
+	}
+	if !directoryInfo.IsDir() {
+		return fmt.Errorf("mieru config parent is not a directory: %s", directory)
+	}
+	if err := os.Chmod(directory, 0700); err != nil {
+		return err
+	}
+	temporary, err := os.CreateTemp(directory, "."+filepath.Base(configPath)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tempPath := temporary.Name()
+	defer func() {
+		_ = temporary.Close()
+		_ = os.Remove(tempPath)
+	}()
+	if err := temporary.Chmod(0600); err != nil {
+		return err
+	}
+	if _, err := temporary.Write(payload); err != nil {
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
+		return err
+	}
+	if err := temporary.Close(); err != nil {
 		return err
 	}
 	if err := os.Rename(tempPath, configPath); err != nil {
-		_ = os.Remove(tempPath)
 		return err
 	}
 	return nil

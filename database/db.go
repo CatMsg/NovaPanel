@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/CatMsg/NovaPanel/config"
 	"github.com/CatMsg/NovaPanel/database/model"
+	"github.com/CatMsg/NovaPanel/security"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -65,9 +65,12 @@ var schemaIndexes = []schemaIndex{
 }
 
 func OpenDB(dbPath string) error {
-	dir := path.Dir(dbPath)
-	err := os.MkdirAll(dir, 0o750)
+	dir := filepath.Dir(dbPath)
+	err := os.MkdirAll(dir, 0o700)
 	if err != nil {
+		return err
+	}
+	if err := secureDatabaseFile(dbPath); err != nil {
 		return err
 	}
 
@@ -104,6 +107,35 @@ func OpenDB(dbPath string) error {
 		db = db.Debug()
 	}
 	return nil
+}
+
+func secureDatabaseFile(dbPath string) error {
+	for {
+		info, err := os.Lstat(dbPath)
+		if err == nil {
+			if !info.Mode().IsRegular() {
+				return fmt.Errorf("database path must be a regular file, not a symlink or special file: %s", dbPath)
+			}
+			if err := os.Chmod(dbPath, 0o600); err != nil {
+				return fmt.Errorf("secure database file permissions: %w", err)
+			}
+			return nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect database path: %w", err)
+		}
+
+		file, err := os.OpenFile(dbPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("create private database file: %w", err)
+		}
+		if err := file.Close(); err != nil {
+			return fmt.Errorf("close new database file: %w", err)
+		}
+	}
 }
 
 func InitDB(dbPath string) error {
@@ -295,7 +327,21 @@ func seedFreshDatabase(tx *gorm.DB) error {
 	if err := tx.Create(&model.Outbound{Type: "direct", Tag: "direct", Options: json.RawMessage(`{}`)}).Error; err != nil {
 		return fmt.Errorf("seed default direct outbound: %w", err)
 	}
-	if err := tx.Create(&model.User{Username: "admin", Password: "admin"}).Error; err != nil {
+	password := ""
+	if os.Getenv("NOVAS_DEVELOPMENT_DEFAULT_ADMIN") == "1" {
+		password = "admin"
+	} else {
+		var err error
+		password, err = security.GenerateRandomPassword()
+		if err != nil {
+			return fmt.Errorf("generate initial administrator password: %w", err)
+		}
+	}
+	hashedPassword, err := security.HashUserPassword("admin", password)
+	if err != nil {
+		return fmt.Errorf("hash initial administrator password: %w", err)
+	}
+	if err := tx.Create(&model.User{Username: "admin", Password: hashedPassword}).Error; err != nil {
 		return fmt.Errorf("seed initial administrator: %w", err)
 	}
 	return nil

@@ -67,6 +67,98 @@ test('fleet exposes remote inbound creation without template rollout or template
   expect(templateRequests).toEqual([])
 })
 
+for (const succeeds of [true, false]) test(`remote inbound creation locks editing until ${succeeds ? 'success' : 'failure'}`, async ({ page }) => {
+  await installBaseMocks(page, true)
+  await page.route('**/api/fleet**', route => route.fulfill({ status: 200, contentType: 'application/json', body: json({ servers: [
+    { id: 'la', name: 'LA', url: 'https://la.example', enabled: true, reachable: true, core: { running: true } },
+    { id: 'kr', name: 'KR', url: 'https://kr.example', enabled: true, reachable: true, core: { running: true } },
+  ] }) }))
+  await page.route('**/api/fleetInboundTargets**', route => route.fulfill({ status: 200, contentType: 'application/json', body: json([{
+    id: 'la', name: 'LA', success: true, capabilities: { hostname: 'la.example', subscriptionHost: 'la.example', tlsProfileDetails: true, inboundTags: [], tlsProfiles: [] },
+  }]) }))
+  let releasePreview: () => void = () => {}
+  const waitForPreview = new Promise<void>(resolve => { releasePreview = resolve })
+  await page.route('**/api/fleetInboundPreview', async route => {
+    await waitForPreview
+    await route.fulfill({ status: 200, contentType: 'application/json', body: json([
+      { id: 'la', name: 'LA', tag: 'la-socks', success: true, created: false, preview: { valid: true, checks: [] } },
+    ]) })
+  })
+  let releaseCreate: () => void = () => {}
+  const waitForRelease = new Promise<void>(resolve => { releaseCreate = resolve })
+  await page.route('**/api/fleetInboundCreate', async route => {
+    await waitForRelease
+    await route.fulfill({ status: 200, contentType: 'application/json', body: json([
+      { id: 'la', name: 'LA', tag: 'la-socks', success: succeeds, created: succeeds, error: succeeds ? '' : '目标状态未知' },
+    ]) })
+  })
+  await page.goto('/app/fleet')
+  await page.getByRole('button', { name: '远程新建入站' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: /LA/ }).click()
+  await dialog.getByRole('button', { name: '校验全部目标' }).click()
+  await expect(dialog.getByLabel('此服务器监听端口')).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: /KR/ })).toBeDisabled()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeVisible()
+  releasePreview()
+  await expect(dialog.getByText('校验通过，可以创建。')).toBeVisible()
+  page.once('dialog', event => event.accept())
+  await dialog.getByRole('button', { name: '在目标机创建' }).click()
+  await expect(dialog.getByLabel('此服务器监听端口')).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: /KR/ })).toBeDisabled()
+  await expect(dialog.getByLabel('入站名称')).toBeDisabled()
+  await expect(dialog.locator('.fleet-inbound-draft input').first()).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: '关闭', exact: true }).last()).toBeDisabled()
+  releaseCreate()
+  await expect(dialog.getByText(succeeds ? '全部入站创建成功。' : '创建失败，请核对目标状态后再重试。')).toBeVisible()
+  await expect(dialog.getByLabel('此服务器监听端口')).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: '关闭', exact: true }).last()).toBeEnabled()
+})
+
+test('reopening remote inbound creation discards late target capabilities', async ({ page }) => {
+  await installBaseMocks(page, true)
+  await page.route('**/api/fleet**', route => route.fulfill({ status: 200, contentType: 'application/json', body: json({ servers: [
+    { id: 'la', name: 'LA', url: 'https://la.example', enabled: true, reachable: true, core: { running: true } },
+  ] }) }))
+  let finishFirstRequest: () => void = () => {}
+  let markFirstRequest: () => void = () => {}
+  const firstRequestStarted = new Promise<void>(resolve => { markFirstRequest = resolve })
+  const releaseFirstRequest = new Promise<void>(resolve => { finishFirstRequest = resolve })
+  let requestCount = 0
+  await page.route('**/api/fleetInboundTargets**', async route => {
+    requestCount += 1
+    if (requestCount === 1) {
+      markFirstRequest()
+      await releaseFirstRequest
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: json([{
+      id: 'la', name: 'LA', success: true, capabilities: { hostname: 'la.example', subscriptionHost: 'la.example', tlsProfileDetails: true, inboundTags: [], tlsProfiles: [] },
+    }]) })
+  })
+
+  await page.goto('/app/fleet')
+  await page.getByRole('button', { name: '远程新建入站' }).click()
+  let dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: /LA/ }).click()
+  await firstRequestStarted
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+
+  await page.getByRole('button', { name: '远程新建入站' }).click()
+  dialog = page.getByRole('dialog')
+  await page.evaluate(() => { Math.random = () => 0 })
+  const firstResponse = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/api/fleetInboundTargets'))
+  finishFirstRequest()
+  await firstResponse
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
+
+  await page.evaluate(() => { Math.random = () => 0.5 })
+  await dialog.getByRole('button', { name: /LA/ }).click()
+  await expect(dialog.getByLabel('此服务器监听端口')).toHaveValue('40000')
+  expect(requestCount).toBe(2)
+})
+
 test('HY2 offers certificate TLS but excludes Reality profiles', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await installBaseMocks(page, true)
@@ -116,6 +208,51 @@ test('remote inbound delete confirms the selected server and exact inbound', asy
   await dialog.getByRole('button', { name: '远程删除入站: la-hy2' }).click()
   await expect(dialog.getByText('该服务器没有入站。')).toBeVisible()
   expect(target).toEqual({ serverId: 'la', id: 7, tag: 'la-hy2' })
+})
+
+test('remote inbound deletion locks the dialog and explains uncertain outcomes', async ({ page }) => {
+  await installBaseMocks(page, true)
+  await page.route('**/api/fleet**', route => route.fulfill({ status: 200, contentType: 'application/json', body: json({ servers: [
+    { id: 'la', name: 'LA', url: 'https://la.example', enabled: true, reachable: true, core: { running: true } },
+  ] }) }))
+  let targetRequests = 0
+  await page.route('**/api/fleetInboundTargets**', route => {
+    targetRequests += 1
+    return route.fulfill({ status: 200, contentType: 'application/json', body: json([{
+      id: 'la', name: 'LA', success: true, capabilities: { hostname: 'la.example', subscriptionHost: 'la.example', tlsProfiles: [], inboundTags: [], inbounds: [{ id: 7, tag: 'la-hy2', type: 'hysteria2' }] },
+    }]) })
+  })
+  let finishDelete: () => void = () => {}
+  let markDeleteStarted: () => void = () => {}
+  const deleteStarted = new Promise<void>(resolve => { markDeleteStarted = resolve })
+  const releaseDelete = new Promise<void>(resolve => { finishDelete = resolve })
+  await page.route('**/api/fleetInboundDelete', async route => {
+    markDeleteStarted()
+    await releaseDelete
+    await route.fulfill({ status: 200, contentType: 'application/json', body: json(null, 'request timeout', false) })
+  })
+
+  await page.goto('/app/fleet')
+  await page.getByRole('button', { name: '远程删除入站' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.locator('.v-select .v-field').click()
+  await page.getByRole('option', { name: 'LA' }).click()
+  await expect(dialog.getByText('la-hy2')).toBeVisible()
+  page.once('dialog', confirmation => confirmation.accept())
+  await dialog.getByRole('button', { name: '远程删除入站: la-hy2' }).click()
+  await deleteStarted
+  await expect(dialog.getByRole('button', { name: '关闭' })).toBeDisabled()
+  await expect(dialog.getByRole('progressbar').last()).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeVisible()
+
+  finishDelete()
+  await expect(dialog.getByText(/request timeout.*重试前请刷新目标机确认状态/)).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '关闭' })).toBeEnabled()
+  await expect(dialog.getByRole('button', { name: '刷新' })).toBeEnabled()
+  await dialog.getByRole('button', { name: '刷新' }).click()
+  await expect(dialog.getByText('la-hy2')).toBeVisible()
+  expect(targetRequests).toBe(2)
 })
 
 test('remote inbound names account for matching server prefixes outside the current selection', async ({ page }) => {

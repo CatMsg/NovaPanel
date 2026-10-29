@@ -8,6 +8,7 @@ import (
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
 	"github.com/CatMsg/NovaPanel/logger"
+	"github.com/CatMsg/NovaPanel/security"
 	"github.com/CatMsg/NovaPanel/util/common"
 	"gorm.io/gorm"
 )
@@ -16,6 +17,11 @@ type UserService struct {
 }
 
 var ErrInvalidCredentials = errors.New("invalid credentials")
+
+const (
+	authSessionEpochKey     = database.AuthSessionEpochSettingKey
+	initialAuthSessionEpoch = database.InitialAuthSessionEpoch
+)
 
 func (s *UserService) saveUserTx(tx *gorm.DB, user *model.User) error {
 	if user == nil {
@@ -55,24 +61,42 @@ func (s *UserService) UpdateFirstUser(username string, password string) error {
 	} else if password == "" {
 		return common.NewError("password can not be empty")
 	}
+	hashedPassword, err := security.HashUserPassword(username, password)
+	if err != nil {
+		return err
+	}
 	return retryWriteTx(func(tx *gorm.DB) error {
 		user := &model.User{}
 		err := tx.Model(model.User{}).First(user).Error
 		if database.IsNotFound(err) {
 			user.Username = username
-			user.Password = password
+			user.Password = hashedPassword
 			return s.saveUserTx(tx, user)
 		} else if err != nil {
 			return err
 		}
 		user.Username = username
-		user.Password = password
-		return s.saveUserTx(tx, user)
+		user.Password = hashedPassword
+		if err := s.saveUserTx(tx, user); err != nil {
+			return err
+		}
+		return incrementAuthSessionEpochTx(tx)
 	})
 }
 
+func (s *UserService) GetAuthSessionEpoch() (uint64, error) {
+	return database.GetAuthSessionEpoch(database.GetDB())
+}
+
+func incrementAuthSessionEpochTx(tx *gorm.DB) error {
+	if err := ensureDefaultSettingsTx(tx); err != nil {
+		return err
+	}
+	return database.RotateAuthSessionEpoch(tx)
+}
+
 func (s *UserService) Login(username string, password string, remoteIP string) (string, error) {
-	user, err := s.checkUser(username, password, remoteIP)
+	user, err := s.authenticate(username, password, remoteIP)
 	if database.IsNotFound(err) {
 		return "", ErrInvalidCredentials
 	}
@@ -80,6 +104,47 @@ func (s *UserService) Login(username string, password string, remoteIP string) (
 		return "", err
 	}
 	return user.Username, nil
+}
+
+func (s *UserService) LoginWithSessionEpoch(username, password, remoteIP string) (string, uint64, error) {
+	user, err := s.authenticate(username, password, remoteIP)
+	if database.IsNotFound(err) {
+		return "", 0, ErrInvalidCredentials
+	}
+	if err != nil {
+		return "", 0, err
+	}
+
+	epoch, err := s.authSessionEpochForCredential(user.Username, user.Password)
+	if err != nil {
+		return "", 0, err
+	}
+	return user.Username, epoch, nil
+}
+
+func (s *UserService) authenticate(username, password, remoteIP string) (*model.User, error) {
+	user, err := s.checkUser(username, password, remoteIP)
+	if database.IsNotFound(err) {
+		return nil, ErrInvalidCredentials
+	}
+	return user, err
+}
+
+func (s *UserService) authSessionEpochForCredential(username, verifiedPasswordHash string) (uint64, error) {
+	var epoch uint64
+	err := database.GetDB().Transaction(func(tx *gorm.DB) error {
+		var user model.User
+		if err := tx.Select("password").Where("username = ?", username).First(&user).Error; err != nil {
+			return err
+		}
+		if user.Password != verifiedPasswordHash {
+			return ErrInvalidCredentials
+		}
+		current, err := database.GetAuthSessionEpoch(tx)
+		epoch = current
+		return err
+	})
+	return epoch, err
 }
 
 func (s *UserService) CheckUser(username string, password string, remoteIP string) *model.User {
@@ -98,11 +163,52 @@ func (s *UserService) checkUser(username string, password string, remoteIP strin
 
 	user := &model.User{}
 	err := db.Model(model.User{}).
-		Where("username = ? and password = ?", username, password).
+		Where("username = ?", username).
 		First(user).
 		Error
 	if err != nil {
 		return nil, err
+	}
+	valid, needsUpgrade, err := security.VerifyPassword(user.Password, password)
+	if err != nil {
+		return nil, err
+	}
+	if !valid {
+		return nil, gorm.ErrRecordNotFound
+	}
+	if needsUpgrade {
+		hashedPassword, err := security.HashUserPassword(user.Username, password)
+		if err != nil {
+			return nil, err
+		}
+		err = retryWriteTx(func(tx *gorm.DB) error {
+			result := tx.Model(model.User{}).
+				Where("id = ? AND password = ?", user.Id, user.Password).
+				Update("password", hashedPassword)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				latest := &model.User{}
+				if err := tx.Model(model.User{}).Where("id = ?", user.Id).First(latest).Error; err != nil {
+					return err
+				}
+				stillValid, _, err := security.VerifyPassword(latest.Password, password)
+				if err != nil {
+					return err
+				}
+				if !stillValid {
+					return gorm.ErrRecordNotFound
+				}
+				user.Password = latest.Password
+			} else {
+				user.Password = hashedPassword
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	lastLoginTxt := time.Now().Format("2006-01-02 15:04:05") + " " + remoteIP
@@ -128,15 +234,32 @@ func (s *UserService) GetUsers() (*[]model.User, error) {
 }
 
 func (s *UserService) ChangePass(id string, oldPass string, newUser string, newPass string) error {
+	if newUser == "" || newPass == "" {
+		return common.NewError("username and password can not be empty")
+	}
 	return retryWriteTx(func(tx *gorm.DB) error {
 		user := &model.User{}
-		err := tx.Model(model.User{}).Where("id = ? AND password = ?", id, oldPass).First(user).Error
-		if err != nil || database.IsNotFound(err) {
+		err := tx.Model(model.User{}).Where("id = ?", id).First(user).Error
+		if err != nil {
+			return err
+		}
+		valid, _, err := security.VerifyPassword(user.Password, oldPass)
+		if err != nil {
+			return err
+		}
+		if !valid {
+			return gorm.ErrRecordNotFound
+		}
+		hashedPassword, err := security.HashUserPassword(newUser, newPass)
+		if err != nil {
 			return err
 		}
 		user.Username = newUser
-		user.Password = newPass
-		return s.saveUserTx(tx, user)
+		user.Password = hashedPassword
+		if err := s.saveUserTx(tx, user); err != nil {
+			return err
+		}
+		return incrementAuthSessionEpochTx(tx)
 	})
 }
 

@@ -1,4 +1,10 @@
-# Sing-Box embedded source and patch history
+# Sing-Box embedded source and patch history (historical alpha.12 snapshot)
+
+> Historical record only. The repository now pins sing-box `v1.15.0-alpha.13`;
+> the provenance, no-patch statement, module checksums, and reproduction commands
+> below describe the former alpha.12 snapshot and must not be used to verify or
+> replace the current vendor tree. The current source and patch contract is
+> [`docs/SING_BOX_MASQUE_INTEGRATION.md`](../docs/SING_BOX_MASQUE_INTEGRATION.md).
 
 ## Provenance
 

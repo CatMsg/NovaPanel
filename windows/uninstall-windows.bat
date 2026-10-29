@@ -21,16 +21,37 @@ set "SERVICE_NAME=novas"
 echo Uninstalling NovaPanel from: %INSTALL_DIR%
 
 REM Stop and remove Windows Service
-if exist "%INSTALL_DIR%\novas-service.exe" (
+sc query %SERVICE_NAME% >nul 2>&1
+set "SERVICE_QUERY_RESULT=!errorLevel!"
+if not "!SERVICE_QUERY_RESULT!"=="0" if not "!SERVICE_QUERY_RESULT!"=="1060" (
+    echo Error: Unable to determine whether the NovaPanel service is registered.
+    echo No files or firewall rules have been removed. Check service permissions and retry.
+    pause
+    exit /b 1
+)
+if "!SERVICE_QUERY_RESULT!"=="0" (
+    if not exist "%INSTALL_DIR%\novas-service.exe" (
+        echo Error: The NovaPanel service is registered, but its verified uninstaller is missing.
+        echo No files or firewall rules have been removed.
+        pause
+        exit /b 1
+    )
     echo Stopping and removing Windows Service...
     net stop %SERVICE_NAME% >nul 2>&1
-    cd /d "%INSTALL_DIR%"
-    novas-service.exe uninstall >nul 2>&1
-    if %errorLevel% equ 0 (
-        echo Service removed successfully
-    ) else (
-        echo Warning: Failed to remove service or service was not installed
+    "%INSTALL_DIR%\novas-service.exe" uninstall >nul 2>&1
+    sc query %SERVICE_NAME% >nul 2>&1
+    set "SERVICE_QUERY_RESULT=!errorLevel!"
+    if not "!SERVICE_QUERY_RESULT!"=="1060" (
+        if "!SERVICE_QUERY_RESULT!"=="0" (
+            echo Error: The NovaPanel service is still registered; uninstall has stopped safely.
+        ) else (
+            echo Error: Could not verify service removal; uninstall has stopped safely.
+        )
+        echo No application files, user data, shortcuts, or firewall rules have been removed.
+        pause
+        exit /b 1
     )
+    echo Service removed successfully.
 )
 
 REM Remove desktop shortcut

@@ -7,12 +7,12 @@ and nonempty-test-only verification descriptions in
 
 ## Scope and provenance
 
-The baseline remains `github.com/sagernet/sing-box v1.15.0-alpha.12`, tag commit
-`25b0d5ea3e466d246c708ac0f20d0448110e566c`. Its official download is unchanged:
+The baseline is `github.com/sagernet/sing-box v1.15.0-alpha.13`, tag commit
+`824dbcfb4dd0a95921840b1737b950cde590241e`. Its official download is pinned by:
 
-- Module sum: `h1:mAzZow7/pGOmTLVcFUnmXKgkLEmVmOUDswNjTdYf3Ns=`.
-- Module go.mod sum: `h1:1gZ6h/h1qzAEVu8bQhvtVQWW/gy1EsueQcJ9uCl+vCU=`.
-- Module ZIP SHA-256: `7d6e28f0b3380a92f34f30cd22bca2bc05e88384dfe6f3b6cc19f9848a84414f`.
+- Module sum: `h1:O6728RBadOUoC186Lsky8Mt0f6Ulca0XcM2EQFVOtEQ=`.
+- Module go.mod sum: `h1:ZammbTArdjjUecHmXdXatOHMWI4lZNgKh/i+yvY+rng=`.
+- Module ZIP SHA-256: `8a037ba62bde6b1fd70bde56fee523e90ca36aa9d36d62fb6f0d3fa4740d0b7e`.
 
 Of the ZIP's 1,566 files, two have audited MASQUE integration hooks and one
 has a URLTest selection race fix; the other 1,563 remain byte-identical to the ZIP. Native authentication,
@@ -50,14 +50,14 @@ authentication, traffic accounting, quotas, or session behavior at runtime.
 
 | File | Official baseline SHA-256 | Accepted patched SHA-256 |
 | --- | --- | --- |
-| `protocol/masque/server.go` | `9cd47ca60adbcc0ff440ae4ab04c1b7ba44c1e9ba111812e21d8e7d5b86ea45e` | `b8a77ff30e5036999c21702856694e8c1c1d9483179477f42cf587bb45e1cb57` |
-| `transport/masque/server.go` | `75e07c475865fe3539cf1470fe7fa15d019d3261958111c341ebba5f38157086` | `14c4a4ed410363f3f19cd261632eda137defa7b6916edfd8a3772547e1277d4d` |
-| `protocol/group/urltest.go` | `fc3d26ed1cecf664f23c870b5caa3f96af868dd4cdbca4d46bc6a309fdaff2c2` | `edc7dd0a2a91d19e81b036f65786b3b3a96ab0b5c11fbf543249b0874ee95779` |
+| `protocol/masque/server.go` | `9403cf920cf5c6cfa7b35aaa77924298037125b3ad8c1bacba12210ddb9cd15a` | `3269efd045bedc4cc7f800abda8f3b78d001c519cb1d7870441647956c231163` |
+| `transport/masque/server.go` | `eedbba857ea834f38ca5873b039c7ae7a8d7034c37ea70525fbcfb0da197ddbc` | `9d293dc4e545292e6995a858f5185453b6f8cda2870f66987e49540b02cc2c04` |
+| `protocol/group/urltest.go` | `88ecf28c540d9eeebec0ea6463306d23cdb16231f45d91dd1cd5d57b8073bf98` | `bad4a29061ed4505b44aa91444ddc1837c1ac3a2d1f06f28d38b3f8c22f0c8de` |
 
 Artifact:
-`docs/patches/sing-box-v1.15.0-alpha.12-masque-integration.patch`.
+`docs/patches/sing-box-v1.15.0-alpha.13-masque-integration.patch`.
 Artifact SHA-256:
-`82a9a1e307fcfdd377034251e5c322cedccee9649e69a9c35e64be6690da04ee`.
+`790ea3fb2fe68faa77ff84b32037c63fb9e55f214afb6af01cd33fc45a8db6fa`.
 
 The sole added vendor file is the existing regression test
 `route/network_started_test.go`, SHA-256
@@ -85,17 +85,17 @@ no-replacement checks remain enforced.
 
 ## Reproduce and independently replay
 
-Run from the repository root, using Go 1.26.9. This operates only on a temporary
+Run from the repository root, using the Go version pinned in `go.mod`. This operates only on a temporary
 copy of the official ZIP, never on the vendor tree or expanded module cache:
 
 ```sh
-export GOTOOLCHAIN=go1.26.9
+export GOTOOLCHAIN=go1.26.10
 go run -mod=readonly ./scripts/verify-sing-box.go
 tmp=$(mktemp -d)
-zip="$(go env GOMODCACHE)/cache/download/github.com/sagernet/sing-box/@v/v1.15.0-alpha.12.zip"
+zip="$(go env GOMODCACHE)/cache/download/github.com/sagernet/sing-box/@v/v1.15.0-alpha.13.zip"
 unzip -q "$zip" -d "$tmp"
-baseline="$tmp/github.com/sagernet/sing-box@v1.15.0-alpha.12"
-artifact="$PWD/docs/patches/sing-box-v1.15.0-alpha.12-masque-integration.patch"
+baseline="$tmp/github.com/sagernet/sing-box@v1.15.0-alpha.13"
+artifact="$PWD/docs/patches/sing-box-v1.15.0-alpha.13-masque-integration.patch"
 (
   for source_file in protocol/masque/server.go transport/masque/server.go protocol/group/urltest.go; do
     diff_status=0
@@ -124,16 +124,16 @@ refresh hashes just to make a failing gate pass.
 ## Acceptance checks
 
 ```sh
-GOTOOLCHAIN=go1.26.9 go run -mod=readonly ./scripts/verify-sing-box.go
-GOTOOLCHAIN=go1.26.9 go test -mod=readonly -race \
+GOTOOLCHAIN=go1.26.10 go run -mod=readonly ./scripts/verify-sing-box.go
+GOTOOLCHAIN=go1.26.10 go test -mod=readonly -race \
   ./scripts/verify-sing-box.go ./scripts/verify-sing-box_test.go \
   -count=1 -timeout=120s
-GOTOOLCHAIN=go1.26.9 go test -mod=readonly \
+GOTOOLCHAIN=go1.26.10 go test -mod=readonly \
   ./scripts/verify-sing-box.go ./scripts/verify-sing-box_test.go \
   -run='^$' -fuzz=FuzzExactAuditedPatch -fuzztime=5s -parallel=2
-GOTOOLCHAIN=go1.26.9 go run -mod=readonly ./scripts/verify-sing-box.go \
+GOTOOLCHAIN=go1.26.10 go run -mod=readonly ./scripts/verify-sing-box.go \
   --source /absolute/path/to/extracted/archive/third_party/sing-box
-GOTOOLCHAIN=go1.26.9 GOMAXPROCS=2 \
+GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 \
   bash ./scripts/test-sing-box-race.sh
 ```
 
@@ -187,7 +187,7 @@ keys and the expanded CONNECT-IP URI only when compatibility is enabled.
 There is no invented universal `masque://` link. The server public key is
 pinned, so a TLS public-key rotation requires clients to refresh subscriptions.
 
-Run `GOTOOLCHAIN=go1.26.9 bash scripts/test-mihomo-masque.sh`. This downloads an
+Run `GOTOOLCHAIN=go1.26.10 bash scripts/test-mihomo-masque.sh`. This downloads an
 official digest-pinned Mihomo v1.19.31 binary for Linux amd64 or macOS arm64
 (or accepts an explicitly supplied `NOVAPANEL_MIHOMO_TEST_BINARY`) and requires
 non-skipped PASS records for both-client TCP/UDP, tracked accounting, native

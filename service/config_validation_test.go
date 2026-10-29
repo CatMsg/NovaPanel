@@ -24,7 +24,7 @@ func TestValidateConfigReferencesAcceptsValidRoute(t *testing.T) {
 		],
 		"route":{
 			"final":"select",
-			"rule_set":[{"type":"remote","tag":"remote","format":"binary","url":"https://example.com/rules.srs","download_detour":"proxy-a"}],
+			"rule_set":[{"type":"remote","tag":"remote","format":"binary","url":"https://example.com/rules.srs","http_client":{"detour":"proxy-a"}}],
 			"rules":[{"inbound":["mixed-in"],"rule_set":["remote"],"action":"route","outbound":"proxy-a"}]
 		}
 	}`)
@@ -175,7 +175,7 @@ func TestValidateRuntimeConfigDomainResolvers(t *testing.T) {
 		{"HTTP client", `"http_clients":[{"tag":"web","domain_resolver":RESOLVER}]`, "http_clients[0].domain_resolver"},
 		{"NTP", `"ntp":{"server":"time.example.com","domain_resolver":RESOLVER}`, "ntp.domain_resolver"},
 		{"route default", `"route":{"default_domain_resolver":RESOLVER}`, "route.default_domain_resolver"},
-		{"route direct action", `"route":{"rules":[{"action":"direct","domain_resolver":RESOLVER}]}`, "route.rules[0].domain_resolver"},
+		{"route direct action", `"route":{"rules":[{"action":"direct","domain_resolver":RESOLVER}]}`, "outbounds[0].domain_resolver"},
 		{"shadowtls handshake", `"inbounds":[{"type":"shadowtls","tag":"in","handshake":{"server":"host.example.com","domain_resolver":RESOLVER}}]`, "inbounds[0].handshake.domain_resolver"},
 		{"shadowtls named handshake", `"inbounds":[{"type":"shadowtls","tag":"in","handshake_for_server_name":{"host.example.com":{"server":"host.example.com","domain_resolver":RESOLVER}}}]`, `inbounds[0].handshake_for_server_name["host.example.com"].domain_resolver`},
 		{"reality handshake", `"inbounds":[{"type":"vless","tag":"in","tls":{"reality":{"handshake":{"server":"host.example.com","domain_resolver":RESOLVER}}}}]`, "inbounds[0].tls.reality.handshake.domain_resolver"},
@@ -199,7 +199,11 @@ func TestValidateRuntimeConfigDomainResolvers(t *testing.T) {
 						path += ".server"
 					}
 					config := []byte(`{"dns":{"servers":[{"type":"local","tag":"bootstrap"}]},` + strings.ReplaceAll(test.fragment, "RESOLVER", resolver) + `}`)
-					err := validateRuntimeConfig(config)
+					normalized, normalizeErr := ValidateSingBoxConfig(config)
+					if normalizeErr != nil {
+						t.Fatalf("normalize fixture: %v", normalizeErr)
+					}
+					err := validateRuntimeConfig(normalized)
 					if tag == "bootstrap" {
 						if err != nil {
 							t.Fatalf("valid resolver rejected: %v", err)
@@ -301,7 +305,7 @@ func TestValidateRuntimeConfigDNSFallbackLifecycle(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			// Same non-rewriting validation as getConfig -> save/preflight.
+			// Same normalization and validation path as getConfig -> save/preflight.
 			// No database, listeners, certificates, NTP or outbound queries.
 			config, err := ValidateSingBoxConfig([]byte(test.config))
 			if err != nil {

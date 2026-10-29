@@ -1,10 +1,14 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/CatMsg/NovaPanel/core"
@@ -16,6 +20,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+const databaseUploadMultipartOverhead int64 = 1 << 20
+const maxDatabaseUploadBodySize = database.MaxDatabaseBackupSize + databaseUploadMultipartOverhead
+const databaseUploadReadIdleTimeout = 60 * time.Second
+const databaseUploadMaxDuration = 2 * time.Hour
+
+var databaseUploadGate sync.Mutex
 
 func (a *ApiService) GetRuleSetHealth(c *gin.Context) {
 	health, err := a.ConfigService.GetRuleSetHealth()
@@ -658,6 +669,13 @@ func (a *ApiService) GetDb(c *gin.Context) {
 
 func (a *ApiService) Login(c *gin.Context) {
 	started := time.Now()
+	releaseVerification, admitted := loginVerificationGate.tryAcquire()
+	if !admitted {
+		rejectOverloadedLogin(c)
+		return
+	}
+	defer releaseVerification()
+
 	respondInvalidLogin := func() {
 		if remaining := 400*time.Millisecond - time.Since(started); remaining > 0 {
 			time.Sleep(remaining)
@@ -674,13 +692,13 @@ func (a *ApiService) Login(c *gin.Context) {
 		User string `form:"user" json:"user"`
 		Pass string `form:"pass" json:"pass"`
 	}
-	if err := c.ShouldBind(&payload); err != nil {
+	if err := bindLoginPayload(c, &payload); err != nil {
 		recordLoginFailure(remoteIP, &a.AlertService)
 		respondInvalidLogin()
 		return
 	}
 
-	loginUser, err := a.UserService.Login(payload.User, payload.Pass, remoteIP)
+	loginUser, sessionEpoch, err := a.UserService.LoginWithSessionEpoch(payload.User, payload.Pass, remoteIP)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidCredentials) {
 			recordLoginFailure(remoteIP, &a.AlertService)
@@ -695,7 +713,7 @@ func (a *ApiService) Login(c *gin.Context) {
 		logger.Infof("Unable to get session's max age from DB")
 	}
 
-	err = SetLoginUser(c, loginUser, sessionMaxAge)
+	err = SetLoginUser(c, loginUser, sessionMaxAge, sessionEpoch)
 	if err == nil {
 		logger.Info("user ", loginUser, " login success")
 	} else {
@@ -703,6 +721,24 @@ func (a *ApiService) Login(c *gin.Context) {
 	}
 
 	jsonMsg(c, "", nil)
+}
+
+func rejectOverloadedLogin(c *gin.Context) {
+	c.Header("Retry-After", "1")
+	c.AbortWithStatusJSON(http.StatusTooManyRequests, Msg{Success: false, Msg: "login temporarily unavailable"})
+}
+
+const maxLoginRequestBodyBytes = 16 << 10
+
+func bindLoginPayload(c *gin.Context, payload any) error {
+	originalBody := c.Request.Body
+	defer originalBody.Close()
+	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, originalBody, maxLoginRequestBodyBytes))
+	if err != nil {
+		return err
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+	return c.ShouldBind(payload)
 }
 
 func (a *ApiService) ChangePass(c *gin.Context) {
@@ -769,18 +805,29 @@ func (a *ApiService) SubConvert(c *gin.Context) {
 }
 
 func (a *ApiService) ImportDb(c *gin.Context) {
-	file, _, err := c.Request.FormFile("db")
+	clearReadDeadline, ok := limitDatabaseUploadRequest(c)
+	if !ok {
+		return
+	}
+	defer clearReadDeadline()
+	releaseUpload, err := acquireDatabaseUpload()
 	if err != nil {
 		jsonMsg(c, "", err)
 		return
 	}
-	defer file.Close()
+	defer releaseUpload()
 	releaseBackupGuard, err := service.AcquireRemoteBackupRestoreGuard()
 	if err != nil {
 		jsonMsg(c, "", err)
 		return
 	}
 	defer releaseBackupGuard()
+	file, _, err := c.Request.FormFile("db")
+	if err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
+	defer file.Close()
 	// The lifecycle service serializes import against saves/resume and carries
 	// any active pause into the replacement DB before swapping it into service.
 	err = service.GetMaintenanceService().ImportDatabase(file)
@@ -788,6 +835,17 @@ func (a *ApiService) ImportDb(c *gin.Context) {
 }
 
 func (a *ApiService) ValidateDb(c *gin.Context) {
+	clearReadDeadline, ok := limitDatabaseUploadRequest(c)
+	if !ok {
+		return
+	}
+	defer clearReadDeadline()
+	releaseUpload, err := acquireDatabaseUpload()
+	if err != nil {
+		jsonMsg(c, "", err)
+		return
+	}
+	defer releaseUpload()
 	file, _, err := c.Request.FormFile("db")
 	if err != nil {
 		jsonMsg(c, "", err)
@@ -796,6 +854,54 @@ func (a *ApiService) ValidateDb(c *gin.Context) {
 	defer file.Close()
 	report, err := database.ValidateDB(file)
 	jsonObj(c, report, err)
+}
+
+func limitDatabaseUploadRequest(c *gin.Context) (func(), bool) {
+	if c.Request.ContentLength > maxDatabaseUploadBodySize {
+		jsonMsg(c, "", common.NewError("database upload exceeds the 1 GiB limit"))
+		return nil, false
+	}
+	controller := http.NewResponseController(c.Writer)
+	body := &databaseUploadReadTimeoutBody{
+		ReadCloser: c.Request.Body,
+		controller: controller,
+		startedAt:  time.Now(),
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, body, maxDatabaseUploadBodySize)
+	return func() { _ = controller.SetReadDeadline(time.Time{}) }, true
+}
+
+func limitRequestBody(c *gin.Context, maxBytes int64) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+}
+
+func acquireDatabaseUpload() (func(), error) {
+	if !databaseUploadGate.TryLock() {
+		return nil, common.NewError("another database upload or validation is in progress")
+	}
+	return databaseUploadGate.Unlock, nil
+}
+
+type databaseUploadReadTimeoutBody struct {
+	io.ReadCloser
+	controller *http.ResponseController
+	startedAt  time.Time
+}
+
+func (b *databaseUploadReadTimeoutBody) Read(p []byte) (int, error) {
+	deadline := databaseUploadReadDeadline(b.startedAt, time.Now())
+	if err := b.controller.SetReadDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return 0, err
+	}
+	return b.ReadCloser.Read(p)
+}
+
+func databaseUploadReadDeadline(startedAt, now time.Time) time.Time {
+	deadline := now.Add(databaseUploadReadIdleTimeout)
+	if maxDeadline := startedAt.Add(databaseUploadMaxDuration); deadline.After(maxDeadline) {
+		return maxDeadline
+	}
+	return deadline
 }
 
 func (a *ApiService) Logout(c *gin.Context) {

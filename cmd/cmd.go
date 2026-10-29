@@ -30,6 +30,8 @@ func ParseCmd() {
 	var clearSubTLS bool
 	var reset bool
 	var show bool
+	var passwordStdin bool
+	var passwordPrompt bool
 	settingCmd.BoolVar(&reset, "reset", false, "reset all settings")
 	settingCmd.BoolVar(&show, "show", false, "show current settings")
 	settingCmd.IntVar(&port, "port", 0, "set panel port")
@@ -46,7 +48,9 @@ func ParseCmd() {
 	adminCmd.BoolVar(&show, "show", false, "show first admin credentials")
 	adminCmd.BoolVar(&reset, "reset", false, "reset first admin credentials")
 	adminCmd.StringVar(&username, "username", "", "set login username")
-	adminCmd.StringVar(&password, "password", "", "set login password")
+	adminCmd.StringVar(&password, "password", "", "set login password (legacy; visible in process arguments)")
+	adminCmd.BoolVar(&passwordStdin, "password-stdin", false, "read login password from standard input")
+	adminCmd.BoolVar(&passwordPrompt, "password-prompt", false, "read login password without terminal echo")
 
 	oldUsage := flag.Usage
 	flag.Usage = func() {
@@ -80,26 +84,61 @@ func ParseCmd() {
 		}
 		return
 	}
+	if len(os.Args) < 2 {
+		flag.Usage()
+		os.Exit(2)
+	}
 
 	switch os.Args[1] {
 	case "admin":
 		err := adminCmd.Parse(os.Args[2:])
 		if err != nil {
-			fmt.Println(err)
-			return
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
 		}
 		switch {
 		case show:
-			showAdmin()
+			if err := showAdmin(); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
 		case reset:
-			resetAdmin()
+			if err := resetAdmin(); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
 		default:
-			updateAdmin(username, password)
-			showAdmin()
+			if (passwordStdin && passwordPrompt) || ((passwordStdin || passwordPrompt) && password != "") {
+				fmt.Fprintln(os.Stderr, "use only one of -password, -password-stdin, or -password-prompt")
+				os.Exit(2)
+			}
+			if passwordStdin || passwordPrompt {
+				var err error
+				if passwordStdin {
+					password, err = readAdminPassword(os.Stdin)
+				} else {
+					password, err = promptAdminPassword()
+				}
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(1)
+				}
+			}
+			if err := updateAdmin(username, password); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			if err := showAdmin(); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
 		}
 
 	case "uri":
-		getPanelURI()
+		if err := getPanelURI(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 
 	case "healthcheck":
 		if err := checkLocalPanel(); err != nil {
@@ -123,17 +162,29 @@ func ParseCmd() {
 	case "setting":
 		err := settingCmd.Parse(os.Args[2:])
 		if err != nil {
-			fmt.Println(err)
-			return
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
 		}
 		switch {
 		case show:
-			showSetting()
+			if err := showSetting(); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
 		case reset:
-			resetSetting()
+			if err := resetSetting(); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
 		default:
-			updateSetting(port, path, subPort, subPath, webCertFile, webKeyFile, subCertFile, subKeyFile, clearWebTLS, clearSubTLS)
-			showSetting()
+			if err := updateSetting(port, path, subPort, subPath, webCertFile, webKeyFile, subCertFile, subKeyFile, clearWebTLS, clearSubTLS); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			if err := showSetting(); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
 		}
 	case "security":
 		runSecurityCommand(os.Args[2:])

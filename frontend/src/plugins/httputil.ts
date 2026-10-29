@@ -35,7 +35,7 @@ function _handleMsg(msg: any): void {
 }
 
 export const logout = async () => {
-  const response = await HttpUtils.get('api/logout')
+  const response = await HttpUtils.post('api/logout', {})
   if(response.success){
     router.push('/login')
   }
