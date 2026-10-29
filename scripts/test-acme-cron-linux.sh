@@ -193,8 +193,12 @@ exec /usr/bin/sudo -n /usr/bin/systemctl "$@"
 EOF
 chmod 0755 "$ACME_SYSTEMCTL_BIN/systemctl"
 
+ACME_SH_VERSION=$(sed -n 's/^readonly ACME_SH_VERSION="\([^"]\{1,32\}\)"$/\1/p' "${NOVAS_WORKSPACE}/novas.sh")
 ACME_SH_COMMIT=$(sed -n 's/^readonly ACME_SH_COMMIT="\([[:xdigit:]]\{40\}\)"$/\1/p' "${NOVAS_WORKSPACE}/novas.sh")
+ACME_SH_ARCHIVE_SHA256=$(sed -n 's/^readonly ACME_SH_ARCHIVE_SHA256="\([[:xdigit:]]\{64\}\)"$/\1/p' "${NOVAS_WORKSPACE}/novas.sh")
+[[ "$ACME_SH_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "could not read the pinned acme.sh version"
 [[ "$ACME_SH_COMMIT" =~ ^[[:xdigit:]]{40}$ ]] || die "could not read the pinned acme.sh commit"
+[[ "$ACME_SH_ARCHIVE_SHA256" =~ ^[[:xdigit:]]{64}$ ]] || die "could not read the pinned acme.sh archive digest"
 
 extract_novas_function() {
     awk -v function_name="$1" '
@@ -203,7 +207,8 @@ extract_novas_function() {
         in_function && $0 == "}" { exit }
     ' "${NOVAS_WORKSPACE}/novas.sh"
 }
-printf 'readonly ACME_SH_COMMIT="%s"\n' "$ACME_SH_COMMIT" >"$ACME_FUNCTIONS"
+printf 'readonly ACME_SH_VERSION="%s"\nreadonly ACME_SH_COMMIT="%s"\nreadonly ACME_SH_ARCHIVE_SHA256="%s"\n' \
+    "$ACME_SH_VERSION" "$ACME_SH_COMMIT" "$ACME_SH_ARCHIVE_SHA256" >"$ACME_FUNCTIONS"
 for function_name in \
     install_cron_package verify_sysv_cron_boot_links enable_sysv_cron \
     start_cron_service cron_service_backend cron_service_is_active \
