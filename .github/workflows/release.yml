@@ -512,7 +512,7 @@ jobs:
               fi
 
               # The upload may have succeeded even if the client lost its response.
-              if release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")"; then
+              if release_json="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets)"; then
                 uploaded_digest="$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .digest // empty' <<<"$release_json")"
                 if [[ -n "$uploaded_digest" ]]; then
                   if [[ "$uploaded_digest" != "$expected_digest" ]]; then
@@ -535,7 +535,7 @@ jobs:
             fi
           done
 
-          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")"
+          release_json="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets)"
           for asset in "${assets[@]}"; do
             name="$(basename "$asset")"
             expected_digest="sha256:$(sha256sum "$asset" | awk '{print $1}')"

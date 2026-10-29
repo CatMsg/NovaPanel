@@ -47,6 +47,7 @@ fi
 grep -Fq 'gh release create "$TAG"' "$workflow"
 grep -Fq -- '--draft' "$workflow"
 grep -Fq "if: steps.vars.outputs.resume != 'true'" "$workflow"
+grep -Fq 'gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets' "$workflow"
 grep -Fq 'gh release edit "$TAG" --draft=false' "$workflow"
 grep -Fq 'sha256sum "$asset"' "$workflow"
 grep -Fq "'.assets[] | select(.name == \$name) | .digest // empty'" "$workflow"
@@ -60,6 +61,11 @@ grep -Fq -- '--source-ref "$GITHUB_REF"' "$workflow"
 grep -Fq -- '--source-digest "$GITHUB_SHA"' "$workflow"
 grep -Fq -- '--deny-self-hosted-runners' "$workflow"
 grep -Fq 'Existing release tag points to a different commit' "$prepare"
+grep -Fq 'releases?per_page=100' "$prepare"
+if grep -Eq 'gh api .*releases/tags/' "$prepare" "$workflow"; then
+    echo "release resume and draft asset verification must not use the tag-only release endpoint" >&2
+    exit 1
+fi
 if grep -Eq -- '--clobber|gh release edit .*--title' "$workflow"; then
     echo "release workflow must not overwrite existing releases or assets" >&2
     exit 1
