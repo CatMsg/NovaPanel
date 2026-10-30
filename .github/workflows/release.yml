@@ -255,20 +255,6 @@ jobs:
             NOVAS_WORKSPACE="$NOVAS_WORKSPACE" \
             bash "$GITHUB_WORKSPACE/scripts/test-acme-cron-linux.sh"
 
-  test-windows-installer-prereqs:
-    name: Windows installer source and dependency checks
-    runs-on: windows-latest
-    timeout-minutes: 10
-    steps:
-      - name: 检出仓库
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: WinSW 摘要与安装器行为回归测试
-        shell: pwsh
-        run: ./windows/test-winsw-verifier.ps1
-
   build-linux:
     name: 构建-${{ matrix.platform }}
     needs:

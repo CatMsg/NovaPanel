@@ -38,11 +38,6 @@ job_needs() {
 }
 
 release_needs="$(job_needs "$workflow" publish-release)"
-docker_needs="$(job_needs "$ci_workflow" docker)"
-if grep -Eiq 'windows' <<<"$release_needs$docker_needs"; then
-    echo "Linux Release and Docker CI must not depend on Windows jobs" >&2
-    exit 1
-fi
 for readme in "$root/README.md" "$root/README.en.md" "$root/README.ja.md" "$root/README.ko.md" "$root/README.ru.md" "$root/README.zh-TW.md"; do
     if grep -Fq 'raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh' "$readme"; then
         echo "installer bootstrap must not execute the mutable main branch: $readme" >&2

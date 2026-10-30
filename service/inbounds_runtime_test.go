@@ -189,9 +189,6 @@ func TestInboundRuntimeMieruPortHolder(t *testing.T) {
 
 func startInboundRuntimeMieruPortHolder(t *testing.T, address string) *mieruRuntime {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("Mieru listener lifecycle test requires Unix process signals")
-	}
 	command := exec.Command(os.Args[0], "-test.run=^TestInboundRuntimeMieruPortHolder$")
 	command.Env = append(os.Environ(), "NOVAS_TEST_MIERU_PORT_HOLDER="+address)
 	command.Stdout = io.Discard

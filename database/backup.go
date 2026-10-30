@@ -14,7 +14,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -648,13 +647,7 @@ func SendSighup() error {
 	// Send SIGHUP to the current process
 	go func() {
 		time.Sleep(3 * time.Second)
-		var signalErr error
-		if runtime.GOOS == "windows" {
-			signalErr = process.Kill()
-		} else {
-			signalErr = process.Signal(syscall.SIGHUP)
-		}
-		if signalErr != nil {
+		if signalErr := process.Signal(syscall.SIGHUP); signalErr != nil {
 			logger.Error("send signal SIGHUP failed:", signalErr)
 		}
 	}()

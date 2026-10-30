@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -420,9 +419,6 @@ func (s *SettingService) GetTimeLocation() (*time.Location, error) {
 	if err != nil {
 		return nil, err
 	}
-	if runtime.GOOS == "windows" {
-		l = "Local"
-	}
 	location, err := time.LoadLocation(l)
 	if err != nil {
 		return nil, fmt.Errorf("invalid time location %q: %w", l, err)
@@ -434,9 +430,6 @@ func (s *SettingService) getTimeLocationTx(tx *gorm.DB) (*time.Location, error) 
 	l, err := s.getStringTx(tx, "timeLocation")
 	if err != nil {
 		return nil, err
-	}
-	if runtime.GOOS == "windows" {
-		l = "Local"
 	}
 	location, err := time.LoadLocation(l)
 	if err != nil {

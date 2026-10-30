@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -56,10 +55,6 @@ func GetDBFolderPath() string {
 	if dbFolderPath == "" {
 		dir, err := filepath.Abs(filepath.Dir(os.Args[0]))
 		if err != nil {
-			// Cross-platform fallback path
-			if runtime.GOOS == "windows" {
-				return "C:\\Program Files\\novas\\db"
-			}
 			return "/usr/local/novas/db"
 		}
 		dbFolderPath = filepath.Join(dir, "db")

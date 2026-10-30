@@ -113,4 +113,4 @@ iMac/macOS 本地开发沿用 `sh runNovas.sh`、原有 `db/novas.db` 和 2095 �
 - 本地通过：Go 全包测试脚本、全项目 vet/staticcheck/build、Sing-box 特性和 race 验收、真实 Mihomo 1.19.31 TCP/UDP 互通验收；前端 npm audit、61 个单测、lint、typecheck、生产构建和 57 个 Playwright E2E 全通过。macOS 构建仅出现重复 `-lobjc` 警告。
 - `govulncheck` 未发现项目可达漏洞；另报告一个项目代码未调用的模块级漏洞，不能据此声称所有依赖均无公告。
 - 修复了 CI gofmt 检查会因 alpha.13 已删除的旧文件路径而报错的问题；检查现在跳过不存在的已跟踪路径，并对当前存在的 Go 文件验证通过。
-- v1.6.149 的 Hosted 工作流已通过基线 Windows 安装器检查及 Linux 原生 UFW/ACME 门禁；当前未推送工作树新增的 Windows amd64 源码构建、WinSW x86/x64 架构选择和 Linux amd64 安装器差异尚无 Hosted CI 证据。本地 E2E/回环测试不代表公网 VPS 协议互通；这些本地差异未推送、未发布、未部署。
+- v1.6.149 的 Hosted 工作流已通过 Linux 原生 UFW/ACME 门禁。本地 E2E/回环测试不代表公网 VPS 协议互通；本地差异未推送、未发布、未部署。

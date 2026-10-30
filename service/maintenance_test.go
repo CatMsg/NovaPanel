@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -105,9 +104,6 @@ func TestMaintenanceModeFailsClosedOnInvalidPersistedValue(t *testing.T) {
 }
 
 func TestMaintenanceModeImportPreservesPauseAcrossInitialize(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("ImportDB restart uses process termination on Windows")
-	}
 	setupMaintenanceTest(t)
 	settings := &SettingService{}
 	if err := settings.setString(maintenanceModeSetting, "false"); err != nil {

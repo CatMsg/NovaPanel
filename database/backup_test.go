@@ -5,7 +5,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -207,10 +206,6 @@ func TestImportDBUsesPrivateRandomTemporaryFile(t *testing.T) {
 	if err := InitDB(config.GetDBPath()); err != nil {
 		t.Fatalf("initialize live database: %v", err)
 	}
-	if runtime.GOOS == "windows" {
-		t.Skip("creating a symlink may require elevated privileges on Windows")
-	}
-
 	legacyTempPath := dbPath + ".temp"
 	victimPath := filepath.Join(t.TempDir(), "victim")
 	if err := os.Symlink(victimPath, legacyTempPath); err != nil {

@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -22,9 +21,6 @@ func TestOpenDBCreatesPrivateDatabaseStorage(t *testing.T) {
 	}
 	if err := CloseDB(); err != nil {
 		t.Fatalf("close database: %v", err)
-	}
-	if runtime.GOOS == "windows" {
-		return // Windows ACLs are enforced by the installer, not chmod bits.
 	}
 	for target, want := range map[string]os.FileMode{dir: 0o700, path: 0o600} {
 		info, err := os.Stat(target)
@@ -55,9 +51,6 @@ func TestOpenDBCreatesPrivateDatabaseStorage(t *testing.T) {
 }
 
 func TestOpenDBRejectsDatabaseSymlink(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink creation requires elevated Windows privileges in some environments")
-	}
 	target := filepath.Join(t.TempDir(), "target.db")
 	if err := InitDB(target); err != nil {
 		t.Fatalf("initialize target database: %v", err)
