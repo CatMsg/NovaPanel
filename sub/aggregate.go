@@ -679,7 +679,7 @@ func (a *AggregateService) selfAggregateURI(host string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimRight(strings.TrimSpace(base), "/") + "/aggregate", nil
+	return util.AppendURLPathSegment(base, "aggregate"), nil
 }
 
 func sameSubscriptionSource(left string, right string) bool {

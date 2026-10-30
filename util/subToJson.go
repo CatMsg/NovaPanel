@@ -30,39 +30,6 @@ var externalSubscriptionTransport = func() *http.Transport {
 	return transport
 }()
 
-var externalSubscriptionDeniedPrefixes = mustParsePrefixes(
-	"0.0.0.0/8",
-	"100.64.0.0/10",
-	"192.0.0.0/24",
-	"192.0.2.0/24",
-	"192.88.99.0/24",
-	"198.18.0.0/15",
-	"198.51.100.0/24",
-	"203.0.113.0/24",
-	"240.0.0.0/4",
-	"::/96",
-	"64:ff9b::/96",
-	"64:ff9b:1::/48",
-	"100::/64",
-	"2001::/23",
-	"2001:db8::/32",
-	"2002::/16",
-	"fec0::/10",
-	"3fff::/20",
-)
-
-func mustParsePrefixes(values ...string) []netip.Prefix {
-	prefixes := make([]netip.Prefix, 0, len(values))
-	for _, value := range values {
-		prefix, err := netip.ParsePrefix(value)
-		if err != nil {
-			panic(err)
-		}
-		prefixes = append(prefixes, prefix)
-	}
-	return prefixes
-}
-
 func dialExternalSubscription(ctx context.Context, network, address string) (net.Conn, error) {
 	dialer := net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
 	return dialExternalSubscriptionWith(ctx, network, address, net.DefaultResolver.LookupNetIP, dialer.DialContext)
@@ -115,13 +82,8 @@ func validateExternalSubscriptionIPs(ips []netip.Addr) error {
 	}
 	for _, ip := range ips {
 		ip = ip.Unmap()
-		if !ip.IsValid() || !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsMulticast() || ip.IsUnspecified() {
-			return errors.New("external subscription host resolved to a non-public address")
-		}
-		for _, prefix := range externalSubscriptionDeniedPrefixes {
-			if prefix.Contains(ip) {
-				return errors.New("external subscription host resolved to a reserved address")
-			}
+		if !IsPublicRoutableIP(ip) {
+			return errors.New("external subscription host resolved to a non-public or reserved address")
 		}
 	}
 	return nil

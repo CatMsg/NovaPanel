@@ -38,6 +38,10 @@ readonly NOVAS_UPDATE_STATUS="${NOVAS_UPDATE_STATE_DIR}/update.status"
 readonly NOVAS_UPDATE_PID="${NOVAS_UPDATE_STATE_DIR}/update.pid"
 readonly NOVAS_UPDATE_LOCK_DIR="${NOVAS_UPDATE_STATE_DIR}/update.lock"
 readonly NOVAS_UPDATE_UNIT_FILE="${NOVAS_UPDATE_STATE_DIR}/update.unit"
+readonly NOVAS_RELEASE_REPO="CatMsg/NovaPanel"
+readonly NOVAS_RELEASE_GH_VERSION="2.103.2"
+readonly NOVAS_RELEASE_GH_SHA256="62ccf747115ddc61237efffdde66a3c8f70ba249433dc64f70801089b59c59c8"
+NOVAS_RELEASE_GH_PATH=""
 # Update only after reviewing the official release and verifying its archive digest.
 readonly ACME_SH_VERSION="3.1.6"
 readonly ACME_SH_COMMIT="807da6498377ee5e0cf43a78091f46f12dc59a89"
@@ -100,6 +104,97 @@ release_source_url() {
     valid_release_tag "${tag}" || return 1
     [[ "${file}" == "install.sh" || "${file}" == "novas.sh" ]] || return 1
     printf 'https://raw.githubusercontent.com/CatMsg/NovaPanel/%s/%s' "${tag}" "${file}"
+}
+
+release_download_to_file() {
+    curl --proto '=https' --proto-redir '=https' -fsSL --retry 3 --retry-delay 2 --max-time 60 -o "$2" "$1"
+}
+
+release_gh_version_supported() {
+    local version="$1" major minor patch
+    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+    IFS=. read -r major minor patch <<< "$version"
+    ((major > 2 || (major == 2 && minor > 103) || (major == 2 && minor == 103 && patch >= 2)))
+}
+
+ensure_release_gh() {
+    local staging="$1" system_gh version archive member actual
+    system_gh="$(type -P gh 2>/dev/null || true)"
+    if [[ -n "$system_gh" && -x "$system_gh" ]]; then
+        version="$("$system_gh" --version 2>/dev/null | sed -n '1s/^gh version \([0-9][0-9.]*\).*/\1/p')"
+        if release_gh_version_supported "$version" && \
+            "$system_gh" attestation verify --help 2>&1 | grep -Fq -- '--source-digest' && \
+            "$system_gh" attestation verify --help 2>&1 | grep -Fq -- '--bundle'; then
+            NOVAS_RELEASE_GH_PATH="$system_gh"
+            return 0
+        fi
+    fi
+
+    archive="$staging/gh_${NOVAS_RELEASE_GH_VERSION}_linux_amd64.tar.gz"
+    member="gh_${NOVAS_RELEASE_GH_VERSION}_linux_amd64/bin/gh"
+    release_download_to_file "https://github.com/cli/cli/releases/download/v${NOVAS_RELEASE_GH_VERSION}/gh_${NOVAS_RELEASE_GH_VERSION}_linux_amd64.tar.gz" "$archive" || {
+        LOGE "无法下载固定版本 GitHub CLI，已停止来源验证" >&2
+        return 1
+    }
+    actual="$(sha256sum "$archive" | awk '{print $1}')"
+    if [[ "$actual" != "$NOVAS_RELEASE_GH_SHA256" ]]; then
+        LOGE "GitHub CLI 下载包 SHA-256 校验失败，已停止来源验证" >&2
+        return 1
+    fi
+    if ! tar -tzf "$archive" | grep -Fxq "$member"; then
+        LOGE "GitHub CLI 下载包缺少预期文件，已停止来源验证" >&2
+        return 1
+    fi
+    tar -xzf "$archive" -C "$staging" --no-same-owner --no-same-permissions "$member" || return 1
+    NOVAS_RELEASE_GH_PATH="$staging/$member"
+    [[ -x "$NOVAS_RELEASE_GH_PATH" ]]
+}
+
+verify_release_script_provenance() {
+    local script_path="$1" target_version="$2" staging="$3" file bundle metadata source_digest gh_path
+    file="$(basename "$script_path")"
+    [[ "$file" == "install.sh" || "$file" == "novas.sh" ]] || return 1
+    bundle="$staging/NovaPanel-${file}.sigstore.json"
+    metadata="$staging/release.json"
+    release_download_to_file "https://github.com/${NOVAS_RELEASE_REPO}/releases/download/${target_version}/NovaPanel-${file}.sigstore.json" "$bundle" || {
+        LOGE "Release 缺少 ${file} 的来源证明，已停止执行" >&2
+        return 1
+    }
+    release_download_to_file "https://api.github.com/repos/${NOVAS_RELEASE_REPO}/releases/tags/${target_version}" "$metadata" || {
+        LOGE "无法读取 Release 来源提交，已停止执行" >&2
+        return 1
+    }
+    source_digest="$(sed -nE 's/^[[:space:]]*"target_commitish":[[:space:]]*"([0-9a-fA-F]{40})"[,]?$/\1/p' "$metadata" | head -n1)"
+    if [[ ! "$source_digest" =~ ^[0-9a-fA-F]{40}$ ]]; then
+        LOGE "Release 未提供有效的 40 位构建提交，已停止来源验证" >&2
+        return 1
+    fi
+    ensure_release_gh "$staging" || return 1
+    gh_path="$NOVAS_RELEASE_GH_PATH"
+    if ! env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN \
+        GH_CONFIG_DIR="$staging/gh-config" GH_HOST=github.com \
+        "$gh_path" attestation verify "$script_path" \
+        --repo "$NOVAS_RELEASE_REPO" \
+        --bundle "$bundle" \
+        --cert-oidc-issuer https://token.actions.githubusercontent.com \
+        --signer-workflow "$NOVAS_RELEASE_REPO/.github/workflows/release.yml" \
+        --source-ref refs/heads/main \
+        --source-digest "$source_digest" \
+        --deny-self-hosted-runners >&2; then
+        LOGE "${file} 的 NovaPanel 来源证明验证失败，已停止执行" >&2
+        return 1
+    fi
+    LOGI "${file} 的 NovaPanel 来源证明验证通过" >&2
+}
+
+download_verified_release_script() {
+    local target_version="$1" file="$2" staging="$3" path url
+    path="$staging/$file"
+    url="$(release_source_url "$target_version" "$file")" || return 1
+    release_download_to_file "$url" "$path" || return 1
+    verify_release_script_provenance "$path" "$target_version" "$staging" || return 1
+    bash -n "$path" || return 1
+    printf '%s\n' "$path"
 }
 
 update() {
@@ -240,20 +335,16 @@ custom_version() {
 }
 
 download_install_script() {
-    local target_version="${1:-}" installer_path installer_url
-    installer_url=$(release_source_url "${target_version}" "install.sh") || return 1
-    installer_path=$(mktemp /tmp/novapanel-install.XXXXXX.sh) || return 1
-    if ! curl --proto '=https' --proto-redir '=https' -fsSL --max-time 60 "${installer_url}" -o "${installer_path}" || ! bash -n "${installer_path}"; then
-        rm -f "${installer_path}"
-        return 1
-    fi
+    local target_version="${1:-}" staging="${2:-}" installer_path
+    [[ -n "$staging" && -d "$staging" ]] || return 1
+    installer_path="$(download_verified_release_script "$target_version" install.sh "$staging")" || return 1
     chmod +x "${installer_path}"
     printf '%s\n' "${installer_path}"
 }
 
 run_install_script() {
     local target_version="${1:-}"
-    local installer_path
+    local installer_path staging status
     if [[ -z "${target_version}" ]]; then
         target_version=$(get_latest_release_tag) || {
             LOGE "无法从 Github 获取有效的最新版本号，已停止安装"
@@ -264,16 +355,38 @@ run_install_script() {
         LOGE "版本号无效：${target_version}"
         return 1
     }
-    installer_path=$(download_install_script "${target_version}")
+    staging=$(mktemp -d /tmp/novapanel-install.XXXXXX) || return 1
+    installer_path=$(download_install_script "${target_version}" "$staging")
     if [[ -z "${installer_path}" ]]; then
+        rm -rf "$staging"
         LOGE "下载安装脚本失败，请检查当前机器是否可以连接 Github"
         return 1
     fi
 
     bash "${installer_path}" "${target_version}"
-    local status=$?
-    rm -f "${installer_path}"
+    status=$?
+    rm -rf "$staging"
     return ${status}
+}
+
+stop_novas_before_uninstall() {
+    local stop_status=0 active_state
+    systemctl stop novas || stop_status=$?
+    active_state=$(systemctl is-active novas 2>/dev/null) || true
+    case "$active_state" in
+        inactive|failed) ;;
+        *)
+            LOGE "无法确认面板已停止（状态：${active_state:-未知}），取消卸载"
+            return 1
+            ;;
+    esac
+    if [[ "$stop_status" != 0 ]]; then
+        LOGI "停止命令返回错误，但已确认面板停止"
+    fi
+    if ! systemctl disable novas; then
+        LOGE "禁用面板服务失败，取消卸载"
+        return 1
+    fi
 }
 
 uninstall() {
@@ -284,8 +397,12 @@ uninstall() {
         fi
         return 0
     fi
-    systemctl stop novas
-    systemctl disable novas
+    if ! stop_novas_before_uninstall; then
+        if [[ $# == 0 ]]; then
+            before_show_menu
+        fi
+        return 1
+    fi
 
     if [[ -x /usr/local/novas/scripts/hy2-forward.sh ]]; then
         /usr/local/novas/scripts/hy2-forward.sh purge || true
@@ -352,12 +469,12 @@ set_setting() {
     read config_subPath
 
     echo -e "${yellow}正在初始化，请稍候...${plain}"
-    params=""
-    [ -z "$config_port" ] || params="$params -port $config_port"
-    [ -z "$config_path" ] || params="$params -path $config_path"
-    [ -z "$config_subPort" ] || params="$params -subPort $config_subPort"
-    [ -z "$config_subPath" ] || params="$params -subPath $config_subPath"
-    if /usr/local/novas/novas setting ${params}; then
+    local -a params=()
+    [ -z "$config_port" ] || params+=("-port" "$config_port")
+    [ -z "$config_path" ] || params+=("-path" "$config_path")
+    [ -z "$config_subPort" ] || params+=("-subPort" "$config_subPort")
+    [ -z "$config_subPath" ] || params+=("-subPath" "$config_subPath")
+    if /usr/local/novas/novas setting "${params[@]}"; then
         restart novas 0
     else
         LOGE "面板设置保存失败，请检查上方错误信息"
@@ -486,23 +603,25 @@ show_log() {
 }
 
 update_shell() {
-    local latest_version temp_script script_url
+    local latest_version staging temp_script
     latest_version=$(get_latest_release_tag) || {
         LOGE "无法从 Github 获取有效的最新版本号，已停止管理脚本更新"
         return 1
     }
-    script_url=$(release_source_url "${latest_version}" "novas.sh") || return 1
-    temp_script=$(mktemp /usr/bin/.novas.XXXXXX) || return 1
-    if ! curl --proto '=https' --proto-redir '=https' -fsSL --max-time 60 "${script_url}" -o "$temp_script" || ! bash -n "$temp_script"; then
-        rm -f "$temp_script"
-        echo ""
-        LOGE "下载脚本失败，请检查当前机器是否可以连接 Github"
-        before_show_menu
-    else
-        chmod 755 "$temp_script"
-        mv -f "$temp_script" /usr/bin/novas
-        LOGI "脚本升级成功，请重新运行脚本" && exit 0
+    staging=$(mktemp -d /usr/bin/.novas-update.XXXXXX) || return 1
+    temp_script=$(download_verified_release_script "$latest_version" novas.sh "$staging") || {
+        rm -rf "$staging"
+        LOGE "管理脚本下载或来源验证失败，现有脚本未更改"
+        return 1
+    }
+    if ! chmod 755 "$temp_script" || ! mv -f "$temp_script" /usr/bin/novas; then
+        rm -rf "$staging"
+        LOGE "管理脚本替换失败，现有脚本未更改"
+        return 1
     fi
+    rm -rf "$staging"
+    LOGI "脚本升级成功，请重新运行脚本"
+    exit 0
 }
 
 check_status() {
@@ -1120,63 +1239,45 @@ ssl_cert_issue() {
 
     local domain=""
     read -p "请输入你的域名：" domain
+    if ! validate_cf_domain "${domain}"; then
+        LOGE "域名格式无效，未更改现有证书"
+        return 1
+    fi
     LOGD "你的域名是：${domain}，正在检查..."
-    local currentCert=$(~/.acme.sh/acme.sh --list | tail -1 | awk '{print $1}')
+    local currentCert="" certInfo=""
+    if ! certInfo=$(~/.acme.sh/acme.sh --list); then
+        LOGE "读取现有证书列表失败，未更改现有证书"
+        return 1
+    fi
+    currentCert=$(printf '%s\n' "${certInfo}" | awk -v domain="${domain}" '$1 == domain { print $1; exit }')
 
-    if [ ${currentCert} == ${domain} ]; then
-        local certInfo=$(~/.acme.sh/acme.sh --list)
+    if [[ -n "${currentCert}" ]]; then
         LOGE "系统中已存在证书，不能重复签发，当前证书详情："
         LOGI "$certInfo"
-        exit 1
+        return 1
     else
         LOGI "你的域名已准备好签发证书..."
     fi
 
-    certPath="/root/cert/${domain}"
-    if [ ! -d "$certPath" ]; then
-        mkdir -p "$certPath"
-    else
-        rm -rf "$certPath"
-        mkdir -p "$certPath"
-    fi
-
     local WebPort=80
     read -p "请选择使用的端口，默认使用 80 端口：" WebPort
-    if [[ ${WebPort} -gt 65535 || ${WebPort} -lt 1 ]]; then
-        LOGE "输入的 ${WebPort} 无效，将使用默认端口"
+    if [[ -z "${WebPort}" ]]; then
+        WebPort=80
+    elif [[ ! "${WebPort}" =~ ^[0-9]{1,5}$ ]] || ((10#${WebPort} < 1 || 10#${WebPort} > 65535)); then
+        LOGE "输入端口无效，必须是 1 到 65535 之间的整数；未更改现有证书"
+        return 1
     fi
     LOGI "将使用端口 ${WebPort} 签发证书，请确保该端口已开放..."
-    ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt
-    ~/.acme.sh/acme.sh --issue -d ${domain} --standalone --httpport ${WebPort}
-    if [ $? -ne 0 ]; then
-        LOGE "签发证书失败，请检查日志"
-        rm -rf ~/.acme.sh/${domain}
-        exit 1
-    else
-        LOGE "证书签发成功，正在安装证书..."
+    if ! run_standalone_acme_issue "${domain}" "${WebPort}" "/root/cert"; then
+        return 1
     fi
-    ~/.acme.sh/acme.sh --installcert -d ${domain} \
-        --key-file /root/cert/${domain}/privkey.pem \
-        --fullchain-file /root/cert/${domain}/fullchain.pem
-
-    if [ $? -ne 0 ]; then
-        LOGE "安装证书失败，退出"
-        rm -rf ~/.acme.sh/${domain}
-        exit 1
-    else
-        LOGI "安装证书成功，正在启用自动续签..."
-    fi
-
-    if ! secure_issued_certificate_permissions "${certPath}"; then
-        LOGE "证书文件权限设置失败，已停止后续操作"
-        exit 1
-    fi
+    LOGI "安装证书成功，正在启用自动续签..."
 
     ~/.acme.sh/acme.sh --upgrade --auto-upgrade
     if [ $? -ne 0 ]; then
         LOGE "自动续签失败，证书详情："
         ls -lah cert/*
-        exit 1
+        return 1
     else
         LOGI "自动续签成功，证书详情："
         ls -lah cert/*
@@ -1255,7 +1356,7 @@ run_cloudflare_acme_issue() {
     issue_cloudflare_certificate "${acme_bin}" "${domain}" "${token}" "${account_id}" "${force_renew}"
 }
 
-restore_cloudflare_certificate_backup() {
+restore_issued_certificate_backup() {
     local backup_dir="$1"
     local cert_dir="$2"
 
@@ -1265,10 +1366,19 @@ restore_cloudflare_certificate_backup() {
     fi
 }
 
+restore_cloudflare_certificate_backup() {
+    restore_issued_certificate_backup "$@"
+}
+
 install_cloudflare_certificate() {
+    install_issued_certificate "$1" "$2" "$3" 1
+}
+
+install_issued_certificate() {
     local acme_bin="$1"
     local domain="$2"
     local cert_root="$3"
+    local include_wildcard="${4:-0}"
     local cert_dir="${cert_root}/${domain}"
     local staging_dir=""
     local backup_dir=""
@@ -1326,15 +1436,20 @@ install_cloudflare_certificate() {
     if ! mv -T -- "${staging_dir}" "${cert_dir}"; then
         LOGE "证书发布失败"
         if [[ "${had_backup}" == "1" ]]; then
-            restore_cloudflare_certificate_backup "${backup_dir}" "${cert_dir}" || return 1
+            restore_issued_certificate_backup "${backup_dir}" "${cert_dir}" || return 1
         fi
         rm -rf "${staging_dir}"
         return 1
     fi
 
-    if ! "${acme_bin}" --installcert -d "${domain}" -d "*.${domain}" \
-        --fullchain-file "${cert_dir}/fullchain.pem" \
-        --key-file "${cert_dir}/privkey.pem" || \
+    local -a install_args=(--installcert -d "${domain}")
+    if [[ "${include_wildcard}" == "1" ]]; then
+        install_args+=(-d "*.${domain}")
+    fi
+    install_args+=(--fullchain-file "${cert_dir}/fullchain.pem")
+    install_args+=(--key-file "${cert_dir}/privkey.pem")
+
+    if ! "${acme_bin}" "${install_args[@]}" || \
         ! chmod 644 "${cert_dir}/fullchain.pem" || \
         ! chmod 600 "${cert_dir}/privkey.pem" || \
         ! chmod 700 "${cert_dir}" || \
@@ -1344,7 +1459,7 @@ install_cloudflare_certificate() {
             return 1
         fi
         if [[ "${had_backup}" == "1" ]]; then
-            restore_cloudflare_certificate_backup "${backup_dir}" "${cert_dir}" || return 1
+            restore_issued_certificate_backup "${backup_dir}" "${cert_dir}" || return 1
             LOGE "证书安装失败，已恢复旧证书"
         else
             LOGE "证书安装失败，未有旧证书可恢复"
@@ -1354,6 +1469,36 @@ install_cloudflare_certificate() {
 
     if [[ "${had_backup}" == "1" ]] && ! rm -rf "${backup_dir}"; then
         LOGE "新证书已安装，但旧证书备份未能清理：${backup_dir}"
+    fi
+    return 0
+}
+
+run_standalone_acme_issue() {
+    local domain="$1"
+    local port="$2"
+    local cert_root="$3"
+    local acme_bin="${HOME}/.acme.sh/acme.sh"
+
+    if ! validate_cf_domain "${domain}" || [[ ! "${port}" =~ ^[0-9]{1,5}$ ]]; then
+        LOGE "域名或端口无效，未更改现有证书"
+        return 1
+    fi
+    if ((10#${port} < 1 || 10#${port} > 65535)); then
+        LOGE "域名或端口无效，未更改现有证书"
+        return 1
+    fi
+    port=$((10#${port}))
+    if ! ( unset CF_Token CF_Account_ID CF_Key CF_Email CF_Zone_ID; "${acme_bin}" --set-default-ca --server letsencrypt ); then
+        LOGE "设置默认 CA Let's Encrypt 失败，证书签发已停止"
+        return 1
+    fi
+    if ! ( unset CF_Token CF_Account_ID CF_Key CF_Email CF_Zone_ID; "${acme_bin}" --issue -d "${domain}" --standalone --httpport "${port}" ); then
+        LOGE "签发证书失败；旧证书和 ACME 续期配置均予以保留"
+        return 1
+    fi
+    if ! install_issued_certificate "${acme_bin}" "${domain}" "${cert_root}" 0; then
+        LOGE "安装证书失败；旧证书已回滚，ACME 续期配置保持原路径"
+        return 1
     fi
     return 0
 }

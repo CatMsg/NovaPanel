@@ -32,6 +32,7 @@ func NewAPIv2Handler(g *gin.RouterGroup) *APIv2Handler {
 }
 
 func (a *APIv2Handler) initRouter(g *gin.RouterGroup) {
+	g.Use(noStoreAPIResponses())
 	g.Use(func(c *gin.Context) {
 		a.checkToken(c)
 	})

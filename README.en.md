@@ -32,17 +32,7 @@ NovaPanel is a Sing-Box management panel for protocol configuration, subscriptio
 
 ## Installation
 
-Install the latest version:
-
-```sh
-_novas_installer_tmp="$(mktemp)" && trap 'rm -f "$_novas_installer_tmp"' EXIT && curl --proto '=https' --proto-redir '=https' -fsSL https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh -o "$_novas_installer_tmp" && bash -n "$_novas_installer_tmp" && bash "$_novas_installer_tmp"; _novas_installer_rc=$?; exit "$_novas_installer_rc"
-```
-
-Install a specific version:
-
-```sh
-_novas_installer_tmp="$(mktemp)" && trap 'rm -f "$_novas_installer_tmp"' EXIT && curl --proto '=https' --proto-redir '=https' -fsSL https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh -o "$_novas_installer_tmp" && bash -n "$_novas_installer_tmp" && bash "$_novas_installer_tmp" vx.x.x; _novas_installer_rc=$?; exit "$_novas_installer_rc"
-```
+For verified installation commands (latest or pinned version), follow the [main README](README.md). Its bootstrap checks the GitHub Actions provenance before executing the installer.
 
 During installation you can configure the administrator account, panel path, and ports. After installation, use these commands for maintenance:
 
@@ -114,6 +104,7 @@ docker run -d \
 
 ## Documentation
 
+- [Common operations guide (Chinese)](docs/WORKFLOWS.md)
 - [Naming conventions](NAMING.md)
 - [Releases](https://github.com/CatMsg/NovaPanel/releases)
 - [Issue tracker](https://github.com/CatMsg/NovaPanel/issues)

@@ -67,7 +67,8 @@ func (s *OutboundService) Save(tx *gorm.DB, act string, data json.RawMessage) (f
 		if err != nil {
 			return nil, err
 		}
-		if err := validateDeprecatedHysteriaProtocolOptions(outbound.Type, outbound.Options); err != nil {
+		outbound.Options, err = migrateDeprecatedHysteriaProtocolOptions("outbounds", outbound.Type, outbound.Options)
+		if err != nil {
 			return nil, err
 		}
 

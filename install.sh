@@ -12,11 +12,22 @@ cur_dir=$(pwd)
 AUTO_UPGRADE="${NOVAS_AUTO_UPGRADE:-0}"
 
 github_api_url="https://api.github.com/repos/CatMsg/NovaPanel/releases/latest"
+github_cli_version="2.103.2"
+github_cli_archive_sha256="62ccf747115ddc61237efffdde66a3c8f70ba249433dc64f70801089b59c59c8"
+# v1.6.149 predates publishing a Sigstore bundle; allow only its independently verified archive digest.
+legacy_attestation_version="v1.6.149"
+legacy_attestation_sha256="e4da2eb684dc1fadc9efef5d7db22c03da9c9558039cafb18eb22a3fc7dd2988"
+gh_cli_path=""
 
 arch() {
-    case "$(uname -m)" in
-    x86_64 | x64 | amd64) echo 'amd64' ;;
-    *) echo -e "${green}不支持的 CPU 架构！${plain}" && rm -f install.sh && exit 1 ;;
+    local machine
+    machine="$(uname -m)"
+    case "$machine" in
+    x86_64 | x64 | amd64) printf 'amd64\n' ;;
+    *)
+        echo -e "${red}当前仅支持 Linux amd64，检测到 CPU 架构：${machine}。${plain}" >&2
+        return 1
+        ;;
     esac
 }
 
@@ -54,6 +65,89 @@ verify_archive_checksum() {
     fi
     echo -e "${green}NovaPanel 下载包 SHA-256 校验通过。${plain}"
     return 0
+}
+
+installer_gh_version_supported() {
+    local version="$1" major minor patch
+    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+    IFS=. read -r major minor patch <<< "$version"
+    ((major > 2 || (major == 2 && minor > 103) || (major == 2 && minor == 103 && patch >= 2)))
+}
+
+ensure_attestation_gh() {
+    local staging="$1" system_gh version cli_archive member actual
+    system_gh="$(type -P gh 2>/dev/null || true)"
+    if [[ -n "$system_gh" && -x "$system_gh" ]]; then
+        version="$("$system_gh" --version 2>/dev/null | sed -n '1s/^gh version \([0-9][0-9.]*\).*/\1/p')"
+        if installer_gh_version_supported "$version" && "$system_gh" attestation verify --help 2>&1 | grep -Fq -- '--source-digest'; then
+            gh_cli_path="$system_gh"
+            return 0
+        fi
+    fi
+
+    cli_archive="$staging/gh_${github_cli_version}_linux_amd64.tar.gz"
+    member="gh_${github_cli_version}_linux_amd64/bin/gh"
+    download_to_file "https://github.com/cli/cli/releases/download/v${github_cli_version}/gh_${github_cli_version}_linux_amd64.tar.gz" "$cli_archive" || {
+        echo "无法下载固定版本 GitHub CLI，已停止来源验证。" >&2
+        return 1
+    }
+    actual="$(sha256sum "$cli_archive" | awk '{print $1}')"
+    if [[ "$actual" != "$github_cli_archive_sha256" ]]; then
+        echo "GitHub CLI 下载包 SHA-256 校验失败，已停止来源验证。" >&2
+        return 1
+    fi
+    if ! tar -tzf "$cli_archive" | grep -Fxq "$member"; then
+        echo "GitHub CLI 下载包缺少预期的可执行文件。" >&2
+        return 1
+    fi
+    tar -xzf "$cli_archive" -C "$staging" "$member" || return 1
+    gh_cli_path="$staging/$member"
+    [[ -x "$gh_cli_path" ]] || { echo "GitHub CLI 解包失败。" >&2; return 1; }
+}
+
+verify_archive_provenance() {
+    local version="$1" archive_path="$2" staging="$3" actual bundle_path release_metadata source_digest
+    actual="$(sha256sum "$archive_path" | awk '{print $1}')"
+    if [[ "$version" == "$legacy_attestation_version" ]]; then
+        if [[ "$actual" != "$legacy_attestation_sha256" ]]; then
+            echo "旧版发布包不在已验证的 SHA-256 过渡白名单中，已停止安装。" >&2
+            return 1
+        fi
+        echo "v1.6.149 过渡包 SHA-256 已匹配固定值。"
+        return 0
+    fi
+
+    bundle_path="${archive_path}.sigstore.json"
+    release_metadata="$staging/release-metadata.json"
+    download_to_file "https://github.com/CatMsg/NovaPanel/releases/download/${version}/NovaPanel-linux-$(arch).tar.gz.sigstore.json" "$bundle_path" || {
+        echo "发布包缺少来源证明 bundle，已停止安装。" >&2
+        return 1
+    }
+    download_to_file "https://api.github.com/repos/CatMsg/NovaPanel/releases/tags/${version}" "$release_metadata" || {
+        echo "无法读取 Release 来源信息，已停止安装。" >&2
+        return 1
+    }
+    source_digest="$(awk -F '"' '/"target_commitish"[[:space:]]*:/ { print $4; exit }' "$release_metadata")"
+    if [[ ! "$source_digest" =~ ^[0-9a-fA-F]{40}$ ]]; then
+        echo "Release 未提供有效的 40 位构建提交，已停止来源验证。" >&2
+        return 1
+    fi
+    ensure_attestation_gh "$staging" || return 1
+
+    if ! env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN \
+        GH_CONFIG_DIR="$staging/gh-config" GH_HOST=github.com \
+        "$gh_cli_path" attestation verify "$archive_path" \
+        --repo CatMsg/NovaPanel \
+        --bundle "$bundle_path" \
+        --cert-oidc-issuer https://token.actions.githubusercontent.com \
+        --signer-workflow CatMsg/NovaPanel/.github/workflows/release.yml \
+        --source-ref refs/heads/main \
+        --source-digest "$source_digest" \
+        --deny-self-hosted-runners; then
+        echo "NovaPanel 发布来源证明验证失败，已停止安装。" >&2
+        return 1
+    fi
+    echo "NovaPanel 发布来源证明验证通过。"
 }
 
 get_latest_release_tag() {
@@ -498,7 +592,8 @@ installer_deployment_cleanup() {
 }
 
 install_novas() {
-    local version="${1:-}" staging archive
+    local version="${1:-}" staging archive platform_arch listing version_output artifact_version
+    platform_arch="$(arch)" || return 1
     if [[ -z "$version" ]]; then version=$(get_latest_release_tag) || return 1; fi
     [[ -n "$version" ]] || { echo "无法获取发布版本" >&2; return 1; }
     [[ "$version" == v* ]] || version="v$version"
@@ -506,12 +601,32 @@ install_novas() {
     staging=$(mktemp -d /tmp/novapanel-install.XXXXXX) || return 1
     local UFW_RECOVERY_STATE="$staging/ufw-new-activation"
     trap "installer_deployment_cleanup '$staging' \$?" EXIT
-    archive="$staging/NovaPanel-linux-$(arch).tar.gz"
-    download_to_file "https://github.com/CatMsg/NovaPanel/releases/download/$version/NovaPanel-linux-$(arch).tar.gz" "$archive" || return 1
+    archive="$staging/NovaPanel-linux-${platform_arch}.tar.gz"
+    download_to_file "https://github.com/CatMsg/NovaPanel/releases/download/$version/NovaPanel-linux-${platform_arch}.tar.gz" "$archive" || return 1
     verify_archive_checksum "$version" "$archive" || return 1
+    verify_archive_provenance "$version" "$archive" "$staging" || return 1
     # Reject path traversal before extracting a downloaded archive.
     if tar -tzf "$archive" | grep -E '(^/|(^|/)\.\.(/|$))' >/dev/null; then
         echo "安装包包含非法路径" >&2
+        return 1
+    fi
+    listing="$staging/archive-listing.txt"
+    if ! tar -tvzf "$archive" > "$listing"; then
+        echo "无法读取安装包成员信息" >&2
+        return 1
+    fi
+    if ! awk '
+        {
+            mode = substr($0, 1, 10)
+            type = substr(mode, 1, 1)
+            if ((type != "-" && type != "d") || mode ~ /[sStT]/ || substr(mode, 6, 1) == "w" || substr(mode, 9, 1) == "w" || $0 ~ / -> / || $0 ~ / link to /) {
+                invalid = 1
+            }
+            seen = 1
+        }
+        END { exit (!seen || invalid) }
+    ' "$listing"; then
+        echo "安装包包含不支持的链接、特殊文件或危险权限" >&2
         return 1
     fi
     tar -xzf "$archive" -C "$staging" || return 1
@@ -519,6 +634,15 @@ install_novas() {
         echo "需要新的 novas 格式发布包；未改动当前安装。旧版本降级请使用对应 tag 的安装脚本。" >&2
         return 1
     }
+    if ! version_output="$("$staging/novas/novas" -v 2>/dev/null)"; then
+        echo "无法读取安装包内 NovaPanel 版本，已停止安装。" >&2
+        return 1
+    fi
+    artifact_version="$(printf '%s\n' "$version_output" | awk 'NR == 1 && NF == 3 && $1 == "NovaPanel" && $2 == "Panel" { print $3; exit }')"
+    if [[ "$artifact_version" != "${version#v}" ]]; then
+        echo "安装包版本与 Release 标签不匹配（标签 ${version#v}，安装包 ${artifact_version:-未知}），已停止安装。" >&2
+        return 1
+    fi
     source "$staging/novas/scripts/install-runtime.sh"
     novas_deploy "$staging/novas"
     rm -f "$UFW_RECOVERY_STATE"
@@ -539,8 +663,10 @@ install_main() {
         return 1
     fi
     release=$ID
+    local platform_arch
+    platform_arch="$(arch)" || return 1
     echo "当前系统发行版为：$release"
-    echo "架构：$(arch)"
+    echo "架构：${platform_arch}"
     FRESH_INSTALL=0
     installer_is_fresh && FRESH_INSTALL=1
     echo -e "${green}正在执行...${plain}"

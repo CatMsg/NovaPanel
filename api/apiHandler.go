@@ -23,6 +23,7 @@ func NewAPIHandler(g *gin.RouterGroup, a2 *APIv2Handler) {
 }
 
 func (a *APIHandler) initRouter(g *gin.RouterGroup) {
+	g.Use(noStoreAPIResponses())
 	g.Use(sameOriginAPIMiddleware(a.SettingService.GetLoginTrustedProxies))
 	g.Use(func(c *gin.Context) {
 		path := c.Request.URL.Path

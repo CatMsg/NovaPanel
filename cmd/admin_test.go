@@ -36,6 +36,27 @@ func TestReadAdminPassword(t *testing.T) {
 	}
 }
 
+func TestPlaintextAdminPasswordFlagIsRejected(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "separate value", args: []string{"-username", "admin", "-password", "synthetic-secret"}, want: true},
+		{name: "equals value", args: []string{"--password=synthetic-secret"}, want: true},
+		{name: "missing value", args: []string{"-password"}, want: true},
+		{name: "hidden prompt", args: []string{"-password-prompt"}},
+		{name: "stdin", args: []string{"-password-stdin"}},
+		{name: "after flag terminator", args: []string{"--", "-password", "synthetic-secret"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := hasPlaintextAdminPasswordFlag(test.args); got != test.want {
+				t.Fatalf("hasPlaintextAdminPasswordFlag(%q) = %t, want %t", test.args, got, test.want)
+			}
+		})
+	}
+}
+
 func TestAdminCommandsReturnInitializationErrors(t *testing.T) {
 	blockedDBFolder := filepath.Join(t.TempDir(), "not-a-directory")
 	if err := os.WriteFile(blockedDBFolder, []byte("block"), 0600); err != nil {

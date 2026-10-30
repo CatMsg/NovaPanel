@@ -2,9 +2,12 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/CatMsg/NovaPanel/database"
@@ -76,13 +79,55 @@ func TestPostAlertJSON(t *testing.T) {
 
 func TestPostAlertJSONRejectsFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "denied", http.StatusForbidden)
+		http.Error(w, "botSyntheticSecret was denied", http.StatusForbidden)
 	}))
 	defer server.Close()
 
-	if err := postAlertJSON(server.URL, map[string]string{"message": "test"}); err == nil {
+	err := postAlertJSONWithClient(alertHTTPClient(), server.URL+"/botSyntheticSecret/sendMessage", map[string]string{"message": "test"})
+	if err == nil {
 		t.Fatal("expected HTTP failure")
 	}
+	if strings.Contains(err.Error(), "botSyntheticSecret") || strings.Contains(err.Error(), "denied") {
+		t.Fatalf("alert error leaked URL credentials or response body: %v", err)
+	}
+}
+
+func TestPostAlertJSONDoesNotFollowRedirects(t *testing.T) {
+	var targetRequests atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		targetRequests.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer target.Close()
+
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer redirector.Close()
+
+	err := postAlertJSONWithClient(alertHTTPClient(), redirector.URL+"/botSyntheticSecret/sendMessage", map[string]string{"message": "test"})
+	if err == nil || targetRequests.Load() != 0 {
+		t.Fatalf("redirect error=%v target requests=%d, want refusal without following", err, targetRequests.Load())
+	}
+	if strings.Contains(err.Error(), "botSyntheticSecret") {
+		t.Fatalf("redirect error leaked URL credentials: %v", err)
+	}
+}
+
+func TestPostAlertJSONSanitizesTransportError(t *testing.T) {
+	client := &http.Client{Transport: alertRoundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		return nil, errors.New("dial failed")
+	})}
+	err := postAlertJSONWithClient(client, "https://api.telegram.org/botSyntheticSecret/sendMessage", map[string]string{"message": "test"})
+	if err == nil || strings.Contains(err.Error(), "botSyntheticSecret") || strings.Contains(err.Error(), "api.telegram.org") {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+}
+
+type alertRoundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f alertRoundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
 }
 
 func TestFormatAlertProblemLabelsTrafficBudget(t *testing.T) {

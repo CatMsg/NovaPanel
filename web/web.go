@@ -55,6 +55,7 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 	}
 
 	engine := gin.Default()
+	engine.Use(middleware.SecurityHeaders())
 
 	// Load the HTML template
 	t := template.New("").Funcs(engine.FuncMap)

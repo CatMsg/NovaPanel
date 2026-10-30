@@ -39,3 +39,24 @@ func TestHysteriaOutboundUsesCurrentTuningNames(t *testing.T) {
 		}
 	}
 }
+
+func TestHysteriaOutboundMigratesLegacyInboundTuningNames(t *testing.T) {
+	outbound := map[string]interface{}{}
+	inbound := map[string]interface{}{
+		"recv_window_conn":      100,
+		"recv_window_client":    200,
+		"max_conn_client":       30,
+		"disable_mtu_discovery": true,
+	}
+	hysteriaOut(&outbound, inbound)
+	for field, want := range map[string]interface{}{
+		"stream_receive_window":      100,
+		"connection_receive_window":  200,
+		"max_concurrent_streams":     30,
+		"disable_path_mtu_discovery": true,
+	} {
+		if got := outbound[field]; got != want {
+			t.Fatalf("generated Hysteria field %q = %#v, want %#v", field, got, want)
+		}
+	}
+}

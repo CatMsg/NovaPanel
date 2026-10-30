@@ -3,6 +3,8 @@ package database
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -29,6 +31,7 @@ import (
 // MaxDatabaseBackupSize is the maximum size of an imported database snapshot.
 const MaxDatabaseBackupSize int64 = 1 << 30
 const restoreValidationTimeout = 3 * time.Minute
+const maxRestoreTLSFileSize int64 = 4 << 20
 
 var requestRestartAfterDatabaseRestore = SendSighup
 
@@ -498,23 +501,28 @@ func validateAndSanitizeRestoreDB(path string) error {
 		values[setting.Key] = setting.Value
 	}
 	updates := make(map[string]string)
-	for _, pair := range [][2]string{
-		{"webCertFile", "webKeyFile"},
-		{"subCertFile", "subKeyFile"},
+	for _, settings := range []struct{ cert, key, domain string }{
+		{cert: "webCertFile", key: "webKeyFile", domain: "webDomain"},
+		{cert: "subCertFile", key: "subKeyFile", domain: "subDomain"},
 	} {
-		cert, key := strings.TrimSpace(values[pair[0]]), strings.TrimSpace(values[pair[1]])
+		cert, key := strings.TrimSpace(values[settings.cert]), strings.TrimSpace(values[settings.key])
 		if cert == "" && key == "" {
 			continue
 		}
-		certInfo, certErr := os.Stat(cert)
-		keyInfo, keyErr := os.Stat(key)
-		if certErr != nil || keyErr != nil || certInfo.IsDir() || keyInfo.IsDir() || certInfo.Size() == 0 || keyInfo.Size() == 0 {
-			updates[pair[0]], updates[pair[1]] = "", ""
-			if pair[0] == "webCertFile" {
-				updates["webDomain"] = ""
-			} else {
-				updates["subDomain"] = ""
+		certPEM, certErr := readRestoreTLSFile(cert)
+		keyPEM, keyErr := readRestoreTLSFile(key)
+		valid := certErr == nil && keyErr == nil
+		if valid {
+			var certificate tls.Certificate
+			certificate, certErr = tls.X509KeyPair(certPEM, keyPEM)
+			valid = certErr == nil && len(certificate.Certificate) > 0
+			if domain := strings.TrimSpace(values[settings.domain]); valid && domain != "" {
+				leaf, err := x509.ParseCertificate(certificate.Certificate[0])
+				valid = err == nil && leaf.VerifyHostname(domain) == nil
 			}
+		}
+		if !valid {
+			updates[settings.cert], updates[settings.key], updates[settings.domain] = "", "", ""
 		}
 	}
 	if len(updates) == 0 {
@@ -532,6 +540,28 @@ func validateAndSanitizeRestoreDB(path string) error {
 		}
 		return nil
 	})
+}
+func readRestoreTLSFile(path string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > maxRestoreTLSFileSize {
+		return nil, fmt.Errorf("TLS file has unsupported type or size")
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxRestoreTLSFileSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxRestoreTLSFileSize {
+		return nil, fmt.Errorf("TLS file exceeds size limit")
+	}
+	return data, nil
 }
 
 // ValidateDB copies and validates a backup without touching the live database.

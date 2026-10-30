@@ -32,17 +32,7 @@ NovaPanel은 프로토콜 구성, 구독, 포트 규칙, 모니터링 및 다중
 
 ## 설치
 
-최신 버전 설치:
-
-```sh
-_novas_installer_tmp="$(mktemp)" && trap 'rm -f "$_novas_installer_tmp"' EXIT && curl --proto '=https' --proto-redir '=https' -fsSL https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh -o "$_novas_installer_tmp" && bash -n "$_novas_installer_tmp" && bash "$_novas_installer_tmp"; _novas_installer_rc=$?; exit "$_novas_installer_rc"
-```
-
-특정 버전 설치:
-
-```sh
-_novas_installer_tmp="$(mktemp)" && trap 'rm -f "$_novas_installer_tmp"' EXIT && curl --proto '=https' --proto-redir '=https' -fsSL https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh -o "$_novas_installer_tmp" && bash -n "$_novas_installer_tmp" && bash "$_novas_installer_tmp" vx.x.x; _novas_installer_rc=$?; exit "$_novas_installer_rc"
-```
+검증된 설치 명령(최신 또는 지정 버전)은 [기본 README](README.md)를 따르세요. 설치기를 실행하기 전에 GitHub Actions 출처 증명을 확인합니다.
 
 설치 과정에서 관리자 계정, 패널 경로 및 포트를 설정할 수 있습니다. 설치 후에는 다음 명령으로 관리할 수 있습니다.
 
@@ -57,7 +47,7 @@ _novas_installer_tmp="$(mktemp)" && trap 'rm -f "$_novas_installer_tmp"' EXIT &&
 
 ### 로그인 무차별 대입 방어
 
-Linux systemd 호스트에서는 설치 프로그램이 Fail2ban을 자동으로 설치하고 구성합니다. 웹 로그인에 10분 이내 10회 연속 실패하면 해당 소스 IP가 영구 차단됩니다. 규칙은 현재 패널 TCP 포트만 대상으로 하며 SSH 포트는 차단하지 않습니다.
+Linux systemd 호스트에서는 설치 프로그램이 Fail2ban을 자동으로 설치하고 구성합니다. 웹 로그인에 10분 이내 3회 연속 실패하면 해당 소스 IP가 영구 차단됩니다. 규칙은 현재 패널 TCP 포트만 대상으로 하며 SSH 포트는 차단하지 않습니다.
 
 - **설정 -> 인터페이스**에서 신뢰할 수 있는 리버스 프록시 IP/CIDR과 로그인 차단 허용 목록을 관리합니다.
 - **상태 진단 -> 로그인 보호**에서 상태를 확인하고 개별 IP 차단을 해제합니다.
@@ -114,6 +104,7 @@ docker run -d \
 
 ## 문서
 
+- [자주 사용하는 작업 가이드(중국어)](docs/WORKFLOWS.md)
 - [명명 규칙](NAMING.md)
 - [릴리스](https://github.com/CatMsg/NovaPanel/releases)
 - [이슈](https://github.com/CatMsg/NovaPanel/issues)

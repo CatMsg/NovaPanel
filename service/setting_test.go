@@ -479,6 +479,117 @@ func TestSettingSaveNormalizesPaths(t *testing.T) {
 	}
 }
 
+func TestRoutePathPrefixesRejectUnsafeGinAndURLSyntax(t *testing.T) {
+	valid := []string{"/", "/app/", "/custom-v2/path_1/", "/订阅/线路/"}
+	for _, path := range valid {
+		if err := validateRoutePathPrefix(path); err != nil {
+			t.Errorf("valid path %q rejected: %v", path, err)
+		}
+	}
+
+	invalid := []string{
+		"sub//path/",
+		"/sub//path/",
+		"/sub/:param/",
+		"/sub/*rest/",
+		"/sub/?format=clash/",
+		"/sub/#section/",
+		"/sub/%2Fsecret/",
+		"/sub\\path/",
+		"/sub path/",
+		"/./sub/",
+		"/sub/../private/",
+		"/" + strings.Repeat("a", 256) + "/",
+	}
+	for _, path := range invalid {
+		if err := validateRoutePathPrefix(path); err == nil {
+			t.Errorf("unsafe path %q accepted", path)
+		}
+	}
+}
+
+func TestSettingSaveRejectsUnsafeRoutePrefixes(t *testing.T) {
+	workDir := t.TempDir()
+	if err := database.InitDB(filepath.Join(workDir, "unsafe-route-prefix.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+	svc := &SettingService{}
+	if _, err := svc.GetAllSetting(); err != nil {
+		t.Fatalf("init default settings: %v", err)
+	}
+
+	for _, test := range []struct {
+		key   string
+		value string
+	}{
+		{key: "webPath", value: "panel/*rest"},
+		{key: "subPath", value: "sub/:id"},
+	} {
+		t.Run(test.key, func(t *testing.T) {
+			raw, err := json.Marshal(map[string]string{test.key: test.value})
+			if err != nil {
+				t.Fatal(err)
+			}
+			tx := database.GetDB().Begin()
+			if tx.Error != nil {
+				t.Fatalf("begin tx: %v", tx.Error)
+			}
+			if _, err := svc.Save(tx, raw); err == nil {
+				_ = tx.Rollback()
+				t.Fatalf("unsafe %s accepted", test.key)
+			}
+			_ = tx.Rollback()
+			stored, err := svc.getString(test.key)
+			if err != nil {
+				t.Fatalf("read %s: %v", test.key, err)
+			}
+			if strings.Contains(stored, "*") || strings.Contains(stored, ":id") {
+				t.Fatalf("unsafe %s persisted: %q", test.key, stored)
+			}
+		})
+	}
+}
+
+func TestRoutePathSettersAndGettersValidate(t *testing.T) {
+	workDir := t.TempDir()
+	if err := database.InitDB(filepath.Join(workDir, "route-prefix-accessors.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+	svc := &SettingService{}
+	if _, err := svc.GetAllSetting(); err != nil {
+		t.Fatalf("init default settings: %v", err)
+	}
+
+	if err := svc.SetWebPath("panel/*rest"); err == nil {
+		t.Fatal("webPath setter accepted a Gin catch-all")
+	}
+	if err := svc.SetSubPath("sub/:id"); err == nil {
+		t.Fatal("subPath setter accepted a Gin parameter")
+	}
+	if err := svc.SetWebPath("panel-v2/private"); err != nil {
+		t.Fatalf("webPath setter rejected safe path: %v", err)
+	}
+	if err := svc.SetSubPath("subscriptions/v2"); err != nil {
+		t.Fatalf("subPath setter rejected safe path: %v", err)
+	}
+
+	if err := svc.setString("webPath", "/panel/*rest/"); err != nil {
+		t.Fatalf("seed legacy invalid webPath: %v", err)
+	}
+	if _, err := svc.GetWebPath(); err == nil {
+		t.Fatal("webPath getter allowed invalid persisted route syntax")
+	}
+	if err := svc.setString("subPath", "/sub/*rest/"); err != nil {
+		t.Fatalf("seed legacy invalid subPath: %v", err)
+	}
+	if _, err := svc.GetSubPath(); err == nil {
+		t.Fatal("subPath getter allowed invalid persisted route syntax")
+	}
+	if _, err := svc.GetFinalSubURI("example.com"); err == nil {
+		t.Fatal("subscription URI getter allowed invalid persisted route syntax")
+	}
+}
+
 func TestSettingSaveReturnsNoChangesForIdenticalPayload(t *testing.T) {
 	workDir := t.TempDir()
 	if err := database.InitDB(filepath.Join(workDir, "setting-no-changes.db")); err != nil {

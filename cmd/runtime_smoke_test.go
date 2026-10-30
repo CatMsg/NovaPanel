@@ -79,6 +79,11 @@ func TestRuntimeBinarySmoke(t *testing.T) {
 	if output, err := setAdmin.CombinedOutput(); err != nil {
 		t.Fatalf("runtime admin password update failed: %v: %s", err, output)
 	}
+	plaintextPassword := exec.Command(binary, "admin", "-username", "runtime-smoke", "-password", "smoke-only-secret")
+	plaintextPassword.Env, plaintextPassword.Dir = env, dir
+	if output, err := plaintextPassword.CombinedOutput(); err == nil || !strings.Contains(string(output), "plaintext -password is disabled") {
+		t.Fatalf("runtime accepted plaintext password argument: err=%v output=%s", err, output)
+	}
 	blockedDBFolder := filepath.Join(dir, "not-a-directory")
 	if err := os.WriteFile(blockedDBFolder, []byte("block"), 0600); err != nil {
 		t.Fatal(err)

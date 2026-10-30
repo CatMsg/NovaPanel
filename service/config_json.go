@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strconv"
 
+	"github.com/CatMsg/NovaPanel/database/model"
 	"github.com/sagernet/sing-box/option"
 )
 
@@ -31,13 +32,16 @@ func ValidateSingBoxConfig(raw []byte) ([]byte, error) {
 	if config == nil {
 		return nil, errors.New("sing-box config must be a JSON object")
 	}
+	if err := migrateLegacyTLSACME(config, ""); err != nil {
+		return nil, err
+	}
 	if err := migrateSingBox116Config(config); err != nil {
 		return nil, err
 	}
 	if err := migrateLegacyDirectRouteActions(config); err != nil {
 		return nil, err
 	}
-	if err := validateDeprecatedHysteriaOptions(config); err != nil {
+	if err := migrateDeprecatedHysteriaOptions(config); err != nil {
 		return nil, err
 	}
 	if err := validateHTTPProxyConfig(config); err != nil {
@@ -54,6 +58,54 @@ func ValidateSingBoxConfig(raw []byte) ([]byte, error) {
 		return nil, fmt.Errorf("format sing-box config: %w", err)
 	}
 	return formatted, nil
+}
+
+func migrateLegacyTLSACME(value interface{}, path string) error {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		for key, child := range typed {
+			childPath := key
+			if path != "" {
+				childPath = path + "." + key
+			}
+			if key == "tls" {
+				if tlsOptions, ok := child.(map[string]interface{}); ok {
+					if _, hasLegacyACME := tlsOptions["acme"]; !hasLegacyACME {
+						if err := migrateLegacyTLSACME(child, childPath); err != nil {
+							return err
+						}
+						continue
+					}
+					raw, err := json.Marshal(tlsOptions)
+					if err != nil {
+						return fmt.Errorf("%s: encode TLS options: %w", childPath, err)
+					}
+					upgraded, err := (&model.Tls{Server: raw}).ServerConfig()
+					if err != nil {
+						return fmt.Errorf("%s: %w", childPath, err)
+					}
+					decoder := json.NewDecoder(bytes.NewReader(upgraded))
+					decoder.UseNumber()
+					var upgradedOptions map[string]interface{}
+					if err := decoder.Decode(&upgradedOptions); err != nil {
+						return fmt.Errorf("%s: decode migrated TLS options: %w", childPath, err)
+					}
+					typed[key] = upgradedOptions
+					child = upgradedOptions
+				}
+			}
+			if err := migrateLegacyTLSACME(child, childPath); err != nil {
+				return err
+			}
+		}
+	case []interface{}:
+		for index, child := range typed {
+			if err := migrateLegacyTLSACME(child, fmt.Sprintf("%s[%d]", path, index)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // migrateSingBox116Config applies only upstream-documented, lossless migrations.
@@ -457,40 +509,78 @@ func hasHTTPClientTag(value interface{}, tag string) bool {
 	return false
 }
 
-func validateDeprecatedHysteriaOptions(config map[string]interface{}) error {
+var hysteriaLegacyOptionMigrations = map[string][][2]string{
+	"inbounds": {
+		{"recv_window_conn", "stream_receive_window"},
+		{"recv_window_client", "connection_receive_window"},
+		{"max_conn_client", "max_concurrent_streams"},
+		{"disable_mtu_discovery", "disable_path_mtu_discovery"},
+	},
+	"outbounds": {
+		{"recv_window_conn", "stream_receive_window"},
+		{"recv_window", "connection_receive_window"},
+		{"disable_mtu_discovery", "disable_path_mtu_discovery"},
+	},
+}
+
+func migrateDeprecatedHysteriaOptions(config map[string]interface{}) error {
 	for _, section := range []string{"inbounds", "outbounds"} {
 		for index, item := range objectList(config[section]) {
-			raw, err := json.Marshal(item)
-			if err != nil {
-				return fmt.Errorf("%s[%d]: %w", section, index, err)
-			}
-			if err := validateDeprecatedHysteriaProtocolOptions(stringValue(item["type"]), raw); err != nil {
-				return fmt.Errorf("%s[%d]: %w", section, index, err)
+			if err := migrateHysteriaItemOptions(section, index, item); err != nil {
+				return err
 			}
 		}
 	}
 	return nil
 }
 
-func validateDeprecatedHysteriaProtocolOptions(protocol string, raw json.RawMessage) error {
+func migrateDeprecatedHysteriaProtocolOptions(section, protocol string, raw json.RawMessage) (json.RawMessage, error) {
 	if protocol != "hysteria" || len(raw) == 0 {
+		return raw, nil
+	}
+	var options map[string]interface{}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&options); err != nil {
+		return nil, fmt.Errorf("hysteria options: %w", err)
+	}
+	if options == nil {
+		return raw, nil
+	}
+	options["type"] = protocol
+	if err := migrateHysteriaItemOptions(section, 0, options); err != nil {
+		return nil, err
+	}
+	delete(options, "type")
+	migrated, err := json.Marshal(options)
+	if err != nil {
+		return nil, fmt.Errorf("marshal migrated hysteria options: %w", err)
+	}
+	return migrated, nil
+}
+
+func migrateHysteriaItemOptions(section string, index int, item map[string]interface{}) error {
+	if stringValue(item["type"]) != "hysteria" {
 		return nil
 	}
-	var options map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &options); err != nil {
-		return fmt.Errorf("hysteria options: %w", err)
+	migrations, exists := hysteriaLegacyOptionMigrations[section]
+	if !exists {
+		return fmt.Errorf("unsupported Hysteria config section %q", section)
 	}
-	deprecated := map[string]string{
-		"recv_window_conn":      "connection_receive_window",
-		"recv_window":           "stream_receive_window",
-		"recv_window_client":    "stream_receive_window",
-		"max_conn_client":       "max_concurrent_streams",
-		"disable_mtu_discovery": "disable_path_mtu_discovery",
-	}
-	for field, replacement := range deprecated {
-		if _, exists := options[field]; exists {
-			return fmt.Errorf("hysteria field %s is no longer supported; use %s", field, replacement)
+	for _, migration := range migrations {
+		legacyField, currentField := migration[0], migration[1]
+		legacyValue, exists := item[legacyField]
+		if !exists {
+			continue
 		}
+		if currentValue, currentExists := item[currentField]; currentExists && currentValue != nil {
+			if !reflect.DeepEqual(currentValue, legacyValue) {
+				return fmt.Errorf("%s[%d].%s conflicts with %s[%d].%s", section, index, legacyField, section, index, currentField)
+			}
+		} else {
+			item[currentField] = legacyValue
+		}
+		delete(item, legacyField)
 	}
 	return nil
 }

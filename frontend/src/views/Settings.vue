@@ -233,6 +233,7 @@ import { FindDiff } from '@/plugins/utils'
 import { push } from 'notivue'
 import { useDisplay } from 'vuetify'
 import Data from '@/store/modules/data'
+import { appendUrlPathSegment } from '@/utils/url'
 
 const SubJsonExtVue = defineAsyncComponent(() => import('@/components/SubJsonExt.vue'))
 const SubClashExtVue = defineAsyncComponent(() => import('@/components/SubClashExt.vue'))
@@ -289,9 +290,7 @@ const settings = ref({
 })
 
 const aggregateSubURI = computed(() => {
-  const base = buildSubBaseURI()
-  if (!base) return ''
-  return base.endsWith('/') ? base + 'aggregate' : base + '/aggregate'
+  return appendUrlPathSegment(buildSubBaseURI(), 'aggregate')
 })
 
 const subModes = [

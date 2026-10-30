@@ -53,6 +53,31 @@ func TestValidateSingBoxConfigMigratesLosslessSingBox116Fields(t *testing.T) {
 	}
 }
 
+func TestMigratedSingBox116FieldsParseWithPinnedCore(t *testing.T) {
+	raw := []byte(`{
+		"dns": {
+			"strategy": "ipv4_only",
+			"independent_cache": false,
+			"servers": [{"type": "local", "tag": "local"}],
+			"rules": [{"domain": ["example.org"], "rule_set_ip_cidr_accept_empty": false, "action": "route", "server": "local"}]
+		},
+		"outbounds": [{"type": "direct", "tag": "direct"}],
+		"route": {
+			"final": "direct",
+			"rule_set": [{"type": "remote", "tag": "rules", "format": "binary", "url": "https://example.org/rules.srs", "download_detour": "direct"}]
+		},
+		"experimental": {"cache_file": {"enabled": true, "path": "/tmp/novapanel-migration-cache.db", "store_rdrc": true}}
+	}`)
+
+	validated, err := ValidateSingBoxConfig(raw)
+	if err != nil {
+		t.Fatalf("migrate config: %v", err)
+	}
+	if err := core.NewCore().ValidateConfig(validated); err != nil {
+		t.Fatalf("pinned sing-box parser rejected migrated config: %v\n%s", err, validated)
+	}
+}
+
 func TestValidateSingBoxConfigRejectsAmbiguousSingBox116Fields(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -359,25 +384,74 @@ func TestValidateSingBoxConfigAllowsStandaloneH2CInbound(t *testing.T) {
 	}
 }
 
-func TestValidateSingBoxConfigRejectsDeprecatedHysteriaTuningFields(t *testing.T) {
+func TestValidateSingBoxConfigMigratesDeprecatedHysteriaTuningFields(t *testing.T) {
 	tests := []struct {
 		section string
 		field   string
 		newName string
 	}{
-		{section: "inbounds", field: "recv_window_conn", newName: "connection_receive_window"},
-		{section: "inbounds", field: "recv_window_client", newName: "stream_receive_window"},
+		{section: "inbounds", field: "recv_window_conn", newName: "stream_receive_window"},
+		{section: "inbounds", field: "recv_window_client", newName: "connection_receive_window"},
 		{section: "inbounds", field: "max_conn_client", newName: "max_concurrent_streams"},
 		{section: "inbounds", field: "disable_mtu_discovery", newName: "disable_path_mtu_discovery"},
-		{section: "outbounds", field: "recv_window", newName: "stream_receive_window"},
-		{section: "outbounds", field: "recv_window_conn", newName: "connection_receive_window"},
+		{section: "outbounds", field: "recv_window", newName: "connection_receive_window"},
+		{section: "outbounds", field: "recv_window_conn", newName: "stream_receive_window"},
+		{section: "outbounds", field: "disable_mtu_discovery", newName: "disable_path_mtu_discovery"},
 	}
 	for _, test := range tests {
 		t.Run(test.section+"/"+test.field, func(t *testing.T) {
 			config := `{"` + test.section + `":[{"type":"hysteria","tag":"hy","` + test.field + `":1}]}`
-			_, err := ValidateSingBoxConfig([]byte(config))
-			if err == nil || !strings.Contains(err.Error(), test.newName) {
-				t.Fatalf("error = %v, want replacement %q", err, test.newName)
+			validated, err := ValidateSingBoxConfig([]byte(config))
+			if err != nil {
+				t.Fatalf("migrate legacy option: %v", err)
+			}
+			var got map[string]interface{}
+			if err := json.Unmarshal(validated, &got); err != nil {
+				t.Fatal(err)
+			}
+			item := objectList(got[test.section])[0]
+			if _, exists := item[test.field]; exists {
+				t.Fatalf("legacy field %q remains: %#v", test.field, item)
+			}
+			if item[test.newName] != float64(1) {
+				t.Fatalf("migrated %q = %#v, want 1", test.newName, item[test.newName])
+			}
+		})
+	}
+}
+
+func TestValidateSingBoxConfigRejectsConflictingHysteriaTuningFields(t *testing.T) {
+	config := `{"outbounds":[{"type":"hysteria","tag":"hy","recv_window_conn":1,"stream_receive_window":2}]}`
+	_, err := ValidateSingBoxConfig([]byte(config))
+	if err == nil || !strings.Contains(err.Error(), "outbounds[0].recv_window_conn conflicts with outbounds[0].stream_receive_window") {
+		t.Fatalf("error = %v, want conflicting legacy/current Hysteria field error", err)
+	}
+}
+
+func TestMigrateDeprecatedHysteriaProtocolOptionsOnSave(t *testing.T) {
+	tests := []struct {
+		section string
+		legacy  string
+		current string
+	}{
+		{section: "inbounds", legacy: "recv_window_client", current: "connection_receive_window"},
+		{section: "outbounds", legacy: "recv_window", current: "connection_receive_window"},
+	}
+	for _, test := range tests {
+		t.Run(test.section, func(t *testing.T) {
+			raw, err := migrateDeprecatedHysteriaProtocolOptions(test.section, "hysteria", json.RawMessage(`{"`+test.legacy+`":1234}`))
+			if err != nil {
+				t.Fatalf("migrate saved options: %v", err)
+			}
+			var got map[string]interface{}
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Fatal(err)
+			}
+			if _, exists := got[test.legacy]; exists {
+				t.Fatalf("saved options retained legacy field %q: %#v", test.legacy, got)
+			}
+			if got[test.current] != float64(1234) {
+				t.Fatalf("saved field %q = %#v, want 1234", test.current, got[test.current])
 			}
 		})
 	}

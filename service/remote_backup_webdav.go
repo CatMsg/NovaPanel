@@ -10,13 +10,59 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/CatMsg/NovaPanel/util"
 )
 
 const remoteBackupMaxSize int64 = 1 << 30
+
+var errBackupNonPublicAddress = errors.New("WebDAV destination resolves to a non-public address")
+
+type backupLookupNetIP func(context.Context, string, string) ([]netip.Addr, error)
+type backupDialContext func(context.Context, string, string) (net.Conn, error)
+
+func safeBackupDialContext(lookup backupLookupNetIP, dial backupDialContext) backupDialContext {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, errors.New("invalid WebDAV destination address")
+		}
+
+		addresses := make([]netip.Addr, 0, 1)
+		if literal, parseErr := netip.ParseAddr(host); parseErr == nil {
+			addresses = append(addresses, literal)
+		} else {
+			addresses, err = lookup(ctx, "ip", host)
+			if err != nil || len(addresses) == 0 {
+				return nil, errors.New("cannot resolve WebDAV destination")
+			}
+		}
+
+		for _, candidate := range addresses {
+			if !util.IsPublicRoutableIP(candidate) {
+				return nil, errBackupNonPublicAddress
+			}
+		}
+
+		var lastErr error
+		for _, candidate := range addresses {
+			conn, dialErr := dial(ctx, network, net.JoinHostPort(candidate.Unmap().String(), port))
+			if dialErr == nil {
+				return conn, nil
+			}
+			lastErr = dialErr
+		}
+		if lastErr == nil {
+			lastErr = errors.New("no usable WebDAV destination address")
+		}
+		return nil, lastErr
+	}
+}
 
 // No custom CA, insecure TLS switch, shell command, or redirect is accepted.
 // The HTTP client is replaceable only by package tests, not by configuration.
@@ -34,6 +80,9 @@ func backupDestination(raw string) (*url.URL, error) {
 	if strings.ContainsAny(u.Path, "\\\x00\r\n") || u.RawPath != "" {
 		return nil, errors.New("destination path must not contain encoded or unsafe separators")
 	}
+	if address, parseErr := netip.ParseAddr(u.Hostname()); parseErr == nil && !util.IsPublicRoutableIP(address) {
+		return nil, errors.New("destination IP must be publicly routable")
+	}
 	for _, part := range strings.Split(u.Path, "/") {
 		if part == "." || part == ".." {
 			return nil, errors.New("destination path must not contain dot segments")
@@ -44,6 +93,11 @@ func backupDestination(raw string) (*url.URL, error) {
 }
 
 func newBackupDAV(cfg remoteBackupConfig, owner string) (*backupDAV, error) {
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	return newBackupDAVWithDialContext(cfg, owner, safeBackupDialContext(net.DefaultResolver.LookupNetIP, dialer.DialContext))
+}
+
+func newBackupDAVWithDialContext(cfg remoteBackupConfig, owner string, dial backupDialContext) (*backupDAV, error) {
 	u, err := backupDestination(cfg.Destination)
 	if err != nil {
 		return nil, err
@@ -54,7 +108,7 @@ func newBackupDAV(cfg remoteBackupConfig, owner string) (*backupDAV, error) {
 	u.Path += "novapanel-" + owner + "/"
 	transport := &http.Transport{
 		Proxy:                 nil,
-		DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+		DialContext:           dial,
 		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 20 * time.Second,
@@ -87,6 +141,9 @@ func (d *backupDAV) request(ctx context.Context, method, name string, body io.Re
 	resp, err := d.client.Do(req)
 	if err != nil {
 		// net/http errors include URLs and sometimes proxy details. Never relay them.
+		if errors.Is(err, errBackupNonPublicAddress) {
+			return nil, errors.New("WebDAV destination resolved to a non-public address")
+		}
 		if ctx.Err() != nil {
 			return nil, errors.New("backup operation cancelled or timed out")
 		}
@@ -142,17 +199,47 @@ func (d *backupDAV) delete(ctx context.Context, name string) error {
 	return err
 }
 
+func (d *backupDAV) exists(ctx context.Context, name string) (bool, error) {
+	if !backupArtifactPattern.MatchString(name) {
+		return false, errors.New("refusing to inspect non-backup artifact")
+	}
+	resp, err := d.request(ctx, http.MethodHead, name, nil, nil, http.StatusOK, http.StatusNotFound)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK, nil
+}
+
 // Only files constructed by this operation may reach this cleanup helper.
 func (d *backupDAV) cleanupStaging(name string) {
-	if !strings.HasPrefix(name, ".") || !strings.HasSuffix(name, ".upload") || !backupArtifactPattern.MatchString(strings.TrimSuffix(strings.TrimPrefix(name, "."), ".upload")) {
-		return
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	_ = d.deleteStaging(ctx, name)
+}
+
+func (d *backupDAV) deleteStaging(ctx context.Context, name string) error {
+	if !isBackupStagingArtifact(name) {
+		return errors.New("refusing to delete non-backup staging artifact")
+	}
 	resp, err := d.request(ctx, "DELETE", name, nil, nil, 200, 204, 404)
 	if err == nil {
 		_ = resp.Body.Close()
 	}
+	return err
+}
+
+func isBackupStagingArtifact(name string) bool {
+	_, ok := backupStagingTarget(name)
+	return ok
+}
+
+func backupStagingTarget(name string) (string, bool) {
+	if !strings.HasPrefix(name, ".") || !strings.HasSuffix(name, ".upload") {
+		return "", false
+	}
+	artifact := strings.TrimSuffix(strings.TrimPrefix(name, "."), ".upload")
+	return artifact, backupArtifactPattern.MatchString(artifact)
 }
 
 func (d *backupDAV) read(ctx context.Context, name string, limit int64, out io.Writer) error {
@@ -175,6 +262,20 @@ func (d *backupDAV) read(ctx context.Context, name string, limit int64, out io.W
 }
 
 func (d *backupDAV) list(ctx context.Context) ([]string, error) {
+	artifacts, err := d.listOwnedArtifacts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(artifacts))
+	for _, name := range artifacts {
+		if backupArtifactPattern.MatchString(name) && strings.HasSuffix(name, ".json") {
+			names = append(names, name)
+		}
+	}
+	return names, nil
+}
+
+func (d *backupDAV) listOwnedArtifacts(ctx context.Context) ([]string, error) {
 	body := strings.NewReader(`<d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>`)
 	resp, err := d.request(ctx, "PROPFIND", "", body, map[string]string{"Depth": "1", "Content-Type": "application/xml"}, 207)
 	if err != nil {
@@ -216,7 +317,7 @@ func (d *backupDAV) list(ctx context.Context) ([]string, error) {
 			continue
 		}
 		name := strings.TrimPrefix(u.Path, d.base.Path)
-		if !backupArtifactPattern.MatchString(name) || !strings.HasSuffix(name, ".json") || seen[name] {
+		if (!backupArtifactPattern.MatchString(name) && !isBackupStagingArtifact(name)) || seen[name] {
 			continue
 		}
 		seen[name] = true

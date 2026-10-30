@@ -12,6 +12,8 @@ test('unauthenticated app renders the login screen', async ({ page }) => {
   await page.goto('/app/')
   await expect(page).toHaveURL(/\/app\/login$/)
   await expect(page.getByText('NovaPanel').first()).toBeVisible()
+  await expect(page.getByRole('heading')).toHaveCount(0)
   await expect(page.locator('input[type="password"]')).toBeVisible()
   await expect(page.locator('form button[type="submit"]')).toBeVisible()
+  await expect(page.getByText(/v1\.6\./)).toHaveCount(0)
 })

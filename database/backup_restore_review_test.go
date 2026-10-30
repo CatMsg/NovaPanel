@@ -3,7 +3,13 @@ package database
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -161,6 +167,126 @@ func TestRestoreReviewRehearsalDoesNotSanitizeTLS(t *testing.T) {
 	if err != nil || bytes.Equal(before, afterRestore) {
 		t.Fatal("actual restore did not perform its TLS sanitization")
 	}
+}
+
+func TestRestoreSanitizesInvalidTLSKeyPairsAndDomains(t *testing.T) {
+	certA, keyA := writeRestoreReviewTLSFiles(t)
+	keyB := writeRestoreReviewMismatchedKey(t)
+	invalidCert := filepath.Join(t.TempDir(), "invalid.pem")
+	if err := os.WriteFile(invalidCert, []byte("not a certificate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, prefix := range []string{"web", "sub"} {
+		for _, test := range []struct {
+			name, cert, key, domain string
+			valid                   bool
+		}{
+			{name: "invalid_pem", cert: invalidCert, key: keyA, domain: "example.com"},
+			{name: "mismatched_key", cert: certA, key: keyB, domain: "example.com"},
+			{name: "domain_mismatch", cert: certA, key: keyA, domain: "example.invalid"},
+			{name: "valid", cert: certA, key: keyA, domain: "example.com", valid: true},
+		} {
+			t.Run(prefix+"/"+test.name, func(t *testing.T) {
+				path := restoreReviewSnapshot(t, "[]")
+				conn, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				sqlDB, err := conn.DB()
+				if err != nil {
+					t.Fatal(err)
+				}
+				for key, value := range map[string]string{
+					prefix + "CertFile": test.cert,
+					prefix + "KeyFile":  test.key,
+					prefix + "Domain":   test.domain,
+				} {
+					if err := conn.Model(&model.Setting{}).Where("key = ?", key).Update("value", value).Error; err != nil {
+						_ = sqlDB.Close()
+						t.Fatal(err)
+					}
+				}
+				if err := sqlDB.Close(); err != nil {
+					t.Fatal(err)
+				}
+
+				if err := validateAndSanitizeRestoreDB(path); err != nil {
+					t.Fatalf("validate restore DB: %v", err)
+				}
+				check, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var settings []model.Setting
+				if err := check.Where("key IN ?", []string{prefix + "CertFile", prefix + "KeyFile", prefix + "Domain"}).Find(&settings).Error; err != nil {
+					t.Fatal(err)
+				}
+				checkSQL, err := check.DB()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := checkSQL.Close(); err != nil {
+					t.Fatal(err)
+				}
+				got := make(map[string]string, len(settings))
+				for _, setting := range settings {
+					got[setting.Key] = setting.Value
+				}
+				if test.valid {
+					if got[prefix+"CertFile"] != test.cert || got[prefix+"KeyFile"] != test.key || got[prefix+"Domain"] != test.domain {
+						t.Fatalf("valid TLS configuration was not preserved: %#v", got)
+					}
+				} else {
+					for _, suffix := range []string{"CertFile", "KeyFile", "Domain"} {
+						if got[prefix+suffix] != "" {
+							t.Fatalf("invalid TLS setting %s was not cleared: %q", prefix+suffix, got[prefix+suffix])
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+func writeRestoreReviewTLSFiles(t *testing.T) (string, string) {
+	t.Helper()
+	server := httptest.NewTLSServer(nil)
+	t.Cleanup(server.Close)
+	pair := server.TLS.Certificates[0]
+	keyDER, err := x509.MarshalPKCS8PrivateKey(pair.PrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	certPath, keyPath := filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem")
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: pair.Certificate[0]})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
+	if err := os.WriteFile(certPath, certPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return certPath, keyPath
+}
+
+func writeRestoreReviewMismatchedKey(t *testing.T) string {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "mismatched-key.pem")
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
+	if err := os.WriteFile(path, keyPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func TestRestoreReviewRehearsalHonorsCancellation(t *testing.T) {

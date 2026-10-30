@@ -416,7 +416,12 @@ export default {
       if (this.tlsType) {
         this.tls.server = <iTls>{
           enabled: true,
-          reality: { enabled: true, handshake: { server_port: 443 }, short_id: RandomUtil.randomShortId() },
+          reality: {
+            enabled: true,
+            handshake: { server_port: 443 },
+            short_id: RandomUtil.randomShortId(),
+            max_time_difference: "1m",
+          },
           server_name: ""
         }
         this.tls.client = <oTls>{ reality: { public_key: "" }, utls: defaultOutTls.utls }

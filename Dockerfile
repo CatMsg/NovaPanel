@@ -1,4 +1,6 @@
 FROM --platform=$BUILDPLATFORM node:alpine AS front-builder
+ARG TARGETARCH
+RUN test "$TARGETARCH" = "amd64" || { echo "Linux Docker images are supported on amd64 only" >&2; exit 1; }
 WORKDIR /app
 COPY frontend/ ./
 RUN npm ci && npm run build
@@ -6,7 +8,7 @@ RUN npm ci && npm run build
 FROM golang:1.26.10-alpine AS backend-builder
 WORKDIR /app
 ARG TARGETARCH
-ARG TARGETVARIANT
+RUN test "$TARGETARCH" = "amd64" || { echo "Linux Docker images are supported on amd64 only" >&2; exit 1; }
 ENV CGO_ENABLED=1
 ENV CGO_CFLAGS="-D_LARGEFILE64_SOURCE"
 ENV GOARCH=$TARGETARCH
@@ -24,7 +26,6 @@ RUN apk update && apk add --no-cache \
 
 ENV CC=gcc
 
-RUN test "$TARGETARCH" = "amd64" || { echo "Linux Docker images are supported on amd64 only" >&2; exit 1; }
 COPY third_party/sing-box/.github/CRONET_GO_VERSION /tmp/CRONET_GO_VERSION
 RUN set -eux; \
     CRONET_GO_VERSION="$(tr -d '\r\n' < /tmp/CRONET_GO_VERSION)"; \
@@ -40,8 +41,7 @@ RUN set -eux; \
 COPY . .
 COPY --from=front-builder /app/dist/ /app/web/html/
 
-RUN if [ "$TARGETARCH" = "arm" ]; then export GOARM=7; [ "$TARGETVARIANT" = "v6" ] && export GOARM=6; fi; \
-    go build -ldflags="-w -s" \
+RUN go build -ldflags="-w -s" \
     -tags "with_quic,with_grpc,with_utls,with_acme,with_gvisor,with_naive_outbound,with_purego,with_tailscale" \
     -o novas .
 

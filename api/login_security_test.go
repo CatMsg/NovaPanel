@@ -2,6 +2,7 @@ package api
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	"github.com/gin-contrib/gzip"
+	ginSessions "github.com/gin-contrib/sessions"
+	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 )
 
@@ -166,6 +169,36 @@ func TestLoginBodyReadDeadlineBoundsSlowRequest(t *testing.T) {
 	}
 }
 
+func TestLoginBodyReadDeadlineSupportsHTTP2(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(loginRequestBodyDeadlineMiddleware(time.Second))
+	router.Use(gzip.Gzip(gzip.DefaultCompression))
+	router.POST("/api/login", func(c *gin.Context) {
+		_, _ = io.Copy(io.Discard, c.Request.Body)
+		c.Status(http.StatusNoContent)
+	})
+
+	server := httptest.NewUnstartedServer(router)
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	defer server.Close()
+
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/login", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatalf("send HTTP/2 login request: %v", err)
+	}
+	defer response.Body.Close()
+	if response.ProtoMajor != 2 || response.StatusCode != http.StatusNoContent {
+		t.Fatalf("HTTP/2 login response = %s %d, want HTTP/2 204", response.Proto, response.StatusCode)
+	}
+}
+
 type loginBodyReadTracker struct {
 	reads int
 }
@@ -220,5 +253,30 @@ func TestBindLoginPayloadAcceptsJSONAndForm(t *testing.T) {
 				t.Fatalf("bound credentials = (%q, %q), want (admin, secret)", payload.User, payload.Pass)
 			}
 		})
+	}
+}
+
+func TestLoginSessionSaveFailureDoesNotReportSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := cookie.NewStore([]byte(""))
+	router := gin.New()
+	router.Use(ginSessions.Sessions("login-session-test", store))
+	router.POST("/login", func(c *gin.Context) {
+		completeLogin(c, "admin", 0, initialSessionEpoch)
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "http://panel.example/login", nil)
+	router.ServeHTTP(recorder, request)
+
+	var response Msg
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode login response: %v; body=%s", err, recorder.Body.String())
+	}
+	if recorder.Code != http.StatusOK || response.Success || response.Msg != "login temporarily unavailable" {
+		t.Fatalf("session-save failure response = status %d, %#v", recorder.Code, response)
+	}
+	if cookies := recorder.Result().Cookies(); len(cookies) != 0 {
+		t.Fatalf("failed session save emitted cookies: %#v", cookies)
 	}
 }

@@ -60,20 +60,20 @@ func parseHTTPInboundVersions(fields map[string]interface{}) ([]int, error) {
 	return versions, nil
 }
 
-// ValidateHTTPInbound rejects HTTP/3 listeners unless the inbound's actual TLS
-// server configuration is enabled. A TLS record ID alone is not sufficient.
+// ValidateHTTPInbound preserves sing-box's legacy HTTP/1+HTTP/2 defaults for
+// existing records while validating HTTP/3 against the actual TLS configuration.
 func ValidateHTTPInbound(inbound *model.Inbound) ([]int, error) {
 	if inbound == nil || inbound.Type != "http" {
 		return nil, nil
 	}
-	version, err := SelectedHTTPInboundVersion(inbound.Options)
+	versions, err := HTTPInboundVersions(inbound.Options)
 	if err != nil {
 		return nil, err
 	}
-	if version == 3 && !HTTPInboundTLSEnabled(inbound) {
+	if containsHTTPVersion(versions, 3) && !HTTPInboundTLSEnabled(inbound) {
 		return nil, fmt.Errorf("HTTP inbound version 3 requires an enabled TLS server configuration")
 	}
-	return []int{version}, nil
+	return versions, nil
 }
 
 // SelectedHTTPInboundVersion reads the panel's single-version inbound contract.
@@ -89,6 +89,13 @@ func SelectedHTTPInboundVersion(options json.RawMessage) (int, error) {
 		return 0, fmt.Errorf("HTTP inbound requires exactly one version choice (1, 2, or 3)")
 	}
 	return version, nil
+}
+
+// HasExplicitHTTPInboundVersion distinguishes the panel's single-version
+// contract from legacy Sing-Box lists and the default HTTP/1+HTTP/2 behavior.
+func HasExplicitHTTPInboundVersion(options json.RawMessage) bool {
+	_, err := SelectedHTTPInboundVersion(options)
+	return err == nil
 }
 
 // ValidateHTTPClientVersionOverride validates the shape of a per-user HTTP

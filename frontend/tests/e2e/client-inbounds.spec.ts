@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { installBaseMocks, json } from './mockApi'
+import { gotoAndWaitForLoad, installBaseMocks, json } from './mockApi'
 
 const inboundFixtures = [
   { id: 31, type: 'vless', tag: 'empty-vless', users: null },
@@ -47,7 +47,7 @@ test('new and bulk client forms offer supported empty-user inbounds only', async
   })
 
   await page.setViewportSize({ width: 1280, height: 900 })
-  await page.goto('/app/clients')
+  await gotoAndWaitForLoad(page, '/app/clients')
   await page.getByRole('button', { name: '添加', exact: true }).first().click()
 
   const clientDialog = page.getByRole('dialog').last()

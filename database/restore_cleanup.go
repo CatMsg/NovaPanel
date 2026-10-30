@@ -19,24 +19,38 @@ import (
 
 func cleanupRestoredInboundConflicts() error {
 	sshPorts, err := detectSSHListenPortsForRestore()
-	if err != nil || len(sshPorts) == 0 {
-		sshPorts = []int{22}
-		if err != nil {
-			logger.Warning("detect ssh listen ports for restore failed, fallback to 22:", err)
-		}
-	}
-	return pruneInboundConflictsBySSHPorts(sshPorts)
+	return cleanupInboundConflictsWithDetectedSSHPorts(sshPorts, err)
 }
 
 func cleanupRestoredEndpointConflicts() error {
 	sshPorts, err := detectSSHListenPortsForRestore()
-	if err != nil || len(sshPorts) == 0 {
-		sshPorts = []int{22}
-		if err != nil {
-			logger.Warning("detect ssh listen ports for restore failed, fallback to 22:", err)
-		}
+	return cleanupEndpointConflictsWithDetectedSSHPorts(sshPorts, err)
+}
+
+func cleanupInboundConflictsWithDetectedSSHPorts(sshPorts []int, detectErr error) error {
+	sshPorts, err := requireDetectedSSHPortsForRestore(sshPorts, detectErr)
+	if err != nil {
+		return err
+	}
+	return pruneInboundConflictsBySSHPorts(sshPorts)
+}
+
+func cleanupEndpointConflictsWithDetectedSSHPorts(sshPorts []int, detectErr error) error {
+	sshPorts, err := requireDetectedSSHPortsForRestore(sshPorts, detectErr)
+	if err != nil {
+		return err
 	}
 	return pruneEndpointConflictsBySSHPorts(sshPorts)
+}
+
+func requireDetectedSSHPortsForRestore(sshPorts []int, detectErr error) ([]int, error) {
+	if detectErr != nil {
+		return nil, fmt.Errorf("cannot determine SSH listen ports; skipped restore conflict cleanup: %w", detectErr)
+	}
+	if len(sshPorts) == 0 {
+		return nil, fmt.Errorf("cannot determine SSH listen ports; skipped restore conflict cleanup")
+	}
+	return sshPorts, nil
 }
 
 func pruneInboundConflictsBySSHPorts(sshPorts []int) error {

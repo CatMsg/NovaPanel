@@ -32,16 +32,64 @@ NovaPanel 是一个 Sing-Box 管理面板，提供协议配置、订阅、端口
 
 ## 安装
 
-安装最新版本：
+安装命令会先验证 GitHub Actions 来源证明，再执行安装脚本。为兼容尚未发布脚本来源证明的 `v1.6.149`，仅对该版本校验固定的 `install.sh` SHA-256；其他版本必须通过来源证明。默认安装最新版本；如需固定版本，将 `_novas_version='latest'` 改为例如 `_novas_version='v1.6.149'`。
 
-```sh
-_novas_installer_tmp="$(mktemp)" && trap 'rm -f "$_novas_installer_tmp"' EXIT && curl --proto '=https' --proto-redir '=https' -fsSL https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh -o "$_novas_installer_tmp" && bash -n "$_novas_installer_tmp" && bash "$_novas_installer_tmp"; _novas_installer_rc=$?; exit "$_novas_installer_rc"
-```
-
-安装指定版本：
-
-```sh
-_novas_installer_tmp="$(mktemp)" && trap 'rm -f "$_novas_installer_tmp"' EXIT && curl --proto '=https' --proto-redir '=https' -fsSL https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh -o "$_novas_installer_tmp" && bash -n "$_novas_installer_tmp" && bash "$_novas_installer_tmp" vx.x.x; _novas_installer_rc=$?; exit "$_novas_installer_rc"
+```bash
+(
+  set -euo pipefail
+  _novas_version='latest'
+  if [[ "$_novas_version" == latest ]]; then
+    _novas_tag="$(curl --proto '=https' --proto-redir '=https' -fsSL https://api.github.com/repos/CatMsg/NovaPanel/releases/latest | sed -nE 's/^[[:space:]]*"tag_name":[[:space:]]*"([^"]+)".*/\1/p' | head -n1)"
+  else
+    _novas_tag="v${_novas_version#v}"
+  fi
+  if ! printf '%s\n' "$_novas_tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+    echo "Invalid NovaPanel release tag: $_novas_tag" >&2
+    exit 1
+  fi
+  _novas_tmp="$(mktemp -d)"
+  trap 'rm -rf "$_novas_tmp"' EXIT
+  _novas_script="$_novas_tmp/install.sh"
+  _novas_bundle="$_novas_tmp/install.sh.sigstore.json"
+  _novas_release="$_novas_tmp/release.json"
+  curl --proto '=https' --proto-redir '=https' -fsSL "https://raw.githubusercontent.com/CatMsg/NovaPanel/${_novas_tag}/install.sh" -o "$_novas_script"
+  if ! curl --proto '=https' --proto-redir '=https' -fsSL "https://github.com/CatMsg/NovaPanel/releases/download/${_novas_tag}/NovaPanel-install.sh.sigstore.json" -o "$_novas_bundle"; then
+    rm -f "$_novas_bundle"
+  fi
+  curl --proto '=https' --proto-redir '=https' -fsSL "https://api.github.com/repos/CatMsg/NovaPanel/releases/tags/${_novas_tag}" -o "$_novas_release"
+  if [[ -s "$_novas_bundle" ]]; then
+    _novas_source_digest="$(sed -nE 's/^[[:space:]]*"target_commitish":[[:space:]]*"([0-9a-fA-F]{40})",?$/\1/p' "$_novas_release" | head -n1)"
+    if [[ ! "$_novas_source_digest" =~ ^[0-9a-fA-F]{40}$ ]]; then
+      echo "Release source commit is invalid; refusing to run the installer." >&2
+      exit 1
+    fi
+    _novas_gh="$(command -v gh || true)"
+    if [[ -z "$_novas_gh" ]] || ! "$_novas_gh" attestation verify --help 2>&1 | grep -Fq -- '--bundle' || ! "$_novas_gh" attestation verify --help 2>&1 | grep -Fq -- '--source-digest'; then
+      _novas_gh_version='2.103.2'
+      _novas_gh_sha256='62ccf747115ddc61237efffdde66a3c8f70ba249433dc64f70801089b59c59c8'
+      _novas_gh_archive="$_novas_tmp/gh_${_novas_gh_version}_linux_amd64.tar.gz"
+      _novas_gh_member="gh_${_novas_gh_version}_linux_amd64/bin/gh"
+      curl --proto '=https' --proto-redir '=https' -fsSL "https://github.com/cli/cli/releases/download/v${_novas_gh_version}/gh_${_novas_gh_version}_linux_amd64.tar.gz" -o "$_novas_gh_archive"
+      printf '%s  %s\n' "$_novas_gh_sha256" "$_novas_gh_archive" | sha256sum -c -
+      tar -xzf "$_novas_gh_archive" -C "$_novas_tmp" --no-same-owner --no-same-permissions "$_novas_gh_member"
+      _novas_gh="$_novas_tmp/$_novas_gh_member"
+    fi
+    env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN GH_CONFIG_DIR="$_novas_tmp/gh-config" GH_HOST=github.com \
+      "$_novas_gh" attestation verify "$_novas_script" --repo CatMsg/NovaPanel --bundle "$_novas_bundle" \
+      --cert-oidc-issuer https://token.actions.githubusercontent.com \
+      --signer-workflow CatMsg/NovaPanel/.github/workflows/release.yml \
+      --source-ref refs/heads/main --source-digest "$_novas_source_digest" --deny-self-hosted-runners
+  else
+    _novas_legacy_sha256='71a91cf3e7a9d18a2f803e272d46266b4100162f9bfcbc69991d626f94534583'
+    if [[ "$_novas_tag" != 'v1.6.149' ]] || [[ "$(sha256sum "$_novas_script" | awk '{print $1}')" != "$_novas_legacy_sha256" ]]; then
+      echo "Release has no installer provenance bundle and is not the pinned v1.6.149 transition; refusing to run the installer." >&2
+      exit 1
+    fi
+    echo "v1.6.149 installer SHA-256 matches the pinned transition digest."
+  fi
+  bash -n "$_novas_script"
+  bash "$_novas_script" "$_novas_tag"
+)
 ```
 
 安装时可设置管理员账号、面板路径和端口。安装后可使用以下命令维护：

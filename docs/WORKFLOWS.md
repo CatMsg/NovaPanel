@@ -40,17 +40,18 @@
 2. 已存在的资产只会在 GitHub API SHA-256 与本次构建文件完全一致时复用；缺少摘要或摘要不同都会停止发布，不能手工覆盖后继续。
 3. 已发布 tag、指向其他提交的 tag、没有对应 Draft Release 的 tag 均不可续跑。不要删除或移动已发布 tag；检查版本号和失败草稿后走新的版本发布。
 
-Linux 发布包由实际构建作业生成 GitHub OIDC/Sigstore provenance。发布作业在创建或公开 Release 前，会验证每个压缩包的签名、仓库、发布工作流、`main` 来源和构建提交，并拒绝自托管 runner 证明。消费者可安装 GitHub CLI 后独立验证：
+Linux 发布包由实际构建作业生成 GitHub OIDC/Sigstore provenance，bundle 与压缩包一起发布。发布作业和 Linux 安装器会验证每个压缩包的签名、仓库、发布工作流、`main` 来源和构建提交，并拒绝自托管 runner 证明。安装器优先使用 GitHub CLI `2.103.2` 或更新版本，否则下载固定的 `2.103.2` 并校验 SHA-256 后临时使用；不会写入系统目录或使用 GitHub 登录凭据。消费者也可独立验证：
 
 ```bash
 gh attestation verify NovaPanel-linux-amd64.tar.gz \
   --repo CatMsg/NovaPanel \
+  --bundle NovaPanel-linux-amd64.tar.gz.sigstore.json \
   --signer-workflow CatMsg/NovaPanel/.github/workflows/release.yml \
   --source-ref refs/heads/main \
   --deny-self-hosted-runners
 ```
 
-当前安装器仍执行 SHA-256 完整性校验，但不会自动安装 GitHub CLI，也不会强制做 provenance 验证；以上命令适用于需要独立验证来源的场景。该验证仅适用于启用此工作流后构建的新发布包。
+`v1.6.149` 是过渡版本：构建时尚未随包发布 bundle，因此安装器只接受已人工验证的唯一 SHA-256。其他没有 bundle 的版本均拒绝安装。后续版本缺少或无法验证 bundle 时，安装器会在解包和替换当前安装前失败关闭。
 
 ## 在远端服务器新建入站
 
@@ -67,6 +68,8 @@ gh attestation verify NovaPanel-linux-amd64.tar.gz \
 在仓库根目录运行 `sh runNovas.sh`，使用原有 `db/novas.db` 与测试数据，不创建空库替代开发环境。默认面板为 `http://127.0.0.1:2095/app/`，实际端口和路径以现有设置为准。
 
 本地开发启动脚本仅在新建开发数据库时保留 `admin/admin` 便于调试；线上安装会清除该开发标记并设置随机/交互管理员密码。若直接运行二进制初始化全新数据库，请执行 `novas admin -reset` 生成并显示一次性登录密码；已存在的数据库不会被此行为改写。
+
+管理员密码不能通过 `novas admin -password <明文>` 设置，因为命令行参数可能被系统进程列表或 shell 历史记录读取。请使用 `-password-stdin` 或交互式 `-password-prompt`。
 
 iMac/macOS 本地开发沿用 `sh runNovas.sh`、原有 `db/novas.db` 和 2095 端口，不依赖 UFW、iptables、nftables、cron 或 systemd；非 Linux 环境跳过 Linux 防火墙/NAT 集成。需要真实特权 Linux 环境的全新安装及 ACME cron 验收，仅在隔离的 GitHub-hosted Linux 作业中执行，不在 Mac 开发机上执行。
 
@@ -110,4 +113,4 @@ iMac/macOS 本地开发沿用 `sh runNovas.sh`、原有 `db/novas.db` 和 2095 �
 - 本地通过：Go 全包测试脚本、全项目 vet/staticcheck/build、Sing-box 特性和 race 验收、真实 Mihomo 1.19.31 TCP/UDP 互通验收；前端 npm audit、61 个单测、lint、typecheck、生产构建和 57 个 Playwright E2E 全通过。macOS 构建仅出现重复 `-lobjc` 警告。
 - `govulncheck` 未发现项目可达漏洞；另报告一个项目代码未调用的模块级漏洞，不能据此声称所有依赖均无公告。
 - 修复了 CI gofmt 检查会因 alpha.13 已删除的旧文件路径而报错的问题；检查现在跳过不存在的已跟踪路径，并对当前存在的 Go 文件验证通过。
-- 尚未在 GitHub runner 验证 Windows 安装器、Linux 原生 UFW/ACME 作业；本地 E2E/回环测试不代表公网 VPS 协议互通。此变更未推送、未发布、未部署。
+- v1.6.149 的 Hosted 工作流已通过基线 Windows 安装器检查及 Linux 原生 UFW/ACME 门禁；当前未推送工作树新增的 Windows amd64 源码构建、WinSW x86/x64 架构选择和 Linux amd64 安装器差异尚无 Hosted CI 证据。本地 E2E/回环测试不代表公网 VPS 协议互通；这些本地差异未推送、未发布、未部署。

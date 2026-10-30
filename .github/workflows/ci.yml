@@ -74,6 +74,15 @@ jobs:
         working-directory: frontend
         run: npm run test:e2e
 
+      - name: 上传浏览器测试诊断
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: frontend/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
   backend:
     name: 后端检查与构建
     runs-on: ubuntu-latest
@@ -88,8 +97,9 @@ jobs:
       - name: 设置 Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          cache: false
+          cache: true
           go-version-file: go.mod
+          cache-dependency-path: go.sum
 
       - name: 检查脚本语法
         run: |
@@ -111,6 +121,33 @@ jobs:
             exit 1
           fi
 
+      - name: 运行 Go 测试
+        run: bash ./scripts/go-test-packages.sh
+
+      - name: Real Mihomo MASQUE Interoperability
+        run: bash ./scripts/test-mihomo-masque.sh
+
+      - name: 基础 Go 构建
+        run: go build ./...
+
+  backend-static:
+    name: 后端静态检查
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: 设置 Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          cache: true
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
       - name: Go Vet
         run: go vet ./...
 
@@ -120,17 +157,26 @@ jobs:
       - name: 漏洞检查
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
 
-      - name: 运行 Go 测试
-        run: bash ./scripts/go-test-packages.sh
+  backend-core-race:
+    name: Sing-Box 核心并发与协议回归
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: 设置 Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          cache: true
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
 
       - name: Verify Sing-Box Source And Core Race Regression
         run: bash ./scripts/test-sing-box-race.sh
-
-      - name: Real Mihomo MASQUE Interoperability
-        run: bash ./scripts/test-mihomo-masque.sh
-
-      - name: 基础 Go 构建
-        run: go build ./...
 
   windows-installer-prereqs:
     name: Windows installer source and dependency checks
@@ -151,7 +197,8 @@ jobs:
     needs:
       - frontend
       - backend
-      - windows-installer-prereqs
+      - backend-static
+      - backend-core-race
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -160,6 +207,26 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
+
+      - name: 验证 ARM64 Docker 目标在依赖安装前被拒绝
+        shell: bash
+        run: |
+          output="$RUNNER_TEMP/novapanel-arm64-rejection.log"
+          if docker build --progress=plain --platform linux/arm64 --target front-builder -f Dockerfile . >"$output" 2>&1; then
+            cat "$output"
+            echo "Unsupported ARM64 Docker target unexpectedly built successfully" >&2
+            exit 1
+          fi
+          if ! grep -Fq "Linux Docker images are supported on amd64 only" "$output"; then
+            cat "$output"
+            echo "ARM64 Docker build failed before reaching the architecture guard" >&2
+            exit 1
+          fi
+          if grep -Fq 'RUN npm ci && npm run build' "$output"; then
+            cat "$output"
+            echo "ARM64 Docker build ran frontend dependency installation before rejection" >&2
+            exit 1
+          fi
 
       - name: 构建 AMD64 镜像
         run: docker build --platform linux/amd64 -t novapanel-ci .

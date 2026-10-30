@@ -26,3 +26,12 @@ export const installBaseMocks = async (page: Page, authenticated = true) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: json({}) })
   })
 }
+
+export const gotoAndWaitForLoad = async (page: Page, path: string) => {
+  const loadResponse = page.waitForResponse(response => {
+    const { pathname } = new URL(response.url())
+    return pathname.endsWith('/api/load') && response.ok()
+  })
+  await page.goto(path)
+  await loadResponse
+}

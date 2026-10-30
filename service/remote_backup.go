@@ -30,7 +30,12 @@ var (
 	ErrRemoteBackupBusy   = errors.New("another remote backup operation is running")
 )
 
-const remoteBackupTimeout = 3 * time.Minute
+const (
+	remoteBackupTimeout          = 3 * time.Minute
+	backupOrphanGracePeriod      = 24 * time.Hour
+	maxOrphanCleanupPerBackupRun = 100
+	orphanCleanupTimeout         = 30 * time.Second
+)
 
 type remoteBackupConfig struct {
 	Enabled         bool   `json:"enabled"`
@@ -218,6 +223,11 @@ func (s *RemoteBackupService) Save(in RemoteBackupSettings) error {
 	if !backupOwnerPattern.MatchString(owner) {
 		return errors.New("invalid stored backup owner")
 	}
+	if cfg.Destination != old.Destination || cfg.Username != old.Username || cfg.Password != old.Password {
+		// Success and error metadata belongs to the old remote account. Do not
+		// imply that the replacement destination already has a verified backup.
+		state = remoteBackupState{}
+	}
 	// Saving never initiates network I/O. First automatic upload is one full
 	// interval after enabling, and failed attempts also wait a full interval.
 	state.NextDueAt = time.Time{}
@@ -377,16 +387,32 @@ func readManifest(ctx context.Context, d *backupDAV, owner, name string) (Remote
 }
 
 func (s *RemoteBackupService) manifests(ctx context.Context, d *backupDAV, owner string) ([]RemoteBackupManifest, error) {
-	names, err := d.list(ctx)
+	names, err := d.listOwnedArtifacts(ctx)
 	if err != nil {
 		return nil, err
 	}
+	present := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		present[name] = struct{}{}
+	}
 	manifests := make([]RemoteBackupManifest, 0)
 	for _, name := range names {
+		if !backupArtifactPattern.MatchString(name) || !strings.HasSuffix(name, ".json") {
+			continue
+		}
 		m, err := readManifest(ctx, d, owner, name)
 		if err != nil {
 			return nil, err
 		} // Fail closed: no retention on ambiguous inventory.
+		if _, listed := present[m.Artifact]; !listed {
+			exists, err := d.exists(ctx, m.Artifact)
+			if err != nil {
+				return nil, fmt.Errorf("cannot verify backup data artifact: %w", err)
+			}
+			if !exists {
+				return nil, errors.New("backup manifest references a missing database artifact")
+			}
+		}
 		manifests = append(manifests, m)
 	}
 	return manifests, nil
@@ -395,6 +421,9 @@ func (s *RemoteBackupService) manifests(ctx context.Context, d *backupDAV, owner
 func (s *RemoteBackupService) backup(ctx context.Context, d *backupDAV, owner string, retention int, state *remoteBackupState) (*RemoteBackupResult, error) {
 	if err := d.ensure(ctx); err != nil {
 		return nil, err
+	}
+	if err := cleanupStaleBackupOrphans(ctx, d, time.Now().UTC()); err != nil {
+		return nil, fmt.Errorf("stale backup cleanup failed: %w", err)
 	}
 	path, cleanup, err := s.snapshot(ctx, "")
 	if err != nil {
@@ -420,7 +449,21 @@ func (s *RemoteBackupService) backup(ctx context.Context, d *backupDAV, owner st
 	}
 	now := time.Now().UTC()
 	name := "npb-" + now.Format("20060102T150405Z") + "-" + id + ".db"
+	manifestName := strings.TrimSuffix(name, ".db") + ".json"
 	defer d.cleanupStaging("." + name + ".upload")
+	dataPublished := false
+	commitVerified := false
+	defer func() {
+		if !dataPublished || commitVerified {
+			return
+		}
+		// A data blob without its verified manifest is not a recovery point.
+		// Remove only the random names allocated by this operation.
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = d.delete(cleanupCtx, manifestName)
+		_ = d.delete(cleanupCtx, name)
+	}()
 	m := RemoteBackupManifest{Format: 1, Application: "NovaPanel", Owner: owner, Artifact: name, CreatedAt: now, Size: size, SHA256: hex.EncodeToString(hash.Sum(nil))}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return nil, errors.New("cannot rewind private snapshot")
@@ -431,11 +474,11 @@ func (s *RemoteBackupService) backup(ctx context.Context, d *backupDAV, owner st
 	if err := d.move(ctx, "."+name+".upload", name); err != nil {
 		return nil, err
 	}
+	dataPublished = true
 	// Verify remote bytes, not just a successful PUT or Content-Length.
 	if err := verifyRemoteBytes(ctx, d, m, io.Discard); err != nil {
 		return nil, err
 	}
-	manifestName := strings.TrimSuffix(name, ".db") + ".json"
 	defer d.cleanupStaging("." + manifestName + ".upload")
 	raw, _ := json.Marshal(m)
 	if err := d.put(ctx, "."+manifestName+".upload", bytes.NewReader(raw)); err != nil {
@@ -449,6 +492,7 @@ func (s *RemoteBackupService) backup(ctx context.Context, d *backupDAV, owner st
 	if err != nil || confirmed != m {
 		return nil, errors.New("published manifest read-back failed")
 	}
+	commitVerified = true
 	state.LastSuccessAt, state.LastArtifact, state.RetentionWarning = time.Now().UTC(), name, ""
 	if err := s.saveState(*state); err != nil {
 		return nil, err
@@ -457,6 +501,79 @@ func (s *RemoteBackupService) backup(ctx context.Context, d *backupDAV, owner st
 		state.RetentionWarning = err.Error()
 	}
 	return &RemoteBackupResult{Artifact: &m, Message: "Snapshot uploaded and SHA-256 verified; manifest published atomically"}, nil
+}
+
+// Stale incomplete artifacts can survive process termination before defers run.
+// The grace period avoids touching a slow upload or another active panel copy.
+func cleanupStaleBackupOrphans(ctx context.Context, d *backupDAV, now time.Time) error {
+	cleanupCtx, cancel := context.WithTimeout(ctx, orphanCleanupTimeout)
+	defer cancel()
+	names, err := d.listOwnedArtifacts(cleanupCtx)
+	if err != nil {
+		return err
+	}
+	present := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		present[name] = struct{}{}
+	}
+	cleaned := 0
+	for _, name := range names {
+		artifact := name
+		stagingTarget, staging := backupStagingTarget(name)
+		if staging {
+			artifact = stagingTarget
+		}
+		if !backupArtifactPattern.MatchString(artifact) || !staleBackupArtifact(name, now) {
+			continue
+		}
+		if staging {
+			if err := d.deleteStaging(cleanupCtx, name); err != nil {
+				return fmt.Errorf("cannot remove stale upload: %w", err)
+			}
+			cleaned++
+			if cleaned >= maxOrphanCleanupPerBackupRun {
+				break
+			}
+			continue
+		}
+		if strings.HasSuffix(artifact, ".db") {
+			manifest := strings.TrimSuffix(artifact, ".db") + ".json"
+			_, committed := present[manifest]
+			if !committed {
+				committed, err = d.exists(cleanupCtx, manifest)
+				if err != nil {
+					return fmt.Errorf("cannot confirm orphan manifest state: %w", err)
+				}
+			}
+			if committed {
+				continue
+			}
+			if err := d.delete(cleanupCtx, artifact); err != nil {
+				return fmt.Errorf("cannot remove uncommitted database artifact: %w", err)
+			}
+			cleaned++
+			if cleaned >= maxOrphanCleanupPerBackupRun {
+				break
+			}
+		}
+	}
+	return nil
+}
+
+func staleBackupArtifact(name string, now time.Time) bool {
+	if artifact, staging := backupStagingTarget(name); staging {
+		name = artifact
+	}
+	if !backupArtifactPattern.MatchString(name) {
+		return false
+	}
+	stem := strings.TrimSuffix(strings.TrimSuffix(name, ".db"), ".json")
+	parts := strings.Split(stem, "-")
+	if len(parts) != 3 || parts[0] != "npb" {
+		return false
+	}
+	created, err := time.Parse("20060102T150405Z", parts[1])
+	return err == nil && now.Sub(created) >= backupOrphanGracePeriod
 }
 
 func verifyRemoteBytes(ctx context.Context, d *backupDAV, m RemoteBackupManifest, out io.Writer) error {
@@ -490,8 +607,8 @@ func (s *RemoteBackupService) retain(ctx context.Context, d *backupDAV, owner st
 	if err != nil {
 		return fmt.Errorf("retention skipped: %w", err)
 	}
-	// Always preserve the newly confirmed snapshot, even if the remote listing
-	// is stale or its timestamps were changed. Never delete orphan/temp files.
+	// Retention only removes committed snapshots; stale orphan cleanup is separate.
+	// Always preserve the newly confirmed snapshot even if listing is stale.
 	kept := 1
 	for _, m := range artifacts {
 		if m.Artifact == current {

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { installBaseMocks, json } from './mockApi'
+import { gotoAndWaitForLoad, installBaseMocks, json } from './mockApi'
 
 test('command palette opens by shortcut and navigates to a filtered page', async ({ page }) => {
   await installBaseMocks(page, true)
@@ -12,7 +12,7 @@ test('command palette opens by shortcut and navigates to a filtered page', async
       onlines: { inbound: [], outbound: [], user: [] },
     }),
   }))
-  await page.goto('/app/')
+  await gotoAndWaitForLoad(page, '/app/')
 
   const dialog = page.getByRole('dialog')
   await page.getByRole('button', { name: '快速跳转' }).click()

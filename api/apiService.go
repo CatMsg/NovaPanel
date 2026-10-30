@@ -229,7 +229,7 @@ func (a *ApiService) getDataSnapshot(c *gin.Context) (interface{}, error) {
 		data["subURI"] = subURI
 		data["subMode"] = subMode
 		if subMode == "master" {
-			data["subAggregateURI"] = subURI + "aggregate"
+			data["subAggregateURI"] = util.AppendURLPathSegment(subURI, "aggregate")
 		}
 		data["enableTraffic"] = true
 		data["onlines"] = onlines
@@ -713,13 +713,17 @@ func (a *ApiService) Login(c *gin.Context) {
 		logger.Infof("Unable to get session's max age from DB")
 	}
 
-	err = SetLoginUser(c, loginUser, sessionMaxAge, sessionEpoch)
-	if err == nil {
-		logger.Info("user ", loginUser, " login success")
-	} else {
-		logger.Warning("login failed: ", err)
+	completeLogin(c, loginUser, sessionMaxAge, sessionEpoch)
+}
+
+func completeLogin(c *gin.Context, loginUser string, sessionMaxAge int, sessionEpoch uint64) {
+	if err := SetLoginUser(c, loginUser, sessionMaxAge, sessionEpoch); err != nil {
+		logger.Warning("login session creation failed: ", err)
+		pureJsonMsg(c, false, "login temporarily unavailable")
+		return
 	}
 
+	logger.Info("user ", loginUser, " login success")
 	jsonMsg(c, "", nil)
 }
 

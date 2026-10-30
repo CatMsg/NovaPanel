@@ -17,7 +17,6 @@ func ParseCmd() {
 	settingCmd := flag.NewFlagSet("setting", flag.ExitOnError)
 
 	var username string
-	var password string
 	var port int
 	var path string
 	var subPort int
@@ -48,7 +47,6 @@ func ParseCmd() {
 	adminCmd.BoolVar(&show, "show", false, "show first admin credentials")
 	adminCmd.BoolVar(&reset, "reset", false, "reset first admin credentials")
 	adminCmd.StringVar(&username, "username", "", "set login username")
-	adminCmd.StringVar(&password, "password", "", "set login password (legacy; visible in process arguments)")
 	adminCmd.BoolVar(&passwordStdin, "password-stdin", false, "read login password from standard input")
 	adminCmd.BoolVar(&passwordPrompt, "password-prompt", false, "read login password without terminal echo")
 
@@ -91,6 +89,10 @@ func ParseCmd() {
 
 	switch os.Args[1] {
 	case "admin":
+		if hasPlaintextAdminPasswordFlag(os.Args[2:]) {
+			fmt.Fprintln(os.Stderr, "plaintext -password is disabled because command-line arguments may be visible; use -password-stdin or -password-prompt")
+			os.Exit(2)
+		}
 		err := adminCmd.Parse(os.Args[2:])
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -108,8 +110,9 @@ func ParseCmd() {
 				os.Exit(1)
 			}
 		default:
-			if (passwordStdin && passwordPrompt) || ((passwordStdin || passwordPrompt) && password != "") {
-				fmt.Fprintln(os.Stderr, "use only one of -password, -password-stdin, or -password-prompt")
+			var password string
+			if passwordStdin && passwordPrompt {
+				fmt.Fprintln(os.Stderr, "use only one of -password-stdin or -password-prompt")
 				os.Exit(2)
 			}
 			if passwordStdin || passwordPrompt {

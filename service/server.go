@@ -17,6 +17,7 @@ import (
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
 	"github.com/CatMsg/NovaPanel/logger"
+	"github.com/CatMsg/NovaPanel/util"
 
 	"github.com/sagernet/sing-box/common/tls"
 	"github.com/shirou/gopsutil/v4/cpu"
@@ -75,15 +76,37 @@ func (s *ServerService) GetPublicIP() string {
 		"https://ipinfo.io/ip",
 		"https://checkip.amazonaws.com",
 	}
+	ip := fetchPublicIP(newPublicIPHTTPClient(), apis)
+	if ip == "" {
+		return ""
+	}
+	serverStatusCache.mu.Lock()
+	serverStatusCache.entries["publicip"] = statusCacheEntry{
+		expiresAt: time.Now().Add(statusCacheTTL["publicip"]),
+		value:     ip,
+	}
+	serverStatusCache.mu.Unlock()
+	return ip
+}
 
+func newPublicIPHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout:       3 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+}
+
+func fetchPublicIP(client *http.Client, apis []string) string {
 	type result struct {
 		ip  string
 		err error
 	}
 
+	if client == nil {
+		client = newPublicIPHTTPClient()
+	}
 	ch := make(chan result, len(apis))
 	var wg sync.WaitGroup
-	client := &http.Client{Timeout: 3 * time.Second}
 
 	for _, api := range apis {
 		wg.Add(1)
@@ -114,22 +137,22 @@ func (s *ServerService) GetPublicIP() string {
 	}()
 
 	for res := range ch {
-		if res.err == nil && isIPv4Literal(res.ip) {
-			serverStatusCache.mu.Lock()
-			serverStatusCache.entries["publicip"] = statusCacheEntry{
-				expiresAt: time.Now().Add(statusCacheTTL["publicip"]),
-				value:     res.ip,
-			}
-			serverStatusCache.mu.Unlock()
-			return res.ip
+		if res.err != nil {
+			continue
+		}
+		if ip := normalizePublicIP(res.ip); ip != "" {
+			return ip
 		}
 	}
 	return ""
 }
 
-func isIPv4Literal(value string) bool {
+func normalizePublicIP(value string) string {
 	addr, err := netip.ParseAddr(strings.TrimSpace(value))
-	return err == nil && addr.Is4()
+	if err != nil || !util.IsPublicRoutableIP(addr) {
+		return ""
+	}
+	return addr.Unmap().String()
 }
 
 func (s *ServerService) GetCpuPercent() float64 {

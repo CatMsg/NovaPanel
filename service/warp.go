@@ -22,8 +22,18 @@ type WarpService struct{}
 
 var (
 	warpAPIBaseURL = "https://api.cloudflareclient.com/v0a2158"
-	warpHTTPClient = &http.Client{Timeout: 15 * time.Second}
+	warpHTTPClient = newWarpHTTPClient(nil)
 )
+
+func newWarpHTTPClient(transport http.RoundTripper) *http.Client {
+	return &http.Client{
+		Transport: transport,
+		Timeout:   15 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
 
 type warpRegistrationResponse struct {
 	ID      string `json:"id"`

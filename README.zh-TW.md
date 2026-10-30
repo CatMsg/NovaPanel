@@ -32,17 +32,7 @@ NovaPanel 是一個 Sing-Box 管理面板，提供協定設定、訂閱、連接
 
 ## 安裝
 
-安裝最新版本：
-
-```sh
-_novas_installer_tmp="$(mktemp)" && trap 'rm -f "$_novas_installer_tmp"' EXIT && curl --proto '=https' --proto-redir '=https' -fsSL https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh -o "$_novas_installer_tmp" && bash -n "$_novas_installer_tmp" && bash "$_novas_installer_tmp"; _novas_installer_rc=$?; exit "$_novas_installer_rc"
-```
-
-安裝指定版本：
-
-```sh
-_novas_installer_tmp="$(mktemp)" && trap 'rm -f "$_novas_installer_tmp"' EXIT && curl --proto '=https' --proto-redir '=https' -fsSL https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh -o "$_novas_installer_tmp" && bash -n "$_novas_installer_tmp" && bash "$_novas_installer_tmp" vx.x.x; _novas_installer_rc=$?; exit "$_novas_installer_rc"
-```
+請依照[主要 README](README.md)中的驗證安裝步驟操作；安裝腳本會在執行前驗證發布來源證明。
 
 安裝時可設定管理員帳號、面板路徑和連接埠。安裝後可使用以下命令維護：
 
@@ -114,6 +104,7 @@ docker run -d \
 
 ## 相關文件
 
+- [常用操作指南（簡體中文）](docs/WORKFLOWS.md)
 - [命名規範](NAMING.md)
 - [版本發布](https://github.com/CatMsg/NovaPanel/releases)
 - [問題回報](https://github.com/CatMsg/NovaPanel/issues)

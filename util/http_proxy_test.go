@@ -233,11 +233,34 @@ func TestValidateHTTPInboundRequiresEnabledTLSForHTTP3(t *testing.T) {
 	}
 }
 
-func TestValidateHTTPInboundRequiresOneScalarVersion(t *testing.T) {
-	for _, options := range []string{`{}`, `{"version":null}`, `{"version":[]}`, `{"version":[1]}`, `{"version":[1,2]}`} {
-		inbound := &model.Inbound{Type: "http", Options: json.RawMessage(options)}
-		if _, err := ValidateHTTPInbound(inbound); err == nil || !strings.Contains(err.Error(), "exactly one version choice") {
-			t.Errorf("options %s should be rejected as a legacy/missing version, got %v", options, err)
+func TestValidateHTTPInboundPreservesLegacyVersions(t *testing.T) {
+	for _, test := range []struct {
+		options string
+		want    []int
+	}{
+		{options: `{}`, want: []int{1, 2}},
+		{options: `{"version":null}`, want: []int{1, 2}},
+		{options: `{"version":[]}`, want: []int{1, 2}},
+		{options: `{"version":[1]}`, want: []int{1}},
+		{options: `{"version":[1,2]}`, want: []int{1, 2}},
+		{options: `{"version":[2,1]}`, want: []int{2, 1}},
+	} {
+		inbound := &model.Inbound{Type: "http", Options: json.RawMessage(test.options)}
+		got, err := ValidateHTTPInbound(inbound)
+		if err != nil || !reflect.DeepEqual(got, test.want) {
+			t.Errorf("options %s returned %#v, %v; want %#v", test.options, got, err, test.want)
+		}
+	}
+	inbound := &model.Inbound{Type: "http", Options: json.RawMessage(`{"version":[1,4]}`)}
+	if _, err := ValidateHTTPInbound(inbound); err == nil {
+		t.Fatal("expected invalid legacy HTTP versions to be rejected")
+	}
+	if !HasExplicitHTTPInboundVersion(json.RawMessage(`{"version":2}`)) {
+		t.Fatal("scalar HTTP version should satisfy the panel's explicit selection contract")
+	}
+	for _, options := range []string{`{}`, `{"version":[]}`, `{"version":[1,2]}`} {
+		if HasExplicitHTTPInboundVersion(json.RawMessage(options)) {
+			t.Errorf("legacy options %s unexpectedly satisfy explicit selection", options)
 		}
 	}
 	for _, version := range []int{1, 2, 3} {
@@ -268,6 +291,27 @@ func TestFillOutJsonRejectsH2CPanelInboundWithoutCompatibleClient(t *testing.T) 
 	}
 	if err := FillOutJson(inbound, "proxy.example"); err == nil || !strings.Contains(err.Error(), "falls back to HTTP/1, which the inbound does not serve") {
 		t.Fatalf("expected panel-generated H2C client to be rejected, got %v", err)
+	}
+}
+
+func TestFillOutJsonPreservesLegacyHTTPVersion(t *testing.T) {
+	inbound := &model.Inbound{
+		Type:    "http",
+		Tag:     "legacy-http",
+		TlsId:   1,
+		Tls:     &model.Tls{Server: json.RawMessage(`{"enabled":true}`), Client: json.RawMessage(`{"enabled":true}`)},
+		Options: json.RawMessage(`{"listen_port":8080}`),
+		OutJson: json.RawMessage(`{"type":"http","tag":"legacy-http","version":2,"tls":{"enabled":true}}`),
+	}
+	if err := FillOutJson(inbound, "proxy.example"); err != nil {
+		t.Fatalf("FillOutJson returned error: %v", err)
+	}
+	var outbound map[string]interface{}
+	if err := json.Unmarshal(inbound.OutJson, &outbound); err != nil {
+		t.Fatalf("decode generated HTTP outbound: %v", err)
+	}
+	if outbound["version"] != float64(2) {
+		t.Fatalf("legacy HTTP version = %#v, want 2", outbound["version"])
 	}
 }
 

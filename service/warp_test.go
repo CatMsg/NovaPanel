@@ -18,11 +18,50 @@ func withWarpTestServer(t *testing.T, handler http.Handler) {
 	oldBaseURL := warpAPIBaseURL
 	oldClient := warpHTTPClient
 	warpAPIBaseURL = server.URL
-	warpHTTPClient = server.Client()
+	warpHTTPClient = newWarpHTTPClient(server.Client().Transport)
 	t.Cleanup(func() {
 		warpAPIBaseURL = oldBaseURL
 		warpHTTPClient = oldClient
 	})
+}
+
+func TestWarpRequestDoesNotFollowHTTPSDowngradeRedirect(t *testing.T) {
+	targetRequests := make(chan string, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetRequests <- r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer target.Close()
+
+	sourceAuthorization := make(chan string, 1)
+	source := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sourceAuthorization <- r.Header.Get("Authorization")
+		location := "http://" + target.Listener.Addr().String() + r.URL.Path
+		http.Redirect(w, r, location, http.StatusFound)
+	}))
+	defer source.Close()
+
+	oldBaseURL := warpAPIBaseURL
+	oldClient := warpHTTPClient
+	warpAPIBaseURL = source.URL
+	warpHTTPClient = newWarpHTTPClient(source.Client().Transport)
+	t.Cleanup(func() {
+		warpAPIBaseURL = oldBaseURL
+		warpHTTPClient = oldClient
+	})
+
+	_, err := (&WarpService{}).getWarpInfo("device-id", "synthetic-token")
+	if err == nil || !strings.Contains(err.Error(), "HTTP 302") {
+		t.Fatalf("expected redirect response to be rejected, got %v", err)
+	}
+	if got := <-sourceAuthorization; got != "Bearer synthetic-token" {
+		t.Fatalf("source authorization = %q", got)
+	}
+	select {
+	case got := <-targetRequests:
+		t.Fatalf("redirect target received request with authorization %q", got)
+	default:
+	}
 }
 
 func TestRegisterWarpRejectsHTTPFailure(t *testing.T) {

@@ -1,6 +1,8 @@
 #!/bin/sh
 set -e
 
+node ./scripts/sync-frontend-version.mjs
+
 retry() {
   max_attempts=3
   attempt=1
@@ -20,7 +22,7 @@ retry() {
 }
 
 cd frontend
-npm i
+npm ci
 npm run build
 
 cd ..

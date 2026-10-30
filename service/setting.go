@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/CatMsg/NovaPanel/config"
 	"github.com/CatMsg/NovaPanel/database"
@@ -389,21 +391,17 @@ func (s *SettingService) GetWebPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !strings.HasPrefix(webPath, "/") {
-		webPath = "/" + webPath
-	}
-	if !strings.HasSuffix(webPath, "/") {
-		webPath += "/"
+	webPath = normalizeRoutePathPrefix(webPath)
+	if err := validateRoutePathPrefix(webPath); err != nil {
+		return "", fmt.Errorf("invalid webPath: %w", err)
 	}
 	return webPath, nil
 }
 
 func (s *SettingService) SetWebPath(webPath string) error {
-	if !strings.HasPrefix(webPath, "/") {
-		webPath = "/" + webPath
-	}
-	if !strings.HasSuffix(webPath, "/") {
-		webPath += "/"
+	webPath = normalizeRoutePathPrefix(webPath)
+	if err := validateRoutePathPrefix(webPath); err != nil {
+		return fmt.Errorf("invalid webPath: %w", err)
 	}
 	return s.setString("webPath", webPath)
 }
@@ -464,21 +462,17 @@ func (s *SettingService) GetSubPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !strings.HasPrefix(subPath, "/") {
-		subPath = "/" + subPath
-	}
-	if !strings.HasSuffix(subPath, "/") {
-		subPath += "/"
+	subPath = normalizeRoutePathPrefix(subPath)
+	if err := validateRoutePathPrefix(subPath); err != nil {
+		return "", fmt.Errorf("invalid subPath: %w", err)
 	}
 	return subPath, nil
 }
 
 func (s *SettingService) SetSubPath(subPath string) error {
-	if !strings.HasPrefix(subPath, "/") {
-		subPath = "/" + subPath
-	}
-	if !strings.HasSuffix(subPath, "/") {
-		subPath += "/"
+	subPath = normalizeRoutePathPrefix(subPath)
+	if err := validateRoutePathPrefix(subPath); err != nil {
+		return fmt.Errorf("invalid subPath: %w", err)
 	}
 	return s.setString("subPath", subPath)
 }
@@ -574,6 +568,10 @@ func (s *SettingService) GetFinalSubURI(host string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	subPath := normalizeRoutePathPrefix((*allSetting)["subPath"])
+	if err := validateRoutePathPrefix(subPath); err != nil {
+		return "", fmt.Errorf("invalid subPath: %w", err)
+	}
 	SubURI := (*allSetting)["subURI"]
 	if SubURI != "" {
 		return SubURI, nil
@@ -589,7 +587,7 @@ func (s *SettingService) GetFinalSubURI(host string) (string, error) {
 	if (port == "80" && protocol == "http") || (port == "443" && protocol == "https") {
 		port = ""
 	}
-	return protocol + "://" + host + port + (*allSetting)["subPath"], nil
+	return protocol + "://" + host + port + subPath, nil
 }
 
 func (s *SettingService) GetConfig() (string, error) {
@@ -678,12 +676,7 @@ func (s *SettingService) preparePortChange(tx *gorm.DB, settings map[string]stri
 func (s *SettingService) normalizeSettingValue(key, value string) string {
 	switch key {
 	case "webPath", "subPath":
-		if !strings.HasPrefix(value, "/") {
-			value = "/" + value
-		}
-		if !strings.HasSuffix(value, "/") {
-			value += "/"
-		}
+		value = normalizeRoutePathPrefix(value)
 	case "loginTrustedProxies", "loginBanAllowlist":
 		normalized, err := normalizeNetworkList(value)
 		if err == nil {
@@ -698,6 +691,11 @@ func (s *SettingService) validateSettingValue(key, value string) error {
 		return nil
 	}
 	switch key {
+	case "webPath", "subPath":
+		if err := validateRoutePathPrefix(value); err != nil {
+			return fmt.Errorf("invalid %s: %w", key, err)
+		}
+		return nil
 	case "webCertFile", "webKeyFile", "subCertFile", "subKeyFile":
 		if err := s.fileExists(value); err != nil {
 			return common.NewError(" -> ", value, " is not exists")
@@ -705,6 +703,39 @@ func (s *SettingService) validateSettingValue(key, value string) error {
 	case "loginTrustedProxies", "loginBanAllowlist":
 		if _, err := normalizeNetworkList(value); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func normalizeRoutePathPrefix(path string) string {
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	if !strings.HasSuffix(path, "/") {
+		path += "/"
+	}
+	return path
+}
+
+func validateRoutePathPrefix(path string) error {
+	if !utf8.ValidString(path) || len(path) > 256 {
+		return errors.New("must be valid UTF-8 and at most 256 bytes")
+	}
+	if path == "/" {
+		return nil
+	}
+	if !strings.HasPrefix(path, "/") || !strings.HasSuffix(path, "/") || strings.Contains(path, "//") {
+		return errors.New("must be a normalized path prefix with no empty segments")
+	}
+	for _, r := range path {
+		if strings.ContainsRune(":*?#%\\", r) || unicode.IsControl(r) || unicode.IsSpace(r) {
+			return errors.New("contains a reserved route character or whitespace")
+		}
+	}
+	for _, segment := range strings.Split(strings.Trim(path, "/"), "/") {
+		if segment == "." || segment == ".." {
+			return errors.New("must not contain dot segments")
 		}
 	}
 	return nil

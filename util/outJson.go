@@ -46,8 +46,10 @@ func FillOutJson(i *model.Inbound, hostname string) error {
 		if err != nil {
 			return err
 		}
-		if err := SetHTTPOutboundVersion(outJson, versions[0]); err != nil {
-			return err
+		if HasExplicitHTTPInboundVersion(i.Options) {
+			if err := SetHTTPOutboundVersion(outJson, versions[0]); err != nil {
+				return err
+			}
 		}
 		if _, err := ResolveHTTPOutboundVersion(outJson, versions); err != nil {
 			return err
@@ -213,11 +215,19 @@ func hysteriaOut(out *map[string]interface{}, inbound map[string]interface{}) {
 	if obfs, ok := inbound["obfs"]; ok {
 		(*out)["obfs"] = obfs
 	}
-	for _, field := range []string{
-		"connection_receive_window", "stream_receive_window", "max_concurrent_streams", "disable_path_mtu_discovery",
+	for _, fields := range [][2]string{
+		{"connection_receive_window", "recv_window_client"},
+		{"stream_receive_window", "recv_window_conn"},
+		{"max_concurrent_streams", "max_conn_client"},
+		{"disable_path_mtu_discovery", "disable_mtu_discovery"},
 	} {
-		if value, ok := inbound[field]; ok {
-			(*out)[field] = value
+		currentField, legacyField := fields[0], fields[1]
+		value, ok := inbound[currentField]
+		if !ok {
+			value, ok = inbound[legacyField]
+		}
+		if ok {
+			(*out)[currentField] = value
 		}
 	}
 }

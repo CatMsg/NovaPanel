@@ -6,8 +6,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -253,25 +253,40 @@ func (s *AlertService) sendAlert(values map[string]string, message string) error
 }
 
 func postAlertJSON(endpoint string, payload interface{}) error {
+	return postAlertJSONWithClient(alertHTTPClient(), endpoint, payload)
+}
+
+func alertHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+func postAlertJSONWithClient(client *http.Client, endpoint string, payload interface{}) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return err
+		return errors.New("cannot encode alert request")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return errors.New("invalid alert request")
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	if client == nil {
+		client = alertHTTPClient()
+	}
+	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return errors.New("alert transport failed")
 	}
 	defer resp.Body.Close()
-	responseBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(responseBody)))
+		return fmt.Errorf("alert service returned HTTP %d", resp.StatusCode)
 	}
 	return nil
 }

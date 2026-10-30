@@ -79,26 +79,56 @@ novas_deploy() (
 
     novas_rollback() {
         local rc=$?
+        local rollback_safe=1 unit_state=""
+        local -a restore_service_errors=()
         trap - EXIT INT TERM
         if [[ "$committed" == 0 ]]; then
             echo "Installation failed; restoring the previous installation" >&2
             if [[ "$deployed" == 1 ]]; then
                 systemctl stop novas || true
-                systemctl disable novas || true
-                rm -rf "$home" "$units/novas.service.d"
-                rm -f "$units/novas.service" "$commands/novas"
-                if [[ -n "$source_dir" && -d "$snapshot/install" ]]; then
-                    mkdir -p "$source_dir"
-                    cp -a "$snapshot/install/." "$source_dir/"
-                    if [[ -f "$snapshot/service" ]]; then cp -a "$snapshot/service" "$units/$old_name.service"; fi
-                    if [[ -d "$snapshot/dropins" ]]; then cp -a "$snapshot/dropins" "$units/$old_name.service.d"; fi
-                    if [[ -f "$snapshot/command" ]]; then cp -a "$snapshot/command" "$commands/$old_name"; fi
+                unit_state=$(systemctl show novas.service -p ActiveState --value 2>/dev/null) || unit_state=unknown
+                case "$unit_state" in
+                    inactive|failed) ;;
+                    *)
+                        echo "WARNING: Rollback stopped before deleting files because novas.service state is '$unit_state'; keeping the current installation and snapshot ${snapshot:-unavailable}" >&2
+                        rollback_safe=0
+                        ;;
+                esac
+                if [[ "$rollback_safe" == 1 ]] && ! systemctl disable novas; then
+                    echo "WARNING: Rollback stopped because novas.service could not be disabled; keeping the current installation and snapshot ${snapshot:-unavailable}" >&2
+                    rollback_safe=0
                 fi
-                systemctl daemon-reload || true
+                if [[ "$rollback_safe" == 1 ]]; then
+                    rm -rf "$home" "$units/novas.service.d"
+                    rm -f "$units/novas.service" "$commands/novas"
+                    if [[ -n "$source_dir" && -d "$snapshot/install" ]]; then
+                        mkdir -p "$source_dir"
+                        cp -a "$snapshot/install/." "$source_dir/"
+                        if [[ -f "$snapshot/service" ]]; then cp -a "$snapshot/service" "$units/$old_name.service"; fi
+                        if [[ -d "$snapshot/dropins" ]]; then cp -a "$snapshot/dropins" "$units/$old_name.service.d"; fi
+                        if [[ -f "$snapshot/command" ]]; then cp -a "$snapshot/command" "$commands/$old_name"; fi
+                    fi
+                    if ! systemctl daemon-reload; then
+                        restore_service_errors+=("daemon-reload")
+                    fi
+                fi
             fi
-            if [[ "$stopped" == 1 && -n "$old_name" ]]; then
-                if [[ "$old_enabled" == 1 ]]; then systemctl enable "$old_name" || true; fi
-                if [[ "$old_active" == 1 ]]; then systemctl start "$old_name" || true; fi
+            if [[ "$stopped" == 1 && -n "$old_name" && "$rollback_safe" == 1 ]]; then
+                if [[ "$old_enabled" == 1 ]]; then
+                    if ! systemctl enable "$old_name" || ! systemctl is-enabled --quiet "$old_name"; then
+                        restore_service_errors+=("enable")
+                    fi
+                fi
+                if [[ "$old_active" == 1 ]]; then
+                    if ! systemctl start "$old_name" || ! systemctl is-active --quiet "$old_name"; then
+                        restore_service_errors+=("start/active-check")
+                    fi
+                fi
+                if ((${#restore_service_errors[@]})); then
+                    echo "WARNING: Previous installation files were restored, but service recovery is incomplete (${restore_service_errors[*]}); inspect the rollback snapshot ${snapshot:-unavailable}" >&2
+                else
+                    echo "Previous installation and original service state were restored" >&2
+                fi
             fi
         fi
         [[ -z "$stage" ]] || rm -rf "$stage"
@@ -109,8 +139,9 @@ novas_deploy() (
     trap 'exit 143' TERM
 
     if [[ -n "$old_name" ]]; then
-        systemctl stop "$old_name"
         stopped=1
+        # Set before stop: systemctl may stop the unit and still return failure.
+        systemctl stop "$old_name"
         if systemctl is-active --quiet "$old_name"; then exit 1; fi
         # A complete offline copy includes the DB, WAL, certificates and assets.
         mkdir -p "$state/update-backup"
@@ -177,7 +208,9 @@ novas_deploy() (
     committed=1
     # Keep three complete rollback snapshots; only touch installer-owned names.
     if [[ -d "$state/update-backup" ]]; then
-        find "$state/update-backup" -mindepth 1 -maxdepth 1 -type d -name '????????-??????.*' -print | sort -r | tail -n +4 | while IFS= read -r expired; do rm -rf "$expired"; done
+        if ! find "$state/update-backup" -mindepth 1 -maxdepth 1 -type d -name '????????-??????.*' -print | sort -r | tail -n +4 | while IFS= read -r expired; do rm -rf "$expired"; done; then
+            echo "WARNING: NovaPanel is installed, but old rollback snapshots could not be fully cleaned up" >&2
+        fi
     fi
     echo "NovaPanel is now managed by: novas"
     [[ -z "$snapshot" ]] || echo "Offline rollback snapshot: $snapshot"

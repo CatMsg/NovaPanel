@@ -48,7 +48,7 @@ type ruleCatalogCacheEntry struct {
 }
 
 var (
-	ruleCatalogHTTPClient = &http.Client{Timeout: 12 * time.Second}
+	ruleCatalogHTTPClient = newRuleCatalogHTTPClient(nil)
 	ruleCatalogSources    = []ruleCatalogSource{
 		{Kind: "geosite", Repository: "SagerNet/sing-geosite", Prefix: "geosite-", RawBaseURL: "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/"},
 		{Kind: "geoip", Repository: "SagerNet/sing-geoip", Prefix: "geoip-", RawBaseURL: "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/"},
@@ -56,6 +56,16 @@ var (
 	ruleCatalogCacheMu sync.RWMutex
 	ruleCatalogCache   = make(map[string]ruleCatalogCacheEntry)
 )
+
+func newRuleCatalogHTTPClient(transport http.RoundTripper) *http.Client {
+	return &http.Client{
+		Transport: transport,
+		Timeout:   12 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
 
 func SearchRuleCatalog(ctx context.Context, query, kind string, page, pageSize int) (RuleCatalogSearchResult, error) {
 	kind = strings.ToLower(strings.TrimSpace(kind))
@@ -128,13 +138,14 @@ func SearchRuleCatalog(ctx context.Context, query, kind string, page, pageSize i
 	})
 
 	total := len(filtered)
-	start := (page - 1) * pageSize
-	if start > total {
-		start = total
+	pageIndex := page - 1
+	start := total
+	if pageIndex <= total/pageSize {
+		start = pageIndex * pageSize
 	}
-	end := start + pageSize
-	if end > total {
-		end = total
+	end := total
+	if pageSize < total-start {
+		end = start + pageSize
 	}
 	return RuleCatalogSearchResult{
 		Items:    append([]RuleCatalogEntry(nil), filtered[start:end]...),

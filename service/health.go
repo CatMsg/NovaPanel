@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"net"
 	"os"
 	"sort"
 	"strings"
@@ -58,8 +59,9 @@ func (s *HealthService) GetHealthReport(force bool) *HealthReport {
 	report.add(s.checkCore())
 	report.add(s.checkDisk())
 	report.add(s.checkPorts(report.Diagnostics))
-	report.add(s.checkTLS("panel-tls", "面板 TLS", s.GetCertFile, s.GetKeyFile))
-	report.add(s.checkTLS("subscription-tls", "订阅 TLS", s.GetSubCertFile, s.GetSubKeyFile))
+	report.add(s.checkPanelHost())
+	report.add(s.checkTLS("panel-tls", "面板 TLS", s.GetCertFile, s.GetKeyFile, s.GetListen))
+	report.add(s.checkTLS("subscription-tls", "订阅 TLS", s.GetSubCertFile, s.GetSubKeyFile, s.GetSubListen))
 	report.add(s.checkSubscription())
 	report.add(s.checkMasque(report.Diagnostics))
 	report.add(s.checkMieru(report.Diagnostics))
@@ -229,7 +231,26 @@ func (s *HealthService) checkPorts(diagnostics map[string]interface{}) HealthChe
 	return HealthCheck{ID: "ports", Title: "端口规则", Status: severity, Summary: fmt.Sprintf("发现 %d 个规则问题", drift.IssueCount), Detail: drift.Status, Action: "reconcile-ports"}
 }
 
-func (s *HealthService) checkTLS(id, title string, certGetter, keyGetter func() (string, error)) HealthCheck {
+func (s *HealthService) checkPanelHost() HealthCheck {
+	domain, domainErr := s.GetWebDomain()
+	listen, listenErr := s.GetListen()
+	return panelHostHealthCheck(domain, listen, domainErr, listenErr)
+}
+
+func panelHostHealthCheck(domain, listen string, domainErr, listenErr error) HealthCheck {
+	if domainErr != nil || listenErr != nil {
+		return HealthCheck{ID: "panel-host", Title: "面板域名校验", Status: "warning", Summary: "无法读取面板域名或监听地址，无法检查 Host 白名单", Detail: errorsText(domainErr, listenErr), Action: "settings"}
+	}
+	if strings.TrimSpace(domain) != "" {
+		return HealthCheck{ID: "panel-host", Title: "面板域名校验", Status: "ok", Summary: "已启用面板 Host 白名单"}
+	}
+	if isLoopbackListenAddress(listen) {
+		return HealthCheck{ID: "panel-host", Title: "面板域名校验", Status: "info", Summary: "未配置面板域名；监听仅限本机"}
+	}
+	return HealthCheck{ID: "panel-host", Title: "面板域名校验", Status: "warning", Summary: "未配置面板域名，Host 白名单未启用；公网部署建议配置域名或限制访问", Action: "settings"}
+}
+
+func (s *HealthService) checkTLS(id, title string, certGetter, keyGetter, listenGetter func() (string, error)) HealthCheck {
 	certFile, certErr := certGetter()
 	keyFile, keyErr := keyGetter()
 	if certErr != nil || keyErr != nil {
@@ -237,7 +258,8 @@ func (s *HealthService) checkTLS(id, title string, certGetter, keyGetter func() 
 	}
 	certFile, keyFile = strings.TrimSpace(certFile), strings.TrimSpace(keyFile)
 	if certFile == "" && keyFile == "" {
-		return HealthCheck{ID: id, Title: title, Status: "info", Summary: "当前未启用 TLS"}
+		listen, listenErr := listenGetter()
+		return tlsDisabledHealthCheck(id, title, listen, listenErr)
 	}
 	if certFile == "" || keyFile == "" {
 		return HealthCheck{ID: id, Title: title, Status: "error", Summary: "证书与密钥未成对配置", Action: "settings"}
@@ -267,6 +289,25 @@ func (s *HealthService) checkTLS(id, title string, certGetter, keyGetter func() 
 		check.Status, check.Summary = "warning", fmt.Sprintf("证书将在 %d 天内到期", int(remaining.Hours()/24))
 	}
 	return check
+}
+
+func tlsDisabledHealthCheck(id, title, listen string, listenErr error) HealthCheck {
+	if listenErr != nil {
+		return HealthCheck{ID: id, Title: title, Status: "warning", Summary: "无法读取监听地址，无法评估 TLS 暴露风险", Detail: listenErr.Error(), Action: "settings"}
+	}
+	if isLoopbackListenAddress(listen) {
+		return HealthCheck{ID: id, Title: title, Status: "info", Summary: "当前未启用 TLS；监听仅限本机回环地址"}
+	}
+	return HealthCheck{ID: id, Title: title, Status: "warning", Summary: "未启用 TLS 且监听非回环地址；确认 HTTPS 反代或限制访问", Action: "settings"}
+}
+
+func isLoopbackListenAddress(listen string) bool {
+	host := strings.TrimSpace(strings.Trim(listen, "[]"))
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (s *HealthService) checkSubscription() HealthCheck {

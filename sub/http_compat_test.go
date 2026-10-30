@@ -137,16 +137,11 @@ func TestJSONSubscriptionDerivesAndPreservesHTTPVersionFields(t *testing.T) {
 			if version, ok := outbound["version"].(int); !ok || version != test.want {
 				t.Fatalf("version = %#v, want %d", version, test.want)
 			}
-			if test.name == "omitted version defaults to H1 for H1 and H2 server" {
-				if outbound["path"] != "/proxy" || outbound["headers"] == nil || outbound["transport"] == nil {
-					t.Fatalf("HTTP outbound fields were not preserved: %#v", outbound)
-				}
-			}
 		})
 	}
 }
 
-func TestJSONSubscriptionRejectsLegacyInboundAndInvalidClientVersionShapes(t *testing.T) {
+func TestJSONSubscriptionAcceptsLegacyInboundAndRejectsInvalidClientVersionShapes(t *testing.T) {
 	inbound := &model.Inbound{
 		Type:    "http",
 		Tag:     "http-singleton",
@@ -154,13 +149,67 @@ func TestJSONSubscriptionRejectsLegacyInboundAndInvalidClientVersionShapes(t *te
 		OutJson: json.RawMessage(`{"type":"http","tag":"http-singleton","version":1}`),
 		Addrs:   json.RawMessage(`[]`),
 	}
-	if _, _, err := (&JsonService{}).getOutbounds(json.RawMessage(`{}`), []*model.Inbound{inbound}); err == nil || !strings.Contains(err.Error(), "exactly one version choice") {
-		t.Fatalf("legacy array inbound should be rejected, got %v", err)
+	if outbounds, _, err := (&JsonService{}).getOutbounds(json.RawMessage(`{}`), []*model.Inbound{inbound}); err != nil || len(*outbounds) != 1 {
+		t.Fatalf("legacy array inbound should remain subscribable, outbounds=%v err=%v", outbounds, err)
 	}
 	inbound.Options = json.RawMessage(`{"version":1}`)
 	_, _, err := (&JsonService{}).getOutbounds(json.RawMessage(`{"http":{"version":[2]}}`), []*model.Inbound{inbound})
 	if err == nil || !strings.Contains(err.Error(), "HTTP client version override must be 0, 1, 2, or 3") {
 		t.Fatalf("invalid singleton client version shape error = %v", err)
+	}
+}
+
+func TestJSONSubscriptionPreservesLegacyHTTPDefaultsAndVersion(t *testing.T) {
+	tls := enabledSubHTTPTestTLS()
+	tests := []struct {
+		name        string
+		options     string
+		outbound    string
+		wantVersion int
+		wantAbsent  bool
+	}{
+		{
+			name:       "omitted inbound version keeps Sing-Box default",
+			options:    `{"listen_port":8080}`,
+			outbound:   `{"type":"http","tag":"legacy-default","tls":{"enabled":true}}`,
+			wantAbsent: true,
+		},
+		{
+			name:        "legacy version list preserves configured HTTP/2",
+			options:     `{"listen_port":8081,"version":[1,2]}`,
+			outbound:    `{"type":"http","tag":"legacy-h2","version":2,"tls":{"enabled":true}}`,
+			wantVersion: 2,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			inbound := &model.Inbound{
+				Id:      1,
+				Type:    "http",
+				Tag:     "legacy-http",
+				Options: json.RawMessage(test.options),
+				Addrs:   json.RawMessage(`[]`),
+				OutJson: json.RawMessage(test.outbound),
+				TlsId:   1,
+				Tls:     tls,
+			}
+			outbounds, _, err := (&JsonService{}).getOutbounds(json.RawMessage(`{}`), []*model.Inbound{inbound})
+			if err != nil {
+				t.Fatalf("build legacy HTTP subscription: %v", err)
+			}
+			if len(*outbounds) != 1 {
+				t.Fatalf("got %d outbounds, want 1", len(*outbounds))
+			}
+			outbound := (*outbounds)[0]
+			version, exists := outbound["version"]
+			if test.wantAbsent {
+				if exists {
+					t.Fatalf("legacy default version was rewritten to %#v", version)
+				}
+			} else if version != float64(test.wantVersion) {
+				t.Fatalf("version = %#v, want %v", version, test.wantVersion)
+			}
+		})
 	}
 }
 
@@ -341,5 +390,34 @@ func TestClashHTTPExportOmitsUnknownNonH1Versions(t *testing.T) {
 	}
 	if filteredTags[0] != "external-h1" || filteredTags[1] != "legacy-http" || filteredTags[2] != "mixed-proxy" {
 		t.Fatalf("unexpected retained unknown-source outbounds: %#v", filteredTags)
+	}
+}
+
+func TestClashHTTPExportUsesHTTP1ForLegacyDefaultInbound(t *testing.T) {
+	inbound := &model.Inbound{
+		Type:    "http",
+		Tag:     "legacy-http",
+		Options: json.RawMessage(`{"listen_port":8080}`),
+		Addrs:   json.RawMessage(`[]`),
+		OutJson: json.RawMessage(`{"type":"http","tag":"legacy-http","version":2,"tls":{"enabled":true}}`),
+		TlsId:   1,
+		Tls:     enabledSubHTTPTestTLS(),
+	}
+	outbounds := []map[string]interface{}{{
+		"type": "http", "tag": "legacy-http", "version": 2,
+		"tls": map[string]interface{}{"enabled": true, "alpn": []interface{}{"h2"}},
+	}}
+	filtered, tags, err := filterClashHTTPOutbounds([]*model.Inbound{inbound}, outbounds, []string{"legacy-http"})
+	if err != nil {
+		t.Fatalf("filter legacy HTTP for Clash: %v", err)
+	}
+	if len(filtered) != 1 || len(tags) != 1 || tags[0] != "legacy-http" {
+		t.Fatalf("legacy HTTP node was dropped: outbounds=%#v tags=%#v", filtered, tags)
+	}
+	if filtered[0]["version"] != 1 {
+		t.Fatalf("Clash HTTP version = %#v, want HTTP/1", filtered[0]["version"])
+	}
+	if got := filtered[0]["tls"].(map[string]interface{})["alpn"].([]interface{}); !reflect.DeepEqual(got, []interface{}{"http/1.1"}) {
+		t.Fatalf("Clash legacy HTTP ALPN = %#v, want [http/1.1]", got)
 	}
 }

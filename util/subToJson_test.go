@@ -214,6 +214,7 @@ func TestValidateExternalSubscriptionIPsRejectsNonPublicAndReservedRanges(t *tes
 		"fc00::1",
 		"fe80::1",
 		"2001:db8::1",
+		"4000::1",
 		"64:ff9b::a00:1",
 	} {
 		if err := validateExternalSubscriptionIPs([]netip.Addr{netip.MustParseAddr(value)}); err == nil {
@@ -225,6 +226,9 @@ func TestValidateExternalSubscriptionIPsRejectsNonPublicAndReservedRanges(t *tes
 	}
 	if err := validateExternalSubscriptionIPs([]netip.Addr{netip.MustParseAddr("1.1.1.1")}); err != nil {
 		t.Fatalf("public address was rejected: %v", err)
+	}
+	if err := validateExternalSubscriptionIPs([]netip.Addr{netip.MustParseAddr("2606:4700:4700::1111")}); err != nil {
+		t.Fatalf("public IPv6 address was rejected: %v", err)
 	}
 }
 
@@ -258,21 +262,25 @@ func TestExternalSubscriptionDialPinsValidatedResolvedIP(t *testing.T) {
 }
 
 func TestExternalSubscriptionDialRejectsPrivateDNSAnswerBeforeDial(t *testing.T) {
-	dialed := false
-	_, err := dialExternalSubscriptionWith(
-		context.Background(),
-		"tcp",
-		"feed.example:443",
-		func(context.Context, string, string) ([]netip.Addr, error) {
-			return []netip.Addr{netip.MustParseAddr("10.0.0.1")}, nil
-		},
-		func(context.Context, string, string) (net.Conn, error) {
-			dialed = true
-			return nil, nil
-		},
-	)
-	if err == nil || dialed {
-		t.Fatalf("private DNS answer err=%v dialed=%t, want rejection before dialing", err, dialed)
+	for _, address := range []string{"10.0.0.1", "4000::1"} {
+		t.Run(address, func(t *testing.T) {
+			dialed := false
+			_, err := dialExternalSubscriptionWith(
+				context.Background(),
+				"tcp",
+				"feed.example:443",
+				func(context.Context, string, string) ([]netip.Addr, error) {
+					return []netip.Addr{netip.MustParseAddr(address)}, nil
+				},
+				func(context.Context, string, string) (net.Conn, error) {
+					dialed = true
+					return nil, nil
+				},
+			)
+			if err == nil || dialed {
+				t.Fatalf("DNS answer %s err=%v dialed=%t, want rejection before dialing", address, err, dialed)
+			}
+		})
 	}
 }
 

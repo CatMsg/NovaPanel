@@ -2,6 +2,7 @@ package database
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -451,6 +452,56 @@ func TestPruneEndpointConflictsBySSHPorts(t *testing.T) {
 	}
 	if len(endpoints) != 1 || endpoints[0].Tag != good.Tag {
 		t.Fatalf("unexpected endpoints after prune: %#v", endpoints)
+	}
+}
+
+func TestRestoreConflictCleanupDoesNotAssumeSSHPort(t *testing.T) {
+	logger.InitLogger(logging.ERROR)
+
+	dir := t.TempDir()
+	if err := InitDB(filepath.Join(dir, "restore-unknown-ssh.db")); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+	inbound := model.Inbound{
+		Type:    "vless",
+		Tag:     "preserve-inbound-on-unknown-ssh-port",
+		Options: json.RawMessage(`{"listen_port":22}`),
+	}
+	endpoint := model.Endpoint{
+		Type:    "wireguard",
+		Tag:     "preserve-endpoint-on-unknown-ssh-port",
+		Options: json.RawMessage(`{"listen_port":22}`),
+	}
+	if err := db.Create(&inbound).Error; err != nil {
+		t.Fatalf("create inbound: %v", err)
+	}
+	if err := db.Create(&endpoint).Error; err != nil {
+		t.Fatalf("create endpoint: %v", err)
+	}
+
+	detectErr := errors.New("ssh service and configuration unavailable")
+	if err := cleanupInboundConflictsWithDetectedSSHPorts(nil, detectErr); err == nil {
+		t.Fatal("expected unknown SSH port to skip inbound cleanup")
+	}
+	if err := cleanupEndpointConflictsWithDetectedSSHPorts(nil, detectErr); err == nil {
+		t.Fatal("expected unknown SSH port to skip endpoint cleanup")
+	}
+	if err := cleanupInboundConflictsWithDetectedSSHPorts(nil, nil); err == nil {
+		t.Fatal("expected empty SSH port result to skip inbound cleanup")
+	}
+	if err := cleanupEndpointConflictsWithDetectedSSHPorts(nil, nil); err == nil {
+		t.Fatal("expected empty SSH port result to skip endpoint cleanup")
+	}
+
+	var inboundCount, endpointCount int64
+	if err := db.Model(&model.Inbound{}).Where("tag = ?", inbound.Tag).Count(&inboundCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.Endpoint{}).Where("tag = ?", endpoint.Tag).Count(&endpointCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if inboundCount != 1 || endpointCount != 1 {
+		t.Fatalf("unknown SSH port must preserve restored configs; inbound=%d endpoint=%d", inboundCount, endpointCount)
 	}
 }
 

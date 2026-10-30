@@ -242,8 +242,10 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 			}
 		}
 		if protocol == "http" {
-			if err := util.SetHTTPOutboundVersion(outbound, httpVersions[0]); err != nil {
-				return nil, nil, fmt.Errorf("HTTP inbound %q subscription: %w", inData.Tag, err)
+			if util.HasExplicitHTTPInboundVersion(inData.Options) {
+				if err := util.SetHTTPOutboundVersion(outbound, httpVersions[0]); err != nil {
+					return nil, nil, fmt.Errorf("HTTP inbound %q subscription: %w", inData.Tag, err)
+				}
 			}
 			if _, err := util.ResolveHTTPOutboundVersion(outbound, httpVersions); err != nil {
 				return nil, nil, fmt.Errorf("HTTP inbound %q subscription: %w", inData.Tag, err)
@@ -297,8 +299,10 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 					newOut["tls"] = outTls
 				}
 				if protocol == "http" {
-					if err := util.SetHTTPOutboundVersion(newOut, httpVersions[0]); err != nil {
-						return nil, nil, fmt.Errorf("HTTP inbound %q address %d subscription: %w", inData.Tag, index+1, err)
+					if util.HasExplicitHTTPInboundVersion(inData.Options) {
+						if err := util.SetHTTPOutboundVersion(newOut, httpVersions[0]); err != nil {
+							return nil, nil, fmt.Errorf("HTTP inbound %q address %d subscription: %w", inData.Tag, index+1, err)
+						}
 					}
 					if _, resolveErr := util.ResolveHTTPOutboundVersion(newOut, httpVersions); resolveErr != nil {
 						return nil, nil, fmt.Errorf("HTTP inbound %q address %d subscription: %w", inData.Tag, index+1, resolveErr)

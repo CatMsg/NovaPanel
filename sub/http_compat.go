@@ -3,6 +3,7 @@ package sub
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/CatMsg/NovaPanel/database/model"
@@ -63,28 +64,29 @@ func filterClashHTTPOutbounds(inbounds []*model.Inbound, outbounds []map[string]
 		if err != nil {
 			return nil, nil, fmt.Errorf("HTTP inbound %q: %w", inbound.Tag, err)
 		}
-		if versions[0] != 1 {
+		if !slices.Contains(versions, 1) {
 			continue
 		}
-		if !clashHTTPVersionIsHTTP1(outbound) {
+		explicitVersion := util.HasExplicitHTTPInboundVersion(inbound.Options)
+		if explicitVersion && versions[0] != 1 {
 			continue
 		}
-		version, err := util.ResolveHTTPOutboundVersion(outbound, versions)
-		if err != nil {
+		if _, err := util.ResolveHTTPOutboundVersion(outbound, versions); err != nil {
 			return nil, nil, fmt.Errorf("HTTP inbound %q Clash subscription: %w", inbound.Tag, err)
-		}
-		if version != 1 {
-			continue
 		}
 		filtered, err := util.CloneJSONMap(outbound)
 		if err != nil {
 			return nil, nil, fmt.Errorf("copy HTTP inbound %q Clash outbound: %w", inbound.Tag, err)
 		}
-		if err := util.SetHTTPOutboundVersion(filtered, version); err != nil {
+		if err := util.SetHTTPOutboundVersion(filtered, 1); err != nil {
 			return nil, nil, fmt.Errorf("HTTP inbound %q Clash subscription: %w", inbound.Tag, err)
 		}
-		if _, err := util.ResolveHTTPOutboundVersion(filtered, versions); err != nil {
+		version, err := util.ResolveHTTPOutboundVersion(filtered, versions)
+		if err != nil {
 			return nil, nil, fmt.Errorf("HTTP inbound %q Clash subscription: %w", inbound.Tag, err)
+		}
+		if version != 1 {
+			continue
 		}
 		if err := util.ValidateHTTPOutboundTLSForInbound(filtered, inbound); err != nil {
 			return nil, nil, fmt.Errorf("HTTP inbound %q Clash subscription: %w", inbound.Tag, err)

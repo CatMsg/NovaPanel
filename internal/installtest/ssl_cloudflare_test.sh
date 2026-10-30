@@ -42,7 +42,9 @@ for function_name in \
     ensure_acme_cron prepare_cloudflare_acme install_acme_payload install_acme \
     resolve_acme_cert_files validate_cf_domain validate_cf_account_id validate_cf_token \
     issue_cloudflare_certificate run_cloudflare_acme_issue \
-    restore_cloudflare_certificate_backup install_cloudflare_certificate \
+    restore_issued_certificate_backup restore_cloudflare_certificate_backup \
+    install_cloudflare_certificate install_issued_certificate \
+    run_standalone_acme_issue \
     secure_issued_certificate_permissions; do
     extract_function "${function_name}" >> "${extracted_functions}"
 done
@@ -359,6 +361,11 @@ case "${1:-}" in
             "${CF_Email-<unset>}" "${CF_Zone_ID-<unset>}" > "${ACME_ENV_FILE}"
         printf '%s\n' "$@" > "${ACME_ARGS_FILE}"
         [[ "${SCENARIO}" != "issue-fail" ]] || exit 1
+        if [[ "${SCENARIO}" == "standalone-success" || "${SCENARIO}" == "standalone-install-fail" ]]; then
+            mkdir -p "${HOME}/.acme.sh/example.com_ecc"
+            printf 'issued standalone certificate\n' > "${HOME}/.acme.sh/example.com_ecc/fullchain.cer"
+            printf 'issued standalone private key\n' > "${HOME}/.acme.sh/example.com_ecc/example.com.key"
+        fi
         ;;
     --upgrade)
         [[ "${SCENARIO}" != "upgrade-fail" ]] || exit 1
@@ -377,7 +384,7 @@ case "${1:-}" in
         printf 'fullchain=%s\nkey=%s\n' "$fullchain" "$keyfile" > "${ACME_CONFIG_FILE}"
         printf 'new certificate\n' > "$fullchain"
         case "${SCENARIO}" in
-            installcert-partial-fail | rollback-delete-fail | rollback-delete-noop | rollback-restore-fail)
+            installcert-partial-fail | standalone-install-fail | rollback-delete-fail | rollback-delete-noop | rollback-restore-fail)
                 exit 1 ;;
         esac
         printf 'new private key\n' > "$keyfile"
@@ -456,6 +463,8 @@ issue_line="$(printf '%s\n' "${menu_source}" | grep -nF 'run_cloudflare_acme_iss
 ((preflight_line < domain_prompt_line && domain_prompt_line < account_prompt_line && account_prompt_line < token_prompt_line && token_prompt_line < issue_line)) || fail "menu preflight or credential prompt order changed"
 [[ "${menu_source}" != *"CF_GlobalKey"* && "${menu_source}" != *"全局 API Key"* && "${menu_source}" != *"请输入 key"* && "${menu_source}" != *"注册邮箱"* && "${menu_source}" != *"rm -rf"* ]] || fail "legacy key/email prompt or certificate-tree deletion returned to the menu"
 [[ "${menu_source}" == *"Zone > DNS > Edit"* && "${menu_source}" == *"Zone > Zone > Read"* && "${menu_source}" == *"仅授权目标 Zone"* ]] || fail "Cloudflare token permission guidance is incomplete"
+manual_menu_source="$(extract_function ssl_cert_issue)"
+[[ "${manual_menu_source}" == *'validate_cf_domain "${domain}"'* && "${manual_menu_source}" == *'run_standalone_acme_issue'* && "${manual_menu_source}" != *'rm -rf'* ]] || fail "manual certificate flow no longer validates input or delegates to the rollback-safe installer"
 
 assert validate_cf_domain "example.co.uk"
 assert validate_cf_domain "a1.example-2.net"
@@ -602,6 +611,63 @@ if run_cloudflare_acme_issue example.com test-token_123.abc 0123456789abcdef0123
 fi
 assert_eq "$(/bin/cat "${cert_root}/example.com/fullchain.pem")" 'old certificate' "issue failure changed the old certificate"
 assert_file_lacks 'test-token_123.abc' "${EVENT_LOG}"
+
+reset_case standalone-issue-failure issue-fail
+write_acme_stub
+cert_root="${HOME}/certs"
+mkdir -p "${cert_root}/example.com" "${HOME}/.acme.sh/example.com_ecc"
+printf 'old certificate\n' > "${cert_root}/example.com/fullchain.pem"
+printf 'old private key\n' > "${cert_root}/example.com/privkey.pem"
+printf 'existing ACME state\n' > "${HOME}/.acme.sh/example.com_ecc/account.conf"
+if run_standalone_acme_issue example.com 80 "${cert_root}"; then
+    fail "failing standalone issuance was accepted"
+fi
+assert_eq "$(/bin/cat "${cert_root}/example.com/fullchain.pem")" 'old certificate' "standalone issue failure changed the old certificate"
+assert_eq "$(/bin/cat "${HOME}/.acme.sh/example.com_ecc/account.conf")" 'existing ACME state' "standalone issue failure removed ACME renewal state"
+assert_file_lacks 'acme:--installcert' "${EVENT_LOG}"
+
+reset_case standalone-invalid-port success
+write_acme_stub
+cert_root="${HOME}/certs"
+mkdir -p "${cert_root}/example.com"
+printf 'old certificate\n' > "${cert_root}/example.com/fullchain.pem"
+if run_standalone_acme_issue example.com 0 "${cert_root}" || run_standalone_acme_issue example.com 65536 "${cert_root}"; then
+    fail "invalid standalone port was accepted"
+fi
+assert_eq "$(/bin/cat "${cert_root}/example.com/fullchain.pem")" 'old certificate' "invalid standalone port changed the old certificate"
+assert_eq "$(count_events 'acme:')" 0 "invalid standalone port invoked ACME"
+
+reset_case standalone-invalid-domain success
+write_acme_stub
+if run_standalone_acme_issue '../example.com' 80 "${HOME}/certs"; then
+    fail "path-like standalone domain was accepted"
+fi
+assert_eq "$(count_events 'acme:')" 0 "invalid standalone domain invoked ACME"
+
+reset_case standalone-install-failure standalone-install-fail
+write_acme_stub
+cert_root="${HOME}/certs"
+mkdir -p "${cert_root}/example.com"
+printf 'old certificate\n' > "${cert_root}/example.com/fullchain.pem"
+printf 'old private key\n' > "${cert_root}/example.com/privkey.pem"
+chmod 600 "${cert_root}/example.com/privkey.pem"
+if run_standalone_acme_issue example.com 8443 "${cert_root}"; then
+    fail "partially failing standalone cert install was accepted"
+fi
+assert_eq "$(/bin/cat "${cert_root}/example.com/fullchain.pem")" 'old certificate' "standalone install failure did not restore the old certificate"
+assert_eq "$(/bin/cat "${cert_root}/example.com/privkey.pem")" 'old private key' "standalone install failure did not restore the old key"
+
+reset_case standalone-success standalone-success
+write_acme_stub
+cert_root="${HOME}/certs"
+run_standalone_acme_issue example.com 00443 "${cert_root}"
+assert_eq "$(/bin/cat "${cert_root}/example.com/fullchain.pem")" 'new certificate' "standalone issuance did not install the new certificate"
+assert_file_contains '-d' "${ACME_ARGS_FILE}"
+assert_file_contains 'example.com' "${ACME_ARGS_FILE}"
+assert_file_lacks '*.example.com' "${ACME_ARGS_FILE}"
+assert_file_contains '443' "${ACME_ARGS_FILE}"
+assert_file_contains "fullchain=${cert_root}/example.com/fullchain.pem" "${ACME_CONFIG_FILE}"
+assert_file_contains "key=${cert_root}/example.com/privkey.pem" "${ACME_CONFIG_FILE}"
 
 reset_case installcert-failure-preserves-cert installcert-fail
 write_acme_stub

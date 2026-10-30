@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { installBaseMocks, json } from './mockApi'
+import { gotoAndWaitForLoad, installBaseMocks, json } from './mockApi'
 
 interface HttpFixtures {
   inbounds?: Record<string, unknown>[]
@@ -281,7 +281,7 @@ test('DNS tag conditions edit and save imported maps without losing unrelated da
     },
   }
   const api = await installHttpMocks(page, { config })
-  await page.goto('/app/rules')
+  await gotoAndWaitForLoad(page, '/app/rules')
   const dnsRuleCard = page.locator('.np-resource-card').filter({ hasText: 'example.test' })
   await dnsRuleCard.getByRole('button', { name: '编辑', exact: true }).click()
   const editor = page.getByRole('dialog').last()

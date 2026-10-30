@@ -75,12 +75,12 @@ npm run build
 
 | 日常任务 | 上游可借鉴的依据 | NovaPanel 现状与本轮决定 |
 | --- | --- | --- |
-| 删除配置对象前了解影响 | 3x-ui 的 [reference-cleanup.ts](https://github.com/MHSanaei/3x-ui/blob/442b7fb1637d6ecf4f2c28f76092228856e766c9/frontend/src/pages/xray/reference-cleanup.ts) 先规划出站、均衡器删除影响，再处理引用 | 已有出站/规则集校验；DNS 删除、改名却存在缺口。本轮补前端依赖提示和后端 DNS 引用校验，不自动级联删除用户规则 |
+| 删除配置对象前了解影响 | 3x-ui 的 [reference-cleanup.ts](https://github.com/MHSanaei/3x-ui/blob/442b7fb1637d6ecf4f2c28f76092228856e766c9/frontend/src/pages/xray/reference-cleanup.ts) 先规划出站、均衡器删除影响，再处理引用 | 出站、规则集和 DNS 均有引用校验；DNS 删除/改名提供依赖提示并拒绝歧义或仍被引用的变更，不自动级联删除用户规则 |
 | DNS 与流量出口分流 | s-ui 与我们同属 sing-box 配置模型；3x-ui 则是 Xray DNS/routing | 保留现有 DNS 分流、规则目录和 DNS 命中诊断。只修 DNS 标签引用，不改变 UDP/TCP 选择，不把解析器当作代理出口 |
-| 多协议用户、流量配额、重置和有效期 | 上游都有配额/有效期管理，但其账户和统计模型不同 | 本地 `service/client.go` 已统一多入站身份、月初重置、首次使用有效期；`service/mieru_clients.go`、`service/masque_clients.go` 接入外部协议。补订阅信息页仍显示“每 N 天”的错误，不改已确定的月初重置规则 |
-| 分享订阅及控制展示内容 | 3x-ui [model.go](https://github.com/MHSanaei/3x-ui/blob/442b7fb1637d6ecf4f2c28f76092228856e766c9/internal/database/model/model.go) 的 `Inbound.ExcludeFromSub` 可隐藏订阅内入站但不停止服务 | NovaPanel 已有多格式订阅、单二维码切换、统一用户和集合订阅。独立“隐藏订阅但继续服务”开关属于可选缺口，不与停用入站混为一谈，本轮未添加 |
-| 备份与恢复 | 3x-ui [备份文档](https://github.com/MHSanaei/3x-ui/blob/442b7fb1637d6ecf4f2c28f76092228856e766c9/docs/content/docs/en/operations/backup-restore.mdx) 支持定时 Telegram/Discord 异机备份 | 本地 `database/backup.go`、`service/config_snapshot.go` 已有手动备份、恢复和配置快照；自动异机备份是实用缺口。需设计保留数量、存储目的地、凭据隔离和恢复演练，本轮不直接把数据库发到第三方 |
-| 临时停核心但保留面板维护 | s-ui [service/config.go](https://github.com/alireza0/s-ui/blob/85866744774f9c1640f1292ac30baea2f72b438e/service/config.go) 的 `SetMaintenance` 和 `lifecycleMu` 使维护状态持久化，阻止 watchdog 自动重启 | NovaPanel 已有启动串行、冷却与配置失败恢复，但没有独立维护模式。属于可选运维能力，需明确哪些保存动作不能重新启动核心；本轮不增加“看似停了却被拉起”的半成品开关 |
+| 多协议用户、流量配额、重置和有效期 | 上游都有配额/有效期管理，但其账户和统计模型不同 | 本地 `service/client.go` 已统一多入站身份、月初重置、首次使用有效期；`service/mieru_clients.go`、`service/masque_clients.go` 接入外部协议。订阅信息页 `sub/user_center.go` 已显示每月 1 日重置和面板时区；首次使用后的有效期仍按天计算 |
+| 分享订阅及控制展示内容 | 3x-ui [model.go](https://github.com/MHSanaei/3x-ui/blob/442b7fb1637d6ecf4f2c28f76092228856e766c9/internal/database/model/model.go) 的 `Inbound.ExcludeFromSub` 可隐藏订阅内入站但不停止服务 | NovaPanel 已有多格式订阅、单二维码切换、统一用户和集合订阅；入站可单独从订阅中隐藏，服务仍保持运行 |
+| 备份与恢复 | 3x-ui [备份文档](https://github.com/MHSanaei/3x-ui/blob/442b7fb1637d6ecf4f2c28f76092228856e766c9/docs/content/docs/en/operations/backup-restore.mdx) 支持定时 Telegram/Discord 异机备份 | NovaPanel 已有默认关闭的 WebDAV 自动异地备份、保留策略、完整性清单和只读恢复演练；真实 WebDAV 服务商恢复仍需外部验收 |
+| 临时停核心但保留面板维护 | s-ui [service/config.go](https://github.com/alireza0/s-ui/blob/85866744774f9c1640f1292ac30baea2f72b438e/service/config.go) 的 `SetMaintenance` 和 `lifecycleMu` 使维护状态持久化，阻止 watchdog 自动重启 | NovaPanel 已有持久化维护模式，停用代理数据面同时保留面板与订阅服务，并阻止 watchdog 或配置保存意外重启核心；生产 VPS 操作仍需单独验收 |
 | 实时排障、历史和故障切换 | 不同核心具有不同连接统计与路由接口，不能简单复制字段 | 已有 `service/sessions.go`、用户历史、流量图和 `service/failover.go`；本轮未发现需要为了功能数量引入第二套统计/核心的理由。单元测试不等于 VPS 真实握手或 DNS 服务商验收 |
 | 多 VPS 管理与远程创建 | 单机面板功能不能替代集合运维 | `service/fleet.go`、`service/fleet_inbounds.go` 提供集合状态、配置差异及单台/批量远程新建入站。全部目标先预检，再逐台创建；配置模板与灰度下发已移除 |
 | 前端请求与编辑一致性 | 参考上轮的读写生命周期分析 | `frontend/src/plugins/api.ts` 已处理读写隔离。本轮改名基于完整配置草稿，外部独立保存资源引用旧标签时拒绝改名，避免界面改了但数据库没改 |
@@ -127,8 +127,9 @@ npm run build
 | 订阅标识 | 继续采用用户名订阅 URL，按用户确认未改成随机标识。 | 无迁移或旧链接过期工作。 |
 | DNS 查询匹配 | 当前 DNS 规则编辑器支持 Sing-Box `query_type`、`query_client_subnet`、`query_dnssec`，并保留旧标量/列表写法。 | 客户端是否实际发送 EDNS Client Subnet 或 DNSSEC DO 位取决于查询端，UI 条件不保证外部查询会命中。 |
 | Linux 架构 | 用户确认服务端发行仅支持 amd64；安装器检测、Release 构建矩阵和文档现统一限制为 amd64；v1.6.149 hosted Linux 验收已通过。 | 无其他 Linux 架构承诺；非 amd64 主机不在支持范围内。 |
+| Windows 平台范围 | 用户于 2026-10-30 澄清目前没有 Windows 平台计划；本轮目标按 Linux amd64 服务端处理。 | 仓库内既有 Windows 源码/CI 文件保留但不扩展；历史 Windows CI 结果不代表当前产品适配承诺，也不纳入本轮完成条件。 |
 
-当前优先补齐项不是再增加面板功能，而是安排真实 WebDAV 恢复验收、受控公网 MASQUE/canary，以及生产维护模式和 ACME 签发/续期演练。v1.6.149 的 Windows/Linux hosted gates 已通过；所有线上验收均需单独授权，本地或 CI 检查不等同于生产部署。
+当前优先补齐项不是再增加面板功能，而是安排真实 WebDAV 恢复验收、受控公网 MASQUE/canary，以及生产维护模式和 ACME 签发/续期演练。v1.6.149 曾通过 Windows/Linux hosted gates；这是历史验证，不扩大当前 Linux amd64 目标。所有线上验收均需单独授权，本地或 CI 检查不等同于生产部署。
 
 ### 2026-10-30 上游 Release 复查
 

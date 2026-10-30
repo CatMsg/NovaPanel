@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/CatMsg/NovaPanel/config"
 	"github.com/CatMsg/NovaPanel/database"
@@ -14,6 +15,18 @@ import (
 )
 
 const maxAdminPasswordInput = 4096
+
+func hasPlaintextAdminPasswordFlag(args []string) bool {
+	for _, arg := range args {
+		if arg == "--" {
+			return false
+		}
+		if arg == "-password" || arg == "--password" || strings.HasPrefix(arg, "-password=") || strings.HasPrefix(arg, "--password=") {
+			return true
+		}
+	}
+	return false
+}
 
 func readAdminPassword(reader io.Reader) (string, error) {
 	input, err := io.ReadAll(io.LimitReader(reader, maxAdminPasswordInput+2))

@@ -177,7 +177,8 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		if err != nil {
 			return nil, err
 		}
-		if err := validateDeprecatedHysteriaProtocolOptions(inbound.Type, inbound.Options); err != nil {
+		inbound.Options, err = migrateDeprecatedHysteriaProtocolOptions("inbounds", inbound.Type, inbound.Options)
+		if err != nil {
 			return nil, err
 		}
 		if inbound.TlsId > 0 {

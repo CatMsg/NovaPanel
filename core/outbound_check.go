@@ -90,19 +90,7 @@ func FetchOutboundIdentity(ctx context.Context, tag string) (OutboundIdentity, e
 			return outbound.DialContext(ctx, network, M.ParseSocksaddr(address))
 		},
 	}
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   outboundIdentityTimeout,
-		CheckRedirect: func(request *http.Request, via []*http.Request) error {
-			if len(via) >= 2 {
-				return errors.New("too many identity endpoint redirects")
-			}
-			if !strings.EqualFold(request.URL.Hostname(), identityURL.Hostname()) {
-				return errors.New("identity endpoint redirected to another host")
-			}
-			return nil
-		},
-	}
+	client := newOutboundIdentityHTTPClient(transport)
 	defer transport.CloseIdleConnections()
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, identityURL.String(), nil)
@@ -127,6 +115,16 @@ func FetchOutboundIdentity(ctx context.Context, tag string) (OutboundIdentity, e
 		return OutboundIdentity{}, errors.New("identity response is too large")
 	}
 	return parseCloudflareTrace(body)
+}
+
+func newOutboundIdentityHTTPClient(transport *http.Transport) *http.Client {
+	return &http.Client{
+		Transport: transport,
+		Timeout:   outboundIdentityTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 }
 
 func parseCloudflareTrace(body []byte) (OutboundIdentity, error) {

@@ -32,17 +32,7 @@ NovaPanel は、プロトコル設定、サブスクリプション、ポート�
 
 ## インストール
 
-最新版をインストール:
-
-```sh
-_novas_installer_tmp="$(mktemp)" && trap 'rm -f "$_novas_installer_tmp"' EXIT && curl --proto '=https' --proto-redir '=https' -fsSL https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh -o "$_novas_installer_tmp" && bash -n "$_novas_installer_tmp" && bash "$_novas_installer_tmp"; _novas_installer_rc=$?; exit "$_novas_installer_rc"
-```
-
-特定バージョンをインストール:
-
-```sh
-_novas_installer_tmp="$(mktemp)" && trap 'rm -f "$_novas_installer_tmp"' EXIT && curl --proto '=https' --proto-redir '=https' -fsSL https://raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh -o "$_novas_installer_tmp" && bash -n "$_novas_installer_tmp" && bash "$_novas_installer_tmp" vx.x.x; _novas_installer_rc=$?; exit "$_novas_installer_rc"
-```
+検証済みのインストール手順（最新版または指定バージョン）は[メイン README](README.md)をご覧ください。実行前に GitHub Actions の出所証明を検証します。
 
 インストール時に管理者アカウント、パネルパス、ポートを設定できます。インストール後は次のコマンドで管理できます。
 
@@ -57,7 +47,7 @@ _novas_installer_tmp="$(mktemp)" && trap 'rm -f "$_novas_installer_tmp"' EXIT &&
 
 ### ログイン総当たり攻撃対策
 
-Linux systemd 環境では、インストーラーが Fail2ban を自動的にインストールして設定します。Web ログインが 10 分以内に 10 回連続で失敗すると、送信元 IP は恒久的にブロックされます。ルールは現在のパネル TCP ポートだけを対象とし、SSH ポートはブロックしません。
+Linux systemd 環境では、インストーラーが Fail2ban を自動的にインストールして設定します。Web ログインが 10 分以内に 3 回連続で失敗すると、送信元 IP は恒久的にブロックされます。ルールは現在のパネル TCP ポートだけを対象とし、SSH ポートはブロックしません。
 
 - **設定 -> インターフェース** で信頼するリバースプロキシの IP/CIDR とログインブロック許可リストを管理します。
 - **ヘルス診断 -> ログイン保護** で状態確認と個別 IP の解除を行います。
@@ -114,6 +104,7 @@ docker run -d \
 
 ## ドキュメント
 
+- [よく使う操作ガイド（中国語）](docs/WORKFLOWS.md)
 - [命名規則](NAMING.md)
 - [リリース](https://github.com/CatMsg/NovaPanel/releases)
 - [Issue](https://github.com/CatMsg/NovaPanel/issues)

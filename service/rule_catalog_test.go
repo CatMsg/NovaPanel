@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -34,6 +35,32 @@ func TestFetchRuleCatalogSourceFiltersSRSAssets(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].Name != "netflix" || items[0].Tag != "geosite-netflix" || items[0].URL != "https://rules.example/geosite-netflix.srs" {
 		t.Fatalf("unexpected catalog items: %#v", items)
+	}
+}
+
+func TestRuleCatalogHTTPClientDoesNotFollowRedirects(t *testing.T) {
+	var targetRequests atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		targetRequests.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer target.Close()
+
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer source.Close()
+
+	response, err := newRuleCatalogHTTPClient(source.Client().Transport).Get(source.URL)
+	if err != nil {
+		t.Fatalf("request rule catalog source: %v", err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusFound {
+		t.Fatalf("response status = %d, want redirect status %d", response.StatusCode, http.StatusFound)
+	}
+	if got := targetRequests.Load(); got != 0 {
+		t.Fatalf("redirect target received %d requests", got)
 	}
 }
 
@@ -71,6 +98,11 @@ func TestSearchRuleCatalogRanksAndPaginatesCachedEntries(t *testing.T) {
 	}
 	if len(second.Items) != 2 || second.Items[0].Name != "internet" || second.Items[1].Name != "xnet" {
 		t.Fatalf("unexpected second page: %#v", second)
+	}
+	maxInt := int(^uint(0) >> 1)
+	farPage, err := SearchRuleCatalog(context.Background(), "net", "all", maxInt, 2)
+	if err != nil || len(farPage.Items) != 0 || farPage.Page != maxInt {
+		t.Fatalf("extreme page should return an empty page without overflow: result=%#v err=%v", farPage, err)
 	}
 	if _, err := SearchRuleCatalog(context.Background(), "net", "unsupported", 1, 10); err == nil {
 		t.Fatal("expected unsupported catalog kind to fail")

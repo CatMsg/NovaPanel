@@ -9,32 +9,39 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
+	"github.com/CatMsg/NovaPanel/util"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
 type fakeBackupDAV struct {
 	sync.Mutex
-	files     map[string][]byte
-	deleted   []string
-	requests  int
-	deny      bool
-	failMove  bool
-	corruptDB bool
-	redirect  bool
-	server    *httptest.Server
+	files                map[string][]byte
+	deleted              []string
+	requests             int
+	deny                 bool
+	failMove             bool
+	failManifestMove     bool
+	failManifestReadback bool
+	hiddenFromListing    map[string]bool
+	corruptDB            bool
+	redirect             bool
+	server               *httptest.Server
 }
 
 func (f *fakeBackupDAV) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -61,6 +68,9 @@ func (f *fakeBackupDAV) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(207)
 		_, _ = io.WriteString(w, `<d:multistatus xmlns:d="DAV:">`)
 		for name := range f.files {
+			if f.hiddenFromListing[name] {
+				continue
+			}
 			_, _ = fmt.Fprintf(w, `<d:response><d:href>%s</d:href></d:response>`, name)
 		}
 		// Hostile paths must not become requests or retention targets.
@@ -74,11 +84,11 @@ func (f *fakeBackupDAV) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.files[path] = data
 		w.WriteHeader(201)
 	case "MOVE":
-		if f.failMove {
+		dest, _ := url.Parse(r.Header.Get("Destination"))
+		if f.failMove || (f.failManifestMove && strings.HasSuffix(dest.Path, ".json")) {
 			w.WriteHeader(500)
 			return
 		}
-		dest, _ := url.Parse(r.Header.Get("Destination"))
 		data, exists := f.files[path]
 		if !exists {
 			w.WriteHeader(404)
@@ -96,6 +106,10 @@ func (f *fakeBackupDAV) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		delete(f.files, path)
 		w.WriteHeader(201)
 	case "GET":
+		if f.failManifestReadback && strings.HasSuffix(path, ".json") {
+			w.WriteHeader(500)
+			return
+		}
 		data, ok := f.files[path]
 		if !ok {
 			w.WriteHeader(404)
@@ -105,6 +119,12 @@ func (f *fakeBackupDAV) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			data = []byte("corrupt bytes")
 		}
 		_, _ = w.Write(data)
+	case http.MethodHead:
+		if _, ok := f.files[path]; !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
 	case "DELETE":
 		f.deleted = append(f.deleted, path)
 		delete(f.files, path)
@@ -121,12 +141,16 @@ func remoteBackupFixture(t *testing.T) (*RemoteBackupService, *fakeBackupDAV) {
 	}
 	sqlDB, _ := database.GetDB().DB()
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	fake := &fakeBackupDAV{files: map[string][]byte{}}
+	fake := &fakeBackupDAV{files: map[string][]byte{}, hiddenFromListing: map[string]bool{}}
 	fake.server = httptest.NewTLSServer(fake)
 	t.Cleanup(fake.server.Close)
 	svc := NewRemoteBackupService()
 	svc.newDAV = func(cfg remoteBackupConfig, owner string) (*backupDAV, error) {
 		d, err := newBackupDAV(cfg, owner)
+		if err != nil {
+			return nil, err
+		}
+		d.base, err = url.Parse(fake.server.URL + "/dav/novapanel-" + owner + "/")
 		if err != nil {
 			return nil, err
 		}
@@ -143,7 +167,7 @@ func remoteBackupFixture(t *testing.T) (*RemoteBackupService, *fakeBackupDAV) {
 func saveFixtureBackup(t *testing.T, s *RemoteBackupService, f *fakeBackupDAV, enabled bool, retention int) {
 	t.Helper()
 	password := "synthetic-backup-password"
-	if err := s.Save(RemoteBackupSettings{Enabled: enabled, IntervalMinutes: 15, Retention: retention, Destination: f.server.URL + "/dav/", Username: "test-user", Password: &password}); err != nil {
+	if err := s.Save(RemoteBackupSettings{Enabled: enabled, IntervalMinutes: 15, Retention: retention, Destination: "https://backup.example/dav/", Username: "test-user", Password: &password}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -189,6 +213,55 @@ func TestRemoteBackupUnconfiguredStatusAndSecretMasking(t *testing.T) {
 	}
 	if f.requests != 0 {
 		t.Fatal("settings save touched network")
+	}
+}
+
+func TestRemoteBackupTargetChangeClearsPreviousTargetStatus(t *testing.T) {
+	s, f := remoteBackupFixture(t)
+	saveFixtureBackup(t, s, f, false, 3)
+
+	now := time.Now().UTC()
+	state := remoteBackupState{
+		LastOperation:    "backup",
+		LastStartedAt:    now.Add(-2 * time.Minute),
+		LastFinishedAt:   now.Add(-time.Minute),
+		LastSuccessAt:    now.Add(-time.Minute),
+		LastArtifact:     "npb-20261030T120000Z-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.db",
+		LastError:        "old destination error",
+		RetentionWarning: "old destination retention warning",
+	}
+	if err := s.saveState(state); err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := s.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	status.Settings.Retention = 5
+	if err := s.Save(status.Settings); err != nil {
+		t.Fatal(err)
+	}
+	status, err = s.Status()
+	if err != nil || status.State.LastSuccessAt != state.LastSuccessAt || status.State.LastArtifact != state.LastArtifact {
+		t.Fatalf("non-target setting change lost backup history: %+v, err=%v", status.State, err)
+	}
+
+	status.Settings.Destination = "https://new-destination.invalid/dav/"
+	newPassword := "new-synthetic-backup-password"
+	status.Settings.Password = &newPassword
+	if err := s.Save(status.Settings); err != nil {
+		t.Fatal(err)
+	}
+	status, err = s.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.State.LastSuccessAt.IsZero() || status.State.LastArtifact != "" || status.State.LastOperation != "" || !status.State.LastStartedAt.IsZero() || !status.State.LastFinishedAt.IsZero() || status.State.LastError != "" || status.State.RetentionWarning != "" {
+		t.Fatalf("new remote target retained stale state: %+v", status.State)
+	}
+	if f.requests != 0 {
+		t.Fatalf("saving settings unexpectedly touched WebDAV: %d requests", f.requests)
 	}
 }
 
@@ -248,6 +321,39 @@ func TestRemoteBackupSnapshotRehearsalDownloadAndRetention(t *testing.T) {
 		if !strings.HasPrefix(name, base) || strings.HasSuffix(name, "/") {
 			t.Fatalf("unsafe delete: %s", name)
 		}
+	}
+}
+
+func TestRemoteBackupRetentionFailsClosedForManifestWithoutData(t *testing.T) {
+	s, f := remoteBackupFixture(t)
+	saveFixtureBackup(t, s, f, false, 1)
+	first, err := s.Run(context.Background(), "backup", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := "/dav/novapanel-" + first.Artifact.Owner + "/"
+	missing := *first.Artifact
+	missing.CreatedAt = time.Now().UTC().Add(-48 * time.Hour)
+	missing.Artifact = "npb-" + missing.CreatedAt.Format("20060102T150405Z") + "-" + strings.Repeat("e", 32) + ".db"
+	manifest, err := json.Marshal(missing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingManifest := strings.TrimSuffix(missing.Artifact, ".db") + ".json"
+	f.files[base+missingManifest] = manifest
+
+	if _, err := s.Run(context.Background(), "backup", ""); err != nil {
+		t.Fatalf("new verified backup should survive ambiguous older inventory: %v", err)
+	}
+	if _, exists := f.files[base+first.Artifact.Artifact]; !exists {
+		t.Fatal("retention deleted the previous valid snapshot despite an incomplete manifest")
+	}
+	status, err := s.Status()
+	if err != nil || status.State.RetentionWarning == "" {
+		t.Fatalf("missing data artifact should produce a retention warning: %+v %v", status.State, err)
+	}
+	if _, err := s.Run(context.Background(), "list", ""); err == nil {
+		t.Fatal("list accepted a manifest with no database artifact")
 	}
 }
 
@@ -318,10 +424,12 @@ func TestRemoteBackupFailureNeverRetainsAndErrorsRedacted(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := "/dav/novapanel-" + first.Artifact.Owner + "/"
-	for _, mode := range []string{"auth", "corrupt", "move", "redirect"} {
+	for _, mode := range []string{"auth", "corrupt", "move", "manifest-move", "manifest-readback", "redirect"} {
 		f.deny = mode == "auth"
 		f.corruptDB = mode == "corrupt"
 		f.failMove = mode == "move"
+		f.failManifestMove = mode == "manifest-move"
+		f.failManifestReadback = mode == "manifest-readback"
 		f.redirect = mode == "redirect"
 		_, err := s.Run(context.Background(), "backup", "")
 		if err == nil {
@@ -341,10 +449,65 @@ func TestRemoteBackupFailureNeverRetainsAndErrorsRedacted(t *testing.T) {
 	f.deny = false
 	f.corruptDB = false
 	f.failMove = false
+	f.failManifestMove = false
+	f.failManifestReadback = false
 	f.redirect = false
 	for name := range f.files {
 		if strings.HasSuffix(name, ".upload") {
 			t.Fatalf("owned staging file orphaned: %s", name)
+		}
+		if strings.HasPrefix(name, base+"npb-") && (strings.HasSuffix(name, ".db") || strings.HasSuffix(name, ".json")) && name != base+first.Artifact.Artifact && name != base+strings.TrimSuffix(first.Artifact.Artifact, ".db")+".json" {
+			t.Fatalf("failed attempt left an uncommitted remote artifact: %s", name)
+		}
+	}
+}
+
+func TestRemoteBackupCleansOnlyStaleUncommittedArtifacts(t *testing.T) {
+	s, f := remoteBackupFixture(t)
+	saveFixtureBackup(t, s, f, false, 10)
+	first, err := s.Run(context.Background(), "backup", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := "/dav/novapanel-" + first.Artifact.Owner + "/"
+	oldTime := time.Now().UTC().Add(-backupOrphanGracePeriod - time.Hour)
+	oldStamp := oldTime.Format("20060102T150405Z")
+	oldOrphan := "npb-" + oldStamp + "-" + strings.Repeat("a", 32) + ".db"
+	oldStage := ".npb-" + oldStamp + "-" + strings.Repeat("b", 32) + ".json.upload"
+	recentOrphan := "npb-" + time.Now().UTC().Add(-time.Hour).Format("20060102T150405Z") + "-" + strings.Repeat("c", 32) + ".db"
+	f.files[base+oldOrphan] = []byte("uncommitted database")
+	f.files[base+oldStage] = []byte("interrupted upload")
+	f.files[base+recentOrphan] = []byte("recent database upload")
+	f.files[base+"unrelated.txt"] = []byte("not ours")
+
+	committedData := []byte("previous committed recovery point")
+	committedHash := sha256.Sum256(committedData)
+	committed := *first.Artifact
+	committed.Artifact = "npb-" + oldStamp + "-" + strings.Repeat("d", 32) + ".db"
+	committed.CreatedAt = oldTime
+	committed.Size = int64(len(committedData))
+	committed.SHA256 = hex.EncodeToString(committedHash[:])
+	manifest, err := json.Marshal(committed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.files[base+committed.Artifact] = committedData
+	committedManifest := base + strings.TrimSuffix(committed.Artifact, ".db") + ".json"
+	f.files[committedManifest] = manifest
+	// Simulate an eventually consistent PROPFIND result; GET must prevent deletion.
+	f.hiddenFromListing[committedManifest] = true
+
+	if _, err := s.Run(context.Background(), "backup", ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{oldOrphan, oldStage} {
+		if _, exists := f.files[base+name]; exists {
+			t.Fatalf("stale incomplete artifact was not cleaned: %s", name)
+		}
+	}
+	for _, name := range []string{recentOrphan, "unrelated.txt", first.Artifact.Artifact, committed.Artifact, strings.TrimSuffix(committed.Artifact, ".db") + ".json"} {
+		if _, exists := f.files[base+name]; !exists {
+			t.Fatalf("cleanup removed or lost a protected artifact: %s", name)
 		}
 	}
 }
@@ -438,7 +601,7 @@ func TestRemoteBackupConcurrencyCancellationAndScheduler(t *testing.T) {
 	}
 }
 
-func TestRemoteBackupProbeAndStrictTLS(t *testing.T) {
+func TestRemoteBackupProbeAndRejectsUnsafeURLs(t *testing.T) {
 	s, f := remoteBackupFixture(t)
 	saveFixtureBackup(t, s, f, false, 2)
 	result, err := s.Run(context.Background(), "test", "")
@@ -448,14 +611,167 @@ func TestRemoteBackupProbeAndStrictTLS(t *testing.T) {
 	if len(f.files) != 0 {
 		t.Fatal("probe left remote artifacts")
 	}
-	// Production client must reject the fixture's self-signed certificate.
-	s.newDAV = newBackupDAV
-	if _, err := s.Run(context.Background(), "test", ""); err == nil {
-		t.Fatal("untrusted TLS certificate accepted")
-	}
-	for _, raw := range []string{"http://host/dav/", "https://user:pass@host/dav/", "https://host/dav/?token=x", "https://host/a/../b/", "https://host/a%2Fb/"} {
+	for _, raw := range []string{"http://host/dav/", "https://user:pass@host/dav/", "https://host/dav/?token=x", "https://host/a/../b/", "https://host/a%2Fb/", "https://127.0.0.1/dav/", "https://[fd00::1]/dav/"} {
 		if _, err := backupDestination(raw); err == nil {
 			t.Fatalf("unsafe destination accepted: %s", raw)
 		}
+	}
+}
+
+func TestRemoteBackupStrictTLSRejectsUntrustedCertificate(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialer := &net.Dialer{Timeout: time.Second}
+	d, err := newBackupDAVWithDialContext(remoteBackupConfig{
+		Destination: "https://backup.example/dav/",
+		Username:    "test-user",
+		Password:    "test-password",
+	}, strings.Repeat("a", 32), func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return dialer.DialContext(ctx, network, parsed.Host)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.close()
+	if err := d.ensure(context.Background()); err == nil {
+		t.Fatal("untrusted TLS certificate accepted")
+	}
+	if requests.Load() != 0 {
+		t.Fatal("WebDAV request reached a server with an untrusted certificate")
+	}
+}
+
+func TestPublicRoutableIPFilter(t *testing.T) {
+	tests := []struct {
+		address string
+		public  bool
+	}{
+		{address: "8.8.8.8", public: true},
+		{address: "2606:4700:4700::1111", public: true},
+		{address: "10.0.0.1"},
+		{address: "100.64.0.1"},
+		{address: "127.0.0.1"},
+		{address: "169.254.169.254"},
+		{address: "192.0.2.1"},
+		{address: "198.18.0.1"},
+		{address: "::ffff:192.168.1.1"},
+		{address: "fc00::1"},
+		{address: "fe80::1"},
+		{address: "64:ff9b::a9fe:a9fe"},
+		{address: "2001:db8::1"},
+		{address: "2002:0808:0808::1"},
+	}
+	for _, test := range tests {
+		t.Run(test.address, func(t *testing.T) {
+			address, err := netip.ParseAddr(test.address)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := util.IsPublicRoutableIP(address); got != test.public {
+				t.Fatalf("util.IsPublicRoutableIP(%s) = %t, want %t", address, got, test.public)
+			}
+		})
+	}
+}
+
+func TestSafeBackupDialContextPinsPublicDNSResults(t *testing.T) {
+	public := netip.MustParseAddr("8.8.8.8")
+	lookupCalls, dialCalls := 0, 0
+	var dialAddress string
+	dial := safeBackupDialContext(
+		func(context.Context, string, string) ([]netip.Addr, error) {
+			lookupCalls++
+			return []netip.Addr{public}, nil
+		},
+		func(_ context.Context, _, address string) (net.Conn, error) {
+			dialCalls++
+			dialAddress = address
+			client, server := net.Pipe()
+			_ = server.Close()
+			return client, nil
+		},
+	)
+	conn, err := dial(context.Background(), "tcp", "dav.example:443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.Close()
+	if lookupCalls != 1 || dialCalls != 1 || dialAddress != "8.8.8.8:443" {
+		t.Fatalf("lookup=%d dial=%d address=%q", lookupCalls, dialCalls, dialAddress)
+	}
+}
+
+func TestSafeBackupDialContextRejectsMixedPublicAndPrivateDNS(t *testing.T) {
+	lookupCalls, dialCalls := 0, 0
+	dial := safeBackupDialContext(
+		func(context.Context, string, string) ([]netip.Addr, error) {
+			lookupCalls++
+			return []netip.Addr{netip.MustParseAddr("8.8.8.8"), netip.MustParseAddr("169.254.169.254")}, nil
+		},
+		func(context.Context, string, string) (net.Conn, error) {
+			dialCalls++
+			return nil, errors.New("unexpected dial")
+		},
+	)
+	if _, err := dial(context.Background(), "tcp", "dav.example:443"); err == nil {
+		t.Fatal("DNS result containing a cloud metadata address was accepted")
+	}
+	if lookupCalls != 1 || dialCalls != 0 {
+		t.Fatalf("lookup=%d dial=%d; expected rejection before any connection", lookupCalls, dialCalls)
+	}
+}
+
+func TestRemoteBackupReportsPrivateDNSResolution(t *testing.T) {
+	var dialCalls atomic.Int32
+	d, err := newBackupDAVWithDialContext(remoteBackupConfig{
+		Destination: "https://backup.example/dav/",
+		Username:    "test-user",
+		Password:    "test-password",
+	}, strings.Repeat("b", 32), safeBackupDialContext(
+		func(context.Context, string, string) ([]netip.Addr, error) {
+			return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
+		},
+		func(context.Context, string, string) (net.Conn, error) {
+			dialCalls.Add(1)
+			return nil, errors.New("private address must not be dialed")
+		},
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.close()
+	if err := d.ensure(context.Background()); err == nil || !strings.Contains(err.Error(), "non-public address") {
+		t.Fatalf("private DNS resolution error = %v", err)
+	}
+	if dialCalls.Load() != 0 {
+		t.Fatal("private DNS result reached the dialer")
+	}
+}
+
+func TestSafeBackupDialContextRejectsPrivateIPLiteral(t *testing.T) {
+	lookupCalls, dialCalls := 0, 0
+	dial := safeBackupDialContext(
+		func(context.Context, string, string) ([]netip.Addr, error) {
+			lookupCalls++
+			return nil, errors.New("IP literals must not be resolved")
+		},
+		func(context.Context, string, string) (net.Conn, error) {
+			dialCalls++
+			return nil, errors.New("private literal must not be dialed")
+		},
+	)
+	if _, err := dial(context.Background(), "tcp", "127.0.0.1:443"); err == nil {
+		t.Fatal("private IP literal was accepted")
+	}
+	if lookupCalls != 0 || dialCalls != 0 {
+		t.Fatalf("lookup=%d dial=%d; expected direct rejection", lookupCalls, dialCalls)
 	}
 }

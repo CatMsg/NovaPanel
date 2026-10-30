@@ -2,7 +2,7 @@
   <section class="offhost-backup" aria-label="自动异地备份" :aria-busy="!!working">
     <h3>自动异地备份</h3>
     <v-alert type="warning" variant="tonal" density="compact">
-      默认关闭。仅支持严格验证证书的 HTTPS WebDAV，不执行命令。
+      默认关闭。仅支持严格验证证书的 HTTPS 公网 WebDAV；若目标解析到内网或保留地址会拒绝连接。不执行命令。
       .db 仍包含面板及代理凭据，TLS 不等于静态加密：请使用私有、可信的存储。
       恢复演练不会覆盖当前数据库；下载后可使用上方的手动恢复。
     </v-alert>

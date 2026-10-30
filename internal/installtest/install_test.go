@@ -63,6 +63,31 @@ func TestUpdaterUsesValidatedReleaseTaggedSources(t *testing.T) {
 		}
 	}
 
+	for _, required := range []string{
+		"verify_release_script_provenance \"$path\" \"$target_version\" \"$staging\"",
+		"--bundle \"$bundle\"",
+		"--signer-workflow \"$NOVAS_RELEASE_REPO/.github/workflows/release.yml\"",
+		"--source-ref refs/heads/main",
+		"--source-digest \"$source_digest\"",
+		"download_verified_release_script \"$target_version\" install.sh \"$staging\"",
+		"download_verified_release_script \"$latest_version\" novas.sh \"$staging\"",
+	} {
+		if !strings.Contains(text, required) {
+			t.Errorf("updater is missing attested script verification: %q", required)
+		}
+	}
+	verify := strings.Index(text, "verify_release_script_provenance \"$path\" \"$target_version\" \"$staging\"")
+	parse := strings.Index(text, "bash -n \"$path\"")
+	execute := strings.Index(text, "bash \"${installer_path}\" \"${target_version}\"")
+	if verify < 0 || parse < 0 || execute < 0 || verify >= parse || parse >= execute {
+		t.Fatal("updater does not verify script provenance before syntax checking and execution")
+	}
+	managerVerify := strings.Index(text, `download_verified_release_script "$latest_version" novas.sh "$staging"`)
+	managerReplace := strings.Index(text, `mv -f "$temp_script" /usr/bin/novas`)
+	if managerVerify < 0 || managerReplace < 0 || managerVerify >= managerReplace {
+		t.Fatal("manager script is replaced before its release provenance is verified")
+	}
+
 	extract := func(name string) string {
 		t.Helper()
 		start := strings.Index(text, name+"() {")
@@ -83,6 +108,201 @@ if release_source_url main install.sh || release_source_url v1.2.3 ../../evil; t
 `
 	if output, err := exec.Command("bash", "-c", script).CombinedOutput(); err != nil {
 		t.Fatalf("release source URL validation failed: %v\n%s", err, output)
+	}
+}
+
+func TestManagerRunsOnlyAttestedReleaseInstaller(t *testing.T) {
+	_, source, _, _ := runtime.Caller(0)
+	updater, err := os.ReadFile(filepath.Clean(filepath.Join(filepath.Dir(source), "../../novas.sh")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(updater)
+	extract := func(name string) string {
+		t.Helper()
+		start := strings.Index(text, name+"() {")
+		if start < 0 {
+			t.Fatalf("missing shell helper %s", name)
+		}
+		end := strings.Index(text[start:], "\n}\n")
+		if end < 0 {
+			t.Fatalf("unterminated shell helper %s", name)
+		}
+		return text[start : start+end+3]
+	}
+
+	root := t.TempDir()
+	bin := filepath.Join(root, "bin")
+	write(t, filepath.Join(bin, "gh-fixture"), `#!/bin/sh
+set -eu
+printf '%s\n' "$@" > "$TEST_ROOT/gh-args"
+printf 'verify\n' >> "$TEST_ACTIONS"
+exit "$VERIFY_RC"
+`, 0755)
+	write(t, filepath.Join(bin, "bash"), `#!/bin/sh
+set -eu
+if [ "${1:-}" = -n ]; then
+  printf 'syntax\n' >> "$TEST_ACTIONS"
+  exit 0
+fi
+[ -f "$1" ]
+shift
+printf 'execute:%s\n' "$*" >> "$TEST_ACTIONS"
+exit 23
+`, 0755)
+
+	shell := strings.Join([]string{
+		extract("valid_release_tag"),
+		extract("release_source_url"),
+		extract("verify_release_script_provenance"),
+		extract("download_verified_release_script"),
+		extract("download_install_script"),
+		extract("run_install_script"),
+	}, "\n") + `
+set -eu
+NOVAS_RELEASE_REPO=CatMsg/NovaPanel
+NOVAS_RELEASE_GH_PATH=""
+LOGI() { printf 'info:%s\n' "$*" >&2; }
+LOGE() { printf 'error:%s\n' "$*" >&2; }
+release_download_to_file() {
+  case "$1" in
+    https://raw.githubusercontent.com/CatMsg/NovaPanel/v1.2.3/install.sh)
+      printf '#!/bin/sh\nexit 0\n' > "$2"
+      printf 'download:script\n' >> "$TEST_ACTIONS" ;;
+    https://github.com/CatMsg/NovaPanel/releases/download/v1.2.3/NovaPanel-install.sh.sigstore.json)
+      [[ "${FAIL_BUNDLE:-0}" == 0 ]] || return 1
+      printf '{}\n' > "$2"
+      printf 'download:bundle\n' >> "$TEST_ACTIONS" ;;
+    https://api.github.com/repos/CatMsg/NovaPanel/releases/tags/v1.2.3)
+      if [[ "${BAD_DIGEST:-0}" == 1 ]]; then
+        printf '{\n  "target_commitish": "main"\n}\n' > "$2"
+      else
+        printf '{\n  "target_commitish": "9014ce970f2af32ab12824b1d57dc6e0d96d50ae"\n}\n' > "$2"
+      fi
+      printf 'download:release\n' >> "$TEST_ACTIONS" ;;
+    *) return 92 ;;
+  esac
+}
+ensure_release_gh() { NOVAS_RELEASE_GH_PATH="$TEST_GH"; }
+status=0
+run_install_script v1.2.3 || status=$?
+printf 'status=%s\n' "$status"
+`
+	for _, test := range []struct {
+		name        string
+		failBundle  bool
+		badDigest   bool
+		verifyRC    string
+		wantStatus  string
+		wantActions string
+	}{
+		{name: "attested-installer-runs", verifyRC: "0", wantStatus: "status=23", wantActions: "download:script\ndownload:bundle\ndownload:release\nverify\nsyntax\nexecute:v1.2.3\n"},
+		{name: "invalid-attestation-fails-closed", verifyRC: "47", wantStatus: "status=1", wantActions: "download:script\ndownload:bundle\ndownload:release\nverify\n"},
+		{name: "missing-bundle-fails-closed", failBundle: true, verifyRC: "0", wantStatus: "status=1", wantActions: "download:script\n"},
+		{name: "invalid-source-commit-fails-closed", badDigest: true, verifyRC: "0", wantStatus: "status=1", wantActions: "download:script\ndownload:bundle\ndownload:release\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			actions := filepath.Join(root, test.name+".actions")
+			command := exec.Command("bash", "-c", shell)
+			command.Env = append(os.Environ(),
+				"PATH="+bin+":"+os.Getenv("PATH"),
+				"TEST_ROOT="+root,
+				"TEST_ACTIONS="+actions,
+				"TEST_GH="+filepath.Join(bin, "gh-fixture"),
+				"VERIFY_RC="+test.verifyRC,
+				"FAIL_BUNDLE="+map[bool]string{true: "1", false: "0"}[test.failBundle],
+				"BAD_DIGEST="+map[bool]string{true: "1", false: "0"}[test.badDigest],
+			)
+			output, err := command.CombinedOutput()
+			if err != nil {
+				t.Fatalf("manager installer fixture failed: %v\n%s", err, output)
+			}
+			if !bytes.Contains(output, []byte(test.wantStatus)) {
+				t.Fatalf("manager installer status output = %q, want %q", output, test.wantStatus)
+			}
+			got, err := os.ReadFile(actions)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != test.wantActions {
+				t.Fatalf("manager installer action order = %q, want %q", got, test.wantActions)
+			}
+			if test.verifyRC == "0" && !test.failBundle && !test.badDigest {
+				args, err := os.ReadFile(filepath.Join(root, "gh-args"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, required := range []string{
+					"attestation\nverify\n",
+					"--repo\nCatMsg/NovaPanel",
+					"--bundle\n",
+					"--signer-workflow\nCatMsg/NovaPanel/.github/workflows/release.yml",
+					"--source-ref\nrefs/heads/main",
+					"--source-digest\n9014ce970f2af32ab12824b1d57dc6e0d96d50ae",
+					"--deny-self-hosted-runners",
+				} {
+					if !bytes.Contains(args, []byte(required)) {
+						t.Errorf("attestation verifier args missing %q:\n%s", required, args)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestInstallerSupportsOnlyAMD64(t *testing.T) {
+	_, source, _, _ := runtime.Caller(0)
+	installer := filepath.Clean(filepath.Join(filepath.Dir(source), "../../install.sh"))
+	bin := t.TempDir()
+	uname := filepath.Join(bin, "uname")
+	if err := os.WriteFile(uname, []byte("#!/bin/sh\nprintf '%s\\n' \"$NOVAS_TEST_UNAME_MACHINE\"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "mktemp"), []byte("#!/bin/sh\nprintf called > \"$NOVAS_TEST_MKTEMP_MARKER\"\nprintf '%s\\n' /tmp/novapanel-installer-architecture-test\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		machine string
+		want    string
+		ok      bool
+	}{
+		{machine: "x86_64", want: "amd64", ok: true},
+		{machine: "x64", want: "amd64", ok: true},
+		{machine: "amd64", want: "amd64", ok: true},
+		{machine: "386"},
+		{machine: "armv5l"},
+		{machine: "armv6l"},
+		{machine: "armv7l"},
+		{machine: "aarch64"},
+		{machine: "s390x"},
+	}
+	for _, test := range tests {
+		t.Run(test.machine, func(t *testing.T) {
+			command := exec.Command("bash", "-c", `source "$1"; arch`, "fixture", installer)
+			command.Env = []string{"PATH=" + bin, "NOVAS_TEST_UNAME_MACHINE=" + test.machine}
+			output, err := command.CombinedOutput()
+			if test.ok {
+				if err != nil || strings.TrimSpace(string(output)) != test.want {
+					t.Fatalf("arch() = %q, %v; want %q", output, err, test.want)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(string(output), "仅支持 Linux amd64") {
+				t.Fatalf("arch() did not reject unsupported architecture %q: %q, %v", test.machine, output, err)
+			}
+		})
+	}
+
+	marker := filepath.Join(t.TempDir(), "mktemp-called")
+	command := exec.Command("bash", "-c", `source "$1"; install_novas v1.2.3`, "fixture", installer)
+	command.Env = []string{"PATH=" + bin, "NOVAS_TEST_UNAME_MACHINE=aarch64", "NOVAS_TEST_MKTEMP_MARKER=" + marker}
+	output, err := command.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "仅支持 Linux amd64") {
+		t.Fatalf("install_novas did not reject non-amd64 before deployment: %q, %v", output, err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("installer created staging before architecture rejection, marker stat error: %v", err)
 	}
 }
 
@@ -202,6 +422,36 @@ func TestInstallerDoesNotInstallUnusedWget(t *testing.T) {
 	}
 }
 
+func readmeInstallerExamples(t *testing.T, content []byte) []string {
+	t.Helper()
+	var examples []string
+	var block strings.Builder
+	inBashBlock := false
+	for _, line := range strings.Split(string(content), "\n") {
+		if !inBashBlock {
+			if strings.TrimSpace(line) == "```bash" {
+				inBashBlock = true
+				block.Reset()
+			}
+			continue
+		}
+		if strings.TrimSpace(line) == "```" {
+			example := block.String()
+			if strings.Contains(example, `bash "$_novas_script"`) {
+				examples = append(examples, example)
+			}
+			inBashBlock = false
+			continue
+		}
+		block.WriteString(line)
+		block.WriteByte('\n')
+	}
+	if inBashBlock {
+		t.Fatal("unterminated bash code block in README")
+	}
+	return examples
+}
+
 func TestReadmeInstallerBootstrapValidatesHTTPSDownloadBeforeExecution(t *testing.T) {
 	_, source, _, _ := runtime.Caller(0)
 	root := filepath.Clean(filepath.Join(filepath.Dir(source), "../.."))
@@ -217,30 +467,52 @@ func TestReadmeInstallerBootstrapValidatesHTTPSDownloadBeforeExecution(t *testin
 		if err != nil {
 			t.Fatal(err)
 		}
-		count := 0
-		for lineNumber, line := range strings.Split(string(content), "\n") {
-			if !strings.Contains(line, "raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh") {
-				continue
+		if filepath.Base(path) != "README.md" {
+			if !strings.Contains(string(content), "](README.md)") {
+				t.Fatalf("%s must link to the canonical verified installation steps", filepath.Base(path))
 			}
-			count++
-			for _, required := range []string{
-				`curl --proto '=https' --proto-redir '=https' -fsSL`,
-				`-o "$_novas_installer_tmp"`,
-				`bash -n "$_novas_installer_tmp"`,
-				`bash "$_novas_installer_tmp"`,
-				`trap 'rm -f "$_novas_installer_tmp"' EXIT`,
-				`exit "$_novas_installer_rc"`,
-			} {
-				if !strings.Contains(line, required) {
-					t.Fatalf("%s:%d installer bootstrap is missing %q", filepath.Base(path), lineNumber+1, required)
-				}
+			if strings.Contains(string(content), `bash "$_novas_installer_tmp"`) || strings.Contains(string(content), "bash <(curl") {
+				t.Fatalf("%s retains an unverified installer command", filepath.Base(path))
 			}
-			if strings.Contains(line, "bash <(curl") {
-				t.Fatalf("%s:%d executes the response stream without validation", filepath.Base(path), lineNumber+1)
+			continue
+		}
+		examples := readmeInstallerExamples(t, content)
+		if len(examples) != 1 {
+			t.Fatalf("README.md contains %d verified installer examples, want one canonical command", len(examples))
+		}
+		example := examples[0]
+		for _, required := range []string{
+			`curl --proto '=https' --proto-redir '=https' -fsSL`,
+			`_novas_version='latest'`,
+			`_novas_tag="v${_novas_version#v}"`,
+			`NovaPanel-install.sh.sigstore.json`,
+			`if [[ -s "$_novas_bundle" ]]; then`,
+			`--bundle "$_novas_bundle"`,
+			`--source-ref refs/heads/main`,
+			`--source-digest "$_novas_source_digest"`,
+			`_novas_tag" != 'v1.6.149'`,
+			`71a91cf3e7a9d18a2f803e272d46266b4100162f9bfcbc69991d626f94534583`,
+			`bash -n "$_novas_script"`,
+			`bash "$_novas_script" "$_novas_tag"`,
+			`https://raw.githubusercontent.com/CatMsg/NovaPanel/${_novas_tag}/install.sh`,
+			"https://api.github.com/repos/CatMsg/NovaPanel/releases/latest",
+		} {
+			if !strings.Contains(example, required) {
+				t.Fatalf("canonical installer bootstrap is missing %q", required)
 			}
 		}
-		if count != 2 {
-			t.Fatalf("%s contains %d installer bootstrap examples, want latest and pinned-version examples", filepath.Base(path), count)
+		verify := strings.Index(example, `attestation verify "$_novas_script"`)
+		syntaxCheck := strings.Index(example, `bash -n "$_novas_script"`)
+		execute := strings.Index(example, `bash "$_novas_script" "$_novas_tag"`)
+		if verify < 0 || syntaxCheck < 0 || execute < 0 || verify >= syntaxCheck || syntaxCheck >= execute {
+			t.Fatal("README executes the installer before attestation and syntax verification")
+		}
+		legacyDigest := strings.Index(example, `sha256sum "$_novas_script"`)
+		if legacyDigest < 0 || legacyDigest >= syntaxCheck {
+			t.Fatal("README executes the installer before checking the pinned legacy digest")
+		}
+		if strings.Contains(example, "raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh") || strings.Contains(example, "bash <(curl") {
+			t.Fatal("README uses a mutable or unverified installer bootstrap")
 		}
 	}
 }
@@ -252,20 +524,85 @@ func TestReadmeInstallerBootstrapExecutionOrderAndExitCode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var examples []string
-	for _, line := range strings.Split(string(readme), "\n") {
-		if strings.Contains(line, "raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh") {
-			examples = append(examples, line)
-		}
-	}
-	if len(examples) != 2 {
-		t.Fatalf("expected latest and pinned-version install examples, got %d", len(examples))
+	examples := readmeInstallerExamples(t, readme)
+	if len(examples) != 1 {
+		t.Fatalf("expected one verified install example, got %d", len(examples))
 	}
 
 	testRoot := t.TempDir()
 	bin := filepath.Join(testRoot, "bin")
-	write(t, filepath.Join(bin, "mktemp"), "#!/bin/sh\nset -eu\n: > \"$TEST_TMP\"\nchmod 600 \"$TEST_TMP\"\nprintf '%s\\n' \"$TEST_TMP\"\n", 0755)
-	write(t, filepath.Join(bin, "curl"), "#!/bin/sh\nset -eu\noutput=\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = -o ]; then output=$2; shift 2; else shift; fi\ndone\n[ -n \"$output\" ]\nprintf '%s\\n' '#!/bin/sh' 'exit 0' > \"$output\"\nprintf 'curl\\n' >> \"$TEST_ACTIONS\"\n", 0755)
+	write(t, filepath.Join(bin, "mktemp"), "#!/bin/sh\nset -eu\n[ \"${1:-}\" = -d ]\nmkdir -p \"$TEST_TMP\"\nprintf '%s\\n' \"$TEST_TMP\"\n", 0755)
+	write(t, filepath.Join(bin, "curl"), `#!/bin/sh
+set -eu
+output=
+url=
+proto_seen=0
+redir_seen=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --proto) [ "${2:-}" = "=https" ] || exit 91; proto_seen=1; shift 2 ;;
+    --proto-redir) [ "${2:-}" = "=https" ] || exit 92; redir_seen=1; shift 2 ;;
+    -fsSL) shift ;;
+    -o) output=${2:-}; shift 2 ;;
+    https://*) url=$1; shift ;;
+    *) exit 93 ;;
+  esac
+done
+[ "$proto_seen" = 1 ] && [ "$redir_seen" = 1 ]
+if [ "$url" = "https://api.github.com/repos/CatMsg/NovaPanel/releases/latest" ]; then
+  printf 'curl:latest\n' >> "$TEST_ACTIONS"
+  printf '{\n  "tag_name": "%s"\n}\n' "${LATEST_TAG:-v1.2.3}"
+else
+  case "$url" in
+    https://raw.githubusercontent.com/CatMsg/NovaPanel/v1.2.3/install.sh) tag=v1.2.3 ;;
+    https://raw.githubusercontent.com/CatMsg/NovaPanel/v9.8.7/install.sh) tag=v9.8.7 ;;
+    https://raw.githubusercontent.com/CatMsg/NovaPanel/v1.6.149/install.sh) tag=v1.6.149 ;;
+    https://raw.githubusercontent.com/CatMsg/NovaPanel/v1.6.150/install.sh) tag=v1.6.150 ;;
+    https://github.com/CatMsg/NovaPanel/releases/download/v1.2.3/NovaPanel-install.sh.sigstore.json) tag=v1.2.3; kind=bundle ;;
+    https://github.com/CatMsg/NovaPanel/releases/download/v9.8.7/NovaPanel-install.sh.sigstore.json) tag=v9.8.7; kind=bundle ;;
+    https://github.com/CatMsg/NovaPanel/releases/download/v1.6.149/NovaPanel-install.sh.sigstore.json) tag=v1.6.149; kind=bundle ;;
+    https://github.com/CatMsg/NovaPanel/releases/download/v1.6.150/NovaPanel-install.sh.sigstore.json) tag=v1.6.150; kind=bundle ;;
+    https://api.github.com/repos/CatMsg/NovaPanel/releases/tags/v1.2.3) tag=v1.2.3; kind=release ;;
+    https://api.github.com/repos/CatMsg/NovaPanel/releases/tags/v9.8.7) tag=v9.8.7; kind=release ;;
+    https://api.github.com/repos/CatMsg/NovaPanel/releases/tags/v1.6.149) tag=v1.6.149; kind=release ;;
+    https://api.github.com/repos/CatMsg/NovaPanel/releases/tags/v1.6.150) tag=v1.6.150; kind=release ;;
+    *) exit 94 ;;
+  esac
+  [ -n "$output" ]
+  if [ "${kind:-installer}" = installer ]; then
+    printf '#!/bin/sh\nexit 0\n' > "$output"
+    printf 'curl:installer:%s\n' "$tag" >> "$TEST_ACTIONS"
+  elif [ "$kind" = bundle ]; then
+    printf 'curl:bundle:%s\n' "$tag" >> "$TEST_ACTIONS"
+    case "$tag" in v1.6.149|v1.6.150) exit 22 ;; esac
+    printf '{}\n' > "$output"
+  else
+    printf '{\n  "target_commitish": "9014ce970f2af32ab12824b1d57dc6e0d96d50ae"\n}\n' > "$output"
+    printf 'curl:release:%s\n' "$tag" >> "$TEST_ACTIONS"
+  fi
+fi
+`, 0755)
+	write(t, filepath.Join(bin, "sha256sum"), `#!/bin/sh
+set -eu
+case "${1:-}" in
+  */install.sh)
+    digest="${LEGACY_SHA:-71a91cf3e7a9d18a2f803e272d46266b4100162f9bfcbc69991d626f94534583}"
+    printf 'sha256:%s\n' "$digest" >> "$TEST_ACTIONS"
+    printf '%s  %s\n' "$digest" "$1"
+    ;;
+  *) exit 98 ;;
+esac
+`, 0755)
+	write(t, filepath.Join(bin, "gh"), `#!/bin/sh
+set -eu
+if [ "${1:-}" = attestation ] && [ "${2:-}" = verify ] && [ "${3:-}" = --help ]; then
+  printf '%s\n' '--bundle <string> --source-digest <string>'
+  exit 0
+fi
+[ "${1:-}" = attestation ] && [ "${2:-}" = verify ]
+printf 'gh:verify\n' >> "$TEST_ACTIONS"
+exit "$VERIFY_RC"
+`, 0755)
 	write(t, filepath.Join(bin, "bash"), "#!/bin/sh\nset -eu\nif [ \"$1\" = -n ]; then\n  [ -f \"$2\" ]\n  printf 'syntax\\n' >> \"$TEST_ACTIONS\"\n  exit 0\nfi\n[ -f \"$1\" ]\nshift\nprintf 'run:%s\\n' \"$*\" >> \"$TEST_ACTIONS\"\nexit \"$INSTALL_RC\"\n", 0755)
 
 	bash, err := exec.LookPath("bash")
@@ -277,14 +614,27 @@ func TestReadmeInstallerBootstrapExecutionOrderAndExitCode(t *testing.T) {
 		shells = append(shells, zsh)
 	}
 	for _, shell := range shells {
-		for exampleIndex, example := range examples {
-			name := filepath.Base(shell) + "/example-" + string(rune('1'+exampleIndex))
-			t.Run(name, func(t *testing.T) {
+		for _, testCase := range []struct {
+			name      string
+			version   string
+			latestTag string
+			verifyRC  string
+			legacySHA string
+			wantExit  int
+			shouldRun bool
+			attested  bool
+		}{{name: "latest-valid", version: "latest", latestTag: "v1.2.3", verifyRC: "0", wantExit: 23, shouldRun: true, attested: true}, {name: "pinned-valid", version: "v9.8.7", verifyRC: "0", wantExit: 23, shouldRun: true, attested: true}, {name: "latest-rejected", version: "latest", latestTag: "v1.2.3", verifyRC: "47", wantExit: 47, attested: true}, {name: "latest-legacy-pinned-digest", version: "latest", latestTag: "v1.6.149", wantExit: 23, shouldRun: true}, {name: "legacy-pinned-digest-mismatch", version: "v1.6.149", legacySHA: "bad-digest", wantExit: 1}, {name: "unknown-version-missing-bundle", version: "v1.6.150", wantExit: 1}} {
+			t.Run(filepath.Base(shell)+"/"+testCase.name, func(t *testing.T) {
 				testTemp := filepath.Join(testRoot, "installer.tmp")
+				if err := os.RemoveAll(testTemp); err != nil {
+					t.Fatal(err)
+				}
 				actions := filepath.Join(testRoot, "actions")
-				command := exec.Command(shell, "-c", example)
+				_ = os.Remove(actions)
+				executionExample := strings.Replace(examples[0], `_novas_version='latest'`, `_novas_version='`+testCase.version+`'`, 1)
+				command := exec.Command(shell, "-c", executionExample)
 				env := append([]string(nil), os.Environ()...)
-				for _, key := range []string{"PATH", "TEST_TMP", "TEST_ACTIONS", "INSTALL_RC"} {
+				for _, key := range []string{"PATH", "TEST_TMP", "TEST_ACTIONS", "INSTALL_RC", "VERIFY_RC", "LATEST_TAG", "LEGACY_SHA"} {
 					prefix := key + "="
 					filtered := env[:0]
 					for _, item := range env {
@@ -299,30 +649,47 @@ func TestReadmeInstallerBootstrapExecutionOrderAndExitCode(t *testing.T) {
 					"TEST_TMP="+testTemp,
 					"TEST_ACTIONS="+actions,
 					"INSTALL_RC=23",
+					"VERIFY_RC="+testCase.verifyRC,
+					"LATEST_TAG="+testCase.latestTag,
+					"LEGACY_SHA="+testCase.legacySHA,
 				)
 				command.Env = env
 				output, runErr := command.CombinedOutput()
 				exitErr, ok := runErr.(*exec.ExitError)
-				if !ok || exitErr.ExitCode() != 23 {
-					t.Fatalf("bootstrap did not preserve installer exit code 23: err=%v output=%s", runErr, output)
+				if !ok || exitErr.ExitCode() != testCase.wantExit {
+					t.Fatalf("bootstrap exit = %v, want %d: %s", runErr, testCase.wantExit, output)
 				}
 				result, err := os.ReadFile(actions)
 				if err != nil {
 					t.Fatal(err)
 				}
-				want := "curl\nsyntax\nrun:"
-				if exampleIndex == 1 {
-					want += "vx.x.x"
+				tag := testCase.version
+				want := ""
+				if tag == "latest" {
+					tag = testCase.latestTag
+					if tag == "" {
+						tag = "v1.2.3"
+					}
+					want = "curl:latest\n"
 				}
-				want += "\n"
+				want += "curl:installer:" + tag + "\ncurl:bundle:" + tag + "\ncurl:release:" + tag + "\n"
+				if testCase.attested {
+					want += "gh:verify\n"
+				} else if tag == "v1.6.149" {
+					legacySHA := testCase.legacySHA
+					if legacySHA == "" {
+						legacySHA = "71a91cf3e7a9d18a2f803e272d46266b4100162f9bfcbc69991d626f94534583"
+					}
+					want += "sha256:" + legacySHA + "\n"
+				}
+				if testCase.shouldRun {
+					want += "syntax\nrun:" + tag + "\n"
+				}
 				if string(result) != want {
 					t.Fatalf("bootstrap execution order/arguments = %q, want %q", result, want)
 				}
 				if _, err := os.Stat(testTemp); !os.IsNotExist(err) {
-					t.Fatalf("bootstrap temporary file was not removed: %v", err)
-				}
-				if err := os.Remove(actions); err != nil {
-					t.Fatal(err)
+					t.Fatalf("bootstrap temporary directory was not removed: %v", err)
 				}
 			})
 		}
@@ -463,6 +830,90 @@ func write(t *testing.T, path, data string, mode os.FileMode) {
 	}
 }
 
+func TestUninstallGuardRequiresStoppedUnitAndDisabledService(t *testing.T) {
+	_, source, _, _ := runtime.Caller(0)
+	root := filepath.Clean(filepath.Join(filepath.Dir(source), "../.."))
+	contents, err := os.ReadFile(filepath.Join(root, "novas.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(contents)
+	start := strings.Index(text, "stop_novas_before_uninstall() {")
+	if start < 0 {
+		t.Fatal("missing uninstall service guard")
+	}
+	end := strings.Index(text[start:], "\n}\n")
+	if end < 0 {
+		t.Fatal("unterminated uninstall service guard")
+	}
+	helper := text[start : start+end+3]
+	uninstallStart := strings.Index(text, "uninstall() {")
+	if uninstallStart < 0 {
+		t.Fatal("missing uninstall function")
+	}
+	uninstallEnd := strings.Index(text[uninstallStart:], "\n}\n\nstart() {")
+	if uninstallEnd < 0 {
+		t.Fatal("unterminated uninstall function")
+	}
+	uninstallBody := text[uninstallStart : uninstallStart+uninstallEnd]
+	guardPosition := strings.Index(uninstallBody, "if ! stop_novas_before_uninstall; then")
+	deletePosition := strings.Index(uninstallBody, "rm /usr/local/novas/ -rf")
+	if guardPosition < 0 || deletePosition < 0 || guardPosition > deletePosition {
+		t.Fatal("uninstall must verify stop/disable before deleting panel files")
+	}
+	bin := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "systemctl.log")
+	if err := os.WriteFile(filepath.Join(bin, "systemctl"), []byte(`#!/bin/sh
+printf '%s\n' "$*" >> "$TEST_LOG"
+case "$1" in
+  stop) exit "$TEST_STOP_STATUS";;
+  is-active) printf '%s\n' "$TEST_ACTIVE_STATE"; [ "$TEST_ACTIVE_STATE" = active ];;
+  disable) exit "$TEST_DISABLE_STATUS";;
+  *) exit 90;;
+esac
+`), 0755); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name          string
+		activeState   string
+		stopStatus    string
+		disableStatus string
+		wantSuccess   bool
+		wantLog       string
+	}{
+		{name: "still active after stop failure", activeState: "active", stopStatus: "1", wantLog: "stop novas\nis-active novas\n"},
+		{name: "still active after successful stop", activeState: "active", stopStatus: "0", wantLog: "stop novas\nis-active novas\n"},
+		{name: "inactive despite stop error", activeState: "inactive", stopStatus: "1", disableStatus: "0", wantSuccess: true, wantLog: "stop novas\nis-active novas\ndisable novas\n"},
+		{name: "disable failure", activeState: "inactive", stopStatus: "0", disableStatus: "1", wantLog: "stop novas\nis-active novas\ndisable novas\n"},
+		{name: "unknown state", activeState: "unknown", stopStatus: "0", wantLog: "stop novas\nis-active novas\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.Remove(logPath); err != nil && !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+			script := "LOGE() { :; }; LOGI() { :; }\n" + helper + "\nstop_novas_before_uninstall"
+			command := exec.Command("bash", "-c", script)
+			command.Env = []string{
+				"PATH=" + bin,
+				"TEST_LOG=" + logPath,
+				"TEST_ACTIVE_STATE=" + tc.activeState,
+				"TEST_STOP_STATUS=" + tc.stopStatus,
+				"TEST_DISABLE_STATUS=" + tc.disableStatus,
+			}
+			output, err := command.CombinedOutput()
+			if tc.wantSuccess != (err == nil) {
+				t.Fatalf("guard success = %v, error %v, output %s", err == nil, err, output)
+			}
+			gotLog, _ := os.ReadFile(logPath)
+			if string(gotLog) != tc.wantLog {
+				t.Fatalf("systemctl calls = %q, want %q", gotLog, tc.wantLog)
+			}
+		})
+	}
+}
+
 func TestOfflineDeployment(t *testing.T) {
 	_, source, _, _ := runtime.Caller(0)
 	helper := filepath.Join(filepath.Dir(source), "../../scripts/install-runtime.sh")
@@ -470,7 +921,7 @@ func TestOfflineDeployment(t *testing.T) {
 		helper = override
 	}
 	installer := filepath.Join(filepath.Dir(source), "../../install.sh")
-	for _, scenario := range []string{"fresh", "fresh-callback", "current", "concurrent-current", "migration-failure", "validation-failure", "health-failure", "custom-db", "bad-package", "locked"} {
+	for _, scenario := range []string{"fresh", "fresh-callback", "current", "concurrent-current", "stop-failure", "snapshot-cleanup-failure", "migration-failure", "validation-failure", "health-failure", "rollback-stop-stuck", "rollback-disable-failure", "rollback-state-unknown", "rollback-daemon-reload-failure", "rollback-enable-failure", "rollback-start-failure", "custom-db", "bad-package", "locked"} {
 		t.Run(scenario, func(t *testing.T) {
 			root := t.TempDir()
 			fresh := scenario == "fresh" || scenario == "fresh-callback"
@@ -505,6 +956,11 @@ func TestOfflineDeployment(t *testing.T) {
 				write(t, filepath.Join(root, "enabled-"+oldName), "", 0600)
 				write(t, filepath.Join(root, "var/lib/novas/update.status"), "state=running", 0600)
 			}
+			if scenario == "snapshot-cleanup-failure" {
+				for _, name := range []string{"20261001-000000.old1", "20261002-000000.old2", "20261003-000000.old3", "20261004-000000.old4"} {
+					write(t, filepath.Join(root, "var/lib/novas/update-backup", name, "marker"), "old snapshot", 0600)
+				}
+			}
 			if scenario == "custom-db" {
 				write(t, filepath.Join(units, oldName+".service"), "[Service]\nEnvironment=NOVAS_DB_FOLDER=/external\n", 0644)
 			}
@@ -515,7 +971,7 @@ case "$1" in
   -v) echo 'NovaPanel Panel 1.6.97';;
   upgrade-db) echo upgrade-db >> "$TEST_ROOT/db-actions"; [[ "$SCENARIO" != migration-failure ]];;
   checkdb) echo checkdb >> "$TEST_ROOT/db-actions"; [[ "$SCENARIO" != validation-failure ]];;
-  healthcheck) [[ "$SCENARIO" != health-failure ]];;
+	  healthcheck) [[ "$SCENARIO" != health-failure && "$SCENARIO" != rollback-stop-stuck && "$SCENARIO" != rollback-disable-failure && "$SCENARIO" != rollback-state-unknown && "$SCENARIO" != rollback-daemon-reload-failure && "$SCENARIO" != rollback-enable-failure && "$SCENARIO" != rollback-start-failure ]];;
 esac
 `, 0755)
 			for _, file := range []string{"novas.sh", "novas.service", "scripts/hy2-forward.sh", "scripts/login-guard.sh", "bin/mita"} {
@@ -526,20 +982,43 @@ esac
 			}
 			bin := filepath.Join(root, "test-bin")
 			write(t, filepath.Join(bin, "sleep"), "#!/bin/sh\nexit 0\n", 0755)
+			if scenario == "snapshot-cleanup-failure" {
+				write(t, filepath.Join(bin, "rm"), "#!/bin/bash\ncase \"$*\" in *update-backup/*) exit 1;; esac\nexec /bin/rm \"$@\"\n", 0755)
+			}
 			write(t, filepath.Join(bin, "systemctl"), `#!/bin/bash
 set -eu
+printf '%s\n' "$*" >> "$TEST_ROOT/systemctl.log"
 action="$1"; shift
 name="${!#}"; name="${name%.service}"
 case "$action" in
   cat) cat "$TEST_ROOT/etc/systemd/system/$name.service";;
-  show) if [[ "$*" == *MainPID* ]]; then echo 42; fi;;
+  show)
+    if [[ "$*" == *ActiveState* ]]; then
+      unit="${1%.service}"
+      [[ "$SCENARIO" != rollback-state-unknown ]] || exit 1
+      if [[ "$SCENARIO" == rollback-stop-stuck && "$unit" == novas ]]; then echo active; else echo inactive; fi
+    elif [[ "$*" == *MainPID* ]]; then echo 42; fi
+    ;;
   is-active) test -f "$TEST_ROOT/active-$name";;
   is-enabled) test -f "$TEST_ROOT/enabled-$name";;
-  stop) rm -f "$TEST_ROOT/active-$name";;
-  start) touch "$TEST_ROOT/active-$name";;
-  enable) touch "$TEST_ROOT/enabled-$name";;
-  disable) rm -f "$TEST_ROOT/enabled-$name";;
-  daemon-reload) :;;
+  stop)
+    if [[ -f "$TEST_ROOT/new-service-started" ]]; then touch "$TEST_ROOT/rollback-phase"; fi
+    if [[ "$SCENARIO" == rollback-stop-stuck && "$name" == novas && -f "$TEST_ROOT/new-service-started" ]]; then exit 1; fi
+    rm -f "$TEST_ROOT/active-$name"
+    [[ "$SCENARIO" != stop-failure ]]
+    ;;
+  start)
+    if [[ "$SCENARIO" == rollback-start-failure && -f "$TEST_ROOT/rollback-phase" ]]; then exit 1; fi
+    touch "$TEST_ROOT/active-$name"; touch "$TEST_ROOT/new-service-started"
+    ;;
+  enable)
+    if [[ "$SCENARIO" == rollback-enable-failure && -f "$TEST_ROOT/rollback-phase" ]]; then exit 1; fi
+    touch "$TEST_ROOT/enabled-$name"
+    ;;
+  disable) [[ "$SCENARIO" != rollback-disable-failure ]] || exit 1; rm -f "$TEST_ROOT/enabled-$name";;
+  daemon-reload)
+    if [[ "$SCENARIO" == rollback-daemon-reload-failure && -f "$TEST_ROOT/rollback-phase" ]]; then exit 1; fi
+    ;;
   *) echo "unexpected systemctl $action" >&2; exit 1;;
 esac
 `, 0755)
@@ -572,7 +1051,7 @@ source "$1"; novas_deploy "$2" "$3"`
 			command := exec.Command("bash", "-c", script, "fixture", helper, pkg, root, installer)
 			command.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "SCENARIO="+scenario, "TEST_ROOT="+root, "NOVAS_DB_FOLDER=")
 			output, err := command.CombinedOutput()
-			success := fresh || scenario == "current" || scenario == "concurrent-current"
+			success := fresh || scenario == "current" || scenario == "concurrent-current" || scenario == "snapshot-cleanup-failure"
 			if success && err != nil {
 				t.Fatalf("%v\n%s", err, output)
 			}
@@ -590,6 +1069,15 @@ source "$1"; novas_deploy "$2" "$3"`
 				}
 			}
 			if success {
+				if scenario == "snapshot-cleanup-failure" {
+					if !strings.Contains(string(output), "WARNING: NovaPanel is installed, but old rollback snapshots could not be fully cleaned up") {
+						t.Fatalf("post-commit snapshot cleanup failure was not reported: %s", output)
+					}
+					backups, err := filepath.Glob(filepath.Join(root, "var/lib/novas/update-backup", "????????-??????.*"))
+					if err != nil || len(backups) != 5 {
+						t.Fatalf("snapshot cleanup failure changed rollback history: found %d snapshots, err %v", len(backups), err)
+					}
+				}
 				securityDropIn, err := os.ReadFile(filepath.Join(units, "novas.service.d/90-novapanel-security.conf"))
 				if err != nil || string(securityDropIn) != "[Service]\nUMask=0077\n" {
 					t.Fatalf("strict systemd umask drop-in missing or invalid: %q, %v", securityDropIn, err)
@@ -650,16 +1138,75 @@ source "$1"; novas_deploy "$2" "$3"`
 				}
 
 			} else {
-				data, _ := os.ReadFile(filepath.Join(old, "db/novas.db"))
-				if string(data) != "user-data" {
-					t.Fatalf("rollback lost data\n%s", output)
-				}
-				binary, _ := os.ReadFile(filepath.Join(old, "novas"))
-				if string(binary) != "old-binary" {
-					t.Fatalf("failed preflight replaced the previous binary\n%s", output)
-				}
-				if _, err := os.Stat(filepath.Join(root, "active-"+oldName)); err != nil {
-					t.Fatalf("old service not recovered: %v\n%s", err, output)
+				if scenario == "rollback-stop-stuck" || scenario == "rollback-disable-failure" || scenario == "rollback-state-unknown" {
+					if !strings.Contains(string(output), "Rollback stopped") {
+						calls, _ := os.ReadFile(filepath.Join(root, "systemctl.log"))
+						t.Fatalf("unsafe rollback was not reported: %s\nsystemctl calls:\n%s", output, calls)
+					}
+					if _, err := os.Stat(filepath.Join(home, "novas")); err != nil {
+						t.Fatalf("current installation was deleted despite an unsafe rollback state: %v\n%s", err, output)
+					}
+					backups, err := filepath.Glob(filepath.Join(root, "var/lib/novas/update-backup", "????????-??????.*", "install/novas"))
+					if err != nil || len(backups) != 1 {
+						t.Fatalf("old installation snapshot was not preserved: %v, %v\n%s", backups, err, output)
+					}
+					binary, err := os.ReadFile(backups[0])
+					if err != nil || string(binary) != "old-binary" {
+						t.Fatalf("rollback snapshot does not contain the prior installation: %q, %v", binary, err)
+					}
+					if scenario == "rollback-stop-stuck" {
+						if _, err := os.Stat(filepath.Join(root, "active-novas")); err != nil {
+							t.Fatalf("active service state was unexpectedly cleared: %v", err)
+						}
+					} else if _, err := os.Stat(filepath.Join(root, "active-novas")); !os.IsNotExist(err) {
+						t.Fatalf("fixture should show the service stopped before its state query failed: %v", err)
+					}
+				} else if scenario == "rollback-daemon-reload-failure" || scenario == "rollback-enable-failure" || scenario == "rollback-start-failure" {
+					if !strings.Contains(string(output), "service recovery is incomplete") {
+						t.Fatalf("failed service recovery was not reported: %s", output)
+					}
+					data, _ := os.ReadFile(filepath.Join(home, "db/novas.db"))
+					if string(data) != "user-data" {
+						t.Fatalf("service recovery failure lost restored database: %q\n%s", data, output)
+					}
+					binary, _ := os.ReadFile(filepath.Join(home, "novas"))
+					if string(binary) != "old-binary" {
+						t.Fatalf("service recovery failure lost restored binary: %q\n%s", binary, output)
+					}
+					backups, err := filepath.Glob(filepath.Join(root, "var/lib/novas/update-backup", "????????-??????.*", "install/novas"))
+					if err != nil || len(backups) != 1 {
+						t.Fatalf("service recovery failure lost rollback snapshot: %v, %v\n%s", backups, err, output)
+					}
+					backupBinary, err := os.ReadFile(backups[0])
+					if err != nil || string(backupBinary) != "old-binary" {
+						t.Fatalf("service recovery snapshot is invalid: %q, %v", backupBinary, err)
+					}
+					if scenario == "rollback-start-failure" {
+						if _, err := os.Stat(filepath.Join(root, "active-novas")); !os.IsNotExist(err) {
+							t.Fatalf("start-failure fixture left prior service active: %v", err)
+						}
+					} else if _, err := os.Stat(filepath.Join(root, "active-novas")); err != nil {
+						t.Fatalf("restored service did not start: %v\n%s", err, output)
+					}
+					if scenario == "rollback-enable-failure" {
+						if _, err := os.Stat(filepath.Join(root, "enabled-novas")); !os.IsNotExist(err) {
+							t.Fatalf("enable-failure fixture left old service enabled: %v", err)
+						}
+					} else if _, err := os.Stat(filepath.Join(root, "enabled-novas")); err != nil {
+						t.Fatalf("old enabled service state was not restored: %v\n%s", err, output)
+					}
+				} else {
+					data, _ := os.ReadFile(filepath.Join(old, "db/novas.db"))
+					if string(data) != "user-data" {
+						t.Fatalf("rollback lost data\n%s", output)
+					}
+					binary, _ := os.ReadFile(filepath.Join(old, "novas"))
+					if string(binary) != "old-binary" {
+						t.Fatalf("failed preflight replaced the previous binary\n%s", output)
+					}
+					if _, err := os.Stat(filepath.Join(root, "active-"+oldName)); err != nil {
+						t.Fatalf("old service not recovered: %v\n%s", err, output)
+					}
 				}
 			}
 			if strings.Contains(string(output), "preserve-key") {
@@ -678,7 +1225,7 @@ func installerFixture(t *testing.T) (string, string, string) {
 	if err := os.MkdirAll(bin, 0755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"bash", "awk", "sed", "sort", "grep", "cat", "cp", "rm"} {
+	for _, name := range []string{"bash", "awk", "sed", "sort", "grep", "cat", "cp", "rm", "env", "sha256sum", "tar"} {
 		path, err := exec.LookPath(name)
 		if err != nil {
 			t.Fatal(err)
@@ -1089,7 +1636,7 @@ func TestInstallerUFWLateDeploymentFailure(t *testing.T) {
 			// Only archive/network plumbing and the deployment outcome are stubbed.
 			// Real installer UFW setup and its outer deployment EXIT trap run here.
 			staging := filepath.Join(root, "staging")
-			write(t, filepath.Join(staging, "novas/novas"), "#!/bin/bash\nexit 90\n", 0755)
+			write(t, filepath.Join(staging, "novas/novas"), "#!/bin/bash\nif [[ \"${1:-}\" == -v ]]; then printf 'NovaPanel Panel\\t1.6.128\\n'; else exit 90; fi\n", 0755)
 			write(t, filepath.Join(staging, "novas/scripts/install-runtime.sh"), `novas_deploy() {
   install_fresh_ufw "$TEST_ROOT/usr/local/novas" "$TEST_ROOT" || return 1
   echo simulated-late-health-failure >&2
@@ -1098,11 +1645,18 @@ func TestInstallerUFWLateDeploymentFailure(t *testing.T) {
 `, 0600)
 			output, err := runInstallerFixture(t, root, bin, installer, `
 release=ubuntu
-mktemp() { printf '%s\n' "$TEST_ROOT/staging"; }
+ mktemp() { mkdir -p "$TEST_ROOT/staging"; printf '%s\n' "$TEST_ROOT/staging"; }
 arch() { echo amd64; }
 download_to_file() { :; }
 verify_archive_checksum() { :; }
-tar() { if [[ "$1" == -tzf ]]; then echo novas/; fi; }
+verify_archive_provenance() { :; }
+tar() {
+  case "$1" in
+    -tzf) echo novas/ ;;
+    -tvzf) printf '%s\n' 'drwxr-xr-x runner/runner 0 2026-10-30 00:00 novas/' '-rwxr-xr-x runner/runner 0 2026-10-30 00:00 novas/novas' ;;
+    -xzf) : ;;
+  esac
+}
 install_novas v1.6.128
 `)
 			if err == nil || !bytes.Contains(output, []byte("simulated-late-health-failure")) || bytes.Contains(output, []byte("安装成功")) {
@@ -1125,6 +1679,227 @@ install_novas v1.6.128
 			}
 		})
 	}
+}
+
+func TestInstallerRejectsReleaseTagAndArchiveVersionMismatch(t *testing.T) {
+	root, bin, installer := installerFixture(t)
+	staging := filepath.Join(root, "staging")
+	write(t, filepath.Join(staging, "novas/novas"), "#!/bin/bash\nprintf 'NovaPanel Panel\\t1.6.149\\n'\n", 0755)
+	write(t, filepath.Join(staging, "novas/scripts/install-runtime.sh"), `novas_deploy() {
+  touch "$TEST_ROOT/deploy-called"
+}
+`, 0600)
+	output, err := runInstallerFixture(t, root, bin, installer, `
+release=ubuntu
+mktemp() { mkdir -p "$TEST_ROOT/staging"; printf '%s\n' "$TEST_ROOT/staging"; }
+arch() { echo amd64; }
+download_to_file() { :; }
+verify_archive_checksum() { :; }
+verify_archive_provenance() { :; }
+tar() {
+  case "$1" in
+    -tzf) echo novas/ ;;
+    -tvzf) printf '%s\n' 'drwxr-xr-x runner/runner 0 2026-10-30 00:00 novas/' '-rwxr-xr-x runner/runner 0 2026-10-30 00:00 novas/novas' ;;
+    -xzf) : ;;
+  esac
+}
+install_novas v1.6.150
+`)
+	if err == nil || !bytes.Contains(output, []byte("安装包版本与 Release 标签不匹配")) {
+		t.Fatalf("release/archive version mismatch was not rejected: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(filepath.Join(root, "deploy-called")); !os.IsNotExist(err) {
+		t.Fatalf("deployment ran despite a release/archive version mismatch: %v", err)
+	}
+}
+
+func TestInstallerRejectsUnsafeArchiveMembers(t *testing.T) {
+	tests := []struct {
+		name    string
+		listing string
+	}{
+		{name: "symbolic link", listing: "lrwxrwxrwx runner/runner 0 2026-10-30 00:00 novas/escape -> /etc/passwd"},
+		{name: "hard link", listing: "-rw-r--r-- runner/runner 0 2026-10-30 00:00 novas/escape link to ../../etc/passwd"},
+		{name: "special file", listing: "prw-r--r-- runner/runner 0 2026-10-30 00:00 novas/pipe"},
+		{name: "setuid file", listing: "-rwsr-xr-x runner/runner 0 2026-10-30 00:00 novas/novas"},
+		{name: "setgid file", listing: "-rwxr-Sr-x runner/runner 0 2026-10-30 00:00 novas/novas"},
+		{name: "sticky directory", listing: "drwxr-xr-t runner/runner 0 2026-10-30 00:00 novas/tmp/"},
+		{name: "group-writable file", listing: "-rw-rw-r-- runner/runner 0 2026-10-30 00:00 novas/config"},
+		{name: "world-writable file", listing: "-rwxrwxrwx runner/runner 0 2026-10-30 00:00 novas/novas"},
+		{name: "empty member listing", listing: ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root, bin, installer := installerFixture(t)
+			if err := os.MkdirAll(filepath.Join(root, "staging"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			output, err := runInstallerFixture(t, root, bin, installer, `
+release=ubuntu
+arch() { echo amd64; }
+mktemp() { printf '%s\n' "$TEST_ROOT/staging"; }
+download_to_file() { :; }
+verify_archive_checksum() { :; }
+verify_archive_provenance() { :; }
+tar() {
+  case "$1" in
+    -tzf) printf 'novas/\nnovas/escape\n' ;;
+    -tvzf) printf '%s\n' "$TAR_VERBOSE_LISTING" ;;
+    -xzf) touch "$TEST_ROOT/archive-extracted" ;;
+  esac
+}
+install_novas v1.6.149
+`, "TAR_VERBOSE_LISTING="+test.listing)
+			if err == nil || !bytes.Contains(output, []byte("安装包包含不支持的链接、特殊文件或危险权限")) {
+				t.Fatalf("unsafe archive was not rejected: %v\n%s", err, output)
+			}
+			if _, err := os.Stat(filepath.Join(root, "archive-extracted")); !os.IsNotExist(err) {
+				t.Fatalf("unsafe archive was extracted before rejection: %v", err)
+			}
+		})
+	}
+}
+
+func TestInstallerArchiveProvenancePolicies(t *testing.T) {
+	t.Run("legacy release accepts only pinned digest", func(t *testing.T) {
+		for _, test := range []struct {
+			name   string
+			digest string
+			wantOK bool
+		}{
+			{name: "pinned", digest: "e4da2eb684dc1fadc9efef5d7db22c03da9c9558039cafb18eb22a3fc7dd2988", wantOK: true},
+			{name: "unrecognized", digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				root, bin, installer := installerFixture(t)
+				write(t, filepath.Join(root, "archive.tar.gz"), "fixture", 0600)
+				output, err := runInstallerFixture(t, root, bin, installer, `
+sha256sum() { printf '%s  %s\n' "$TEST_DIGEST" "$1"; }
+ensure_attestation_gh() { echo unexpected-gh-bootstrap >&2; return 90; }
+verify_archive_provenance v1.6.149 "$TEST_ROOT/archive.tar.gz" "$TEST_ROOT"
+`, "TEST_DIGEST="+test.digest)
+				if (err == nil) != test.wantOK {
+					t.Fatalf("provenance result mismatch: %v\n%s", err, output)
+				}
+				if !test.wantOK && !bytes.Contains(output, []byte("不在已验证的 SHA-256 过渡白名单")) {
+					t.Fatalf("unexpected legacy rejection: %s", output)
+				}
+			})
+		}
+	})
+
+	t.Run("future release without bundle fails closed", func(t *testing.T) {
+		root, bin, installer := installerFixture(t)
+		write(t, filepath.Join(root, "archive.tar.gz"), "fixture", 0600)
+		output, err := runInstallerFixture(t, root, bin, installer, `
+arch() { echo amd64; }
+sha256sum() { printf '%064d  %s\n' 0 "$1"; }
+download_to_file() { return 1; }
+ensure_attestation_gh() { echo verifier-ran >&2; return 90; }
+verify_archive_provenance v1.6.150 "$TEST_ROOT/archive.tar.gz" "$TEST_ROOT"
+`)
+		if err == nil || !bytes.Contains(output, []byte("缺少来源证明 bundle")) || bytes.Contains(output, []byte("verifier-ran")) {
+			t.Fatalf("missing bundle was not rejected before verification: %v\n%s", err, output)
+		}
+	})
+
+	t.Run("future release verifies exact identity and commit", func(t *testing.T) {
+		root, bin, installer := installerFixture(t)
+		archive := filepath.Join(root, "archive.tar.gz")
+		write(t, archive, "fixture", 0600)
+		write(t, filepath.Join(root, "gh-fixture"), `#!/bin/bash
+printf '%s\n' "$@" > "$TEST_ROOT/gh-args"
+`, 0755)
+		output, err := runInstallerFixture(t, root, bin, installer, `
+arch() { echo amd64; }
+sha256sum() { printf '%064d  %s\n' 0 "$1"; }
+download_to_file() {
+  case "$1" in
+    *sigstore.json) printf '{}\n' > "$2" ;;
+    *api.github.com*) printf '{\n  "target_commitish": "9014ce970f2af32ab12824b1d57dc6e0d96d50ae"\n}\n' > "$2" ;;
+    *) return 1 ;;
+  esac
+}
+ensure_attestation_gh() { gh_cli_path="$TEST_ROOT/gh-fixture"; }
+verify_archive_provenance v1.6.150 "$TEST_ROOT/archive.tar.gz" "$TEST_ROOT"
+`)
+		if err != nil {
+			t.Fatalf("valid fixture provenance failed: %v\n%s", err, output)
+		}
+		args, readErr := os.ReadFile(filepath.Join(root, "gh-args"))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		for _, want := range []string{
+			"attestation\nverify\n" + archive,
+			"--repo\nCatMsg/NovaPanel",
+			"--bundle\n" + archive + ".sigstore.json",
+			"--signer-workflow\nCatMsg/NovaPanel/.github/workflows/release.yml",
+			"--source-ref\nrefs/heads/main",
+			"--source-digest\n9014ce970f2af32ab12824b1d57dc6e0d96d50ae",
+			"--deny-self-hosted-runners",
+		} {
+			if !bytes.Contains(args, []byte(want)) {
+				t.Errorf("verifier args missing %q:\n%s", want, args)
+			}
+		}
+	})
+
+	t.Run("bad pinned CLI digest stops before extraction", func(t *testing.T) {
+		root, bin, installer := installerFixture(t)
+		if err := os.MkdirAll(filepath.Join(root, "staging"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		output, err := runInstallerFixture(t, root, bin, installer, `
+download_to_file() { printf 'fixture' > "$2"; }
+sha256sum() { printf '%064d  %s\n' 0 "$1"; }
+tar() { touch "$TEST_ROOT/tar-ran"; }
+if ensure_attestation_gh "$TEST_ROOT/staging"; then exit 91; fi
+`)
+		if err != nil || !bytes.Contains(output, []byte("GitHub CLI 下载包 SHA-256 校验失败")) {
+			t.Fatalf("bad CLI digest was not rejected: %v\n%s", err, output)
+		}
+		if _, err := os.Stat(filepath.Join(root, "tar-ran")); !os.IsNotExist(err) {
+			t.Fatalf("CLI archive was processed before its digest passed: %v", err)
+		}
+	})
+
+	t.Run("pinned CLI digest permits only expected member extraction", func(t *testing.T) {
+		root, bin, installer := installerFixture(t)
+		member := "gh_2.103.2_linux_amd64/bin/gh"
+		staging := filepath.Join(root, "staging")
+		if err := os.MkdirAll(filepath.Join(staging, filepath.Dir(member)), 0755); err != nil {
+			t.Fatal(err)
+		}
+		write(t, filepath.Join(root, "fixture-gh"), "#!/bin/sh\nexit 0\n", 0755)
+		output, err := runInstallerFixture(t, root, bin, installer, `
+download_to_file() { printf 'fixture' > "$2"; }
+sha256sum() { printf '%s  %s\n' "$github_cli_archive_sha256" "$1"; }
+tar() {
+  case "$1" in
+    -tzf) printf '%s\n' 'gh_2.103.2_linux_amd64/bin/gh' ;;
+    -xzf) cp "$TEST_ROOT/fixture-gh" "$4/$5" ;;
+  esac
+}
+ensure_attestation_gh "$TEST_ROOT/staging"
+[[ "$gh_cli_path" == "$TEST_ROOT/staging/gh_2.103.2_linux_amd64/bin/gh" && -x "$gh_cli_path" ]]
+`)
+		if err != nil {
+			t.Fatalf("pinned CLI bootstrap fixture failed: %v\n%s", err, output)
+		}
+	})
+
+	t.Run("GitHub CLI version floor", func(t *testing.T) {
+		root, bin, installer := installerFixture(t)
+		output, err := runInstallerFixture(t, root, bin, installer, `
+installer_gh_version_supported 2.103.2
+! installer_gh_version_supported 2.103.1
+! installer_gh_version_supported not-a-version
+`)
+		if err != nil {
+			t.Fatalf("version floor check failed: %v\n%s", err, output)
+		}
+	})
 }
 
 func TestFreshInteractiveUsesUFWBeforeSettingCLI(t *testing.T) {
@@ -1170,40 +1945,78 @@ func TestWindowsInstallerReportsConfigurationAndServiceFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := string(installer)
-	rootRead := strings.Index(text, `icacls "%INSTALL_DIR%" /grant "*S-1-5-32-545:(OI)(CI)RX" /T`)
-	databaseACL := strings.Index(text, `icacls "%INSTALL_DIR%\db" /inheritance:r /remove:g "*S-1-5-32-545"`)
-	certificateACL := strings.Index(text, `icacls "%INSTALL_DIR%\cert" /inheritance:r /remove:g "*S-1-5-32-545"`)
-	logsACL := strings.Index(text, `icacls "%INSTALL_DIR%\logs" /inheritance:r /remove:g "*S-1-5-32-545"`)
-	databasePreflight := strings.Index(text, "novas.exe upgrade-db")
-	serviceStart := strings.Index(text, "net start %SERVICE_NAME%")
-	if rootRead < 0 || databaseACL < rootRead || certificateACL < rootRead || logsACL < rootRead ||
-		databasePreflight < databaseACL || serviceStart < databaseACL || strings.Contains(text, `Users:(OI)(CI)F`) {
-		t.Fatal("Windows installer must secure database, certificate, and log ACLs before database access/service start")
+	batch := string(installer)
+	if !strings.Contains(batch, `-File "%~dp0install-windows.ps1"`) ||
+		!strings.Contains(batch, `set "INSTALL_EXIT_CODE=%ERRORLEVEL%"`) ||
+		!strings.Contains(batch, `exit /b %INSTALL_EXIT_CODE%`) {
+		t.Fatal("Windows batch installer must invoke the transactional PowerShell installer and propagate its exit code")
 	}
+	powershellInstallerBytes, err := os.ReadFile(filepath.Join(root, "windows/install-windows.ps1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	powershellInstaller := string(powershellInstallerBytes)
+	initializerStart := strings.Index(powershellInstaller, "function Initialize-NovaPanelFreshInstall")
+	initializerEnd := strings.Index(powershellInstaller, "function Wait-NovaPanelHealthy")
+	if initializerStart < 0 || initializerEnd < 0 || initializerEnd <= initializerStart {
+		t.Fatal("Windows installer must isolate first-install initialization from the upgrade path")
+	}
+	initializer := powershellInstaller[initializerStart:initializerEnd]
+	for _, token := range []string{"'setting', '-port'", "'admin', '-username'", "'-password-prompt'"} {
+		if !strings.Contains(initializer, token) {
+			t.Fatalf("Windows fresh-install initializer is missing %q", token)
+		}
+	}
+	mainFlow := powershellInstaller[strings.Index(powershellInstaller, "$target = Get-NovaPanelFullPath $InstallDirectory"):]
 	ordered := []string{
-		`novas.exe setting -port %panel_port% -path "%panel_path%" -subPort %sub_port% -subPath "%sub_path%"`,
-		`if !errorLevel! neq 0 (`,
-		`echo Error: Failed to save the panel and subscription settings.`,
-		`exit /b 1`,
-		`net start %SERVICE_NAME%`,
-		`set "SERVICE_RUNNING=1"`,
-		`set "INSTALL_EXIT_CODE=1"`,
-		`echo Installation completed and the NovaPanel service is running.`,
-		`echo Installation files are ready, but the NovaPanel service did not start.`,
-		`echo Installation files are ready. Windows service is unavailable; use manual launch.`,
-		`exit /b !INSTALL_EXIT_CODE!`,
+		"$isFreshInstall = -not (Test-Path -LiteralPath $target)",
+		"$stage = New-NovaPanelInstallStage",
+		"Set-NovaPanelInstallAcl -Path $stage",
+		"$env:NOVAS_DB_FOLDER = Join-Path $stage 'db'",
+		"'upgrade-db'",
+		"'checkdb'",
+		"if ($isFreshInstall) {",
+		"Initialize-NovaPanelFreshInstall -Executable $stagedExecutable",
+		"Write-Host 'Existing panel settings and administrator credentials will be preserved.'",
+		"'Final staged database validation'",
+		"$commit = Commit-NovaPanelInstallStage",
+		"-Arguments @('refresh')",
+		"Start-Service -Name 'novas'",
+		"Wait-NovaPanelHealthy",
+		"Restore-NovaPanelInstallBackup -InstallDirectory $target",
 	}
 	searchFrom := 0
 	for _, token := range ordered {
-		index := strings.Index(text[searchFrom:], token)
+		index := strings.Index(mainFlow[searchFrom:], token)
 		if index < 0 {
-			t.Fatalf("Windows installer does not handle/report failure in expected order near %q", token)
+			t.Fatalf("Windows transactional installer is missing ordered stage/verify/swap/health/rollback step %q", token)
 		}
 		searchFrom += index + len(token)
 	}
-	if strings.Contains(text, "Installation completed successfully!") {
-		t.Fatal("Windows installer still claims unconditional success")
+	if strings.Contains(mainFlow, "$configuration = Read-NovaPanelConfiguration") ||
+		strings.Contains(mainFlow, "'setting', '-port'") || strings.Contains(mainFlow, "'admin', '-username'") {
+		t.Fatal("Windows upgrade flow must not prompt for or reset panel settings and administrator credentials")
+	}
+	transactionBytes, err := os.ReadFile(filepath.Join(root, "windows/install-transaction.ps1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	transaction := string(transactionBytes)
+	for _, token := range []string{
+		"/COPY:DATS",
+		".novas-backup-",
+		".novas-managed-backup",
+		"function Restore-NovaPanelInstallBackup",
+		"Select-Object -Skip 3",
+	} {
+		if !strings.Contains(transaction, token) {
+			t.Fatalf("Windows installer transaction helper is missing %q", token)
+		}
+	}
+	if strings.Contains(powershellInstaller, "Remove-Item -LiteralPath $target -Recurse") ||
+		!strings.Contains(powershellInstaller, "NOVAS_DB_FOLDER") ||
+		!strings.Contains(powershellInstaller, "'*S-1-5-32-545") {
+		t.Fatal("Windows installer must preserve the live tree until staged validation and keep private install data protected")
 	}
 
 	controller, err := os.ReadFile(filepath.Join(root, "windows/novas-windows.bat"))
@@ -1243,7 +2056,6 @@ func TestWindowsUninstallerFailsClosedUntilServiceIsRemoved(t *testing.T) {
 		"No application files, user data, shortcuts, or firewall rules have been removed.",
 		"exit /b 1",
 		"REM Remove desktop shortcut",
-		"REM Ask user if they want to keep data",
 		"REM Remove firewall rules",
 	}
 	searchFrom := 0
@@ -1253,5 +2065,10 @@ func TestWindowsUninstallerFailsClosedUntilServiceIsRemoved(t *testing.T) {
 			t.Fatalf("Windows uninstaller does not fail closed in the expected order near %q", token)
 		}
 		searchFrom += index + len(token)
+	}
+	dataPrompt := strings.Index(text, "choice /C YN")
+	stopService := strings.Index(text, "REM Stop and remove Windows Service")
+	if dataPrompt < 0 || stopService < 0 || dataPrompt > stopService {
+		t.Fatal("Windows uninstaller must ask about data retention before changing service or installation state")
 	}
 }

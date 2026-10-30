@@ -128,6 +128,8 @@ func TestCollectInboundForwardProtocolsMatchesListenerTransport(t *testing.T) {
 		{name: "http1 uses TCP", typeName: "http", options: `,"version":1`, want: []string{"tcp"}},
 		{name: "http2 uses TCP", typeName: "http", options: `,"version":2`, want: []string{"tcp"}, tls: true},
 		{name: "http3 uses UDP", typeName: "http", options: `,"version":3`, want: []string{"udp"}, tls: true},
+		{name: "legacy default HTTP versions use TCP", typeName: "http", want: []string{"tcp"}},
+		{name: "legacy HTTP version list opens each transport", typeName: "http", options: `,"version":[1,3]`, want: []string{"tcp", "udp"}, tls: true},
 		{name: "shadowsocks default", typeName: "shadowsocks", want: []string{"tcp", "udp"}},
 		{name: "shadowsocks tcp", typeName: "shadowsocks", options: `,"network":"tcp"`, want: []string{"tcp"}},
 		{name: "shadowsocks udp array", typeName: "shadowsocks", options: `,"network":["udp"]`, want: []string{"udp"}},
