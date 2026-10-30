@@ -24,11 +24,18 @@ RUN apk update && apk add --no-cache \
 
 ENV CC=gcc
 
-RUN CRONET_ARCH="$TARGETARCH" && \
-    CRONET_URL="https://github.com/SagerNet/cronet-go/releases/latest/download/libcronet-linux-${CRONET_ARCH}.so"; \
-    echo "Downloading $CRONET_URL" && \
-    wget -q -O ./libcronet.so "$CRONET_URL" && \
-    chmod 755 ./libcronet.so
+RUN test "$TARGETARCH" = "amd64" || { echo "Linux Docker images are supported on amd64 only" >&2; exit 1; }
+COPY third_party/sing-box/.github/CRONET_GO_VERSION /tmp/CRONET_GO_VERSION
+RUN set -eux; \
+    CRONET_GO_VERSION="$(tr -d '\r\n' < /tmp/CRONET_GO_VERSION)"; \
+    printf '%s\n' "$CRONET_GO_VERSION" | grep -Eq '^[0-9a-f]{40}$'; \
+    git init /tmp/cronet-go-lib; \
+    git -C /tmp/cronet-go-lib remote add origin https://github.com/sagernet/cronet-go.git; \
+    git -C /tmp/cronet-go-lib sparse-checkout set --no-cone /lib/linux_amd64/libcronet.so; \
+    git -C /tmp/cronet-go-lib fetch --depth=1 --filter=blob:none origin "$CRONET_GO_VERSION"; \
+    git -C /tmp/cronet-go-lib checkout FETCH_HEAD; \
+    install -m 755 /tmp/cronet-go-lib/lib/linux_amd64/libcronet.so ./libcronet.so; \
+    rm -rf /tmp/cronet-go-lib /tmp/CRONET_GO_VERSION
 
 COPY . .
 COPY --from=front-builder /app/dist/ /app/web/html/
@@ -36,10 +43,9 @@ COPY --from=front-builder /app/dist/ /app/web/html/
 RUN if [ "$TARGETARCH" = "arm" ]; then export GOARM=7; [ "$TARGETVARIANT" = "v6" ] && export GOARM=6; fi; \
     go build -ldflags="-w -s" \
     -tags "with_quic,with_grpc,with_utls,with_acme,with_gvisor,with_naive_outbound,with_purego,with_tailscale" \
-    -o novas main.go
+    -o novas .
 
-RUN test "$TARGETARCH" = "amd64" && \
-    CGO_ENABLED=0 GOOS=linux GOARCH="$TARGETARCH" bash ./scripts/build-mita.sh /app/mita
+RUN CGO_ENABLED=0 GOOS=linux GOARCH="$TARGETARCH" bash ./scripts/build-mita.sh /app/mita
 
 FROM alpine
 ENV TZ=Asia/Shanghai

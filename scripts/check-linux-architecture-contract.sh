@@ -5,6 +5,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workflow="$root/.github/workflows/release.yml"
 installer="$root/install.sh"
 docker_test="$root/docker-build-test.sh"
+dockerfile="$root/Dockerfile"
 
 installer_arches="$(sed -n '/^arch() {/,/^}/p' "$installer" | grep -oE "echo '[a-z0-9]+'" | sed -E "s/echo '([^']+)'/\1/" | sort -u)"
 release_arches="$(grep -E '^[[:space:]]*- platform:' "$workflow" | awk '{print $3}' | sort -u)"
@@ -36,5 +37,12 @@ grep -Fq 'set -euo pipefail' "$docker_test"
     echo "Docker build check must target linux/amd64 only; found: $docker_platform" >&2
     exit 1
 }
+grep -Fq 'COPY third_party/sing-box/.github/CRONET_GO_VERSION /tmp/CRONET_GO_VERSION' "$dockerfile"
+grep -Fq 'git -C /tmp/cronet-go-lib fetch --depth=1 --filter=blob:none origin "$CRONET_GO_VERSION"' "$dockerfile"
+grep -Fq -- '-o novas .' "$dockerfile"
+if grep -Fq 'releases/latest/download/libcronet' "$dockerfile"; then
+    echo "Docker build must fetch Cronet from the pinned source commit" >&2
+    exit 1
+fi
 
-printf 'Linux installer, release, and Docker test are consistently amd64-only.\n'
+printf 'Linux installer, release, and Docker test are amd64-only; Docker Cronet is pinned to source.\n'
