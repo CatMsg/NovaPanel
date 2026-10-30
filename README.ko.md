@@ -85,7 +85,7 @@ sh runNovas.sh logs -f   # 로그 계속 추적
 
 ## Docker
 
-현재 GHCR 이미지는 배포하지 않습니다. 소스에서 직접 빌드할 수 있습니다.
+Docker 이미지 빌드는 Linux/amd64만 지원합니다. 현재 GHCR 이미지는 배포하지 않으며, 소스에서 직접 빌드할 수 있습니다.
 
 ```sh
 git clone https://github.com/CatMsg/NovaPanel

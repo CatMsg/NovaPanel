@@ -85,7 +85,7 @@ sh runNovas.sh logs -f   # 持續顯示日誌
 
 ## Docker
 
-目前不發布 GHCR 映像，可從原始碼自行建置：
+Docker 映像建置僅支援 Linux/amd64。目前不發布 GHCR 映像，可從原始碼自行建置：
 
 ```sh
 git clone https://github.com/CatMsg/NovaPanel

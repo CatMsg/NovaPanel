@@ -85,7 +85,7 @@ sh runNovas.sh logs -f   # Follow logs continuously
 
 ## Docker
 
-NovaPanel does not currently publish a GHCR image. You can build it from source:
+Docker image builds are supported on Linux/amd64 only. NovaPanel does not currently publish a GHCR image; build it from source:
 
 ```sh
 git clone https://github.com/CatMsg/NovaPanel
