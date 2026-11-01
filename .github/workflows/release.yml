@@ -58,7 +58,17 @@ jobs:
           npm run lint:check
           npm run typecheck
 
+      - name: 限制 Ubuntu 包管理器重试
+        run: |
+          printf '%s\n' \
+            'Acquire::Retries "1";' \
+            'Acquire::ForceIPv4 "true";' \
+            'Acquire::http::Timeout "10";' \
+            'Acquire::https::Timeout "10";' \
+            | sudo tee /etc/apt/apt.conf.d/99novapanel-ci-network-timeouts >/dev/null
+
       - name: 安装 Chromium
+        timeout-minutes: 10
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
