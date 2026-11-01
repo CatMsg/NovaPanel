@@ -592,13 +592,17 @@ installer_deployment_cleanup() {
 }
 
 install_novas() {
-    local version="${1:-}" staging archive platform_arch listing version_output artifact_version
+    local version="${1:-}" staging archive platform_arch listing version_output artifact_version staging_root
     platform_arch="$(arch)" || return 1
     if [[ -z "$version" ]]; then version=$(get_latest_release_tag) || return 1; fi
     [[ -n "$version" ]] || { echo "无法获取发布版本" >&2; return 1; }
     [[ "$version" == v* ]] || version="v$version"
     [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "无效版本号" >&2; return 1; }
-    staging=$(mktemp -d /tmp/novapanel-install.XXXXXX) || return 1
+    staging_root=/var/tmp
+    if [[ ! -d "$staging_root" || ! -w "$staging_root" ]]; then
+        staging_root="${TMPDIR:-/tmp}"
+    fi
+    staging=$(mktemp -d "${staging_root%/}/novapanel-install.XXXXXX") || return 1
     local UFW_RECOVERY_STATE="$staging/ufw-new-activation"
     trap "installer_deployment_cleanup '$staging' \$?" EXIT
     archive="$staging/NovaPanel-linux-${platform_arch}.tar.gz"

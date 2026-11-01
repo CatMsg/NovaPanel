@@ -55,7 +55,12 @@ func TestUpdaterUsesValidatedReleaseTaggedSources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for lineNumber, line := range strings.Split(string(installer), "\n") {
+	installerText := string(installer)
+	if !strings.Contains(installerText, `staging_root=/var/tmp`) ||
+		!strings.Contains(installerText, `mktemp -d "${staging_root%/}/novapanel-install.XXXXXX"`) {
+		t.Fatal("installer must stage the release archive under disk-backed /var/tmp by default")
+	}
+	for lineNumber, line := range strings.Split(installerText, "\n") {
 		if strings.Contains(line, "curl ") && strings.Contains(line, "https://") {
 			if !strings.Contains(line, "--proto '=https'") || !strings.Contains(line, "--proto-redir '=https'") {
 				t.Fatalf("HTTPS download at install.sh:%d does not forbid protocol downgrade: %s", lineNumber+1, line)
