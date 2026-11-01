@@ -65,16 +65,21 @@ func (s *UserCenterService) Build(subID string, now time.Time) (userCenterView, 
 
 	updateInterval, _ := s.SettingService.GetSubUpdates()
 	view := newUserCenterView(client, online, updateInterval, now, resetLocation)
-	usage := resolveClientSubscriptionUsage(client)
-	if usage.inherited {
-		view.Remaining = formatUserCenterBytes(usage.remaining)
-		view.Quota = formatUserCenterBytes(usage.total) + "（VPS 共享）"
-		if usage.total > 0 {
-			used := saturatingTrafficAdd(usage.upload, usage.download)
-			view.UsagePercent = math.Min(100, float64(used)/float64(usage.total)*100)
-		}
-	}
+	applyInheritedUserPoolUsage(&view, client)
 	return view, getClientSubscriptionHeaders(client, updateInterval), nil
+}
+
+func applyInheritedUserPoolUsage(view *userCenterView, client *model.Client) {
+	usage := resolveClientSubscriptionUsage(client)
+	if !usage.inherited {
+		return
+	}
+	view.Remaining = formatInheritedPoolBytes(usage.remaining)
+	view.Quota = formatInheritedPoolBytes(usage.total) + "（VPS 共享）"
+	if usage.total > 0 {
+		used := saturatingTrafficAdd(usage.upload, usage.download)
+		view.UsagePercent = math.Min(100, float64(used)/float64(usage.total)*100)
+	}
 }
 
 func newUserCenterView(client *model.Client, online bool, updateInterval int, now time.Time, resetLocation *time.Location) userCenterView {
@@ -158,7 +163,7 @@ func safeTrafficSum(left, right int64) int64 {
 
 func formatUserCenterBytes(value int64) string {
 	value = nonNegative(value)
-	units := []string{"B", "KB", "MB", "GB", "TB", "PB", "EB"}
+	units := []string{"B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"}
 	size := float64(value)
 	unit := 0
 	for size >= 1024 && unit < len(units)-1 {
@@ -169,6 +174,11 @@ func formatUserCenterBytes(value int64) string {
 		return fmt.Sprintf("%d %s", value, units[unit])
 	}
 	return fmt.Sprintf("%.1f %s", size, units[unit])
+}
+
+func formatInheritedPoolBytes(value int64) string {
+	value = nonNegative(value)
+	return fmt.Sprintf("%.1f GB（%s）", float64(value)/1_000_000_000, formatUserCenterBytes(value))
 }
 
 func formatUserCenterDuration(value time.Duration) string {

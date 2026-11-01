@@ -1,6 +1,6 @@
 {
   "name": "novapanel-frontend",
-  "version": "1.6.150",
+  "version": "1.6.151",
   "private": true,
   "scripts": {
     "dev": "vite --host",
@@ -48,12 +48,8 @@
     "vue-tsc": "^3.2.6"
   },
   "overrides": {
-    "minimatch@3.1.5": {
-      "brace-expansion": "1.1.21"
-    },
-    "minimatch@10.2.4": {
-      "brace-expansion": "5.0.12"
-    },
+    "minimatch": "^11.0.3",
+    "moment-jalaali": "0.10.5",
     "postcss": "8.5.25"
   }
 }

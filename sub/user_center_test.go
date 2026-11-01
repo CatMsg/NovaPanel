@@ -9,6 +9,7 @@ import (
 
 	"github.com/CatMsg/NovaPanel/database"
 	"github.com/CatMsg/NovaPanel/database/model"
+	"github.com/CatMsg/NovaPanel/service"
 )
 
 func TestUserCenterRendersStatusTrafficExpiryAndReset(t *testing.T) {
@@ -36,18 +37,45 @@ func TestUserCenterRendersStatusTrafficExpiryAndReset(t *testing.T) {
 	for _, expected := range []string{
 		`data-testid="enabled-state"><span class="dot"></span>已启用`,
 		`data-testid="online-state"><span class="dot"></span>在线`,
-		`data-testid="used-traffic">3.0 GB`,
-		`剩余 7.0 GB`,
-		`data-testid="upload-traffic">1.0 GB`,
-		`data-testid="download-traffic">2.0 GB`,
-		`data-testid="lifetime-upload">4.0 GB`,
-		`data-testid="lifetime-download">6.0 GB`,
+		`data-testid="used-traffic">3.0 GiB`,
+		`剩余 7.0 GiB`,
+		`data-testid="upload-traffic">1.0 GiB`,
+		`data-testid="download-traffic">2.0 GiB`,
+		`data-testid="lifetime-upload">4.0 GiB`,
+		`data-testid="lifetime-download">6.0 GiB`,
 		`剩余 2 天 1 小时`,
 		`剩余 1 天 1 小时`,
 		`data-testid="update-interval">每 12 小时`,
 	} {
 		if !strings.Contains(html, expected) {
 			t.Errorf("rendered page is missing %q", expected)
+		}
+	}
+}
+
+func TestUserCenterShowsInheritedPoolInDecimalGBAndBinaryGiB(t *testing.T) {
+	withTrafficBudgetStatus(t, service.TrafficBudgetStatus{
+		Enabled: true, Supported: true, PoolRemainingBytes: 1_021_131_874_977,
+	})
+	client := &model.Client{Name: "krmememe", Up: 99_833_361, Down: 640_495_515}
+	now := time.Date(2026, time.November, 1, 0, 20, 0, 0, time.UTC)
+	view := newUserCenterView(client, true, 12, now, now.Location())
+	applyInheritedUserPoolUsage(&view, client)
+
+	if view.Remaining != "1021.1 GB（951.0 GiB）" {
+		t.Fatalf("inherited remaining = %q", view.Remaining)
+	}
+	if view.Quota != "1021.9 GB（951.7 GiB）（VPS 共享）" {
+		t.Fatalf("inherited quota = %q", view.Quota)
+	}
+
+	var output bytes.Buffer
+	if err := renderUserCenter(&output, view); err != nil {
+		t.Fatalf("render inherited user center: %v", err)
+	}
+	for _, expected := range []string{"1021.1 GB（951.0 GiB）", "1021.9 GB（951.7 GiB）（VPS 共享）"} {
+		if !strings.Contains(output.String(), expected) {
+			t.Errorf("rendered inherited user center is missing %q", expected)
 		}
 	}
 }
