@@ -465,7 +465,7 @@ func (s *FleetService) FleetAction(id, action string) (interface{}, error) {
 			return GetUpdateStatus()
 		}
 		if action == "update" {
-			started, err := StartBackgroundUpdate()
+			started, runID, err := StartBackgroundUpdate()
 			if err != nil {
 				return nil, err
 			}
@@ -478,7 +478,7 @@ func (s *FleetService) FleetAction(id, action string) (interface{}, error) {
 				status["message"] = "已有更新任务正在运行"
 				return status, nil
 			}
-			return map[string]interface{}{"scheduled": true, "state": "queued"}, nil
+			return map[string]interface{}{"scheduled": true, "state": "queued", "runId": runID}, nil
 		}
 		if err := (&PanelService{}).RestartPanel(3 * time.Second); err != nil {
 			return nil, err

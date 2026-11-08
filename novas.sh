@@ -110,6 +110,46 @@ release_download_to_file() {
     curl --proto '=https' --proto-redir '=https' -fsSL --retry 3 --retry-delay 2 --max-time 60 -o "$2" "$1"
 }
 
+release_asset_id() {
+    local metadata="$1" asset_name="$2"
+    awk -v wanted="$asset_name" '
+        /^    [{]$/ { in_asset=1; asset_id="" }
+        in_asset && /^      "id": [0-9]+,/ {
+            asset_id=$0
+            sub(/^      "id": /, "", asset_id)
+            sub(/,.*/, "", asset_id)
+        }
+        in_asset && /^      "name": "/ {
+            name=$0
+            sub(/^      "name": "/, "", name)
+            sub(/".*/, "", name)
+            if (name == wanted && asset_id ~ /^[0-9]+$/) {
+                print asset_id
+                exit
+            }
+        }
+        in_asset && /^    [}]$/ { in_asset=0 }
+    ' "$metadata"
+}
+
+release_download_asset() {
+    local repo="$1" tag="$2" asset_name="$3" output="$4" metadata="${5:-}"
+    local asset_id
+    valid_release_tag "$tag" || return 1
+    if [[ -z "$metadata" || ! -s "$metadata" ]]; then
+        metadata="${output}.release.json"
+        release_download_to_file "https://api.github.com/repos/${repo}/releases/tags/${tag}" "$metadata" || return 1
+    fi
+    asset_id="$(release_asset_id "$metadata" "$asset_name")"
+    if [[ ! "$asset_id" =~ ^[0-9]+$ ]]; then
+        LOGE "Release API 未返回资产 ${asset_name} 的有效 ID" >&2
+        return 1
+    fi
+    curl --proto '=https' --proto-redir '=https' -fsSL --retry 3 --retry-delay 2 --max-time 180 \
+        -H 'Accept: application/octet-stream' \
+        -o "$output" "https://api.github.com/repos/${repo}/releases/assets/${asset_id}"
+}
+
 release_gh_version_supported() {
     local version="$1" major minor patch
     [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
@@ -132,7 +172,12 @@ ensure_release_gh() {
 
     archive="$staging/gh_${NOVAS_RELEASE_GH_VERSION}_linux_amd64.tar.gz"
     member="gh_${NOVAS_RELEASE_GH_VERSION}_linux_amd64/bin/gh"
-    release_download_to_file "https://github.com/cli/cli/releases/download/v${NOVAS_RELEASE_GH_VERSION}/gh_${NOVAS_RELEASE_GH_VERSION}_linux_amd64.tar.gz" "$archive" || {
+    local release_metadata="$staging/gh-release.json"
+    release_download_to_file "https://api.github.com/repos/cli/cli/releases/tags/v${NOVAS_RELEASE_GH_VERSION}" "$release_metadata" || {
+        LOGE "无法读取固定版本 GitHub CLI Release 信息，已停止来源验证" >&2
+        return 1
+    }
+    release_download_asset "cli/cli" "v${NOVAS_RELEASE_GH_VERSION}" "gh_${NOVAS_RELEASE_GH_VERSION}_linux_amd64.tar.gz" "$archive" "$release_metadata" || {
         LOGE "无法下载固定版本 GitHub CLI，已停止来源验证" >&2
         return 1
     }
@@ -156,10 +201,6 @@ verify_release_script_provenance() {
     [[ "$file" == "install.sh" || "$file" == "novas.sh" ]] || return 1
     bundle="$staging/NovaPanel-${file}.sigstore.json"
     metadata="$staging/release.json"
-    release_download_to_file "https://github.com/${NOVAS_RELEASE_REPO}/releases/download/${target_version}/NovaPanel-${file}.sigstore.json" "$bundle" || {
-        LOGE "Release 缺少 ${file} 的来源证明，已停止执行" >&2
-        return 1
-    }
     release_download_to_file "https://api.github.com/repos/${NOVAS_RELEASE_REPO}/releases/tags/${target_version}" "$metadata" || {
         LOGE "无法读取 Release 来源提交，已停止执行" >&2
         return 1
@@ -169,6 +210,10 @@ verify_release_script_provenance() {
         LOGE "Release 未提供有效的 40 位构建提交，已停止来源验证" >&2
         return 1
     fi
+    release_download_asset "$NOVAS_RELEASE_REPO" "$target_version" "NovaPanel-${file}.sigstore.json" "$bundle" "$metadata" || {
+        LOGE "Release 缺少 ${file} 的来源证明，已停止执行" >&2
+        return 1
+    }
     ensure_release_gh "$staging" || return 1
     gh_path="$NOVAS_RELEASE_GH_PATH"
     if ! env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN \
@@ -233,6 +278,7 @@ write_update_status() {
     {
         printf 'state=%s\n' "${state}"
         printf 'updated_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        printf 'run_id=%s\n' "${NOVAS_UPDATE_RUN_ID:-}"
         printf 'message=%s\n' "${message}"
     } > "${NOVAS_UPDATE_STATUS}"
 }
@@ -292,7 +338,11 @@ start_background_update() {
 	local worker_unit="novas-update"
 	local worker_command
 	printf -v worker_command 'exec >>%q 2>&1; exec /bin/bash %q update --worker' "${NOVAS_UPDATE_LOG}" "$0"
-	if command -v systemd-run >/dev/null 2>&1 && systemd-run --unit="${worker_unit}" --collect --no-block /bin/bash -c "${worker_command}" >/dev/null; then
+	local -a worker_env=()
+	if [[ -n "${NOVAS_UPDATE_RUN_ID:-}" ]]; then
+		worker_env+=("--setenv=NOVAS_UPDATE_RUN_ID=${NOVAS_UPDATE_RUN_ID}")
+	fi
+	if command -v systemd-run >/dev/null 2>&1 && systemd-run "${worker_env[@]}" --unit="${worker_unit}" --collect --no-block /bin/bash -c "${worker_command}" >/dev/null; then
 		printf '%s\n' "systemd:${worker_unit}" > "${NOVAS_UPDATE_PID}"
 		printf '%s\n' "${worker_unit}" > "${NOVAS_UPDATE_UNIT_FILE}"
 		local display_pid="systemd:${worker_unit}"

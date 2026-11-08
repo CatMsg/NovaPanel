@@ -580,6 +580,7 @@ import { i18n } from '@/locales'
 import FleetTrafficHistory from '@/components/FleetTrafficHistory.vue'
 import FleetInboundDraftEditor from '@/components/FleetInboundDraftEditor.vue'
 import { createInbound, type Inbound } from '@/types/inbounds'
+import { waitForFleetUpdate } from '@/utils/fleetUpdate'
 import {
   trafficBudgetCap as resolveTrafficBudgetCap,
   trafficBudgetPercent as resolveTrafficBudgetPercent,
@@ -1355,15 +1356,60 @@ const runBatchAction = async (action: 'update' | 'restart') => {
     const server = targets[index]
     if (server.id === 'local' && remoteFailed) break
     batchMessage.value = t('ui.fleet.runningAction', { action: actionLabel, name: server.name, current: index + 1, total: targets.length })
-    const response = await HttpUtils.post('api/fleetAction', { id: server.id, action })
-    if (!response.success) {
+    let failureMessage = ''
+
+    if (action === 'update') {
+      const baselineResponse = await HttpUtils.post('api/fleetAction', { id: server.id, action: 'update-status' })
+      if (!baselineResponse.success) {
+        failureMessage = baselineResponse.msg || t('ui.fleet.unknown')
+      } else {
+        const baseline = baselineResponse.obj ?? {}
+        const response = await HttpUtils.post('api/fleetAction', { id: server.id, action })
+        if (!response.success) {
+          failureMessage = response.msg || t('ui.fleet.unknown')
+        } else {
+          const queued = response.obj ?? {}
+          const alreadyRunning = queued.scheduled === false && Boolean(queued.running)
+          const updatedWithoutScheduling = queued.scheduled === false && !alreadyRunning
+          const changedTerminalStatus = updatedWithoutScheduling &&
+            (queued.state === 'success' || queued.state === 'failed') &&
+            queued.updatedAt && queued.updatedAt !== baseline.updatedAt
+
+          if (updatedWithoutScheduling && !changedTerminalStatus) {
+            failureMessage = queued.message || t('ui.fleet.updateNotStarted')
+          } else if (changedTerminalStatus) {
+            updateStates.value = { ...updateStates.value, [server.id]: queued }
+            if (queued.state !== 'success') failureMessage = queued.message || t('ui.fleet.failed')
+          } else {
+            updateStates.value = { ...updateStates.value, [server.id]: queued }
+            const result = await waitForFleetUpdate(
+              async () => HttpUtils.post('api/fleetAction', { id: server.id, action: 'update-status' }),
+              {
+                runId: queued.runId || undefined,
+                baselineUpdatedAt: baseline.updatedAt,
+                alreadyRunning,
+              },
+            )
+            if (result.status) updateStates.value = { ...updateStates.value, [server.id]: result.status }
+            if (result.timedOut) failureMessage = t('ui.fleet.updateTimeout')
+            else if (result.status?.state !== 'success') failureMessage = result.status?.message || t('ui.fleet.failed')
+          }
+        }
+      }
+    } else {
+      const response = await HttpUtils.post('api/fleetAction', { id: server.id, action })
+      if (!response.success) failureMessage = response.msg || t('ui.fleet.unknown')
+    }
+
+    if (failureMessage) {
       if (server.id !== 'local') {
         remoteFailed = true
         failedRemoteNames.push(server.name)
       }
       else localFailed = true
       batchMessageType.value = 'error'
-      batchMessage.value = t('ui.fleet.actionFailed', { name: server.name, action: actionLabel, message: response.msg })
+      batchMessage.value = t('ui.fleet.actionFailed', { name: server.name, action: actionLabel, message: failureMessage })
+      if (action === 'update' || server.id === 'local') break
       if (server.id !== 'local') continue
       break
     }
@@ -1401,11 +1447,38 @@ const restartServer = async (server: FleetServer) => {
 
 const updateServer = async (server: FleetServer) => {
   updateLoadingId.value = server.id
-  const response = await HttpUtils.post('api/fleetAction', { id: server.id, action: 'update' })
-  if (response.success) {
-    updateStates.value = { ...updateStates.value, [server.id]: response.obj ?? { state: 'queued' } }
-    schedule(() => loadUpdateStatus(server), 1500)
-    schedule(loadFleet, 4500)
+  const baselineResponse = await HttpUtils.post('api/fleetAction', { id: server.id, action: 'update-status' })
+  if (baselineResponse.success) {
+    const baseline = baselineResponse.obj ?? {}
+    const response = await HttpUtils.post('api/fleetAction', { id: server.id, action: 'update' })
+    if (response.success) {
+      const queued = response.obj ?? {}
+      updateStates.value = { ...updateStates.value, [server.id]: queued }
+      if (queued.scheduled === false && !queued.running) {
+        const changedTerminalStatus =
+          (queued.state === 'success' || queued.state === 'failed') &&
+          queued.updatedAt && queued.updatedAt !== baseline.updatedAt
+        if (!changedTerminalStatus) {
+          updateStates.value = { ...updateStates.value, [server.id]: { ...queued, state: 'failed', message: queued.message || t('ui.fleet.updateNotStarted') } }
+        }
+      } else {
+        const result = await waitForFleetUpdate(
+          async () => HttpUtils.post('api/fleetAction', { id: server.id, action: 'update-status' }),
+          {
+            runId: queued.runId || undefined,
+            baselineUpdatedAt: baseline.updatedAt,
+            alreadyRunning: queued.scheduled === false && Boolean(queued.running),
+          },
+        )
+        if (result.status) updateStates.value = { ...updateStates.value, [server.id]: result.status }
+        if (result.timedOut) updateStates.value = { ...updateStates.value, [server.id]: { state: 'failed', message: t('ui.fleet.updateTimeout') } }
+      }
+      await loadFleet(true)
+    } else {
+      updateStates.value = { ...updateStates.value, [server.id]: { state: 'failed', message: response.msg } }
+    }
+  } else {
+    updateStates.value = { ...updateStates.value, [server.id]: { state: 'failed', message: baselineResponse.msg } }
   }
   updateLoadingId.value = ''
 }

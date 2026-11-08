@@ -70,6 +70,10 @@ func TestUpdaterUsesValidatedReleaseTaggedSources(t *testing.T) {
 
 	for _, required := range []string{
 		"verify_release_script_provenance \"$path\" \"$target_version\" \"$staging\"",
+		"release_download_asset \"$NOVAS_RELEASE_REPO\" \"$target_version\" \"NovaPanel-${file}.sigstore.json\" \"$bundle\" \"$metadata\"",
+		"-H 'Accept: application/octet-stream'",
+		"worker_env+=(\"--setenv=NOVAS_UPDATE_RUN_ID=${NOVAS_UPDATE_RUN_ID}\")",
+		"printf 'run_id=%s\\n' \"${NOVAS_UPDATE_RUN_ID:-}\"",
 		"--bundle \"$bundle\"",
 		"--signer-workflow \"$NOVAS_RELEASE_REPO/.github/workflows/release.yml\"",
 		"--source-ref refs/heads/main",
@@ -114,6 +118,45 @@ if release_source_url main install.sh || release_source_url v1.2.3 ../../evil; t
 	if output, err := exec.Command("bash", "-c", script).CombinedOutput(); err != nil {
 		t.Fatalf("release source URL validation failed: %v\n%s", err, output)
 	}
+	assetScript := extract("release_asset_id") + `
+set -eu
+[[ "$(release_asset_id "$TEST_METADATA" NovaPanel-install.sh.sigstore.json)" == 723442933 ]]
+`
+	metadata := filepath.Join(t.TempDir(), "release.json")
+	write(t, metadata, `{
+  "assets": [
+    {
+      "id": 723442933,
+      "name": "NovaPanel-install.sh.sigstore.json",
+      "uploader": {
+        "id": 41898282
+      }
+    },
+    {
+      "id": 723442961,
+      "name": "NovaPanel-linux-amd64.tar.gz"
+    }
+  ]
+}
+`, 0644)
+	command := exec.Command("bash", "-c", assetScript)
+	command.Env = append(os.Environ(), "TEST_METADATA="+metadata)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("release asset ID parsing failed: %v\n%s", err, output)
+	}
+	statusScript := extract("write_update_status") + `
+set -eu
+NOVAS_UPDATE_STATE_DIR="$TEST_STATE_DIR"
+NOVAS_UPDATE_STATUS="$TEST_STATE_DIR/update.status"
+NOVAS_UPDATE_RUN_ID=0123456789abcdef
+write_update_status running test
+grep -Fxq 'run_id=0123456789abcdef' "$NOVAS_UPDATE_STATUS"
+`
+	command = exec.Command("bash", "-c", statusScript)
+	command.Env = append(os.Environ(), "TEST_STATE_DIR="+t.TempDir())
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("update run ID status persistence failed: %v\n%s", err, output)
+	}
 }
 
 func TestManagerRunsOnlyAttestedReleaseInstaller(t *testing.T) {
@@ -155,10 +198,34 @@ shift
 printf 'execute:%s\n' "$*" >> "$TEST_ACTIONS"
 exit 23
 `, 0755)
+	write(t, filepath.Join(bin, "curl"), `#!/bin/sh
+set -eu
+output=
+url=
+accept_seen=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) output=${2:-}; shift 2 ;;
+    -H) [ "${2:-}" = 'Accept: application/octet-stream' ] && accept_seen=1; shift 2 ;;
+    https://*) url=$1; shift ;;
+    *) shift ;;
+  esac
+done
+[ "$accept_seen" = 1 ] && [ -n "$output" ]
+case "$url" in
+  https://api.github.com/repos/CatMsg/NovaPanel/releases/assets/723442933)
+    printf 'download:asset:723442933\n' >> "$TEST_ACTIONS"
+    [ "${FAIL_BUNDLE:-0}" = 0 ] || exit 22
+    printf '{}\n' > "$output" ;;
+  *) exit 92 ;;
+esac
+`, 0755)
 
 	shell := strings.Join([]string{
 		extract("valid_release_tag"),
 		extract("release_source_url"),
+		extract("release_asset_id"),
+		extract("release_download_asset"),
 		extract("verify_release_script_provenance"),
 		extract("download_verified_release_script"),
 		extract("download_install_script"),
@@ -174,15 +241,11 @@ release_download_to_file() {
     https://raw.githubusercontent.com/CatMsg/NovaPanel/v1.2.3/install.sh)
       printf '#!/bin/sh\nexit 0\n' > "$2"
       printf 'download:script\n' >> "$TEST_ACTIONS" ;;
-    https://github.com/CatMsg/NovaPanel/releases/download/v1.2.3/NovaPanel-install.sh.sigstore.json)
-      [[ "${FAIL_BUNDLE:-0}" == 0 ]] || return 1
-      printf '{}\n' > "$2"
-      printf 'download:bundle\n' >> "$TEST_ACTIONS" ;;
     https://api.github.com/repos/CatMsg/NovaPanel/releases/tags/v1.2.3)
       if [[ "${BAD_DIGEST:-0}" == 1 ]]; then
-        printf '{\n  "target_commitish": "main"\n}\n' > "$2"
+        printf '{\n  "target_commitish": "main",\n  "assets": []\n}\n' > "$2"
       else
-        printf '{\n  "target_commitish": "9014ce970f2af32ab12824b1d57dc6e0d96d50ae"\n}\n' > "$2"
+        printf '{\n  "target_commitish": "9014ce970f2af32ab12824b1d57dc6e0d96d50ae",\n  "assets": [\n    {\n      "id": 723442933,\n      "name": "NovaPanel-install.sh.sigstore.json"\n    }\n  ]\n}\n' > "$2"
       fi
       printf 'download:release\n' >> "$TEST_ACTIONS" ;;
     *) return 92 ;;
@@ -201,10 +264,10 @@ printf 'status=%s\n' "$status"
 		wantStatus  string
 		wantActions string
 	}{
-		{name: "attested-installer-runs", verifyRC: "0", wantStatus: "status=23", wantActions: "download:script\ndownload:bundle\ndownload:release\nverify\nsyntax\nexecute:v1.2.3\n"},
-		{name: "invalid-attestation-fails-closed", verifyRC: "47", wantStatus: "status=1", wantActions: "download:script\ndownload:bundle\ndownload:release\nverify\n"},
-		{name: "missing-bundle-fails-closed", failBundle: true, verifyRC: "0", wantStatus: "status=1", wantActions: "download:script\n"},
-		{name: "invalid-source-commit-fails-closed", badDigest: true, verifyRC: "0", wantStatus: "status=1", wantActions: "download:script\ndownload:bundle\ndownload:release\n"},
+		{name: "attested-installer-runs", verifyRC: "0", wantStatus: "status=23", wantActions: "download:script\ndownload:release\ndownload:asset:723442933\nverify\nsyntax\nexecute:v1.2.3\n"},
+		{name: "invalid-attestation-fails-closed", verifyRC: "47", wantStatus: "status=1", wantActions: "download:script\ndownload:release\ndownload:asset:723442933\nverify\n"},
+		{name: "missing-bundle-fails-closed", failBundle: true, verifyRC: "0", wantStatus: "status=1", wantActions: "download:script\ndownload:release\ndownload:asset:723442933\n"},
+		{name: "invalid-source-commit-fails-closed", badDigest: true, verifyRC: "0", wantStatus: "status=1", wantActions: "download:script\ndownload:release\n"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			actions := filepath.Join(root, test.name+".actions")

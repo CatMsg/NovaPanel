@@ -2,6 +2,8 @@ package service
 
 import (
 	"bufio"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -29,40 +31,46 @@ var (
 
 // StartBackgroundUpdate delegates the upgrade to the installed updater. The new
 // process is detached so an SSH disconnect cannot interrupt it.
-func StartBackgroundUpdate() (bool, error) {
+func StartBackgroundUpdate() (bool, string, error) {
 	backgroundUpdateMu.Lock()
 	defer backgroundUpdateMu.Unlock()
 	if time.Since(lastUpdateLaunch) < 10*time.Second {
-		return false, nil
+		return false, "", nil
 	}
 
 	status, err := GetUpdateStatus()
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	if running, _ := status["running"].(bool); running {
-		return false, nil
+		return false, "", nil
 	}
 
 	if _, err := os.Stat(updateCommand); err != nil {
-		return false, errors.New("未找到 novas 更新程序")
+		return false, "", errors.New("未找到 novas 更新程序")
 	}
+	var runIDBytes [16]byte
+	if _, err := rand.Read(runIDBytes[:]); err != nil {
+		return false, "", fmt.Errorf("生成更新任务 ID 失败: %w", err)
+	}
+	runID := hex.EncodeToString(runIDBytes[:])
 	command := exec.Command(updateCommand, "update", "--background")
+	command.Env = append(os.Environ(), "NOVAS_UPDATE_RUN_ID="+runID)
 	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	command.Stdin = devNull
 	command.Stdout = devNull
 	command.Stderr = devNull
 	if err := command.Start(); err != nil {
 		_ = devNull.Close()
-		return false, err
+		return false, "", err
 	}
 	_ = devNull.Close()
 	go func() { _ = command.Wait() }()
 	lastUpdateLaunch = time.Now()
-	return true, nil
+	return true, runID, nil
 }
 
 // GetUpdateStatus returns a small, safe status object for the local panel and
@@ -86,6 +94,8 @@ func GetUpdateStatus() (map[string]interface{}, error) {
 				result["message"] = parts[1]
 			case "updated_at":
 				result["updatedAt"] = parts[1]
+			case "run_id":
+				result["runId"] = parts[1]
 			}
 		}
 	}
