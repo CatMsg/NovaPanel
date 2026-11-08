@@ -43,7 +43,7 @@ type HealthService struct {
 func (s *HealthService) GetHealthReport(force bool) *HealthReport {
 	started := time.Now()
 	if force {
-		clearServerStatusCache("sys", "sbd", "db", "dsk", "ports", "publicip")
+		clearServerStatusCache("sys", "sbd", "db", "dsk", "ports", "publicipv4", "publicipv6")
 	}
 
 	report := &HealthReport{

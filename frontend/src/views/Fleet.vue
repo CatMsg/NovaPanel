@@ -205,7 +205,10 @@
               </div>
               <div class="fleet-metric">
                 <span>{{ $t('ui.common.publicIp') }}</span>
-                <strong>{{ server.PublicIP || '-' }}</strong>
+                <div class="fleet-public-ips">
+                  <span><small>IPv4</small><strong>{{ server.PublicIPv4 || '-' }}</strong></span>
+                  <span><small>IPv6</small><strong>{{ server.PublicIPv6 || '-' }}</strong></span>
+                </div>
               </div>
               <div class="fleet-metric">
                 <span>{{ $t('ui.common.uptime') }}</span>
@@ -500,7 +503,13 @@
             <div><span>{{ trafficTitle(selectedServer) }}</span><strong>{{ trafficTotalLabel(selectedServer) }}</strong></div>
             <div><span>{{ $t('ui.fleet.trafficBreakdown') }}</span><strong>{{ trafficDetailLabel(selectedServer) }}</strong></div>
             <div><span>{{ $t('ui.fleet.address') }}</span><strong>{{ selectedServer.url }}</strong></div>
-            <div><span>{{ $t('ui.common.publicIp') }}</span><strong>{{ selectedServer.PublicIP || '-' }}</strong></div>
+            <div>
+              <span>{{ $t('ui.common.publicIp') }}</span>
+              <strong class="fleet-public-ips fleet-public-ips--detail">
+                <span><small>IPv4</small>{{ selectedServer.PublicIPv4 || '-' }}</span>
+                <span><small>IPv6</small>{{ selectedServer.PublicIPv6 || '-' }}</span>
+              </strong>
+            </div>
             <div><span>{{ $t('ui.common.version') }}</span><strong>{{ selectedServer.System?.appVersion || '-' }}</strong></div>
             <div><span>{{ $t('ui.common.uptime') }}</span><strong>{{ formatUptime(selectedServer.Uptime) }}</strong></div>
             <div><span>{{ $t('ui.common.firewall') }}</span><strong>{{ selectedServer.portBackend || '-' }}</strong></div>
@@ -596,6 +605,8 @@ type FleetServer = {
   system?: Record<string, any>
   core?: Record<string, any>
   PublicIP: string
+  PublicIPv4: string
+  PublicIPv6: string
   Uptime: number
   CPUPercent: number
   MemoryUsed: number
@@ -734,11 +745,18 @@ const normalizeServer = (server: any): FleetServer => {
 
   const budget = server.trafficBudget ?? server.TrafficBudget
 
+  const legacyPublicIP = server.publicIp ?? server.PublicIP ?? ''
+  const legacyIPv6 = String(legacyPublicIP).includes(':')
+  const publicIPv4 = server.publicIpv4 ?? server.PublicIPv4 ?? (legacyIPv6 ? '' : legacyPublicIP)
+  const publicIPv6 = server.publicIpv6 ?? server.PublicIPv6 ?? (legacyIPv6 ? legacyPublicIP : '')
+
   return {
     ...server,
     System: server.system ?? server.System ?? {},
     Core: server.core ?? server.Core ?? {},
-    PublicIP: server.publicIp ?? server.PublicIP ?? '',
+    PublicIP: legacyPublicIP || publicIPv4 || publicIPv6,
+    PublicIPv4: publicIPv4,
+    PublicIPv6: publicIPv6,
     Uptime: server.uptime ?? server.Uptime ?? 0,
     CPUPercent: Number(server.cpuPercent ?? server.CPUPercent ?? 0),
     MemoryUsed: Number(server.memoryUsed ?? server.MemoryUsed ?? 0),
@@ -1527,6 +1545,11 @@ onBeforeUnmount(() => {
 .fleet-metric { display: grid; gap: 3px; }
 .fleet-metric span { color: var(--np-text-muted); font-size: 0.75rem; }
 .fleet-metric strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.93rem; }
+.fleet-public-ips { display: grid; gap: 3px; min-width: 0; }
+.fleet-public-ips > span { display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: baseline; gap: 5px; min-width: 0; }
+.fleet-public-ips small { color: var(--np-text-muted); font-size: 0.68rem; }
+.fleet-public-ips strong { overflow: visible; overflow-wrap: anywhere; text-overflow: clip; white-space: normal; font-size: 0.78rem; }
+.fleet-public-ips--detail { white-space: normal; }
 .fleet-card__footer { justify-content: space-between; gap: 10px; min-width: 0; color: var(--np-text-muted); font-size: 0.8rem; }
 .fleet-core-state { display: inline-flex; align-items: center; gap: 5px; }
 .fleet-core-state.is-running { color: #22c55e; }

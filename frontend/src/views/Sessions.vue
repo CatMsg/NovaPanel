@@ -63,6 +63,9 @@
         <template #item.serverName="{ item }">
           <v-chip size="small" variant="tonal" color="primary">{{ item.serverName }}</v-chip>
         </template>
+        <template #item.userDesc="{ item }">
+          <span class="sessions-user-desc">{{ item.userDesc || '-' }}</span>
+        </template>
         <template #item.sourceIp="{ item }">
           <span class="sessions-source-ip" dir="ltr" :title="sourceIpTitle(item)">{{ sourceIpText(item) }}</span>
         </template>
@@ -73,7 +76,12 @@
           </div>
         </template>
         <template #item.path="{ item }">
-          <div class="sessions-path"><span>{{ item.inbound || '-' }}</span><v-icon icon="mdi-arrow-right" size="14" /><span>{{ item.outbound || '-' }}</span></div>
+          <div class="sessions-path-cell">
+            <div class="sessions-path"><span>{{ item.inbound || '-' }}</span><v-icon icon="mdi-arrow-right" size="14" /><span>{{ item.outbound || '-' }}</span></div>
+            <span v-if="item.dnsResolver" class="sessions-dns-resolver" :title="$t('ui.sessions.dnsRuleMatchHint')">
+              <v-icon icon="mdi-dns-outline" size="13" /> {{ $t('ui.sessions.dnsResolver') }}: {{ item.dnsResolver }}
+            </span>
+          </div>
         </template>
         <template #item.traffic="{ item }">
           <div class="sessions-traffic"><span>↑ {{ formatBytes(item.upload) }}</span><span>↓ {{ formatBytes(item.download) }}</span></div>
@@ -90,6 +98,7 @@
             <div><v-chip size="x-small" color="primary" variant="tonal">{{ item.serverName }}</v-chip><strong>{{ item.user || $t('ui.sessions.anonymous') }}</strong></div>
             <v-btn icon="mdi-link-off" size="small" variant="text" color="error" :aria-label="$t('ui.sessions.disconnect')" @click="requestClose(item)" />
           </div>
+          <div v-if="item.userDesc" class="sessions-mobile__user-desc"><span>{{ $t('client.desc') }}:</span> {{ item.userDesc }}</div>
           <div class="sessions-mobile__target">{{ item.domain || item.destination || '-' }}</div>
           <div v-if="item.domain && item.destination && item.domain !== item.destination" class="sessions-mobile__destination">{{ item.destination }}</div>
           <div class="sessions-mobile__grid">
@@ -98,6 +107,7 @@
             <div><span>{{ $t('ui.sessions.duration') }}</span><strong>{{ elapsed(item.startedAt) }}</strong></div>
             <div><span>{{ $t('pages.inbounds') }}</span><strong>{{ item.inbound || '-' }}</strong></div>
             <div><span>{{ $t('pages.outbounds') }}</span><strong>{{ item.outbound || '-' }}</strong></div>
+            <div v-if="item.dnsResolver" :title="$t('ui.sessions.dnsRuleMatchHint')"><span>{{ $t('ui.sessions.dnsResolver') }}</span><strong>{{ item.dnsResolver }}</strong></div>
             <div><span>{{ $t('ui.sessions.upload') }}</span><strong>{{ formatBytes(item.upload) }}</strong></div>
             <div><span>{{ $t('ui.sessions.download') }}</span><strong>{{ formatBytes(item.download) }}</strong></div>
           </div>
@@ -129,7 +139,9 @@ interface SessionRow {
   kind: string
   inbound?: string
   outbound?: string
+  dnsResolver?: string
   user?: string
+  userDesc?: string
   network: string
   source?: string
   sourceIp?: string
@@ -164,6 +176,7 @@ let stopVisibilityListener: (() => void) | undefined
 const headers = [
   { title: t('ui.sessions.server'), key: 'serverName' },
   { title: t('ui.sessions.user'), key: 'user' },
+  { title: t('client.desc'), key: 'userDesc', sortable: false },
   { title: t('ui.sessions.sourceIp'), key: 'sourceIp' },
   { title: t('ui.sessions.target'), key: 'target', sortable: false },
   { title: t('ui.sessions.path'), key: 'path', sortable: false },
@@ -188,7 +201,7 @@ const filteredSessions = computed(() => {
     if (userFilter.value !== 'all' && item.user !== userFilter.value) return false
     if (networkFilter.value !== 'all' && item.network !== networkFilter.value) return false
     if (!needle) return true
-    return [item.serverName, item.user, item.sourceIp, ...(item.sourceIps ?? []), item.source, item.domain, item.destination, item.inbound, item.outbound, item.protocol]
+    return [item.serverName, item.user, item.userDesc, item.sourceIp, ...(item.sourceIps ?? []), item.source, item.domain, item.destination, item.inbound, item.outbound, item.dnsResolver, item.protocol]
       .some(value => String(value ?? '').toLowerCase().includes(needle))
   })
 })
@@ -283,15 +296,20 @@ onUnmounted(() => {
 .sessions-content { padding: 20px; }
 .sessions-toolbar { display: grid; grid-template-columns: minmax(260px, 1fr) repeat(3, minmax(150px, .42fr)); gap: 12px; margin-bottom: 18px; }
 .sessions-source-ip { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: .8rem; white-space: nowrap; }
+.sessions-user-desc { display: block; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(var(--v-theme-on-surface), .74); }
 .sessions-target { display: flex; flex-direction: column; min-width: 180px; max-width: 320px; }
 .sessions-target strong, .sessions-target span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sessions-target span { color: rgba(var(--v-theme-on-surface), .64); font-size: .74rem; }
 .sessions-path { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.sessions-path-cell { display: grid; gap: 4px; min-width: 160px; }
+.sessions-dns-resolver { display: flex; align-items: center; gap: 3px; max-width: 300px; overflow: hidden; color: rgba(var(--v-theme-primary), .88); text-overflow: ellipsis; white-space: nowrap; font-size: .72rem; }
 .sessions-traffic { display: grid; gap: 2px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sessions-mobile { display: grid; gap: 12px; }
 .sessions-mobile__card { padding: 17px; border: 1px solid rgba(var(--v-theme-on-surface), .08); background: rgba(var(--v-theme-surface), .62); }
 .sessions-mobile__head { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
 .sessions-mobile__head > div { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.sessions-mobile__user-desc { margin: 6px 0 0; color: rgba(var(--v-theme-on-surface), .72); font-size: .78rem; overflow-wrap: anywhere; }
+.sessions-mobile__user-desc span { color: rgba(var(--v-theme-on-surface), .52); }
 .sessions-mobile__target { margin-top: 14px; font-weight: 750; overflow-wrap: anywhere; }
 .sessions-mobile__destination { color: rgba(var(--v-theme-on-surface), .64); font-size: .75rem; overflow-wrap: anywhere; }
 .sessions-mobile__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 15px; }

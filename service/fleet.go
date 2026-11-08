@@ -13,6 +13,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
@@ -61,6 +62,8 @@ type FleetServerView struct {
 	System             map[string]interface{} `json:"system,omitempty"`
 	Core               map[string]interface{} `json:"core,omitempty"`
 	PublicIP           string                 `json:"publicIp,omitempty"`
+	PublicIPv4         string                 `json:"publicIpv4,omitempty"`
+	PublicIPv6         string                 `json:"publicIpv6,omitempty"`
 	Uptime             int64                  `json:"uptime,omitempty"`
 	CPUPercent         float64                `json:"cpuPercent"`
 	MemoryUsed         int64                  `json:"memoryUsed"`
@@ -140,6 +143,11 @@ var fleetLastKnownPersistence = struct {
 func (s *FleetService) GetFleetStatus() map[string]interface{} {
 	serverService := &ServerService{}
 	status := serverService.GetStatus("sys,sbd,db,cpu,mem,net")
+	ipv4, ipv6 := serverService.GetPublicIPs()
+	publicIP := ipv4
+	if publicIP == "" {
+		publicIP = ipv6
+	}
 	result := map[string]interface{}{
 		"system":   (*status)["sys"],
 		"core":     (*status)["sbd"],
@@ -149,7 +157,9 @@ func (s *FleetService) GetFleetStatus() map[string]interface{} {
 			"memory":  (*status)["mem"],
 			"network": (*status)["net"],
 		},
-		"publicIp":      serverService.GetPublicIP(),
+		"publicIp":      publicIP,
+		"publicIpv4":    ipv4,
+		"publicIpv6":    ipv6,
 		"ports":         serverService.GetPortStatus(),
 		"configuration": s.getFleetConfigProfile(),
 		"trafficBudget": GetTrafficBudgetService().GetStatusSnapshot(),
@@ -524,8 +534,27 @@ func (s *FleetService) applyFleetStatus(view *FleetServerView, payload map[strin
 			view.Uptime = fleetInt64(stats["Uptime"])
 		}
 	}
-	if publicIP, ok := payload["publicIp"].(string); ok {
-		view.PublicIP = publicIP
+	legacyPublicIP, _ := payload["publicIp"].(string)
+	legacyPublicIP = strings.TrimSpace(legacyPublicIP)
+	view.PublicIPv4, _ = payload["publicIpv4"].(string)
+	view.PublicIPv6, _ = payload["publicIpv6"].(string)
+	if legacyPublicIP != "" {
+		view.PublicIP = legacyPublicIP
+		if view.PublicIPv4 == "" && view.PublicIPv6 == "" {
+			if address, err := netip.ParseAddr(legacyPublicIP); err == nil {
+				if address.Unmap().Is4() {
+					view.PublicIPv4 = legacyPublicIP
+				} else if address.Is6() {
+					view.PublicIPv6 = legacyPublicIP
+				}
+			}
+		}
+	}
+	if view.PublicIP == "" {
+		view.PublicIP = view.PublicIPv4
+		if view.PublicIP == "" {
+			view.PublicIP = view.PublicIPv6
+		}
 	}
 	applyFleetResourceInfo(view, payload["resources"])
 	view.TrafficBudget = fleetTrafficBudgetFromValue(payload["trafficBudget"])

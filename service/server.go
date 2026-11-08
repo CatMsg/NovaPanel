@@ -1,9 +1,11 @@
 package service
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"io"
+	stdnet "net"
 	"net/http"
 	"net/netip"
 	"os"
@@ -59,9 +61,33 @@ func (s *ServerService) GetStatus(request string) *map[string]interface{} {
 }
 
 func (s *ServerService) GetPublicIP() string {
+	ipv4, ipv6 := s.GetPublicIPs()
+	if ipv4 != "" {
+		return ipv4
+	}
+	return ipv6
+}
+
+func (s *ServerService) GetPublicIPs() (string, string) {
+	var ipv4, ipv6 string
+	var wait sync.WaitGroup
+	wait.Add(2)
+	go func() {
+		defer wait.Done()
+		ipv4 = s.getCachedPublicIP("publicipv4", 4)
+	}()
+	go func() {
+		defer wait.Done()
+		ipv6 = s.getCachedPublicIP("publicipv6", 6)
+	}()
+	wait.Wait()
+	return ipv4, ipv6
+}
+
+func (s *ServerService) getCachedPublicIP(cacheKey string, family int) string {
 	now := time.Now()
 	serverStatusCache.mu.RLock()
-	entry, ok := serverStatusCache.entries["publicip"]
+	entry, ok := serverStatusCache.entries[cacheKey]
 	serverStatusCache.mu.RUnlock()
 	if ok && now.Before(entry.expiresAt) {
 		if ip, ok := entry.value.(string); ok {
@@ -70,19 +96,18 @@ func (s *ServerService) GetPublicIP() string {
 	}
 
 	apis := []string{
-		"https://api64.ipify.org",
+		"https://api.ipify.org",
 		"https://ip.sb",
 		"https://icanhazip.com",
 		"https://ipinfo.io/ip",
 		"https://checkip.amazonaws.com",
 	}
-	ip := fetchPublicIP(newPublicIPHTTPClient(), apis)
-	if ip == "" {
-		return ""
-	}
+	client := newPublicIPHTTPClientForFamily(family)
+	ip := fetchPublicIPForFamily(client, apis, family)
+	client.CloseIdleConnections()
 	serverStatusCache.mu.Lock()
-	serverStatusCache.entries["publicip"] = statusCacheEntry{
-		expiresAt: time.Now().Add(statusCacheTTL["publicip"]),
+	serverStatusCache.entries[cacheKey] = statusCacheEntry{
+		expiresAt: time.Now().Add(statusCacheTTL[cacheKey]),
 		value:     ip,
 	}
 	serverStatusCache.mu.Unlock()
@@ -90,13 +115,33 @@ func (s *ServerService) GetPublicIP() string {
 }
 
 func newPublicIPHTTPClient() *http.Client {
+	return newPublicIPHTTPClientForFamily(0)
+}
+
+func newPublicIPHTTPClientForFamily(family int) *http.Client {
+	transport := &http.Transport{}
+	if family == 4 || family == 6 {
+		network := "tcp4"
+		if family == 6 {
+			network = "tcp6"
+		}
+		dialer := &stdnet.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}
+		transport.DialContext = func(ctx context.Context, _, address string) (stdnet.Conn, error) {
+			return dialer.DialContext(ctx, network, address)
+		}
+	}
 	return &http.Client{
 		Timeout:       3 * time.Second,
+		Transport:     transport,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 }
 
 func fetchPublicIP(client *http.Client, apis []string) string {
+	return fetchPublicIPForFamily(client, apis, 0)
+}
+
+func fetchPublicIPForFamily(client *http.Client, apis []string, family int) string {
 	type result struct {
 		ip  string
 		err error
@@ -141,7 +186,10 @@ func fetchPublicIP(client *http.Client, apis []string) string {
 			continue
 		}
 		if ip := normalizePublicIP(res.ip); ip != "" {
-			return ip
+			address, _ := netip.ParseAddr(ip)
+			if family == 0 || (family == 4 && address.Is4()) || (family == 6 && address.Is6()) {
+				return ip
+			}
 		}
 	}
 	return ""

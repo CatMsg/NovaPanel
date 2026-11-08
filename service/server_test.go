@@ -18,6 +18,31 @@ func TestFetchPublicIPAcceptsIPv6OnlyServer(t *testing.T) {
 	}
 }
 
+func TestFetchPublicIPForFamilySeparatesIPv4AndIPv6(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		family int
+		body   string
+		want   string
+	}{
+		{name: "IPv4", family: 4, body: "1.1.1.1", want: "1.1.1.1"},
+		{name: "IPv6", family: 6, body: "2001:4860:4860::8888", want: "2001:4860:4860::8888"},
+		{name: "wrong family", family: 4, body: "2001:4860:4860::8888", want: ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer server.Close()
+
+			got := fetchPublicIPForFamily(server.Client(), []string{server.URL}, test.family)
+			if got != test.want {
+				t.Fatalf("fetchPublicIPForFamily() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestNormalizePublicIPAcceptsIPv4AndRejectsNonPublicValues(t *testing.T) {
 	tests := []struct {
 		name  string

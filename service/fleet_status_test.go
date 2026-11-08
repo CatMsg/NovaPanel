@@ -2,6 +2,25 @@ package service
 
 import "testing"
 
+func TestApplyFleetStatusSeparatesPublicIPFamiliesAndSupportsLegacyPayload(t *testing.T) {
+	service := &FleetService{}
+	dualStack := &FleetServerView{}
+	service.applyFleetStatus(dualStack, map[string]interface{}{
+		"publicIp":   "198.51.100.8",
+		"publicIpv4": "198.51.100.8",
+		"publicIpv6": "2001:4860:4860::8888",
+	})
+	if dualStack.PublicIPv4 != "198.51.100.8" || dualStack.PublicIPv6 != "2001:4860:4860::8888" {
+		t.Fatalf("dual-stack addresses were not separated: %+v", dualStack)
+	}
+
+	legacy := &FleetServerView{}
+	service.applyFleetStatus(legacy, map[string]interface{}{"publicIp": "2001:4860:4860::8888"})
+	if legacy.PublicIPv4 != "" || legacy.PublicIPv6 != "2001:4860:4860::8888" {
+		t.Fatalf("legacy IPv6 address was not classified: %+v", legacy)
+	}
+}
+
 func TestApplyFleetDatabaseInfoSupportsLocalAndRemotePayloads(t *testing.T) {
 	local := &FleetServerView{}
 	applyFleetDatabaseInfo(local, map[string]int64{

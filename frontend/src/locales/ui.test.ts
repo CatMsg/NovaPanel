@@ -12,6 +12,8 @@ const requiredFleetKeys = [
   'trafficHistoryUnavailable',
 ] as const
 
+const requiredSessionKeys = ['dnsResolver', 'dnsRuleMatchHint'] as const
+
 const technicalSame = new Set([
   'fleet.apiToken', 'fleet.panel', 'fleet.runningAction',
   'health.endpoint', 'health.inbound', 'health.panel', 'health.telegramChatId', 'health.telegramToken',
@@ -22,6 +24,9 @@ describe('traffic UI translations', () => {
     for (const [locale, messages] of Object.entries(uiMessages)) {
       for (const key of requiredFleetKeys) {
         expect(messages.fleet[key], `${locale}.fleet.${key}`).toBeTruthy()
+      }
+      for (const key of requiredSessionKeys) {
+        expect(messages.sessions[key], `${locale}.sessions.${key}`).toBeTruthy()
       }
       expect(messages.health.telegramToken, `${locale}.health.telegramToken`).toBeTruthy()
       expect(messages.health.telegramChatId, `${locale}.health.telegramChatId`).toBeTruthy()

@@ -150,6 +150,10 @@ func ExplainRoute(input RouteExplainInput) (RouteExplainResult, error) {
 	}, nil
 }
 
+func ExplainDNS(input RouteExplainInput) (*DNSExplainResult, error) {
+	return explainDNS(input)
+}
+
 func explainDNS(input RouteExplainInput) (*DNSExplainResult, error) {
 	domain := strings.TrimSpace(input.Domain)
 	if domain == "" {

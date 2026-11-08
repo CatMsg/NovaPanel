@@ -59,6 +59,16 @@ func TestExplainRouteIncludesMatchedDNSServer(t *testing.T) {
 		t.Fatalf("unexpected DNS endpoint: %#v", result.DNS)
 	}
 
+	dnsOnly, err := ExplainDNS(RouteExplainInput{
+		Domain: "www.netflix.com", Inbound: "", User: "", Protocol: "dns", QueryType: "AAAA",
+	})
+	if err != nil {
+		t.Fatalf("explain DNS rule: %v", err)
+	}
+	if dnsOnly == nil || dnsOnly.Server != "dns-media" {
+		t.Fatalf("expected DNS-only diagnosis to select dns-media: %#v", dnsOnly)
+	}
+
 	defaultResult, err := ExplainRoute(RouteExplainInput{
 		Domain:    "example.com",
 		Port:      53,

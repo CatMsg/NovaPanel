@@ -11,6 +11,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/CatMsg/NovaPanel/core"
+	"github.com/CatMsg/NovaPanel/database"
+	"github.com/CatMsg/NovaPanel/database/model"
 )
 
 func remarshalFleetObject(value interface{}, target interface{}) error {
@@ -46,7 +50,9 @@ type SessionView struct {
 	Kind          string    `json:"kind"`
 	Inbound       string    `json:"inbound,omitempty"`
 	Outbound      string    `json:"outbound,omitempty"`
+	DNSResolver   string    `json:"dnsResolver,omitempty"`
 	User          string    `json:"user,omitempty"`
+	UserDesc      string    `json:"userDesc,omitempty"`
 	Network       string    `json:"network"`
 	Source        string    `json:"source,omitempty"`
 	SourceIP      string    `json:"sourceIp,omitempty"`
@@ -66,6 +72,16 @@ type FleetSessions struct {
 	Errors    map[string]string `json:"errors,omitempty"`
 	CheckedAt time.Time         `json:"checkedAt"`
 }
+
+type sessionDNSResolverCacheEntry struct {
+	resolver  string
+	expiresAt time.Time
+}
+
+var sessionDNSResolverCache = struct {
+	sync.Mutex
+	entries map[string]sessionDNSResolverCacheEntry
+}{entries: make(map[string]sessionDNSResolverCacheEntry)}
 
 func GetLocalSessions() []SessionView {
 	result := make([]SessionView, 0)
@@ -90,8 +106,128 @@ func GetLocalSessions() []SessionView {
 	if masque := GetMasqueService(); masque != nil {
 		result = append(result, masque.sessionViews()...)
 	}
+	applySessionDNSResolvers(result)
+	applySessionUserDescriptions(result)
 	sort.Slice(result, func(i, j int) bool { return result[i].StartedAt.After(result[j].StartedAt) })
 	return result
+}
+
+func applySessionDNSResolvers(sessions []SessionView) {
+	for index := range sessions {
+		session := &sessions[index]
+		if strings.TrimSpace(session.Domain) == "" {
+			continue
+		}
+		base := core.RouteExplainInput{
+			Domain:   session.Domain,
+			Inbound:  session.Inbound,
+			User:     session.User,
+			Protocol: "dns",
+		}
+		aInput := base
+		aInput.QueryType = "A"
+		aaaaInput := base
+		aaaaInput.QueryType = "AAAA"
+		session.DNSResolver = combineSessionDNSResolvers(
+			cachedSessionDNSResolver(aInput),
+			cachedSessionDNSResolver(aaaaInput),
+		)
+	}
+}
+
+func cachedSessionDNSResolver(input core.RouteExplainInput) string {
+	domain := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(input.Domain), "."))
+	key := strings.Join([]string{
+		domain,
+		strings.TrimSpace(input.Inbound),
+		strings.TrimSpace(input.User),
+		strings.ToUpper(strings.TrimSpace(input.QueryType)),
+	}, "\x00")
+	now := time.Now()
+	sessionDNSResolverCache.Lock()
+	if entry, ok := sessionDNSResolverCache.entries[key]; ok && now.Before(entry.expiresAt) {
+		sessionDNSResolverCache.Unlock()
+		return entry.resolver
+	}
+	sessionDNSResolverCache.Unlock()
+
+	resolver := ""
+	startCoreMu.Lock()
+	if corePtr != nil && corePtr.IsRunning() {
+		if result, err := core.ExplainDNS(input); err == nil && result != nil {
+			resolver = result.Server
+		}
+	}
+	startCoreMu.Unlock()
+
+	sessionDNSResolverCache.Lock()
+	for existingKey, entry := range sessionDNSResolverCache.entries {
+		if !now.Before(entry.expiresAt) {
+			delete(sessionDNSResolverCache.entries, existingKey)
+		}
+	}
+	if len(sessionDNSResolverCache.entries) >= 512 {
+		sessionDNSResolverCache.entries = make(map[string]sessionDNSResolverCacheEntry)
+	}
+	sessionDNSResolverCache.entries[key] = sessionDNSResolverCacheEntry{
+		resolver: resolver, expiresAt: now.Add(10 * time.Second),
+	}
+	sessionDNSResolverCache.Unlock()
+	return resolver
+}
+
+func combineSessionDNSResolvers(ipv4, ipv6 string) string {
+	if ipv4 == "" {
+		return ipv6
+	}
+	if ipv6 == "" || ipv4 == ipv6 {
+		return ipv4
+	}
+	return fmt.Sprintf("A: %s · AAAA: %s", ipv4, ipv6)
+}
+
+func applySessionUserDescriptions(sessions []SessionView) {
+	if len(sessions) == 0 {
+		return
+	}
+	db := database.GetDB()
+	if db == nil {
+		return
+	}
+
+	userNames := make([]string, 0, len(sessions))
+	seenNames := make(map[string]struct{}, len(sessions))
+	for _, session := range sessions {
+		if strings.TrimSpace(session.User) == "" {
+			continue
+		}
+		if _, seen := seenNames[session.User]; seen {
+			continue
+		}
+		seenNames[session.User] = struct{}{}
+		userNames = append(userNames, session.User)
+	}
+	if len(userNames) == 0 {
+		return
+	}
+
+	var clients []model.Client
+	if err := db.Select("name", "desc", "enable", "id").Where("name IN ?", userNames).Order("enable DESC, id ASC").Find(&clients).Error; err != nil {
+		return
+	}
+	applySessionUserDescriptionsFromClients(sessions, clients)
+}
+
+func applySessionUserDescriptionsFromClients(sessions []SessionView, clients []model.Client) {
+	userDescriptions := make(map[string]string, len(clients))
+	for _, client := range clients {
+		if _, exists := userDescriptions[client.Name]; !exists {
+			userDescriptions[client.Name] = client.Desc
+		}
+	}
+	for index := range sessions {
+		sessions[index].UserDesc = userDescriptions[sessions[index].User]
+	}
 }
 
 func applyMieruSourceIPs(view *SessionView, mieru *MieruService) {

@@ -15,7 +15,9 @@ test('live sessions show and search source IP', async ({ page }) => {
         kind: 'sing-box',
         inbound: 'vless-in',
         outbound: 'direct',
+        dnsResolver: 'dns-media',
         user: 'alice',
+        userDesc: '主手机',
         network: 'tcp',
         source: '203.0.113.9:54321',
         sourceIp: '203.0.113.9',
@@ -31,6 +33,8 @@ test('live sessions show and search source IP', async ({ page }) => {
 
   await page.goto('/app/sessions')
   await expect(page.getByRole('heading', { name: '实时连接' })).toBeVisible()
+  await expect(page.getByText('主手机').first()).toBeVisible()
+  await expect(page.getByText(/dns-media/).first()).toBeVisible()
   await expect(page.getByText('203.0.113.9').first()).toBeVisible()
 
   const search = page.getByRole('textbox', { name: '搜索用户、来源 IP、目标地址、入站或出站' })
