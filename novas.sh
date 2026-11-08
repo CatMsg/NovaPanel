@@ -1172,7 +1172,7 @@ prepare_cloudflare_acme() {
 }
 
 install_acme_payload() {
-    local temp_dir="" archive_path="" source_dir="" actual_sha256=""
+    local temp_dir="" archive_path="" source_dir="" actual_sha256="" repository_dir="" actual_commit="" package_manager=""
 
     temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/novas-acme-install.XXXXXX") || {
         LOGE "创建 acme.sh 安装临时文件失败"
@@ -1182,23 +1182,76 @@ install_acme_payload() {
     source_dir="${temp_dir}/acme.sh-${ACME_SH_COMMIT}"
 
     LOGI "正在安装 acme..."
-    if ! curl --proto '=https' --proto-redir '=https' -fsSL --max-time 120 "https://github.com/acmesh-official/acme.sh/archive/${ACME_SH_COMMIT}.tar.gz" -o "${archive_path}"; then
-        rm -rf -- "${temp_dir}"
-        LOGE "安装 acme 失败"
-        return 1
-    fi
-
-    actual_sha256=$(sha256sum "${archive_path}" | awk '{print $1}')
-    if [[ "${actual_sha256}" != "${ACME_SH_ARCHIVE_SHA256}" ]]; then
-        rm -rf -- "${temp_dir}"
-        LOGE "acme.sh 官方归档 SHA-256 校验失败，已停止安装"
-        return 1
-    fi
-
-    if ! tar -xzf "${archive_path}" -C "${temp_dir}" || [[ ! -f "${source_dir}/acme.sh" ]]; then
-        rm -rf -- "${temp_dir}"
-        LOGE "acme.sh 官方归档解压失败，已停止安装"
-        return 1
+    if curl --proto '=https' --proto-redir '=https' -fsSL --connect-timeout 10 --max-time 20 \
+        "https://github.com/acmesh-official/acme.sh/archive/${ACME_SH_COMMIT}.tar.gz" -o "${archive_path}"; then
+        actual_sha256=$(sha256sum "${archive_path}" | awk '{print $1}')
+        if [[ "${actual_sha256}" != "${ACME_SH_ARCHIVE_SHA256}" ]]; then
+            rm -rf -- "${temp_dir}"
+            LOGE "acme.sh 官方归档 SHA-256 校验失败，已停止安装"
+            return 1
+        fi
+        if ! tar -xzf "${archive_path}" -C "${temp_dir}" || [[ ! -f "${source_dir}/acme.sh" ]]; then
+            rm -rf -- "${temp_dir}"
+            LOGE "acme.sh 官方归档解压失败，已停止安装"
+            return 1
+        fi
+    else
+        LOGI "GitHub 归档下载不可用，改从固定 commit 获取 acme.sh 源码"
+        case "${release}" in
+            ubuntu | debian | armbian)
+                package_manager="apt-get"
+                ;;
+            centos | almalinux | rocky | oracle)
+                if command -v dnf >/dev/null 2>&1; then
+                    package_manager="dnf"
+                else
+                    package_manager="yum"
+                fi
+                ;;
+            fedora)
+                package_manager="dnf"
+                ;;
+            arch | manjaro | parch)
+                package_manager="pacman"
+                ;;
+            *)
+                rm -rf -- "${temp_dir}"
+                LOGE "${release} 暂不支持通过 Git 获取 acme.sh 源码"
+                return 1
+                ;;
+        esac
+        if ! command -v git >/dev/null 2>&1; then
+            if ! install_cron_package "${package_manager}" git; then
+                if [[ "${package_manager}" == "apt-get" ]] && apt-get update && install_cron_package "${package_manager}" git; then
+                    :
+                else
+                    rm -rf -- "${temp_dir}"
+                    LOGE "无法安装 Git，不能安全获取固定 commit 的 acme.sh 源码"
+                    return 1
+                fi
+            fi
+        fi
+        repository_dir="${temp_dir}/acme.sh-source"
+        if ! git init -q "${repository_dir}" ||
+            ! git -C "${repository_dir}" remote add origin https://github.com/acmesh-official/acme.sh.git ||
+            ! git -C "${repository_dir}" fetch --depth=1 origin "${ACME_SH_COMMIT}"; then
+            rm -rf -- "${temp_dir}"
+            LOGE "无法从 acme.sh 官方仓库获取固定 commit"
+            return 1
+        fi
+        actual_commit=$(git -C "${repository_dir}" rev-parse FETCH_HEAD) || {
+            rm -rf -- "${temp_dir}"
+            LOGE "无法校验 acme.sh 源码 commit"
+            return 1
+        }
+        if [[ "${actual_commit}" != "${ACME_SH_COMMIT}" ]] ||
+            ! git -C "${repository_dir}" checkout --quiet --detach FETCH_HEAD ||
+            [[ ! -f "${repository_dir}/acme.sh" ]]; then
+            rm -rf -- "${temp_dir}"
+            LOGE "acme.sh 源码 commit 校验失败，已停止安装"
+            return 1
+        fi
+        source_dir="${repository_dir}"
     fi
 
     if ! (cd "${source_dir}" && unset CF_Token CF_Account_ID CF_Key CF_Email CF_Zone_ID && BRANCH="${ACME_SH_VERSION}" sh ./acme.sh --install); then

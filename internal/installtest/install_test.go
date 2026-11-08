@@ -80,6 +80,9 @@ func TestUpdaterUsesValidatedReleaseTaggedSources(t *testing.T) {
 		"--source-digest \"$source_digest\"",
 		"download_verified_release_script \"$target_version\" install.sh \"$staging\"",
 		"download_verified_release_script \"$latest_version\" novas.sh \"$staging\"",
+		"GitHub 归档下载不可用，改从固定 commit 获取 acme.sh 源码",
+		"git -C \"${repository_dir}\" fetch --depth=1 origin \"${ACME_SH_COMMIT}\"",
+		"git -C \"${repository_dir}\" rev-parse FETCH_HEAD",
 	} {
 		if !strings.Contains(text, required) {
 			t.Errorf("updater is missing attested script verification: %q", required)
