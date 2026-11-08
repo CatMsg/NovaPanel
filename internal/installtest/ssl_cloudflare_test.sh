@@ -128,6 +128,7 @@ ACME_BOOTSTRAP_STUB
     ACME_SH_VERSION="test-version"
     ACME_SH_COMMIT="test-commit"
     ACME_SH_ARCHIVE_SHA256=$(sha256sum "${fixture_archive}" | awk '{print $1}')
+    release="ubuntu"
     ACME_INSTALL_MARKER="${marker}"
     HOME="${test_root}/acme-bootstrap-home"
     export ACME_INSTALL_MARKER HOME
@@ -149,7 +150,8 @@ ACME_BOOTSTRAP_STUB
                     proto_redir_seen=1
                     shift 2
                     ;;
-                --max-time) [[ "${2:-}" == "120" ]] || return 97; shift 2 ;;
+                --connect-timeout) [[ "${2:-}" == "10" ]] || return 97; shift 2 ;;
+                --max-time) [[ "${2:-}" == "20" ]] || return 97; shift 2 ;;
                 -o) output="${2:-}"; shift 2 ;;
                 https://*) url="$1"; shift ;;
                 *) return 98 ;;
