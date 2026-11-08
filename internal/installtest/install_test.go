@@ -179,6 +179,8 @@ func TestMihomoAcceptanceUsesReleaseAPIAndPinnedAsset(t *testing.T) {
 		"-H 'Accept: application/octet-stream'",
 		"d5e74bbddbdfff49a1aef7775bf5911da59f0d7196ed509a0ac914b3653dd5f1",
 		"d131f44b3deb2a8356f7ac75048ad67a10d53243323951c4f3cda7b672922963",
+		"geoip_asset_id=722540983",
+		"4d7ee5304f75d71abf5f8cf5c43858a9273564415ec9017d26ad4105e6cc9e6b",
 	} {
 		if !strings.Contains(text, required) {
 			t.Errorf("Mihomo acceptance script is missing %q", required)
