@@ -159,6 +159,68 @@ grep -Fxq 'run_id=0123456789abcdef' "$NOVAS_UPDATE_STATUS"
 	}
 }
 
+func TestMihomoAcceptanceUsesReleaseAPIAndPinnedAsset(t *testing.T) {
+	_, source, _, _ := runtime.Caller(0)
+	root := filepath.Clean(filepath.Join(filepath.Dir(source), "../.."))
+	scriptPath := filepath.Join(root, "scripts/test-mihomo-masque.sh")
+	script, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(script)
+	for _, required := range []string{
+		"https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/v1.19.31",
+		"https://api.github.com/repos/MetaCubeX/mihomo/releases/assets/$asset_id",
+		"gh api repos/MetaCubeX/mihomo/releases/tags/v1.19.31",
+		"gh api -H 'Accept: application/octet-stream'",
+		"-H 'Accept: application/octet-stream'",
+		"d5e74bbddbdfff49a1aef7775bf5911da59f0d7196ed509a0ac914b3653dd5f1",
+		"d131f44b3deb2a8356f7ac75048ad67a10d53243323951c4f3cda7b672922963",
+	} {
+		if !strings.Contains(text, required) {
+			t.Errorf("Mihomo acceptance script is missing %q", required)
+		}
+	}
+	if strings.Contains(text, "https://github.com/MetaCubeX/mihomo/releases/download/") {
+		t.Fatal("Mihomo acceptance script must not depend on the browser download endpoint")
+	}
+
+	start := strings.Index(text, "release_asset_id() {")
+	if start < 0 {
+		t.Fatal("missing release_asset_id helper")
+	}
+	end := strings.Index(text[start:], "\n}\n")
+	if end < 0 {
+		t.Fatal("unterminated release_asset_id helper")
+	}
+	helper := text[start : start+end+3]
+	metadata := filepath.Join(t.TempDir(), "release.json")
+	write(t, metadata, `{
+  "assets": [
+    {
+      "id": 563462742,
+      "name": "mihomo-darwin-arm64-v1.19.31.gz",
+      "uploader": {"id": 1}
+    },
+    {
+      "id": 563462711,
+      "name": "mihomo-linux-amd64-v1.19.31.gz"
+    }
+  ]
+}
+`, 0644)
+	command := exec.Command("bash", "-c", helper+`
+set -eu
+[[ "$(release_asset_id "$TEST_METADATA" mihomo-linux-amd64-v1.19.31.gz)" == 563462711 ]]
+[[ "$(release_asset_id "$TEST_METADATA" mihomo-darwin-arm64-v1.19.31.gz)" == 563462742 ]]
+[[ -z "$(release_asset_id "$TEST_METADATA" missing.gz)" ]]
+`)
+	command.Env = append(os.Environ(), "TEST_METADATA="+metadata)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("Mihomo Release API asset parsing failed: %v\n%s", err, output)
+	}
+}
+
 func TestManagerRunsOnlyAttestedReleaseInstaller(t *testing.T) {
 	_, source, _, _ := runtime.Caller(0)
 	updater, err := os.ReadFile(filepath.Clean(filepath.Join(filepath.Dir(source), "../../novas.sh")))

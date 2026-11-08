@@ -125,6 +125,8 @@ jobs:
         run: bash ./scripts/go-test-packages.sh
 
       - name: Real Mihomo MASQUE Interoperability
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: bash ./scripts/test-mihomo-masque.sh
 
       - name: 基础 Go 构建
