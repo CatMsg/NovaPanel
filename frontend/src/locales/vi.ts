@@ -427,6 +427,10 @@ export default {
     snell: {
       psk: "PSK dùng chung",
       pskHint: "12-255 byte; tự tạo nếu để trống.",
+      authMode: "Xác thực người dùng",
+      authShared: "PSK dùng chung (tương thích Mihomo)",
+      authPerUser: "Khóa riêng từng người dùng (chỉ sing-box)",
+      perUserWarning: "Tách lưu lượng, giới hạn và lịch sử theo người dùng; chỉ có trong thuê bao sing-box JSON. Mihomo chưa hỗ trợ userkey. Nếu cần dùng cả hai, hãy tạo thêm một đầu vào PSK dùng chung ở cổng khác.",
       mode: "Chế độ lưu lượng",
       modeHint: "Client và máy chủ phải dùng cùng chế độ Snell v6.",
       modeDefault: "default (khuyên dùng)",
@@ -437,7 +441,7 @@ export default {
       modeUnsafeRawDescription: "Không mã hóa, không định hình; chỉ dùng trong mạng tin cậy hoặc đường hầm an toàn.",
       modeUnsafeWarning: "unsafe-raw truyền dữ liệu không mã hóa. Không dùng trên mạng công cộng hoặc không tin cậy.",
       perTargetPsk: "Mỗi máy chủ đích có PSK riêng; không sao chép khóa của máy chủ nguồn.",
-      clientWarning: "Dùng một PSK chung. Chưa tách lưu lượng, giới hạn và lịch sử theo người dùng; lưu lượng inbound/outbound và toàn VPS vẫn được tính.",
+      clientWarning: "Mọi client dùng chung một PSK nên không thể tách lưu lượng, giới hạn và lịch sử theo người dùng; tổng lưu lượng inbound/outbound và VPS vẫn được tính. Tương thích Mihomo.",
     },
     anytls: {
       idleInterval: "Khoảng kiểm tra phiên nhàn rỗi",

@@ -153,6 +153,10 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 	var outbounds []map[string]interface{}
 	var configs map[string]interface{}
 	var outTags []string
+	format := ""
+	if len(formats) > 0 {
+		format = strings.TrimSpace(formats[0])
+	}
 
 	err := json.Unmarshal(clientConfig, &configs)
 	if err != nil {
@@ -168,6 +172,11 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 			return nil, nil, err
 		}
 		protocol, _ := outbound["type"].(string)
+		if protocol == "snell" && format == "clash" && service.SnellUsesPerUserAuth(inData) {
+			// Mihomo's Snell adapter has no userkey field; emitting this inbound
+			// would make a multi-user listener reject every client connection.
+			continue
+		}
 		mihomoTemplate, _ := outbound["nova_mihomo"].(map[string]interface{})
 		delete(outbound, "nova_mihomo")
 		var httpVersions []int
@@ -242,9 +251,16 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 			}
 		}
 		if protocol == "snell" {
-			// Snell v6 uses a shared PSK; older saved client configs may still contain
-			// a userkey, which is unsupported and must never leak into subscriptions.
-			delete(outbound, "userkey")
+			if service.SnellUsesPerUserAuth(inData) {
+				snellConfig, _ := configs["snell"].(map[string]interface{})
+				userKey, _ := snellConfig["userkey"].(string)
+				if strings.TrimSpace(userKey) == "" {
+					return nil, nil, fmt.Errorf("Snell inbound %q is in per-user mode but the user's key is missing; save the user again", inData.Tag)
+				}
+				outbound["userkey"] = userKey
+			} else {
+				delete(outbound, "userkey")
+			}
 			if mode, ok := outbound["mode"].(string); !ok || mode == "" {
 				outbound["mode"] = "default"
 			}

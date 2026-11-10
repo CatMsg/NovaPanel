@@ -22,7 +22,12 @@ describe('inbound subscription visibility', () => {
     const inbound = createInbound('snell') as Snell
     expect(inbound.version).toBe(6)
     expect(inbound.mode).toBe('default')
+    expect(inbound.user_mode).toBe('shared')
     expect(inbound.tls_id).toBe(0)
+  })
+
+  it('preserves an explicit per-user Snell authentication mode', () => {
+    expect((createInbound('snell', { user_mode: 'per-user' }) as Snell).user_mode).toBe('per-user')
   })
 
   it('preserves a selected Snell v6 mode', () => {

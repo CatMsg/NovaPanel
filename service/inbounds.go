@@ -86,6 +86,7 @@ func (s *InboundService) GetAll() (*[]map[string]interface{}, error) {
 		var shadowtls_version uint
 		var snell_version int
 		var snell_mode string
+		var snell_user_mode string
 		ss_managed := false
 		inbData := map[string]interface{}{
 			"id":               inbound.Id,
@@ -134,6 +135,11 @@ func (s *InboundService) GetAll() (*[]map[string]interface{}, error) {
 						return nil, err
 					}
 				}
+				if raw, ok := restFields["user_mode"]; ok && len(raw) > 0 {
+					if err := json.Unmarshal(raw, &snell_user_mode); err != nil {
+						return nil, err
+					}
+				}
 			}
 			if inbound.Type == "shadowsocks" {
 				if raw, ok := restFields["managed"]; ok && len(raw) > 0 {
@@ -149,6 +155,10 @@ func (s *InboundService) GetAll() (*[]map[string]interface{}, error) {
 			}
 			inbData["version"] = snell_version
 			inbData["mode"] = snell_mode
+			if snell_user_mode == "" {
+				snell_user_mode = snellUserModeShared
+			}
+			inbData["user_mode"] = snell_user_mode
 		}
 		if s.hasUser(inbound.Type) &&
 			!(inbound.Type == "shadowtls" && shadowtls_version < 3) &&
@@ -617,18 +627,46 @@ func filterInboundCoreConfig(inbound *model.Inbound, config []byte) ([]byte, err
 		if err := json.Unmarshal(config, &options); err != nil {
 			return nil, err
 		}
-		var users []json.RawMessage
-		_ = json.Unmarshal(options["users"], &users)
-		delete(options, "users")
+		if options == nil {
+			options = make(map[string]json.RawMessage)
+		}
 		var mode string
 		_ = json.Unmarshal(options["mode"], &mode)
 		if strings.TrimSpace(mode) == "" {
 			options["mode"] = mustMarshalRaw(snellV6ModeDefault)
 		}
+		delete(options, "user_mode")
+		var users []json.RawMessage
+		if rawUsers := options["users"]; len(rawUsers) > 0 {
+			if err := json.Unmarshal(rawUsers, &users); err != nil {
+				return nil, fmt.Errorf("解析 Snell 用户列表失败: %w", err)
+			}
+		}
 		if len(users) == 0 {
 			logger.Warningf("skip snell inbound %q: no enabled users assigned", inbound.Tag)
 			return nil, nil
 		}
+		if SnellUsesPerUserAuth(inbound) {
+			var userCredentials []struct {
+				Name    string `json:"name"`
+				UserKey string `json:"userkey"`
+			}
+			if err := json.Unmarshal(options["users"], &userCredentials); err != nil {
+				return nil, fmt.Errorf("解析 Snell 用户列表失败: %w", err)
+			}
+			seenKeys := make(map[string]struct{}, len(userCredentials))
+			for _, user := range userCredentials {
+				if strings.TrimSpace(user.Name) == "" || strings.TrimSpace(user.UserKey) == "" {
+					return nil, common.NewErrorf("Snell 入站 %q 的用户密钥不完整", inbound.Tag)
+				}
+				if _, exists := seenKeys[user.UserKey]; exists {
+					return nil, common.NewErrorf("Snell 入站 %q 存在重复用户密钥", inbound.Tag)
+				}
+				seenKeys[user.UserKey] = struct{}{}
+			}
+			return json.Marshal(options)
+		}
+		delete(options, "users")
 		return json.Marshal(options)
 	}
 	skip, err := shouldSkipInboundWithoutUsers(inbound.Type, config)
@@ -678,15 +716,57 @@ func (s *InboundService) fetchUsers(db *gorm.DB, inboundType string, condition s
 	}
 
 	if inboundType == "snell" {
-		var names []string
+		type snellClient struct {
+			Id     uint   `gorm:"column:id"`
+			Name   string `gorm:"column:name"`
+			Config string `gorm:"column:config"`
+		}
+		var clients []snellClient
 		err := db.Raw(
-			fmt.Sprintf(`SELECT clients.name FROM clients WHERE enable = true AND %s`, condition), args...).Scan(&names).Error
+			fmt.Sprintf(`SELECT clients.id, clients.name, clients.config FROM clients WHERE enable = true AND %s ORDER BY clients.id`, condition), args...).Scan(&clients).Error
 		if err != nil {
 			return nil, err
 		}
-		usersJson := make([]json.RawMessage, 0, len(names))
-		for _, name := range names {
-			user, err := json.Marshal(map[string]string{"name": name})
+		usersJson := make([]json.RawMessage, 0, len(clients))
+		userMode, _ := inbound["user_mode"].(string)
+		perUser := strings.TrimSpace(userMode) == snellUserModePerUser
+		seenKeys := make(map[string]struct{}, len(clients))
+		for _, row := range clients {
+			if !perUser {
+				user, err := json.Marshal(map[string]string{"name": row.Name})
+				if err != nil {
+					return nil, err
+				}
+				usersJson = append(usersJson, user)
+				continue
+			}
+			client := model.Client{Id: row.Id, Name: row.Name, Config: json.RawMessage(row.Config)}
+			userKey, changed, err := ensureSnellClientUserKey(&client, false)
+			if err != nil {
+				return nil, err
+			}
+			if _, duplicate := seenKeys[userKey]; duplicate {
+				userKey, changed, err = ensureSnellClientUserKey(&client, true)
+				if err != nil {
+					return nil, err
+				}
+				for {
+					if _, duplicate = seenKeys[userKey]; !duplicate {
+						break
+					}
+					userKey, changed, err = ensureSnellClientUserKey(&client, true)
+					if err != nil {
+						return nil, err
+					}
+				}
+			}
+			seenKeys[userKey] = struct{}{}
+			if changed {
+				if err := db.Model(&model.Client{}).Where("id = ?", client.Id).Update("config", client.Config).Error; err != nil {
+					return nil, fmt.Errorf("保存用户 %q 的 Snell 密钥失败: %w", client.Name, err)
+				}
+			}
+			user, err := json.Marshal(map[string]string{"name": client.Name, "userkey": userKey})
 			if err != nil {
 				return nil, err
 			}

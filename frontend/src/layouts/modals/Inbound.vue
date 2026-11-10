@@ -355,6 +355,7 @@ export default {
       if (this.inbound.type == InTypes.Snell) {
         const snell = this.inbound as any
         if (!['default', 'unshaped', 'unsafe-raw'].includes(snell.mode)) return false
+        if (!['shared', 'per-user'].includes(snell.user_mode)) return false
         if (snell.version !== 6) return false
         if (typeof snell.psk !== 'string') return false
         const pskLength = new TextEncoder().encode(snell.psk).length

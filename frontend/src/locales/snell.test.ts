@@ -8,6 +8,10 @@ import zhtw from './zhtw'
 
 const locales = { en, fa, ru, vi, zhHans: zhcn, zhHant: zhtw }
 const requiredSnellKeys = [
+  'authMode',
+  'authShared',
+  'authPerUser',
+  'perUserWarning',
   'modeHint',
   'modeDefault',
   'modeDefaultDescription',

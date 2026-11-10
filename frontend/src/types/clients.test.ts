@@ -18,11 +18,15 @@ describe('MASQUE credential revocation', () => {
   })
 })
 
-describe('Snell shared-PSK compatibility', () => {
+describe('Snell per-user credentials', () => {
   afterEach(() => vi.unstubAllGlobals())
-  it('does not generate per-user authentication credentials', () => {
+  it('generates a strong userkey and rotates it with credentials', () => {
     vi.stubGlobal('window', { crypto: globalThis.crypto })
     const configs = randomConfigs('alice')
-    expect(configs).not.toHaveProperty('snell')
+    expect(configs.snell.name).toBe('alice')
+    expect(configs.snell.userkey).toHaveLength(44)
+    const oldKey = configs.snell.userkey
+    shuffleConfigs(configs, 'snell')
+    expect(configs.snell.userkey).not.toBe(oldKey)
   })
 })

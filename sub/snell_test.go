@@ -186,6 +186,37 @@ func TestSnellV6SubscriptionsPreserveAllModes(t *testing.T) {
 	}
 }
 
+func TestSnellPerUserSubscriptionAddsUserKeyAndOmitsMihomoNode(t *testing.T) {
+	inbound := &model.Inbound{
+		Type: "snell", Tag: "kr-snell",
+		Options: json.RawMessage(`{"version":6,"psk":"valid-shared-psk","mode":"default","user_mode":"per-user"}`),
+		OutJson: json.RawMessage(`{"type":"snell","tag":"kr-snell","server":"kr.example","server_port":24443,"version":6,"psk":"valid-shared-psk","mode":"default"}`),
+		Addrs:   json.RawMessage(`[]`),
+	}
+	clientConfig := json.RawMessage(`{"snell":{"name":"alice","userkey":"alice-private-userkey"}}`)
+	native, _, err := (&JsonService{}).getOutbounds(clientConfig, []*model.Inbound{inbound})
+	if err != nil {
+		t.Fatalf("build per-user sing-box Snell outbound: %v", err)
+	}
+	if got := findSnellOutbound(*native); got == nil || got["userkey"] != "alice-private-userkey" {
+		t.Fatalf("sing-box Snell outbound missing the client's own userkey: %#v", native)
+	}
+
+	compatibleInbound := *inbound
+	compatibleInbound.Type = "socks"
+	compatibleInbound.Tag = "kr-socks"
+	compatibleInbound.Options = json.RawMessage(`{}`)
+	compatibleInbound.OutJson = json.RawMessage(`{"type":"socks","tag":"kr-socks","server":"kr.example","server_port":1080}`)
+	compatibleInbound.Addrs = json.RawMessage(`[]`)
+	clash, _, err := (&JsonService{}).getOutbounds(clientConfig, []*model.Inbound{inbound, &compatibleInbound}, "clash")
+	if err != nil {
+		t.Fatalf("build Mihomo-compatible subscription: %v", err)
+	}
+	if findSnellOutbound(*clash) != nil || len(*clash) != 1 || (*clash)[0]["type"] != "socks" {
+		t.Fatalf("per-user Snell must be excluded from Mihomo while other nodes remain: %#v", clash)
+	}
+}
+
 func findSnellOutbound(outbounds []map[string]any) map[string]any {
 	for _, outbound := range outbounds {
 		if outbound["type"] == "snell" {

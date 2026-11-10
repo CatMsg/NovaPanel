@@ -100,6 +100,9 @@ export function shuffleConfigs(configs: Config, key?: string) {
         configs[k].password = RandomUtil.randomShadowsocksPassword(32)
         delete configs[k].mihomo
         break
+      case "snell":
+        configs[k].userkey = RandomUtil.randomShadowsocksPassword(32)
+        break
       case "mixed":
       case "socks":
       case "http":
@@ -202,6 +205,10 @@ export function randomConfigs(user: string): Config {
     mieru: {
       name: user,
       password: mixedPassword,
+    },
+    snell: {
+      name: user,
+      userkey: RandomUtil.randomShadowsocksPassword(32),
     },
   }
 }

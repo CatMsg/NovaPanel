@@ -427,6 +427,10 @@ export default {
     snell: {
       psk: "共用 PSK",
       pskHint: "12-255 位元組；留白時自動產生。",
+      authMode: "使用者驗證模式",
+      authShared: "共用 PSK（相容 Mihomo）",
+      authPerUser: "獨立使用者密鑰（僅 sing-box）",
+      perUserWarning: "依使用者區分流量、限速與歷史，僅提供給 sing-box JSON 訂閱。Mihomo 不支援 userkey；如需同時使用，請另建共用 PSK 入站並使用不同連接埠。",
       mode: "流量模式",
       modeHint: "用戶端與伺服器必須使用相同的 Snell v6 模式。",
       modeDefault: "default（推薦）",
@@ -437,7 +441,7 @@ export default {
       modeUnsafeRawDescription: "不加密、不整形；僅用於可信任的內網或既有安全通道。",
       modeUnsafeWarning: "unsafe-raw 會以明文傳輸流量，請勿用於公網或不可信任的網路。",
       perTargetPsk: "每台目標伺服器會獨立產生 PSK，不會複製來源伺服器密鑰。",
-      clientWarning: "使用共用 PSK。暫不區分個人流量、限速與歷史；入站/出站及 VPS 總流量仍會統計。",
+      clientWarning: "所有用戶端共用 PSK，無法區分使用者流量、限速與歷史；入站/出站與 VPS 總流量仍統計，相容 Mihomo。",
     },
     anytls: {
       idleInterval: "閒置會話檢查間隔",

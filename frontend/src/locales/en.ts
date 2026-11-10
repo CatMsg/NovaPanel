@@ -456,6 +456,10 @@ export default {
     snell: {
       psk: "Shared PSK",
       pskHint: "12-255 bytes; generated automatically when left blank.",
+      authMode: "User authentication",
+      authShared: "Shared PSK (Mihomo compatible)",
+      authPerUser: "Per-user key (sing-box only)",
+      perUserWarning: "Separates traffic, limits, and history by user. Available only in sing-box JSON subscriptions. Mihomo does not support userkey; create a separate shared-PSK inbound on another port if both clients are needed.",
       mode: "Traffic mode",
       modeHint: "The client and server must use the same Snell v6 mode.",
       modeDefault: "default (recommended)",
@@ -466,7 +470,7 @@ export default {
       modeUnsafeRawDescription: "No encryption or shaping; trusted networks or secure tunnels only.",
       modeUnsafeWarning: "unsafe-raw sends traffic unencrypted. Do not use it on public or untrusted networks.",
       perTargetPsk: "Each target server gets its own PSK. The source server key is never copied.",
-      clientWarning: "Uses one shared PSK. Per-user usage, limits, and history are not separated; inbound/outbound and VPS-wide traffic are still counted.",
+      clientWarning: "All clients share one PSK, so per-user traffic, limits, and history cannot be separated; inbound/outbound and VPS totals are still counted. Mihomo compatible.",
     },
     http: {
       serverTitle: "HTTP inbound versions",

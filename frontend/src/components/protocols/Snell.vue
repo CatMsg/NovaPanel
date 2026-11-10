@@ -1,8 +1,21 @@
 <template>
   <v-card class="snell-editor" variant="flat">
     <v-card-text>
-      <v-alert type="warning" variant="tonal" density="compact" class="mb-4">
-        {{ $t('types.snell.clientWarning') }}
+      <v-select
+        v-model="data.user_mode"
+        :items="authOptions"
+        :label="$t('types.snell.authMode')"
+        variant="outlined"
+        density="comfortable"
+        class="mb-3"
+      />
+      <v-alert
+        :type="data.user_mode === 'per-user' ? 'info' : 'warning'"
+        variant="tonal"
+        density="compact"
+        class="mb-4"
+      >
+        {{ $t(data.user_mode === 'per-user' ? 'types.snell.perUserWarning' : 'types.snell.clientWarning') }}
       </v-alert>
       <v-alert type="info" variant="tonal" density="compact" class="mb-4 mode-guide">
         <div class="mode-guide__title">{{ $t('types.snell.modeHint') }}</div>
@@ -56,6 +69,10 @@ withDefaults(defineProps<{ data: Record<string, any>; perTarget?: boolean }>(), 
 })
 
 const { t } = useI18n()
+const authOptions = computed(() => [
+  { title: t('types.snell.authShared'), value: 'shared' },
+  { title: t('types.snell.authPerUser'), value: 'per-user' },
+])
 const modeOptions = computed(() => [
   { title: t('types.snell.modeDefault'), value: 'default' },
   { title: t('types.snell.modeUnshaped'), value: 'unshaped' },

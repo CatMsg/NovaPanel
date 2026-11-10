@@ -481,6 +481,17 @@ func (s *ClientService) updateLinksWithFixedInbounds(tx *gorm.DB, clients []*mod
 	if err := normalizeMasqueClientConfigs(tx, clients); err != nil {
 		return err
 	}
+	for index, client := range clients {
+		for _, inboundID := range clientInboundIDs[index] {
+			inbound := inboundIndex[inboundID]
+			if inbound == nil || !SnellUsesPerUserAuth(inbound) {
+				continue
+			}
+			if _, _, err := ensureSnellClientUserKey(client, false); err != nil {
+				return err
+			}
+		}
+	}
 
 	for index, client := range clients {
 		clientLinks, err := decodeClientLinks(client.Links)

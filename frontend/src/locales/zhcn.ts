@@ -451,6 +451,10 @@ export default {
     snell: {
       psk: "共享 PSK",
       pskHint: "12-255 字节；留空时自动生成。",
+      authMode: "用户认证模式",
+      authShared: "共享 PSK（兼容 Mihomo）",
+      authPerUser: "独立用户密钥（仅 sing-box）",
+      perUserWarning: "按用户区分流量、限速和历史，仅提供给 sing-box JSON 订阅。Mihomo 不支持 userkey；如需同时使用，请另建共享 PSK 入站并使用不同端口。",
       mode: "流量模式",
       modeHint: "客户端与服务端必须使用相同的 Snell v6 模式。",
       modeDefault: "default（推荐）",
@@ -461,7 +465,7 @@ export default {
       modeUnsafeRawDescription: "不加密、不整形；仅用于可信内网或已有安全隧道。",
       modeUnsafeWarning: "unsafe-raw 会以明文传输流量，请勿用于公网或不可信网络。",
       perTargetPsk: "每台目标服务器会独立生成 PSK，不会复制源服务器密钥。",
-      clientWarning: "使用共享 PSK。用户级流量、限速和历史暂不区分；入站/出站及 VPS 总流量仍会统计。",
+      clientWarning: "所有客户端共用 PSK，无法区分用户流量、限速和历史；入站/出站与 VPS 总流量仍统计，兼容 Mihomo。",
     },
     anytls: {
       idleInterval: "空闲会话检查间隔",

@@ -346,10 +346,34 @@
           <v-btn icon="mdi-close" variant="text" :aria-label="$t('actions.close')" :disabled="remoteInboundRequestPending" @click="showRemoteInbound = false" />
         </header>
         <v-card-text class="fleet-remote-inbound__body">
-          <v-alert type="info" variant="tonal" density="compact">{{ $t('ui.fleet.remoteInboundSafety') }}</v-alert>
-          <v-form :disabled="remoteInboundEditingLocked"><FleetInboundDraftEditor v-model="remoteInboundDraft" /></v-form>
+          <section v-if="remoteInboundCreateAttempted" class="fleet-remote-inbound__outcome" aria-live="polite">
+            <v-alert
+              class="fleet-remote-inbound__status"
+              :type="remoteInboundStatusType"
+              variant="tonal"
+            >
+              {{ remoteInboundStatusText }}
+            </v-alert>
+            <v-progress-linear v-if="remoteInboundLoading === 'create'" indeterminate color="primary" />
+            <div v-if="remoteInboundPreviewResults.length && remoteInboundLoading !== 'create'" class="fleet-remote-inbound__results">
+              <div v-for="result in remoteInboundPreviewResults" :key="result.id" class="fleet-remote-inbound__result" :class="result.success ? 'is-success' : 'is-error'">
+                <div>
+                  <strong>{{ result.name }}</strong>
+                  <span>{{ result.tag }}</span>
+                  <small v-if="result.created">{{ $t('ui.fleet.remoteInboundCreated') }}</small>
+                  <small v-else-if="result.success">{{ $t('ui.fleet.remoteInboundTargetPreflightPassed') }}</small>
+                  <small v-else-if="result.error">{{ result.error }}</small>
+                  <small v-else-if="remoteInboundFailedChecks(result).length">{{ remoteInboundFailedChecks(result).join(' · ') }}</small>
+                </div>
+                <v-icon :icon="result.success ? 'mdi-check-circle' : 'mdi-alert-circle'" />
+              </div>
+            </div>
+          </section>
+          <template v-else>
+            <v-alert type="info" variant="tonal" density="compact">{{ $t('ui.fleet.remoteInboundSafety') }}</v-alert>
+            <v-form :disabled="remoteInboundEditingLocked"><FleetInboundDraftEditor v-model="remoteInboundDraft" /></v-form>
 
-          <section class="fleet-remote-inbound__section">
+            <section class="fleet-remote-inbound__section">
             <div class="fleet-remote-inbound__section-head">
               <div class="fleet-remote-inbound__section-icon"><v-icon icon="mdi-server-network-outline" /></div>
               <div><h3>{{ $t('ui.fleet.targetServers') }}</h3><p>{{ $t('ui.fleet.remoteInboundTargetsHint') }}</p></div>
@@ -370,9 +394,9 @@
               </button>
             </div>
             <v-alert v-if="!remoteInboundServers.length" type="warning" variant="tonal" density="compact">{{ $t('ui.fleet.remoteInboundNoServers') }}</v-alert>
-          </section>
+            </section>
 
-          <div v-if="remoteInboundTargetIds.length" class="fleet-remote-inbound__targets">
+            <div v-if="remoteInboundTargetIds.length" class="fleet-remote-inbound__targets">
             <v-progress-linear v-if="remoteInboundLoading === 'targets'" indeterminate color="primary" />
             <article v-for="id in remoteInboundTargetIds" :key="id" class="fleet-remote-target">
               <header>
@@ -438,29 +462,36 @@
                 {{ $t('ui.fleet.remoteInboundGeneratedName') }}: <strong>{{ remoteTargetTag(id) }}</strong>
               </footer>
             </article>
-          </div>
-
-          <v-alert v-if="remoteInboundPreviewResults.length" :type="remoteInboundStatusType" variant="tonal" density="compact">
-            {{ remoteInboundStatusText }}
-          </v-alert>
-          <div v-if="remoteInboundPreviewResults.length" class="fleet-remote-inbound__results">
-            <div v-for="result in remoteInboundPreviewResults" :key="result.id" class="fleet-remote-inbound__result" :class="result.success ? 'is-success' : 'is-error'">
-              <div>
-                <strong>{{ result.name }}</strong>
-                <span>{{ result.tag }}</span>
-                <small v-if="result.created">{{ $t('ui.fleet.remoteInboundCreated') }}</small>
-                <small v-else-if="result.success">{{ $t('ui.fleet.remoteInboundTargetPreflightPassed') }}</small>
-                <small v-else-if="result.error">{{ result.error }}</small>
-                <small v-else-if="remoteInboundFailedChecks(result).length">{{ remoteInboundFailedChecks(result).join(' · ') }}</small>
-              </div>
-              <v-icon :icon="result.success ? 'mdi-check-circle' : 'mdi-alert-circle'" />
             </div>
-          </div>
+
+            <v-alert
+              v-if="remoteInboundPreviewResults.length"
+              class="fleet-remote-inbound__status"
+              :type="remoteInboundStatusType"
+              variant="tonal"
+            >
+              {{ remoteInboundStatusText }}
+            </v-alert>
+            <div v-if="remoteInboundPreviewResults.length" class="fleet-remote-inbound__results">
+              <div v-for="result in remoteInboundPreviewResults" :key="result.id" class="fleet-remote-inbound__result" :class="result.success ? 'is-success' : 'is-error'">
+                <div>
+                  <strong>{{ result.name }}</strong>
+                  <span>{{ result.tag }}</span>
+                  <small v-if="result.created">{{ $t('ui.fleet.remoteInboundCreated') }}</small>
+                  <small v-else-if="result.success">{{ $t('ui.fleet.remoteInboundTargetPreflightPassed') }}</small>
+                  <small v-else-if="result.error">{{ result.error }}</small>
+                  <small v-else-if="remoteInboundFailedChecks(result).length">{{ remoteInboundFailedChecks(result).join(' · ') }}</small>
+                </div>
+                <v-icon :icon="result.success ? 'mdi-check-circle' : 'mdi-alert-circle'" />
+              </div>
+            </div>
+          </template>
         </v-card-text>
         <v-card-actions class="fleet-remote-inbound__footer">
           <v-spacer />
           <v-btn variant="text" :disabled="remoteInboundRequestPending" @click="showRemoteInbound = false">{{ $t('ui.common.close') }}</v-btn>
           <v-btn
+            v-if="!remoteInboundCreateAttempted"
             color="primary"
             :loading="remoteInboundLoading === 'preview'"
             :disabled="!canPreviewRemoteInbound || remoteInboundLoading !== '' || remoteInboundCreateAttempted"
@@ -580,7 +611,6 @@ import { i18n } from '@/locales'
 import FleetTrafficHistory from '@/components/FleetTrafficHistory.vue'
 import FleetInboundDraftEditor from '@/components/FleetInboundDraftEditor.vue'
 import { createInbound, type Inbound } from '@/types/inbounds'
-import { waitForFleetUpdate } from '@/utils/fleetUpdate'
 import {
   trafficBudgetCap as resolveTrafficBudgetCap,
   trafficBudgetPercent as resolveTrafficBudgetPercent,
@@ -1356,60 +1386,15 @@ const runBatchAction = async (action: 'update' | 'restart') => {
     const server = targets[index]
     if (server.id === 'local' && remoteFailed) break
     batchMessage.value = t('ui.fleet.runningAction', { action: actionLabel, name: server.name, current: index + 1, total: targets.length })
-    let failureMessage = ''
-
-    if (action === 'update') {
-      const baselineResponse = await HttpUtils.post('api/fleetAction', { id: server.id, action: 'update-status' })
-      if (!baselineResponse.success) {
-        failureMessage = baselineResponse.msg || t('ui.fleet.unknown')
-      } else {
-        const baseline = baselineResponse.obj ?? {}
-        const response = await HttpUtils.post('api/fleetAction', { id: server.id, action })
-        if (!response.success) {
-          failureMessage = response.msg || t('ui.fleet.unknown')
-        } else {
-          const queued = response.obj ?? {}
-          const alreadyRunning = queued.scheduled === false && Boolean(queued.running)
-          const updatedWithoutScheduling = queued.scheduled === false && !alreadyRunning
-          const changedTerminalStatus = updatedWithoutScheduling &&
-            (queued.state === 'success' || queued.state === 'failed') &&
-            queued.updatedAt && queued.updatedAt !== baseline.updatedAt
-
-          if (updatedWithoutScheduling && !changedTerminalStatus) {
-            failureMessage = queued.message || t('ui.fleet.updateNotStarted')
-          } else if (changedTerminalStatus) {
-            updateStates.value = { ...updateStates.value, [server.id]: queued }
-            if (queued.state !== 'success') failureMessage = queued.message || t('ui.fleet.failed')
-          } else {
-            updateStates.value = { ...updateStates.value, [server.id]: queued }
-            const result = await waitForFleetUpdate(
-              async () => HttpUtils.post('api/fleetAction', { id: server.id, action: 'update-status' }),
-              {
-                runId: queued.runId || undefined,
-                baselineUpdatedAt: baseline.updatedAt,
-                alreadyRunning,
-              },
-            )
-            if (result.status) updateStates.value = { ...updateStates.value, [server.id]: result.status }
-            if (result.timedOut) failureMessage = t('ui.fleet.updateTimeout')
-            else if (result.status?.state !== 'success') failureMessage = result.status?.message || t('ui.fleet.failed')
-          }
-        }
-      }
-    } else {
-      const response = await HttpUtils.post('api/fleetAction', { id: server.id, action })
-      if (!response.success) failureMessage = response.msg || t('ui.fleet.unknown')
-    }
-
-    if (failureMessage) {
+    const response = await HttpUtils.post('api/fleetAction', { id: server.id, action })
+    if (!response.success) {
       if (server.id !== 'local') {
         remoteFailed = true
         failedRemoteNames.push(server.name)
       }
       else localFailed = true
       batchMessageType.value = 'error'
-      batchMessage.value = t('ui.fleet.actionFailed', { name: server.name, action: actionLabel, message: failureMessage })
-      if (action === 'update' || server.id === 'local') break
+      batchMessage.value = t('ui.fleet.actionFailed', { name: server.name, action: actionLabel, message: response.msg })
       if (server.id !== 'local') continue
       break
     }
@@ -1447,40 +1432,18 @@ const restartServer = async (server: FleetServer) => {
 
 const updateServer = async (server: FleetServer) => {
   updateLoadingId.value = server.id
-  const baselineResponse = await HttpUtils.post('api/fleetAction', { id: server.id, action: 'update-status' })
-  if (baselineResponse.success) {
-    const baseline = baselineResponse.obj ?? {}
+  try {
     const response = await HttpUtils.post('api/fleetAction', { id: server.id, action: 'update' })
     if (response.success) {
-      const queued = response.obj ?? {}
-      updateStates.value = { ...updateStates.value, [server.id]: queued }
-      if (queued.scheduled === false && !queued.running) {
-        const changedTerminalStatus =
-          (queued.state === 'success' || queued.state === 'failed') &&
-          queued.updatedAt && queued.updatedAt !== baseline.updatedAt
-        if (!changedTerminalStatus) {
-          updateStates.value = { ...updateStates.value, [server.id]: { ...queued, state: 'failed', message: queued.message || t('ui.fleet.updateNotStarted') } }
-        }
-      } else {
-        const result = await waitForFleetUpdate(
-          async () => HttpUtils.post('api/fleetAction', { id: server.id, action: 'update-status' }),
-          {
-            runId: queued.runId || undefined,
-            baselineUpdatedAt: baseline.updatedAt,
-            alreadyRunning: queued.scheduled === false && Boolean(queued.running),
-          },
-        )
-        if (result.status) updateStates.value = { ...updateStates.value, [server.id]: result.status }
-        if (result.timedOut) updateStates.value = { ...updateStates.value, [server.id]: { state: 'failed', message: t('ui.fleet.updateTimeout') } }
-      }
-      await loadFleet(true)
+      updateStates.value = { ...updateStates.value, [server.id]: response.obj ?? { state: 'queued' } }
+      schedule(() => loadUpdateStatus(server), 1500)
+      schedule(loadFleet, 4500)
     } else {
       updateStates.value = { ...updateStates.value, [server.id]: { state: 'failed', message: response.msg } }
     }
-  } else {
-    updateStates.value = { ...updateStates.value, [server.id]: { state: 'failed', message: baselineResponse.msg } }
+  } finally {
+    updateLoadingId.value = ''
   }
-  updateLoadingId.value = ''
 }
 
 const updateStateLabel = (server: FleetServer) => {
@@ -1678,13 +1641,18 @@ onBeforeUnmount(() => {
 .fleet-target-grid button strong, .fleet-target-grid button small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fleet-target-grid button strong { font-size: .84rem; }
 .fleet-target-grid button small, .fleet-target-grid button em { color: var(--np-text-muted); font-size: .68rem; font-style: normal; }
+.fleet-remote-inbound__outcome { display: grid; gap: 12px; min-width: 0; padding: 14px; border: 1px solid var(--np-border); border-radius: 18px; background: var(--np-bg-2); }
 .fleet-remote-inbound__results { display: grid; gap: 8px; }
-.fleet-remote-inbound__result { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--np-border); border-radius: 14px; }
-.fleet-remote-inbound__result > div { display: grid; gap: 3px; min-width: 0; }
+.fleet-remote-inbound__result { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; padding: 12px 14px; border: 1px solid var(--np-border); border-radius: 14px; background: var(--np-bg-3); }
+.fleet-remote-inbound__result > div { display: grid; flex: 1 1 0%; gap: 3px; min-width: 0; }
+.fleet-remote-inbound__result strong { overflow-wrap: anywhere; }
 .fleet-remote-inbound__result span { color: var(--np-text-muted); font-size: .78rem; overflow-wrap: anywhere; }
-.fleet-remote-inbound__result small { color: var(--np-text-muted); font-size: .7rem; overflow-wrap: anywhere; }
-.fleet-remote-inbound__result.is-success { color: rgb(var(--v-theme-success)); background: rgba(34, 197, 94, .06); }
-.fleet-remote-inbound__result.is-error { color: rgb(var(--v-theme-error)); background: rgba(239, 68, 68, .06); }
+.fleet-remote-inbound__result small { color: var(--np-text-muted); font-size: .75rem; line-height: 1.4; overflow-wrap: anywhere; }
+.fleet-remote-inbound__result :deep(.v-icon) { flex: 0 0 auto; font-size: 1.4rem; }
+.fleet-remote-inbound__result.is-success { color: rgb(var(--v-theme-success)); background: var(--np-bg-3); }
+.fleet-remote-inbound__result.is-error { color: rgb(var(--v-theme-error)); background: var(--np-bg-3); }
+.fleet-remote-inbound__status { align-self: start; width: 100%; min-width: 0; min-height: 48px; }
+.fleet-remote-inbound__status :deep(.v-alert__content) { flex: 1 1 0%; min-width: 0; white-space: normal; overflow-wrap: anywhere; word-break: break-word; line-height: 1.45; }
 .fleet-remote-inbound__footer { min-height: 64px; padding: 10px 20px; border-top: 1px solid var(--np-border); background: var(--np-surface-muted); }
 .fleet-remote-inbound { overflow: hidden; }
 .fleet-remote-inbound__body { display: grid; gap: 16px; max-height: min(72vh, 820px); padding: 18px 24px; }
@@ -1709,7 +1677,11 @@ onBeforeUnmount(() => {
   .fleet-hero__meta { flex-wrap: wrap; }
   .fleet-config-row { grid-template-columns: 1fr; padding: 14px 0; border-bottom: 1px solid var(--np-border); }
   .fleet-remote-inbound__header { padding: 18px 16px 14px; }
-  .fleet-remote-inbound__body { padding: 16px 14px; }
+  .fleet-remote-inbound__body { box-sizing: border-box; width: 100%; padding: 16px 14px; }
+  .fleet-remote-inbound__outcome { box-sizing: border-box; width: 100%; padding: 12px; background: var(--np-bg-2); }
+  .fleet-remote-inbound__status { min-height: 48px; }
+  .fleet-remote-inbound__result { align-items: flex-start; padding: 11px 12px; background: var(--np-bg-3); }
+  .fleet-remote-inbound__result :deep(.v-icon) { margin-top: 2px; }
   .fleet-remote-target__settings { grid-template-columns: 1fr; }
   .fleet-remote-target__certificate { grid-column: 1; }
   .fleet-target-grid { grid-template-columns: 1fr; }

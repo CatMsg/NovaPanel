@@ -24,6 +24,9 @@ func TestPrepareSnellInboundDefaultsAndValidatesManagedOptions(t *testing.T) {
 		if options["version"] != float64(6) || options["mode"] != snellV6ModeDefault {
 			t.Fatalf("defaults = version %v, mode %v", options["version"], options["mode"])
 		}
+		if options["user_mode"] != snellUserModeShared {
+			t.Fatalf("default user authentication mode = %v", options["user_mode"])
+		}
 		psk, _ := options["psk"].(string)
 		if len(psk) < 32 || len(psk) > 255 {
 			t.Fatalf("generated PSK length = %d", len(psk))
@@ -57,6 +60,19 @@ func TestPrepareSnellInboundDefaultsAndValidatesManagedOptions(t *testing.T) {
 		_ = json.Unmarshal(inbound.Options, &options)
 		if options["psk"] != "existing-shared-psk-123" {
 			t.Fatalf("edit unexpectedly rotated PSK: %v", options["psk"])
+		}
+	})
+
+	t.Run("preserves per-user authentication when an older editor omits the field", func(t *testing.T) {
+		previous := &model.Inbound{Type: "snell", Options: json.RawMessage(`{"version":6,"psk":"existing-shared-psk-123","user_mode":"per-user"}`)}
+		inbound := model.Inbound{Type: "snell", Options: json.RawMessage(`{"version":6,"psk":"existing-shared-psk-123"}`)}
+		if err := prepareSnellInbound(&inbound, previous); err != nil {
+			t.Fatal(err)
+		}
+		var options map[string]any
+		_ = json.Unmarshal(inbound.Options, &options)
+		if options["user_mode"] != snellUserModePerUser {
+			t.Fatalf("edit changed user authentication mode to %v", options["user_mode"])
 		}
 	})
 
@@ -94,6 +110,12 @@ func TestPrepareSnellInboundDefaultsAndValidatesManagedOptions(t *testing.T) {
 			}
 		})
 	}
+	t.Run("rejects unknown user authentication mode", func(t *testing.T) {
+		inbound := model.Inbound{Type: "snell", Options: json.RawMessage(`{"version":6,"psk":"valid-shared-psk","user_mode":"unexpected"}`)}
+		if err := prepareSnellInbound(&inbound, nil); err == nil || !strings.Contains(err.Error(), "不支持 Snell 用户认证模式") {
+			t.Fatalf("invalid user mode error = %v", err)
+		}
+	})
 }
 
 func TestGetAllDefaultsLegacySnellMode(t *testing.T) {
@@ -118,6 +140,9 @@ func TestGetAllDefaultsLegacySnellMode(t *testing.T) {
 	for _, got := range *inbounds {
 		if got["mode"] != snellV6ModeDefault {
 			t.Fatalf("legacy Snell inbound mode = %+v; want %q", *inbounds, snellV6ModeDefault)
+		}
+		if got["user_mode"] != snellUserModeShared {
+			t.Fatalf("legacy Snell user mode = %+v; want %q", *inbounds, snellUserModeShared)
 		}
 	}
 	byID, err := (&InboundService{}).Get(fmt.Sprint(inbound.Id))
@@ -161,6 +186,45 @@ func TestUpdateClientsOnSnellAssignmentDoesNotCreatePerUserKeys(t *testing.T) {
 	}
 	if _, exists := config["snell"]; exists || config["vless"]["uuid"] != "preserve" {
 		t.Fatalf("shared-PSK Snell assignment config = %#v", config)
+	}
+	if strings.Contains(string(client.Config), "server-only-secret") {
+		t.Fatal("server PSK leaked into the user's per-protocol client config")
+	}
+}
+
+func TestUpdateClientsOnPerUserSnellAssignmentCreatesUserKey(t *testing.T) {
+	if err := database.InitDB(filepath.Join(t.TempDir(), "snell-per-user-assignment.db")); err != nil {
+		t.Fatal(err)
+	}
+	db := database.GetDB()
+	inbound := model.Inbound{
+		Type:    "snell",
+		Tag:     "server-snell-per-user",
+		Options: json.RawMessage(`{"version":6,"psk":"server-only-secret","user_mode":"per-user"}`),
+		Addrs:   json.RawMessage(`[]`),
+	}
+	if err := db.Create(&inbound).Error; err != nil {
+		t.Fatal(err)
+	}
+	client := model.Client{
+		Enable: true, Name: "alice", Config: json.RawMessage(`{"vless":{"uuid":"preserve"}}`),
+		Inbounds: json.RawMessage(`[]`), Links: json.RawMessage(`[]`),
+	}
+	if err := db.Create(&client).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := (&ClientService{}).UpdateClientsOnInboundAdd(db, fmt.Sprint(client.Id), inbound.Id, "snell.example"); err != nil {
+		t.Fatalf("assign local user to per-user Snell inbound: %v", err)
+	}
+	if err := db.First(&client, client.Id).Error; err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]map[string]string
+	if err := json.Unmarshal(client.Config, &config); err != nil {
+		t.Fatal(err)
+	}
+	if key := config["snell"]["userkey"]; key == "" || config["vless"]["uuid"] != "preserve" {
+		t.Fatalf("per-user assignment config = %#v", config)
 	}
 	if strings.Contains(string(client.Config), "server-only-secret") {
 		t.Fatal("server PSK leaked into the user's per-protocol client config")
@@ -233,6 +297,72 @@ func TestAddSnellUsersFiltersDisabledClients(t *testing.T) {
 		if got != mode {
 			t.Fatalf("runtime mode = %q, want %q", got, mode)
 		}
+	}
+}
+
+func TestAddSnellPerUserAuthPersistsUniqueKeysAndKeepsEnabledUsers(t *testing.T) {
+	if err := database.InitDB(filepath.Join(t.TempDir(), "snell-per-user.db")); err != nil {
+		t.Fatal(err)
+	}
+	db := database.GetDB()
+	inbound := model.Inbound{Type: "snell", Tag: "snell-per-user", Options: json.RawMessage(`{"version":6,"psk":"server-shared-psk","user_mode":"per-user"}`)}
+	if err := db.Create(&inbound).Error; err != nil {
+		t.Fatal(err)
+	}
+	linkedIDs, _ := json.Marshal([]uint{inbound.Id})
+	for _, client := range []model.Client{
+		{Enable: true, Name: "alice", Config: json.RawMessage(`{"snell":{"userkey":"duplicate-key"}}`), Inbounds: linkedIDs},
+		{Enable: true, Name: "bob", Config: json.RawMessage(`{"snell":{"userkey":"duplicate-key"}}`), Inbounds: linkedIDs},
+		{Enable: false, Name: "disabled", Config: json.RawMessage(`{}`), Inbounds: linkedIDs},
+	} {
+		if err := db.Create(&client).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	inboundJSON := []byte(`{"type":"snell","tag":"snell-per-user","version":6,"psk":"server-shared-psk","user_mode":"per-user"}`)
+	configured, err := (&InboundService{}).addUsers(db, inboundJSON, inbound.Id, "snell")
+	if err != nil {
+		t.Fatalf("build per-user Snell config: %v", err)
+	}
+	var config struct {
+		Users []struct {
+			Name    string `json:"name"`
+			UserKey string `json:"userkey"`
+		} `json:"users"`
+	}
+	if err := json.Unmarshal(configured, &config); err != nil {
+		t.Fatal(err)
+	}
+	if len(config.Users) != 2 || config.Users[0].Name != "alice" || config.Users[1].Name != "bob" {
+		t.Fatalf("per-user Snell assignments = %+v", config.Users)
+	}
+	if config.Users[0].UserKey == "" || config.Users[1].UserKey == "" || config.Users[0].UserKey == config.Users[1].UserKey {
+		t.Fatalf("Snell user keys must be populated and unique: %+v", config.Users)
+	}
+	filtered, err := filterInboundCoreConfig(&inbound, configured)
+	if err != nil {
+		t.Fatalf("filter per-user runtime config: %v", err)
+	}
+	var runtime map[string]json.RawMessage
+	if err := json.Unmarshal(filtered, &runtime); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := runtime["users"]; !ok {
+		t.Fatalf("per-user authentication missing from runtime config: %s", filtered)
+	}
+	if _, ok := runtime["user_mode"]; ok {
+		t.Fatalf("panel-only user_mode leaked to sing-box runtime: %s", filtered)
+	}
+	var alice model.Client
+	if err := db.Where("name = ?", "alice").First(&alice).Error; err != nil {
+		t.Fatal(err)
+	}
+	var aliceConfig map[string]map[string]string
+	if err := json.Unmarshal(alice.Config, &aliceConfig); err != nil {
+		t.Fatal(err)
+	}
+	if aliceConfig["snell"]["userkey"] != config.Users[0].UserKey {
+		t.Fatalf("user key was not persisted to the matching client: %s", alice.Config)
 	}
 }
 
