@@ -21,9 +21,9 @@ func TestSnellV6SharedPSKSubscriptions(t *testing.T) {
 	inbound := model.Inbound{
 		Type:    "snell",
 		Tag:     "la-snell",
-		Options: json.RawMessage(`{"listen_port":24443,"version":6,"psk":"shared-server-psk-123456","mode":"unshaped"}`),
+		Options: json.RawMessage(`{"listen_port":24443,"version":6,"psk":"shared-server-psk-123456","mode":"default"}`),
 		Addrs:   json.RawMessage(`[]`),
-		OutJson: json.RawMessage(`{"type":"snell","tag":"la-snell","server":"la.example","server_port":24443,"version":6,"psk":"shared-server-psk-123456","mode":"unshaped"}`),
+		OutJson: json.RawMessage(`{"type":"snell","tag":"la-snell","server":"la.example","server_port":24443,"version":6,"psk":"shared-server-psk-123456","mode":"default"}`),
 	}
 	if err := db.Create(&inbound).Error; err != nil {
 		t.Fatal(err)
@@ -56,7 +56,7 @@ func TestSnellV6SharedPSKSubscriptions(t *testing.T) {
 	if singboxSnell == nil {
 		t.Fatalf("Snell outbound missing from sing-box subscription: %#v", singbox.Outbounds)
 	}
-	assertSnellSubscriptionFields(t, singboxSnell)
+	assertSnellSubscriptionFields(t, singboxSnell, "default")
 	if _, exists := singboxSnell["userkey"]; exists || strings.Contains(*native, "legacy-userkey-must-not-leak") {
 		t.Fatalf("legacy per-user key leaked into sing-box subscription: %#v", singboxSnell)
 	}
@@ -69,13 +69,13 @@ func TestSnellV6SharedPSKSubscriptions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Snell-only Mihomo-compatible subscription failed: %v", err)
 	}
-	if !strings.Contains(*clash, "type: snell") || !strings.Contains(*clash, "psk: shared-server-psk-123456") || !strings.Contains(*clash, "udp: true") || strings.Contains(*clash, "userkey") {
+	if !strings.Contains(*clash, "type: snell") || !strings.Contains(*clash, "psk: shared-server-psk-123456") || !strings.Contains(*clash, "mode: default") || !strings.Contains(*clash, "udp: true") || strings.Contains(*clash, "userkey") {
 		t.Fatalf("Clash subscription did not export shared-PSK Snell cleanly: %s", *clash)
 	}
 	clashOutbounds := []map[string]interface{}{
 		{
 			"type": "snell", "tag": "la-snell", "server": "la.example", "server_port": 24443,
-			"version": 6, "psk": "shared-server-psk-123456", "mode": "unshaped",
+			"version": 6, "psk": "shared-server-psk-123456", "mode": "default",
 		},
 		{
 			"type": "socks", "tag": "la-socks", "server": "socks.example", "server_port": 1080,
@@ -101,7 +101,7 @@ func TestSnellV6SharedPSKSubscriptions(t *testing.T) {
 		t.Fatalf("mixed Clash profile should include Snell and SOCKS: %#v", profile.Proxies)
 	}
 	for _, proxy := range profile.Proxies {
-		if proxy["type"] == "snell" && (proxy["psk"] != "shared-server-psk-123456" || fmt.Sprint(proxy["version"]) != "6" || proxy["mode"] != "unshaped" || proxy["udp"] != true || proxy["userkey"] != nil) {
+		if proxy["type"] == "snell" && (proxy["psk"] != "shared-server-psk-123456" || fmt.Sprint(proxy["version"]) != "6" || proxy["mode"] != "default" || proxy["udp"] != true || proxy["userkey"] != nil) {
 			t.Fatalf("invalid shared-PSK Snell fields in Mihomo subscription: %#v", proxy)
 		}
 	}
@@ -119,8 +119,8 @@ func TestSnellV6SharedPSKSubscriptions(t *testing.T) {
 		t.Fatalf("unsafe-raw sing-box subscription failed: %v", err)
 	}
 	unsafeRaw := findSnellOutbound(*unsafeRawOutbounds)
-	if unsafeRaw == nil || unsafeRaw["mode"] != "unshaped" {
-		t.Fatalf("Snell subscription did not normalize the legacy mode: %#v", unsafeRawOutbounds)
+	if unsafeRaw == nil || unsafeRaw["mode"] != "unsafe-raw" {
+		t.Fatalf("Snell subscription did not preserve the selected mode: %#v", unsafeRawOutbounds)
 	}
 
 	if err := db.Model(&inbound).Update("exclude_from_sub", true).Error; err != nil {
@@ -135,12 +135,12 @@ func TestSnellV6SharedPSKSubscriptions(t *testing.T) {
 	}
 }
 
-func assertSnellSubscriptionFields(t *testing.T, outbound map[string]any) {
+func assertSnellSubscriptionFields(t *testing.T, outbound map[string]any, mode string) {
 	t.Helper()
 	want := map[string]any{
 		"type": "snell",
 		"psk":  "shared-server-psk-123456",
-		"mode": "unshaped",
+		"mode": mode,
 	}
 	for key, value := range want {
 		if outbound[key] != value {
@@ -149,6 +149,40 @@ func assertSnellSubscriptionFields(t *testing.T, outbound map[string]any) {
 	}
 	if fmt.Sprint(outbound["version"]) != "6" {
 		t.Fatalf("Snell subscription version = %v, want 6; outbound: %#v", outbound["version"], outbound)
+	}
+}
+
+func TestSnellV6SubscriptionsPreserveAllModes(t *testing.T) {
+	for _, mode := range []string{"default", "unshaped", "unsafe-raw"} {
+		t.Run(mode, func(t *testing.T) {
+			inbound := &model.Inbound{
+				Type: "snell", Tag: "snell-" + mode,
+				Options: json.RawMessage(`{"version":6,"psk":"valid-shared-psk","mode":"` + mode + `"}`),
+				OutJson: json.RawMessage(`{"type":"snell","tag":"snell-` + mode + `","server":"snell.example","server_port":24443,"version":6,"psk":"valid-shared-psk","mode":"` + mode + `"}`),
+				Addrs:   json.RawMessage(`[]`),
+			}
+			outbounds, _, err := (&JsonService{}).getOutbounds(json.RawMessage(`{}`), []*model.Inbound{inbound})
+			if err != nil {
+				t.Fatalf("build sing-box outbound: %v", err)
+			}
+			if got := findSnellOutbound(*outbounds); got == nil || got["mode"] != mode {
+				t.Fatalf("sing-box Snell mode = %#v; want %q", got, mode)
+			}
+
+			clashText, err := (&ClashService{}).ConvertToClashMeta(outbounds, basicClashConfig)
+			if err != nil {
+				t.Fatalf("build Mihomo outbound: %v", err)
+			}
+			var profile struct {
+				Proxies []map[string]any `yaml:"proxies"`
+			}
+			if err := yaml.Unmarshal([]byte(clashText), &profile); err != nil {
+				t.Fatal(err)
+			}
+			if len(profile.Proxies) == 0 || profile.Proxies[0]["mode"] != mode {
+				t.Fatalf("Mihomo Snell mode = %#v; want %q", profile.Proxies, mode)
+			}
+		})
 	}
 }
 

@@ -406,48 +406,56 @@ func TestFleetInboundTargetSecretsAreGeneratedIndependently(t *testing.T) {
 }
 
 func TestFleetInboundSnellPSKsAreTargetSpecific(t *testing.T) {
-	draft := json.RawMessage(`{"type":"snell","version":6,"psk":"cn2-source-psk-must-not-leak","mode":"unshaped"}`)
-	request, err := buildFleetInboundRemotePayload(draft, "la.example", "la-snell", 24443, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(request.InboundDraft), "cn2-source-psk-must-not-leak") {
-		t.Fatalf("source PSK leaked into target request: %s", request.InboundDraft)
-	}
-	var payload struct {
-		PSK     string `json:"psk"`
-		Version int    `json:"version"`
-		Mode    string `json:"mode"`
-	}
-	if err := json.Unmarshal(request.InboundDraft, &payload); err != nil {
-		t.Fatal(err)
-	}
-	if payload.PSK != snellGeneratePSKMark || payload.Version != 6 || payload.Mode != snellV6ModeUnshaped {
-		t.Fatalf("remote Snell draft fields = %+v", payload)
-	}
+	for _, mode := range []string{snellV6ModeDefault, snellV6ModeUnshaped, snellV6ModeUnsafeRaw} {
+		t.Run(mode, func(t *testing.T) {
+			draft := json.RawMessage(`{"type":"snell","version":6,"psk":"cn2-source-psk-must-not-leak","mode":"` + mode + `"}`)
+			request, err := buildFleetInboundRemotePayload(draft, "la.example", "la-snell", 24443, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(request.InboundDraft), "cn2-source-psk-must-not-leak") {
+				t.Fatalf("source PSK leaked into target request: %s", request.InboundDraft)
+			}
+			var payload struct {
+				PSK     string `json:"psk"`
+				Version int    `json:"version"`
+				Mode    string `json:"mode"`
+			}
+			if err := json.Unmarshal(request.InboundDraft, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.PSK != snellGeneratePSKMark || payload.Version != 6 || payload.Mode != mode {
+				t.Fatalf("remote Snell draft fields = %+v", payload)
+			}
 
-	keys := make(map[string]struct{})
-	for _, target := range []string{"la.example", "tk.example", "kr.example"} {
-		var inbound model.Inbound
-		if err := inbound.UnmarshalJSON(request.InboundDraft); err != nil {
-			t.Fatal(err)
-		}
-		if err := prepareFleetInboundTargetSecrets(&inbound); err != nil {
-			t.Fatalf("prepare target %s Snell key: %v", target, err)
-		}
-		var options struct {
-			PSK string `json:"psk"`
-		}
-		if err := json.Unmarshal(inbound.Options, &options); err != nil {
-			t.Fatal(err)
-		}
-		if len([]byte(options.PSK)) < 12 || len([]byte(options.PSK)) > 255 || options.PSK == snellGeneratePSKMark {
-			t.Fatalf("target %s has invalid PSK %q", target, options.PSK)
-		}
-		if _, duplicate := keys[options.PSK]; duplicate {
-			t.Fatalf("two targets unexpectedly share Snell PSK %q", options.PSK)
-		}
-		keys[options.PSK] = struct{}{}
+			keys := make(map[string]struct{})
+			for _, target := range []string{"la.example", "tk.example", "kr.example"} {
+				var inbound model.Inbound
+				if err := inbound.UnmarshalJSON(request.InboundDraft); err != nil {
+					t.Fatal(err)
+				}
+				if err := prepareFleetInboundTargetSecrets(&inbound); err != nil {
+					t.Fatalf("prepare target %s Snell key: %v", target, err)
+				}
+				var options struct {
+					PSK  string `json:"psk"`
+					Mode string `json:"mode"`
+				}
+				if err := json.Unmarshal(inbound.Options, &options); err != nil {
+					t.Fatal(err)
+				}
+				if len([]byte(options.PSK)) < 12 || len([]byte(options.PSK)) > 255 || options.PSK == snellGeneratePSKMark {
+					t.Fatalf("target %s has invalid PSK %q", target, options.PSK)
+				}
+				if options.Mode != mode {
+					t.Fatalf("target %s mode = %q, want %q", target, options.Mode, mode)
+				}
+				if _, duplicate := keys[options.PSK]; duplicate {
+					t.Fatalf("two targets unexpectedly share Snell PSK %q", options.PSK)
+				}
+				keys[options.PSK] = struct{}{}
+			}
+		})
 	}
 }
 

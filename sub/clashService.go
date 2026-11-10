@@ -240,7 +240,11 @@ func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, b
 			proxy["version"] = obMap["version"]
 			proxy["psk"] = obMap["psk"]
 			proxy["udp"] = true
-			proxy["mode"] = "unshaped"
+			if mode, ok := obMap["mode"].(string); ok && mode != "" {
+				proxy["mode"] = mode
+			} else {
+				proxy["mode"] = "default"
+			}
 		case "vmess", "vless", "tuic":
 			proxy["uuid"] = obMap["uuid"]
 			if t == "vmess" {

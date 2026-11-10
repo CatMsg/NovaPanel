@@ -12,7 +12,7 @@ import (
 )
 
 func TestPrepareSnellInboundDefaultsAndValidatesManagedOptions(t *testing.T) {
-	t.Run("generates a strong PSK and defaults to Mihomo-compatible encrypted mode", func(t *testing.T) {
+	t.Run("generates a strong PSK and defaults to default mode", func(t *testing.T) {
 		inbound := model.Inbound{Type: "snell", Tag: "snell-test", Options: json.RawMessage(`{"listen_port":24443}`)}
 		if err := prepareSnellInbound(&inbound, nil); err != nil {
 			t.Fatal(err)
@@ -21,7 +21,7 @@ func TestPrepareSnellInboundDefaultsAndValidatesManagedOptions(t *testing.T) {
 		if err := json.Unmarshal(inbound.Options, &options); err != nil {
 			t.Fatal(err)
 		}
-		if options["version"] != float64(6) || options["mode"] != snellV6ModeUnshaped {
+		if options["version"] != float64(6) || options["mode"] != snellV6ModeDefault {
 			t.Fatalf("defaults = version %v, mode %v", options["version"], options["mode"])
 		}
 		psk, _ := options["psk"].(string)
@@ -79,19 +79,61 @@ func TestPrepareSnellInboundDefaultsAndValidatesManagedOptions(t *testing.T) {
 			}
 		})
 	}
-	t.Run("normalizes legacy modes to encrypted Mihomo-compatible mode", func(t *testing.T) {
-		inbound := model.Inbound{Type: "snell", Options: json.RawMessage(`{"version":6,"psk":"valid-shared-psk","mode":"unsafe-raw"}`)}
-		if err := prepareSnellInbound(&inbound, nil); err != nil {
-			t.Fatal(err)
+	for _, mode := range []string{snellV6ModeDefault, snellV6ModeUnshaped, snellV6ModeUnsafeRaw} {
+		t.Run("preserves selected mode "+mode, func(t *testing.T) {
+			inbound := model.Inbound{Type: "snell", Options: json.RawMessage(`{"version":6,"psk":"valid-shared-psk","mode":"` + mode + `"}`)}
+			if err := prepareSnellInbound(&inbound, nil); err != nil {
+				t.Fatal(err)
+			}
+			var options map[string]any
+			if err := json.Unmarshal(inbound.Options, &options); err != nil {
+				t.Fatal(err)
+			}
+			if options["mode"] != mode {
+				t.Fatalf("mode = %v, want %s", options["mode"], mode)
+			}
+		})
+	}
+}
+
+func TestGetAllDefaultsLegacySnellMode(t *testing.T) {
+	if err := database.InitDB(filepath.Join(t.TempDir(), "snell-legacy-mode.db")); err != nil {
+		t.Fatal(err)
+	}
+	inbound := model.Inbound{Type: "snell", Tag: "legacy-snell", Options: json.RawMessage(`{"version":6,"psk":"legacy-shared-psk"}`)}
+	if err := database.GetDB().Create(&inbound).Error; err != nil {
+		t.Fatal(err)
+	}
+	legacyWithoutOptions := model.Inbound{Type: "snell", Tag: "legacy-snell-empty-options"}
+	if err := database.GetDB().Create(&legacyWithoutOptions).Error; err != nil {
+		t.Fatal(err)
+	}
+	inbounds, err := (&InboundService{}).GetAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(*inbounds) != 2 {
+		t.Fatalf("legacy Snell inbound count = %d; want 2", len(*inbounds))
+	}
+	for _, got := range *inbounds {
+		if got["mode"] != snellV6ModeDefault {
+			t.Fatalf("legacy Snell inbound mode = %+v; want %q", *inbounds, snellV6ModeDefault)
 		}
-		var options map[string]any
-		if err := json.Unmarshal(inbound.Options, &options); err != nil {
-			t.Fatal(err)
-		}
-		if options["mode"] != snellV6ModeUnshaped {
-			t.Fatalf("mode = %v, want %s", options["mode"], snellV6ModeUnshaped)
-		}
-	})
+	}
+	byID, err := (&InboundService{}).Get(fmt.Sprint(inbound.Id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(*byID) != 1 || (*byID)[0]["mode"] != snellV6ModeDefault {
+		t.Fatalf("legacy Snell inbound edit mode = %+v; want %q", *byID, snellV6ModeDefault)
+	}
+	byID, err = (&InboundService{}).Get(fmt.Sprint(legacyWithoutOptions.Id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(*byID) != 1 || (*byID)[0]["mode"] != snellV6ModeDefault {
+		t.Fatalf("legacy Snell inbound without options edit mode = %+v; want %q", *byID, snellV6ModeDefault)
+	}
 }
 
 func TestUpdateClientsOnSnellAssignmentDoesNotCreatePerUserKeys(t *testing.T) {
@@ -169,6 +211,28 @@ func TestAddSnellUsersFiltersDisabledClients(t *testing.T) {
 	}
 	if _, exists := coreConfig["users"]; exists {
 		t.Fatalf("shared Snell core config unexpectedly contains user authentication: %s", filtered)
+	}
+	var runtimeMode string
+	_ = json.Unmarshal(coreConfig["mode"], &runtimeMode)
+	if runtimeMode != snellV6ModeDefault {
+		t.Fatalf("legacy Snell runtime mode = %q, want %q", runtimeMode, snellV6ModeDefault)
+	}
+
+	for _, mode := range []string{snellV6ModeDefault, snellV6ModeUnshaped, snellV6ModeUnsafeRaw} {
+		config := []byte(`{"type":"snell","version":6,"mode":"` + mode + `","users":[{"name":"enabled"}]}`)
+		filtered, err := filterInboundCoreConfig(&inbound, config)
+		if err != nil {
+			t.Fatalf("filter runtime config in %s mode: %v", mode, err)
+		}
+		var selected map[string]json.RawMessage
+		if err := json.Unmarshal(filtered, &selected); err != nil {
+			t.Fatal(err)
+		}
+		var got string
+		_ = json.Unmarshal(selected["mode"], &got)
+		if got != mode {
+			t.Fatalf("runtime mode = %q, want %q", got, mode)
+		}
 	}
 }
 

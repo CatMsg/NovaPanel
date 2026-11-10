@@ -184,7 +184,7 @@ export interface Masque extends InboundBasics {
 export interface Snell extends InboundBasics {
   version: 6
   psk: string
-  mode: 'unshaped'
+  mode: 'default' | 'unshaped' | 'unsafe-raw'
 }
 export interface Tun extends InboundBasics {
   interface_name?: string
@@ -290,7 +290,7 @@ const defaultValues: Record<InType, Inbound> = {
     mihomo_compatible: true,
     mtu: 1280,
   },
-  snell: <Snell>{ type: InTypes.Snell, tls_id: 0, version: 6, psk: '', mode: 'unshaped' },
+  snell: <Snell>{ type: InTypes.Snell, tls_id: 0, version: 6, psk: '', mode: 'default' },
   tun: <Tun>{ type: InTypes.Tun, mtu: 9000, udp_timeout: '5m', auto_route: false },
   redirect: <Redirect>{ type: InTypes.Redirect },
   tproxy: <TProxy>{ type: InTypes.TProxy },

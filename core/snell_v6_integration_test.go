@@ -96,20 +96,20 @@ func TestMihomoSnellV6SharedPSKLoopback(t *testing.T) {
 	if binary == "" {
 		t.Skip("Mihomo integration binary not configured")
 	}
-	t.Run("unshaped", func(t *testing.T) {
-		mode := "unshaped"
-		initHTTPProxyTestDatabase(t)
-		echo := startHTTPProxyEchoEndpoints(t)
-		serverAddress := reserveLoopbackPort(t)
-		serverPort := portFromAddress(t, serverAddress)
-		serverRuntime := startHTTPProxyTestCore(t, snellV6ServerConfig(serverPort, mode, nil))
-		server := serverRuntime.GetInstance()
-		proxyAddress := reserveLoopbackPort(t)
-		proxyPort := portFromAddress(t, proxyAddress)
+	for _, mode := range []string{"default", "unshaped", "unsafe-raw"} {
+		t.Run(mode, func(t *testing.T) {
+			initHTTPProxyTestDatabase(t)
+			echo := startHTTPProxyEchoEndpoints(t)
+			serverAddress := reserveLoopbackPort(t)
+			serverPort := portFromAddress(t, serverAddress)
+			serverRuntime := startHTTPProxyTestCore(t, snellV6ServerConfig(serverPort, mode, nil))
+			server := serverRuntime.GetInstance()
+			proxyAddress := reserveLoopbackPort(t)
+			proxyPort := portFromAddress(t, proxyAddress)
 
-		temporary := t.TempDir()
-		configPath := filepath.Join(temporary, "mihomo.yaml")
-		config := fmt.Sprintf(`socks-port: %d
+			temporary := t.TempDir()
+			configPath := filepath.Join(temporary, "mihomo.yaml")
+			config := fmt.Sprintf(`socks-port: %d
 bind-address: 127.0.0.1
 allow-lan: false
 mode: rule
@@ -126,112 +126,113 @@ rules:
   - IP-CIDR,127.0.0.1/32,snell,no-resolve
   - MATCH,snell
 `, proxyPort, serverPort, snellV6TestPSK, mode)
-		if err := os.WriteFile(configPath, []byte(config), 0600); err != nil {
-			t.Fatal(err)
-		}
-		cmd := exec.Command(binary, "-d", filepath.Join(temporary, "home"), "-f", configPath)
-		var processOutput bytes.Buffer
-		cmd.Stdout, cmd.Stderr = &processOutput, &processOutput
-		if err := cmd.Start(); err != nil {
-			t.Fatalf("start Mihomo Alpha: %v", err)
-		}
-		t.Cleanup(func() {
-			if cmd.Process != nil {
-				_ = cmd.Process.Kill()
-			}
-			_ = cmd.Wait()
-		})
-
-		var proxyConn net.Conn
-		waitHTTPProxyCondition(t, 10*time.Second, func() bool {
-			if cmd.ProcessState != nil {
-				return false
-			}
-			conn, err := net.DialTimeout("tcp", proxyAddress, 150*time.Millisecond)
-			if err != nil {
-				return false
-			}
-			proxyConn = conn
-			return true
-		})
-		time.Sleep(200 * time.Millisecond)
-		defer proxyConn.Close()
-		_ = proxyConn.SetDeadline(time.Now().Add(8 * time.Second))
-		if _, err := proxyConn.Write([]byte{5, 1, 0}); err != nil {
-			t.Fatalf("send SOCKS5 greeting to Mihomo: %v", err)
-		}
-		greeting := make([]byte, 2)
-		if _, err := io.ReadFull(proxyConn, greeting); err != nil || !bytes.Equal(greeting, []byte{5, 0}) {
-			t.Fatalf("Mihomo SOCKS5 greeting = %v, err=%v", greeting, err)
-		}
-		host, portText, err := net.SplitHostPort(echo.tcpAddress)
-		if err != nil {
-			t.Fatal(err)
-		}
-		ip := net.ParseIP(host).To4()
-		port, err := strconv.Atoi(portText)
-		if err != nil || ip == nil {
-			t.Fatalf("parse echo address %q: ip=%v port=%q err=%v", echo.tcpAddress, ip, portText, err)
-		}
-		request := []byte{5, 1, 0, 1, ip[0], ip[1], ip[2], ip[3], byte(port >> 8), byte(port)}
-		if _, err := proxyConn.Write(request); err != nil {
-			t.Fatalf("send SOCKS5 CONNECT to Mihomo: %v", err)
-		}
-		responseHeader := make([]byte, 4)
-		if _, err := io.ReadFull(proxyConn, responseHeader); err != nil || !bytes.Equal(responseHeader[:2], []byte{5, 0}) {
-			t.Fatalf("Mihomo SOCKS5 CONNECT response = %v, err=%v; process output: %s", responseHeader, err, processOutput.String())
-		}
-		responseAddrLen := 4
-		if responseHeader[3] == 4 {
-			responseAddrLen = 16
-		} else if responseHeader[3] == 3 {
-			length := []byte{0}
-			if _, err := io.ReadFull(proxyConn, length); err != nil {
+			if err := os.WriteFile(configPath, []byte(config), 0600); err != nil {
 				t.Fatal(err)
 			}
-			responseAddrLen = int(length[0])
-		}
-		if _, err := io.CopyN(io.Discard, proxyConn, int64(responseAddrLen+2)); err != nil {
-			t.Fatalf("read SOCKS5 bound address: %v", err)
-		}
-		payload := []byte("mihomo-snell-v6-shared-psk")
-		if _, err := proxyConn.Write(payload); err != nil {
-			t.Fatalf("write through Mihomo Snell: %v", err)
-		}
-		response := make([]byte, len(payload))
-		if _, err := io.ReadFull(proxyConn, response); err != nil || !bytes.Equal(response, payload) {
-			t.Fatalf("Mihomo Snell round-trip = %q, err=%v; process output: %s; server logs: %s", response, err, processOutput.String(), strings.Join(panelLogger.GetLogs(80, "debug"), "\n"))
-		}
+			cmd := exec.Command(binary, "-d", filepath.Join(temporary, "home"), "-f", configPath)
+			var processOutput bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &processOutput, &processOutput
+			if err := cmd.Start(); err != nil {
+				t.Fatalf("start Mihomo Alpha: %v", err)
+			}
+			t.Cleanup(func() {
+				if cmd.Process != nil {
+					_ = cmd.Process.Kill()
+				}
+				_ = cmd.Wait()
+			})
 
-		waitHTTPProxyCondition(t, 5*time.Second, func() bool {
-			for _, session := range server.ConnTracker().Sessions() {
-				if session.Inbound == "test-snell" && session.Outbound == "direct" && session.User == "" && session.Network == "tcp" {
-					return true
+			var proxyConn net.Conn
+			waitHTTPProxyCondition(t, 10*time.Second, func() bool {
+				if cmd.ProcessState != nil {
+					return false
 				}
+				conn, err := net.DialTimeout("tcp", proxyAddress, 150*time.Millisecond)
+				if err != nil {
+					return false
+				}
+				proxyConn = conn
+				return true
+			})
+			time.Sleep(200 * time.Millisecond)
+			defer proxyConn.Close()
+			_ = proxyConn.SetDeadline(time.Now().Add(8 * time.Second))
+			if _, err := proxyConn.Write([]byte{5, 1, 0}); err != nil {
+				t.Fatalf("send SOCKS5 greeting to Mihomo: %v", err)
 			}
-			return false
+			greeting := make([]byte, 2)
+			if _, err := io.ReadFull(proxyConn, greeting); err != nil || !bytes.Equal(greeting, []byte{5, 0}) {
+				t.Fatalf("Mihomo SOCKS5 greeting = %v, err=%v", greeting, err)
+			}
+			host, portText, err := net.SplitHostPort(echo.tcpAddress)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ip := net.ParseIP(host).To4()
+			port, err := strconv.Atoi(portText)
+			if err != nil || ip == nil {
+				t.Fatalf("parse echo address %q: ip=%v port=%q err=%v", echo.tcpAddress, ip, portText, err)
+			}
+			request := []byte{5, 1, 0, 1, ip[0], ip[1], ip[2], ip[3], byte(port >> 8), byte(port)}
+			if _, err := proxyConn.Write(request); err != nil {
+				t.Fatalf("send SOCKS5 CONNECT to Mihomo: %v", err)
+			}
+			responseHeader := make([]byte, 4)
+			if _, err := io.ReadFull(proxyConn, responseHeader); err != nil || !bytes.Equal(responseHeader[:2], []byte{5, 0}) {
+				t.Fatalf("Mihomo SOCKS5 CONNECT response = %v, err=%v; process output: %s", responseHeader, err, processOutput.String())
+			}
+			responseAddrLen := 4
+			if responseHeader[3] == 4 {
+				responseAddrLen = 16
+			} else if responseHeader[3] == 3 {
+				length := []byte{0}
+				if _, err := io.ReadFull(proxyConn, length); err != nil {
+					t.Fatal(err)
+				}
+				responseAddrLen = int(length[0])
+			}
+			if _, err := io.CopyN(io.Discard, proxyConn, int64(responseAddrLen+2)); err != nil {
+				t.Fatalf("read SOCKS5 bound address: %v", err)
+			}
+			payload := []byte("mihomo-snell-v6-shared-psk")
+			if _, err := proxyConn.Write(payload); err != nil {
+				t.Fatalf("write through Mihomo Snell: %v", err)
+			}
+			response := make([]byte, len(payload))
+			if _, err := io.ReadFull(proxyConn, response); err != nil || !bytes.Equal(response, payload) {
+				t.Fatalf("Mihomo Snell round-trip = %q, err=%v; process output: %s; server logs: %s", response, err, processOutput.String(), strings.Join(panelLogger.GetLogs(80, "debug"), "\n"))
+			}
+
+			waitHTTPProxyCondition(t, 5*time.Second, func() bool {
+				for _, session := range server.ConnTracker().Sessions() {
+					if session.Inbound == "test-snell" && session.Outbound == "direct" && session.User == "" && session.Network == "tcp" {
+						return true
+					}
+				}
+				return false
+			})
+			deadline := time.Now().Add(5 * time.Second)
+			for time.Now().Before(deadline) {
+				var inboundBytes, outboundBytes int64
+				for _, stat := range *server.StatsTracker().GetStats() {
+					if stat.Traffic <= 0 {
+						continue
+					}
+					switch stat.Resource {
+					case "inbound":
+						inboundBytes += stat.Traffic
+					case "outbound":
+						outboundBytes += stat.Traffic
+					}
+				}
+				if inboundBytes > 0 && outboundBytes > 0 {
+					return
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+			t.Fatal("shared-PSK Snell traffic was not counted in inbound and outbound totals")
 		})
-		deadline := time.Now().Add(5 * time.Second)
-		for time.Now().Before(deadline) {
-			var inboundBytes, outboundBytes int64
-			for _, stat := range *server.StatsTracker().GetStats() {
-				if stat.Traffic <= 0 {
-					continue
-				}
-				switch stat.Resource {
-				case "inbound":
-					inboundBytes += stat.Traffic
-				case "outbound":
-					outboundBytes += stat.Traffic
-				}
-			}
-			if inboundBytes > 0 && outboundBytes > 0 {
-				return
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-		t.Fatal("shared-PSK Snell traffic was not counted in inbound and outbound totals")
-	})
+	}
 }
 
 func snellV6ServerConfig(port int, mode string, users []map[string]string) []byte {

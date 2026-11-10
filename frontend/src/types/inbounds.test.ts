@@ -21,12 +21,13 @@ describe('inbound subscription visibility', () => {
   it('defaults Snell to managed v6 without TLS', () => {
     const inbound = createInbound('snell') as Snell
     expect(inbound.version).toBe(6)
-    expect(inbound.mode).toBe('unshaped')
+    expect(inbound.mode).toBe('default')
     expect(inbound.tls_id).toBe(0)
   })
 
-  it('defaults to the encrypted mode verified with Mihomo', () => {
-    const inbound = createInbound('snell') as Snell
-    expect(inbound.mode).toBe('unshaped')
+  it('preserves a selected Snell v6 mode', () => {
+    for (const mode of ['default', 'unshaped', 'unsafe-raw'] as const) {
+      expect((createInbound('snell', { mode }) as Snell).mode).toBe(mode)
+    }
   })
 })

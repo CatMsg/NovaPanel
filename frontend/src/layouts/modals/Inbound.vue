@@ -190,7 +190,7 @@ export default {
       inTypes: InTypes,
       inboundWithUsers: ['mixed', 'socks', 'http', 'shadowsocks', 'vmess', 'trojan', 'naive', 'hysteria', 'shadowtls', 'tuic', 'hysteria2', 'vless', 'anytls', 'mieru', 'masque', 'snell'],
       initUsers: {
-        model: 'none',
+        model: 'all',
         values: <any>[],
       },
       HasInData: [
@@ -261,7 +261,7 @@ export default {
       }
       this.side = "s"
       this.initUsers = {
-        model: 'none',
+        model: 'all',
         values: [],
       }
     },
@@ -354,7 +354,8 @@ export default {
       if (this.inbound.type == InTypes.HTTP && this.httpIssue) return false
       if (this.inbound.type == InTypes.Snell) {
         const snell = this.inbound as any
-        if (snell.version !== 6 || snell.mode !== 'unshaped') return false
+        if (!['default', 'unshaped', 'unsafe-raw'].includes(snell.mode)) return false
+        if (snell.version !== 6) return false
         if (typeof snell.psk !== 'string') return false
         const pskLength = new TextEncoder().encode(snell.psk).length
         if (pskLength > 0 && (pskLength < 12 || pskLength > 255)) return false

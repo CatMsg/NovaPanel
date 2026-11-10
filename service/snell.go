@@ -25,9 +25,11 @@ func prepareSnellInbound(inbound *model.Inbound, previous *model.Inbound) error 
 	if inbound.TlsId != 0 {
 		return common.NewError("Snell v6 不使用 TLS 模板，请移除 TLS 配置")
 	}
-	var options map[string]json.RawMessage
-	if err := json.Unmarshal(inbound.Options, &options); err != nil {
-		return fmt.Errorf("解析 Snell v6 配置失败: %w", err)
+	options := make(map[string]json.RawMessage)
+	if len(inbound.Options) > 0 {
+		if err := json.Unmarshal(inbound.Options, &options); err != nil {
+			return fmt.Errorf("解析 Snell v6 配置失败: %w", err)
+		}
 	}
 	if options == nil {
 		options = make(map[string]json.RawMessage)
@@ -44,7 +46,7 @@ func prepareSnellInbound(inbound *model.Inbound, previous *model.Inbound) error 
 	}
 	options["version"] = mustMarshalRaw(version)
 
-	mode := snellV6ModeUnshaped
+	mode := snellV6ModeDefault
 	if raw, ok := options["mode"]; ok {
 		if err := json.Unmarshal(raw, &mode); err != nil {
 			return common.NewError("Snell v6 流量模式无效")
@@ -59,9 +61,7 @@ func prepareSnellInbound(inbound *model.Inbound, previous *model.Inbound) error 
 	default:
 		return common.NewErrorf("不支持 Snell v6 流量模式 %q", mode)
 	}
-	// Mihomo Alpha currently interoperates with sing-box Snell v6 only in
-	// unshaped mode; it remains PSK-encrypted, unlike unsafe-raw.
-	options["mode"] = mustMarshalRaw(snellV6ModeUnshaped)
+	options["mode"] = mustMarshalRaw(mode)
 
 	var psk string
 	if raw, ok := options["psk"]; ok {
@@ -97,6 +97,35 @@ func prepareSnellInbound(inbound *model.Inbound, previous *model.Inbound) error 
 	encoded, err := json.Marshal(options)
 	if err != nil {
 		return err
+	}
+	inbound.Options = encoded
+	return nil
+}
+
+func ensureSnellModeOption(inbound *model.Inbound) error {
+	if inbound == nil || inbound.Type != "snell" {
+		return nil
+	}
+	options := make(map[string]json.RawMessage)
+	if len(inbound.Options) > 0 {
+		if err := json.Unmarshal(inbound.Options, &options); err != nil {
+			return fmt.Errorf("解析 Snell v6 配置失败: %w", err)
+		}
+	}
+	var mode string
+	if raw, ok := options["mode"]; ok {
+		if err := json.Unmarshal(raw, &mode); err != nil {
+			return common.NewError("Snell v6 流量模式无效")
+		}
+	}
+	mode = strings.TrimSpace(mode)
+	if mode == "" {
+		mode = snellV6ModeDefault
+	}
+	options["mode"] = mustMarshalRaw(mode)
+	encoded, err := json.Marshal(options)
+	if err != nil {
+		return fmt.Errorf("序列化 Snell v6 配置失败: %w", err)
 	}
 	inbound.Options = encoded
 	return nil

@@ -93,12 +93,14 @@ func FillOutJson(i *model.Inbound, hostname string) error {
 
 func snellOut(out *map[string]interface{}, inbound map[string]interface{}) {
 	delete(*out, "userkey")
-	for _, key := range []string{"version", "psk"} {
+	for _, key := range []string{"version", "psk", "mode"} {
 		if value, ok := inbound[key]; ok {
 			(*out)[key] = value
 		}
 	}
-	(*out)["mode"] = "unshaped"
+	if mode, ok := (*out)["mode"].(string); !ok || mode == "" {
+		(*out)["mode"] = "default"
+	}
 }
 
 func masqueOut(out *map[string]interface{}, inbound map[string]interface{}) {

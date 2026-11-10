@@ -55,6 +55,9 @@ func (s *InboundService) getById(ids string) (*[]map[string]interface{}, error) 
 		return nil, err
 	}
 	for _, inb := range inbound {
+		if err := ensureSnellModeOption(&inb); err != nil {
+			return nil, err
+		}
 		inbData, err := inb.MarshalFull()
 		if err != nil {
 			return nil, err
@@ -77,6 +80,9 @@ func (s *InboundService) GetAll() (*[]map[string]interface{}, error) {
 	}
 	var data []map[string]interface{}
 	for _, inbound := range inbounds {
+		if err := ensureSnellModeOption(&inbound); err != nil {
+			return nil, err
+		}
 		var shadowtls_version uint
 		var snell_version int
 		var snell_mode string
@@ -138,7 +144,9 @@ func (s *InboundService) GetAll() (*[]map[string]interface{}, error) {
 			}
 		}
 		if inbound.Type == "snell" {
-			snell_mode = snellV6ModeUnshaped
+			if snell_mode == "" {
+				snell_mode = snellV6ModeDefault
+			}
 			inbData["version"] = snell_version
 			inbData["mode"] = snell_mode
 		}
@@ -612,7 +620,11 @@ func filterInboundCoreConfig(inbound *model.Inbound, config []byte) ([]byte, err
 		var users []json.RawMessage
 		_ = json.Unmarshal(options["users"], &users)
 		delete(options, "users")
-		options["mode"] = mustMarshalRaw(snellV6ModeUnshaped)
+		var mode string
+		_ = json.Unmarshal(options["mode"], &mode)
+		if strings.TrimSpace(mode) == "" {
+			options["mode"] = mustMarshalRaw(snellV6ModeDefault)
+		}
 		if len(users) == 0 {
 			logger.Warningf("skip snell inbound %q: no enabled users assigned", inbound.Tag)
 			return nil, nil

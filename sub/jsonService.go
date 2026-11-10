@@ -242,10 +242,12 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 			}
 		}
 		if protocol == "snell" {
-			// Snell v6 is intentionally exported in shared-PSK mode for Mihomo compatibility.
-			// Older saved client configs may still contain a userkey; never leak or use it.
+			// Snell v6 uses a shared PSK; older saved client configs may still contain
+			// a userkey, which is unsupported and must never leak into subscriptions.
 			delete(outbound, "userkey")
-			outbound["mode"] = "unshaped"
+			if mode, ok := outbound["mode"].(string); !ok || mode == "" {
+				outbound["mode"] = "default"
+			}
 			psk, _ := outbound["psk"].(string)
 			version, _ := outbound["version"].(float64)
 			if version != 6 || len([]byte(psk)) < 12 || len([]byte(psk)) > 255 {
