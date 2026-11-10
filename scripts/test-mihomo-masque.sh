@@ -81,14 +81,35 @@ export NOVAPANEL_MIHOMO_XHTTP_CONFIG="$temporary/aggregate-xhttp.yaml"
 GOMAXPROCS=2 bash ./scripts/go-test-sing-box.sh -mod=readonly -p 2 ./sub \
   -run '^TestConvertRawClashProxiesPreservesXHTTPOptions$' -count=1
 mkdir -p "$temporary/home"
-geoip_asset_id=722540983
-geoip_sha256=4d7ee5304f75d71abf5f8cf5c43858a9273564415ec9017d26ad4105e6cc9e6b
+geoip_release="$temporary/geoip-release.json"
+if [[ "$use_gh_api" == 1 ]]; then
+  gh api repos/MetaCubeX/meta-rules-dat/releases/latest > "$geoip_release"
+else
+  curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 --connect-timeout 10 --max-time 30 \
+    https://api.github.com/repos/MetaCubeX/meta-rules-dat/releases/latest -o "$geoip_release"
+fi
+geoip_asset_id="$(release_asset_id "$geoip_release" geoip.metadb)"
+geoip_checksum_asset_id="$(release_asset_id "$geoip_release" geoip.metadb.sha256sum)"
+if [[ ! "$geoip_asset_id" =~ ^[0-9]+$ || ! "$geoip_checksum_asset_id" =~ ^[0-9]+$ ]]; then
+  printf 'MetaCubeX/meta-rules-dat latest release is missing geoip.metadb or its SHA-256 file.\n' >&2
+  exit 1
+fi
 if [[ "$use_gh_api" == 1 ]]; then
   gh api -H 'Accept: application/octet-stream' "repos/MetaCubeX/meta-rules-dat/releases/assets/$geoip_asset_id" > "$temporary/home/geoip.metadb"
+  gh api -H 'Accept: application/octet-stream' "repos/MetaCubeX/meta-rules-dat/releases/assets/$geoip_checksum_asset_id" > "$temporary/home/geoip.metadb.sha256sum"
 else
-  curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 --connect-timeout 10 --max-time 120 \
-    -H 'Accept: application/octet-stream' \
-    "https://api.github.com/repos/MetaCubeX/meta-rules-dat/releases/assets/$geoip_asset_id" -o "$temporary/home/geoip.metadb"
+  for asset in "$geoip_asset_id:geoip.metadb" "$geoip_checksum_asset_id:geoip.metadb.sha256sum"; do
+    asset_id="${asset%%:*}"
+    asset_name="${asset#*:}"
+    curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 --connect-timeout 10 --max-time 120 \
+      -H 'Accept: application/octet-stream' \
+      "https://api.github.com/repos/MetaCubeX/meta-rules-dat/releases/assets/$asset_id" -o "$temporary/home/$asset_name"
+  done
+fi
+geoip_sha256="$(awk 'NR == 1 { print $1; exit }' "$temporary/home/geoip.metadb.sha256sum")"
+if [[ ! "$geoip_sha256" =~ ^[[:xdigit:]]{64}$ ]]; then
+  printf 'MetaCubeX/meta-rules-dat returned an invalid GeoIP SHA-256 file.\n' >&2
+  exit 1
 fi
 if command -v sha256sum >/dev/null; then
   printf '%s  %s\n' "$geoip_sha256" "$temporary/home/geoip.metadb" | sha256sum -c -
