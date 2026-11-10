@@ -255,7 +255,7 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 				snellConfig, _ := configs["snell"].(map[string]interface{})
 				userKey, _ := snellConfig["userkey"].(string)
 				if strings.TrimSpace(userKey) == "" {
-					return nil, nil, fmt.Errorf("Snell inbound %q is in per-user mode but the user's key is missing; save the user again", inData.Tag)
+					return nil, nil, fmt.Errorf("snell inbound %q is in per-user mode but the user's key is missing; save the user again", inData.Tag)
 				}
 				outbound["userkey"] = userKey
 			} else {
