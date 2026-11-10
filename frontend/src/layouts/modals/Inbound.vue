@@ -84,6 +84,7 @@
               <AnyTls v-if="inbound.type == inTypes.AnyTls" :data="inbound" direction="in" />
               <Mieru v-if="inbound.type == inTypes.Mieru" :data="inbound" />
               <Masque v-if="inbound.type == inTypes.Masque" :data="inbound" />
+              <Snell v-if="inbound.type == inTypes.Snell" :data="inbound" />
               <Users v-if="hasUser" :clients="clients" :data="initUsers" />
               <InTls v-if="HasTls.includes(inbound.type)"  :inbound="inbound" :tlsConfigs="tlsConfigs" :tls_id="inbound.tls_id" />
               <v-expansion-panels
@@ -167,6 +168,7 @@ import Tun from '@/components/protocols/Tun.vue'
 import AnyTls from '@/components/protocols/AnyTls.vue'
 import Mieru from '@/components/protocols/Mieru.vue'
 import Masque from '@/components/protocols/Masque.vue'
+import Snell from '@/components/protocols/Snell.vue'
 import InTls from '@/components/tls/InTLS.vue'
 import TProxy from '@/components/protocols/TProxy.vue'
 import Multiplex from '@/components/Multiplex.vue'
@@ -186,7 +188,7 @@ export default {
       loading: false,
       side: "s",
       inTypes: InTypes,
-      inboundWithUsers: ['mixed', 'socks', 'http', 'shadowsocks', 'vmess', 'trojan', 'naive', 'hysteria', 'shadowtls', 'tuic', 'hysteria2', 'vless', 'anytls', 'mieru', 'masque'],
+      inboundWithUsers: ['mixed', 'socks', 'http', 'shadowsocks', 'vmess', 'trojan', 'naive', 'hysteria', 'shadowtls', 'tuic', 'hysteria2', 'vless', 'anytls', 'mieru', 'masque', 'snell'],
       initUsers: {
         model: 'none',
         values: <any>[],
@@ -207,6 +209,7 @@ export default {
         InTypes.Naive,
         InTypes.Mieru,
         InTypes.Masque,
+        InTypes.Snell,
       ],
       HasTls: [
         InTypes.HTTP,
@@ -281,6 +284,9 @@ export default {
       if (this.inbound.type == this.inTypes.Shadowsocks) {
         ;(this.inbound as any).password = RandomUtil.randomSeq(10)
       }
+      if (this.inbound.type == this.inTypes.Snell) {
+        ;(this.inbound as any).psk = RandomUtil.randomSeq(43)
+      }
       if (this.HasInData.includes(this.inbound.type)){
         this.inbound.addrs = []
         this.inbound.out_json = {}
@@ -346,6 +352,13 @@ export default {
       if (this.inbound.listen_port > 65535 || this.inbound.listen_port < 1) return false
       if (this.OnlyTLS.includes(this.inbound.type) && this.inbound.tls_id == 0) return false
       if (this.inbound.type == InTypes.HTTP && this.httpIssue) return false
+      if (this.inbound.type == InTypes.Snell) {
+        const snell = this.inbound as any
+        if (snell.version !== 6 || snell.mode !== 'unshaped') return false
+        if (typeof snell.psk !== 'string') return false
+        const pskLength = new TextEncoder().encode(snell.psk).length
+        if (pskLength > 0 && (pskLength < 12 || pskLength > 255)) return false
+      }
       return true
     },
     httpIssue(): string {
@@ -377,7 +390,7 @@ export default {
   components: {
     Listen, InTls, HttpInbound, Hysteria2, Naive, Direct, Shadowsocks,
     Users, Hysteria, ShadowTls, TProxy, Multiplex, Tuic, Tun,
-    AnyTls, Mieru, Masque, Transport, AddrVue, OutJsonVue, Dial
+    AnyTls, Mieru, Masque, Snell, Transport, AddrVue, OutJsonVue, Dial
   }
 }
 </script>

@@ -449,6 +449,11 @@ func (s *FleetService) buildFleetInboundJobs(plan FleetInboundCreatePlan) ([]fle
 	if !fleetInboundProtocolSupported(draft.Type) || !(&InboundService{}).hasUser(draft.Type) {
 		return nil, nil, common.NewErrorf("不支持远程创建 %q 入站", draft.Type)
 	}
+	if draft.Type == "snell" {
+		if err := prepareSnellInbound(&draft, nil); err != nil {
+			return nil, nil, err
+		}
+	}
 	if draft.Type == "shadowtls" {
 		var options map[string]json.RawMessage
 		_ = json.Unmarshal(draft.Options, &options)
@@ -686,6 +691,10 @@ func buildFleetInboundRemotePayload(draftJSON json.RawMessage, targetHost, targe
 			}
 		}
 	}
+	if inboundType == "snell" {
+		// Never copy the source server PSK; each target creates its own key.
+		data["psk"] = mustMarshalRaw(snellGeneratePSKMark)
+	}
 	if inboundType == "masque" {
 		data["server"] = mustMarshalRaw(targetHost)
 		data["version"] = mustMarshalRaw([]int{3})
@@ -714,6 +723,7 @@ func fleetInboundDraftOptionKeys(inboundType string) []string {
 		"anytls":      {"padding_scheme"},
 		"mieru":       {"transport", "multiplexing", "handshake_mode", "traffic_pattern", "mtu"},
 		"masque":      {"mihomo_compatible", "path", "mtu"},
+		"snell":       {"version", "mode"},
 	}
 	return append(common, protocol[inboundType]...)
 }
@@ -777,7 +787,7 @@ func fleetInboundTagPrefix(server FleetServer) string {
 
 func fleetInboundProtocolSupported(inboundType string) bool {
 	switch inboundType {
-	case "mixed", "socks", "http", "shadowsocks", "vmess", "trojan", "naive", "hysteria", "shadowtls", "tuic", "hysteria2", "vless", "anytls", "mieru", "masque":
+	case "mixed", "socks", "http", "shadowsocks", "vmess", "trojan", "naive", "hysteria", "shadowtls", "tuic", "hysteria2", "vless", "anytls", "mieru", "masque", "snell":
 		return true
 	default:
 		return false
@@ -988,8 +998,22 @@ func prepareFleetInboundTargetSecrets(inbound *model.Inbound) error {
 				options["obfs"], _ = json.Marshal(obfs)
 			}
 		}
+	case "snell":
+		var psk string
+		_ = json.Unmarshal(options["psk"], &psk)
+		if psk == snellGeneratePSKMark || strings.TrimSpace(psk) == "" {
+			var err error
+			psk, err = newSnellSecret()
+			if err != nil {
+				return err
+			}
+			options["psk"] = mustMarshalRaw(psk)
+		}
 	}
 	inbound.Options, _ = json.Marshal(options)
+	if inbound.Type == "snell" {
+		return prepareSnellInbound(inbound, nil)
+	}
 	return nil
 }
 

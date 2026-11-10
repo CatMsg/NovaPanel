@@ -47,6 +47,18 @@ func TestShouldSkipInboundWithoutUsers(t *testing.T) {
 			wantSkip:    false,
 		},
 		{
+			name:        "snell without users",
+			inboundType: "snell",
+			config:      `{"type":"snell","users":[]}`,
+			wantSkip:    false,
+		},
+		{
+			name:        "snell with a user",
+			inboundType: "snell",
+			config:      `{"type":"snell","users":[{"name":"user","userkey":"secret"}]}`,
+			wantSkip:    false,
+		},
+		{
 			name:        "other inbound without users",
 			inboundType: "vless",
 			config:      `{"type":"vless","users":[]}`,

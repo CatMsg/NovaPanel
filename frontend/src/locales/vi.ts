@@ -424,6 +424,17 @@ export default {
       quicCongestion: "Điều khiển tắc nghẽn QUIC",
       udpOverTcp: "UDP qua TCP",
     },
+    snell: {
+      psk: "PSK dùng chung",
+      pskHint: "12-255 byte; tự tạo nếu để trống.",
+      mode: "Chế độ lưu lượng",
+      modeDefault: "Định hình mặc định",
+      modeUnshaped: "Không định hình (tương thích Mihomo, có mã hóa)",
+      modeUnsafeRaw: "unsafe-raw (nâng cao)",
+      modeUnsafeWarning: "unsafe-raw không mã hóa; bảng điều khiển hiện cố định chế độ tương thích đã kiểm thử và có mã hóa.",
+      perTargetPsk: "Mỗi máy chủ đích có PSK riêng; không sao chép khóa của máy chủ nguồn.",
+      clientWarning: "Đang dùng chế độ tương thích Mihomo đã kiểm thử với PSK dùng chung. Chưa tách lưu lượng, giới hạn và lịch sử theo người dùng; lưu lượng inbound/outbound và toàn VPS vẫn được tính.",
+    },
     anytls: {
       idleInterval: "Khoảng kiểm tra phiên nhàn rỗi",
       idleTimeout: "Thời gian chờ phiên nhàn rỗi",

@@ -424,6 +424,17 @@ export default {
       quicCongestion: "QUIC 擁塞控制",
       udpOverTcp: "UDP over TCP",
     },
+    snell: {
+      psk: "共用 PSK",
+      pskHint: "12-255 位元組；留白時自動產生。",
+      mode: "流量模式",
+      modeDefault: "預設整形",
+      modeUnshaped: "不整形（Mihomo 相容，仍加密）",
+      modeUnsafeRaw: "unsafe-raw（進階模式）",
+      modeUnsafeWarning: "unsafe-raw 不加密；面板目前固定使用已驗證的加密相容模式。",
+      perTargetPsk: "每台目標伺服器會獨立產生 PSK，不會複製來源伺服器密鑰。",
+      clientWarning: "目前使用已驗證的 Mihomo 相容模式與共用 PSK。暫不區分個人流量、限速與歷史；入站/出站及 VPS 總流量仍會統計。",
+    },
     anytls: {
       idleInterval: "閒置會話檢查間隔",
       idleTimeout: "閒置會話逾時",

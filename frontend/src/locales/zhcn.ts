@@ -448,6 +448,17 @@ export default {
       quicCongestion: "QUIC 拥塞控制",
       udpOverTcp: "UDP over TCP",
     },
+    snell: {
+      psk: "共享 PSK",
+      pskHint: "12-255 字节；留空时自动生成。",
+      mode: "流量模式",
+      modeDefault: "默认整形",
+      modeUnshaped: "不整形（Mihomo 兼容，仍加密）",
+      modeUnsafeRaw: "unsafe-raw（高级模式）",
+      modeUnsafeWarning: "unsafe-raw 不加密；面板当前固定使用已验证的加密兼容模式。",
+      perTargetPsk: "每台目标服务器会独立生成 PSK，不会复制源服务器密钥。",
+      clientWarning: "当前使用已验证的 Mihomo 兼容模式和共享 PSK。用户级流量、限速和历史暂不区分；入站/出站及 VPS 总流量仍会统计。",
+    },
     anytls: {
       idleInterval: "空闲会话检查间隔",
       idleTimeout: "空闲会话超时",

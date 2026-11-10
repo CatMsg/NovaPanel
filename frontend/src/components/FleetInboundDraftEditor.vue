@@ -34,6 +34,7 @@
     <AnyTls v-else-if="draft.type === 'anytls'" direction="in" :data="draft" />
     <Mieru v-else-if="draft.type === 'mieru'" :data="draft" />
     <Masque v-else-if="draft.type === 'masque'" :data="draft" />
+    <Snell v-else-if="draft.type === 'snell'" :data="draft" per-target />
     <v-card v-else-if="draft.type === 'shadowtls'" variant="tonal" class="pa-4">
       <v-chip color="primary" variant="tonal" class="mb-3">ShadowTLS v3</v-chip>
       <v-text-field v-model="draft.handshake.server" label="Handshake server" variant="outlined" density="comfortable" />
@@ -67,6 +68,8 @@ import Tuic from '@/components/protocols/Tuic.vue'
 import AnyTls from '@/components/protocols/AnyTls.vue'
 import Mieru from '@/components/protocols/Mieru.vue'
 import Masque from '@/components/protocols/Masque.vue'
+import Snell from '@/components/protocols/Snell.vue'
+import RandomUtil from '@/plugins/randomUtil'
 import Transport from '@/components/Transport.vue'
 import Multiplex from '@/components/Multiplex.vue'
 
@@ -90,6 +93,7 @@ const protocolOptions = [
   { title: 'AnyTLS', value: 'anytls' },
   { title: 'Mieru', value: 'mieru' },
   { title: 'MASQUE', value: 'masque' },
+  { title: 'Snell v6', value: 'snell' },
 ]
 const httpVersions = [
   { title: 'HTTP/1.1', value: 1 },
@@ -107,6 +111,7 @@ function changeProtocol(type: string) {
     addrs: [],
     out_json: {},
   } as any)
+  if (type === 'snell') (next as any).psk = RandomUtil.randomSeq(43)
   emit('update:modelValue', next)
 }
 </script>

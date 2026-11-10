@@ -181,7 +181,7 @@ func collectInboundForwardProtocols(inbound *model.Inbound) ([]string, error) {
 	}
 
 	switch inbound.Type {
-	case "mixed", "socks", "shadowtls", "anytls":
+	case "mixed", "socks", "shadowtls", "anytls", "snell":
 		return []string{"tcp"}, nil
 	case "http":
 		versions, err := util.HTTPInboundVersions(inbound.Options)

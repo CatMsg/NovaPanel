@@ -78,6 +78,8 @@ func (s *InboundService) GetAll() (*[]map[string]interface{}, error) {
 	var data []map[string]interface{}
 	for _, inbound := range inbounds {
 		var shadowtls_version uint
+		var snell_version int
+		var snell_mode string
 		ss_managed := false
 		inbData := map[string]interface{}{
 			"id":               inbound.Id,
@@ -115,6 +117,18 @@ func (s *InboundService) GetAll() (*[]map[string]interface{}, error) {
 					inbData["version"] = version
 				}
 			}
+			if inbound.Type == "snell" {
+				if raw, ok := restFields["version"]; ok && len(raw) > 0 {
+					if err := json.Unmarshal(raw, &snell_version); err != nil {
+						return nil, err
+					}
+				}
+				if raw, ok := restFields["mode"]; ok && len(raw) > 0 {
+					if err := json.Unmarshal(raw, &snell_mode); err != nil {
+						return nil, err
+					}
+				}
+			}
 			if inbound.Type == "shadowsocks" {
 				if raw, ok := restFields["managed"]; ok && len(raw) > 0 {
 					if err := json.Unmarshal(raw, &ss_managed); err != nil {
@@ -122,6 +136,11 @@ func (s *InboundService) GetAll() (*[]map[string]interface{}, error) {
 					}
 				}
 			}
+		}
+		if inbound.Type == "snell" {
+			snell_mode = snellV6ModeUnshaped
+			inbData["version"] = snell_version
+			inbData["mode"] = snell_mode
 		}
 		if s.hasUser(inbound.Type) &&
 			!(inbound.Type == "shadowtls" && shadowtls_version < 3) &&
@@ -212,6 +231,11 @@ func (s *InboundService) Save(tx *gorm.DB, act string, data json.RawMessage, ini
 		}
 		if inbound.Type == "masque" {
 			if err := prepareMasqueInbound(tx, &inbound, oldInbound, hostname); err != nil {
+				return nil, err
+			}
+		}
+		if inbound.Type == "snell" {
+			if err := prepareSnellInbound(&inbound, oldInbound); err != nil {
 				return nil, err
 			}
 		}
@@ -580,12 +604,27 @@ func (s *InboundService) buildInboundCoreConfig(db *gorm.DB, inbound *model.Inbo
 
 // An empty config means runtime absence, not deletion of the stored inbound.
 func filterInboundCoreConfig(inbound *model.Inbound, config []byte) ([]byte, error) {
+	if inbound.Type == "snell" {
+		var options map[string]json.RawMessage
+		if err := json.Unmarshal(config, &options); err != nil {
+			return nil, err
+		}
+		var users []json.RawMessage
+		_ = json.Unmarshal(options["users"], &users)
+		delete(options, "users")
+		options["mode"] = mustMarshalRaw(snellV6ModeUnshaped)
+		if len(users) == 0 {
+			logger.Warningf("skip snell inbound %q: no enabled users assigned", inbound.Tag)
+			return nil, nil
+		}
+		return json.Marshal(options)
+	}
 	skip, err := shouldSkipInboundWithoutUsers(inbound.Type, config)
 	if err != nil {
 		return nil, err
 	}
 	if skip {
-		logger.Warningf("skip naive inbound %q: no enabled users assigned", inbound.Tag)
+		logger.Warningf("skip %s inbound %q: no enabled users assigned", inbound.Type, inbound.Tag)
 		return nil, nil
 	}
 	return config, nil
@@ -606,7 +645,7 @@ func shouldSkipInboundWithoutUsers(inboundType string, inboundJSON []byte) (bool
 
 func (s *InboundService) hasUser(inboundType string) bool {
 	switch inboundType {
-	case "mixed", "socks", "http", "shadowsocks", "vmess", "trojan", "naive", "hysteria", "shadowtls", "tuic", "hysteria2", "vless", "anytls", "mieru", "masque":
+	case "mixed", "socks", "http", "shadowsocks", "vmess", "trojan", "naive", "hysteria", "shadowtls", "tuic", "hysteria2", "vless", "anytls", "mieru", "masque", "snell":
 		return true
 	}
 	return false
@@ -685,6 +724,9 @@ func (s *InboundService) initUsers(db *gorm.DB, inboundJson []byte, clientIds st
 	}
 
 	condition := "id IN ?"
+	if inboundType == "snell" {
+		condition = "enable = true AND id IN ?"
+	}
 	inbound["users"], err = s.fetchUsers(db, inboundType, condition, []interface{}{clientIDList}, inbound)
 	if err != nil {
 		return nil, err

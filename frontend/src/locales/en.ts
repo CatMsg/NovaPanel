@@ -453,6 +453,17 @@ export default {
       quicCongestion: "QUIC Congestion Control",
       udpOverTcp: "UDP over TCP",
     },
+    snell: {
+      psk: "Shared PSK",
+      pskHint: "12-255 bytes; generated automatically when left blank.",
+      mode: "Traffic mode",
+      modeDefault: "Default shaping",
+      modeUnshaped: "Unshaped (Mihomo-compatible, encrypted)",
+      modeUnsafeRaw: "unsafe-raw (advanced)",
+      modeUnsafeWarning: "unsafe-raw is unencrypted; the panel currently fixes the verified encrypted compatibility mode.",
+      perTargetPsk: "Each target server gets its own PSK. The source server key is never copied.",
+      clientWarning: "Uses the tested Mihomo-compatible mode with one shared PSK. Per-user usage, limits, and history are not separated; inbound/outbound and VPS-wide traffic are still counted.",
+    },
     http: {
       serverTitle: "HTTP inbound versions",
       versions: "HTTP version",

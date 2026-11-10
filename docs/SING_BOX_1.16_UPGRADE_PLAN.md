@@ -50,3 +50,11 @@ Hysteria v1 compatibility review (2026-10-30): upstream's current inbound/outbou
 ## Separate 1.17 Follow-Up
 
 - [ ] The panel exposes a TUN inbound editor. Before pinning sing-box 1.17, inventory persisted and raw user-supplied TUN inbounds for the deprecated `stack` field, implement a version-targeted migration that removes it, and verify startup and TUN behavior for each previously supported stack value. Do not strip it while running the current 1.15 baseline or during the 1.16 upgrade, because that would change runtime behavior before the removal boundary.
+
+## Separate Protocol Follow-Up: Snell v6
+
+- [x] Add managed Snell v6 as an opt-in protocol, independent of the sing-box 1.16 upgrade; register inbound and outbound in the panel's custom sing-box registries.
+- [x] Integrate local and remote inbound creation with independent target PSKs, user-based subscription visibility, inbound/outbound statistics, VPS interface accounting, TCP port management, and sing-box JSON subscriptions. For Mihomo Alpha compatibility, force encrypted `unshaped` mode and shared PSK; do not expose `default` or plaintext `unsafe-raw`. Shared-PSK mode does not support per-user Snell attribution, limits, or history. Skip listeners without enabled users.
+- [x] Export Snell v6 shared-PSK nodes to Clash/Mihomo and sing-box JSON. Do not emit per-user `userkey`; Mihomo Alpha cannot send it.
+- [x] Validate native sing-box TCP and UDP-over-TCP, connection reuse, wrong-key rejection, all three native modes, target-key isolation, Mihomo Alpha config parsing, and a real Mihomo-to-sing-box shared-PSK loopback connection.
+- [ ] Reassess per-user Snell authentication after Mihomo implements Snell v6 `userkey`; shared-PSK mode is the current compatibility tradeoff.

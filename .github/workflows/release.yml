@@ -146,6 +146,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bash ./scripts/test-mihomo-masque.sh
 
+      - name: Snell v6 native and Mihomo shared-PSK integration
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash ./scripts/test-snell-v6.sh
+
   test-sing-box-race:
     name: Sing-Box 核心并发与协议回归
     runs-on: ubuntu-latest

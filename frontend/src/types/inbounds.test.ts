@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createInbound, type Masque } from './inbounds'
+import { createInbound, type Masque, type Snell } from './inbounds'
 
 describe('inbound subscription visibility', () => {
   it('defaults new inbounds to visible', () => {
@@ -16,5 +16,17 @@ describe('inbound subscription visibility', () => {
 
   it('preserves an explicit native-only MASQUE setting', () => {
     expect((createInbound('masque', { mihomo_compatible: false }) as Masque).mihomo_compatible).toBe(false)
+  })
+
+  it('defaults Snell to managed v6 without TLS', () => {
+    const inbound = createInbound('snell') as Snell
+    expect(inbound.version).toBe(6)
+    expect(inbound.mode).toBe('unshaped')
+    expect(inbound.tls_id).toBe(0)
+  })
+
+  it('defaults to the encrypted mode verified with Mihomo', () => {
+    const inbound = createInbound('snell') as Snell
+    expect(inbound.mode).toBe('unshaped')
   })
 })

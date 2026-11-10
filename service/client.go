@@ -469,7 +469,8 @@ func (s *ClientService) updateLinksWithFixedInbounds(tx *gorm.DB, clients []*mod
 	inboundIndex := make(map[uint]*model.Inbound, len(inboundIDs))
 	if len(inboundIDs) > 0 {
 		var inbounds []model.Inbound
-		if err := tx.Model(model.Inbound{}).Preload("Tls").Where("id in ? and type in ?", inboundIDs, util.InboundTypeWithLink).Find(&inbounds).Error; err != nil {
+		clientConfigInboundTypes := append(append([]string(nil), util.InboundTypeWithLink...), "snell")
+		if err := tx.Model(model.Inbound{}).Preload("Tls").Where("id in ? and type in ?", inboundIDs, clientConfigInboundTypes).Find(&inbounds).Error; err != nil {
 			return err
 		}
 		for index := range inbounds {

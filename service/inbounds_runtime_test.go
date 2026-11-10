@@ -129,6 +129,40 @@ func TestInboundRuntimeRestartWithoutNaiveUsers(t *testing.T) {
 	assertInboundRuntimeColdConfig(t, db, svc, mixed.Tag, true)
 }
 
+func TestInboundRuntimeRestartWithoutEnabledSnellUsers(t *testing.T) {
+	db, svc := setupInboundRuntimeTest(t)
+	options := inboundTestOptions(t, "snell")
+	var listenOptions struct {
+		Listen     string `json:"listen"`
+		ListenPort int    `json:"listen_port"`
+	}
+	if err := json.Unmarshal(options, &listenOptions); err != nil {
+		t.Fatal(err)
+	}
+	inbound := model.Inbound{
+		Type: "snell", Tag: "empty-snell",
+		Options: json.RawMessage(fmt.Sprintf(
+			`{"listen":%q,"listen_port":%d,"version":6,"psk":"snell-runtime-test-psk","mode":"default"}`,
+			listenOptions.Listen, listenOptions.ListenPort,
+		)),
+	}
+	if err := db.Create(&inbound).Error; err != nil {
+		t.Fatal(err)
+	}
+	seedInboundRuntimeClient(t, db, inbound.Id, false)
+	action, err := svc.BuildRestartInboundsAction(db, []uint{inbound.Id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action == nil {
+		t.Fatal("expected an action to remove or skip an inbound with no enabled Snell users")
+	}
+	if err := action(); err != nil {
+		t.Fatalf("restart Snell inbound without enabled users: %v", err)
+	}
+	assertInboundRuntimeTag(t, inbound.Tag, false)
+}
+
 func TestInboundRuntimeSaveWithoutNaiveUsers(t *testing.T) {
 	inbound := model.Inbound{Type: "naive", Tag: "empty-naive", Options: inboundTestOptions(t)}
 	db, svc := setupInboundRuntimeTest(t, inboundRuntimeForwardCall(t, "apply", inbound))

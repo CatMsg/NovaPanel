@@ -218,7 +218,6 @@ func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, b
 		if t == "selector" || t == "urltest" || t == "direct" {
 			continue
 		}
-
 		proxy := make(map[string]interface{})
 		proxy["name"] = obMap["tag"]
 		proxy["type"] = t
@@ -237,6 +236,11 @@ func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, b
 		}
 
 		switch t {
+		case "snell":
+			proxy["version"] = obMap["version"]
+			proxy["psk"] = obMap["psk"]
+			proxy["udp"] = true
+			proxy["mode"] = "unshaped"
 		case "vmess", "vless", "tuic":
 			proxy["uuid"] = obMap["uuid"]
 			if t == "vmess" {
@@ -506,7 +510,11 @@ func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, b
 		proxies = append(proxies, proxy)
 		proxyTags = append(proxyTags, tag)
 	}
-	return s.renderClashConfig(proxies, proxyTags, basicConfig)
+	result, err := s.renderClashConfig(proxies, proxyTags, basicConfig)
+	if err != nil {
+		return "", err
+	}
+	return result, nil
 }
 
 func (s *ClashService) ConvertRawClashProxies(rawProxies []map[string]interface{}, basicConfig string) (string, error) {

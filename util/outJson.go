@@ -69,6 +69,8 @@ func FillOutJson(i *model.Inbound, hostname string) error {
 		tuicOut(&outJson, *inbound)
 	case "masque":
 		masqueOut(&outJson, *inbound)
+	case "snell":
+		snellOut(&outJson, *inbound)
 	case "vless":
 		vlessOut(&outJson, *inbound)
 	case "trojan":
@@ -87,6 +89,16 @@ func FillOutJson(i *model.Inbound, hostname string) error {
 	}
 
 	return nil
+}
+
+func snellOut(out *map[string]interface{}, inbound map[string]interface{}) {
+	delete(*out, "userkey")
+	for _, key := range []string{"version", "psk"} {
+		if value, ok := inbound[key]; ok {
+			(*out)[key] = value
+		}
+	}
+	(*out)["mode"] = "unshaped"
 }
 
 func masqueOut(out *map[string]interface{}, inbound map[string]interface{}) {

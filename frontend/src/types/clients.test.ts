@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { shuffleConfigs } from './clients'
+import { randomConfigs, shuffleConfigs } from './clients'
 
 describe('MASQUE credential revocation', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -15,5 +15,14 @@ describe('MASQUE credential revocation', () => {
     expect(configs.masque.password.length).toBeGreaterThanOrEqual(40)
     expect(configs.masque).not.toHaveProperty('mihomo')
     expect(configs.socks.password).toBe('untouched')
+  })
+})
+
+describe('Snell shared-PSK compatibility', () => {
+  afterEach(() => vi.unstubAllGlobals())
+  it('does not generate per-user authentication credentials', () => {
+    vi.stubGlobal('window', { crypto: globalThis.crypto })
+    const configs = randomConfigs('alice')
+    expect(configs).not.toHaveProperty('snell')
   })
 })

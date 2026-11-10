@@ -241,6 +241,17 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 				}
 			}
 		}
+		if protocol == "snell" {
+			// Snell v6 is intentionally exported in shared-PSK mode for Mihomo compatibility.
+			// Older saved client configs may still contain a userkey; never leak or use it.
+			delete(outbound, "userkey")
+			outbound["mode"] = "unshaped"
+			psk, _ := outbound["psk"].(string)
+			version, _ := outbound["version"].(float64)
+			if version != 6 || len([]byte(psk)) < 12 || len([]byte(psk)) > 255 {
+				return nil, nil, fmt.Errorf("invalid managed snell v6 settings for inbound %q", inData.Tag)
+			}
+		}
 		if protocol == "http" {
 			if util.HasExplicitHTTPInboundVersion(inData.Options) {
 				if err := util.SetHTTPOutboundVersion(outbound, httpVersions[0]); err != nil {

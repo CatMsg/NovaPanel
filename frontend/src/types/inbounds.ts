@@ -20,6 +20,7 @@ export const InTypes = {
   AnyTls: 'anytls',
   Mieru: 'mieru',
   Masque: 'masque',
+  Snell: 'snell',
   Tun: 'tun',
   Redirect: 'redirect',
   TProxy: 'tproxy',
@@ -180,6 +181,11 @@ export interface Masque extends InboundBasics {
   path?: string
   mtu: number
 }
+export interface Snell extends InboundBasics {
+  version: 6
+  psk: string
+  mode: 'unshaped'
+}
 export interface Tun extends InboundBasics {
   interface_name?: string
   netns?: string
@@ -234,6 +240,7 @@ type InterfaceMap = {
   anytls: AnyTls
   mieru: Mieru
   masque: Masque
+  snell: Snell
   tun: Tun
   redirect: Redirect
   tproxy: TProxy
@@ -283,6 +290,7 @@ const defaultValues: Record<InType, Inbound> = {
     mihomo_compatible: true,
     mtu: 1280,
   },
+  snell: <Snell>{ type: InTypes.Snell, tls_id: 0, version: 6, psk: '', mode: 'unshaped' },
   tun: <Tun>{ type: InTypes.Tun, mtu: 9000, udp_timeout: '5m', auto_route: false },
   redirect: <Redirect>{ type: InTypes.Redirect },
   tproxy: <TProxy>{ type: InTypes.TProxy },
