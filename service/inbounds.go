@@ -665,6 +665,24 @@ func (s *InboundService) fetchUsers(db *gorm.DB, inboundType string, condition s
 		}
 	}
 
+	if inboundType == "snell" {
+		var names []string
+		err := db.Raw(
+			fmt.Sprintf(`SELECT clients.name FROM clients WHERE enable = true AND %s`, condition), args...).Scan(&names).Error
+		if err != nil {
+			return nil, err
+		}
+		usersJson := make([]json.RawMessage, 0, len(names))
+		for _, name := range names {
+			user, err := json.Marshal(map[string]string{"name": name})
+			if err != nil {
+				return nil, err
+			}
+			usersJson = append(usersJson, user)
+		}
+		return usersJson, nil
+	}
+
 	var users []string
 
 	err := db.Raw(

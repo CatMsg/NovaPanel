@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -138,8 +139,8 @@ func TestAddSnellUsersFiltersDisabledClients(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, client := range []model.Client{
-		{Enable: true, Name: "enabled", Config: json.RawMessage(`{"snell":{"name":"enabled","userkey":"enabled-user-key-123456"}}`), Inbounds: linkedIDs},
-		{Enable: false, Name: "disabled", Config: json.RawMessage(`{"snell":{"name":"disabled","userkey":"disabled-user-key-123456"}}`), Inbounds: linkedIDs},
+		{Enable: true, Name: "enabled", Config: json.RawMessage(`{"vless":{"uuid":"existing-client-config"}}`), Inbounds: linkedIDs},
+		{Enable: false, Name: "disabled", Config: json.RawMessage(`{"vless":{"uuid":"disabled-client-config"}}`), Inbounds: linkedIDs},
 	} {
 		if err := db.Create(&client).Error; err != nil {
 			t.Fatal(err)
@@ -155,7 +156,7 @@ func TestAddSnellUsersFiltersDisabledClients(t *testing.T) {
 	if err := json.Unmarshal(got, &config); err != nil {
 		t.Fatal(err)
 	}
-	if len(config.Users) != 1 || config.Users[0]["name"] != "enabled" {
+	if len(config.Users) != 1 || config.Users[0]["name"] != "enabled" || len(config.Users[0]) != 1 {
 		t.Fatalf("enabled Snell assignment markers = %#v", config.Users)
 	}
 	filtered, err := filterInboundCoreConfig(&inbound, got)
@@ -168,5 +169,43 @@ func TestAddSnellUsersFiltersDisabledClients(t *testing.T) {
 	}
 	if _, exists := coreConfig["users"]; exists {
 		t.Fatalf("shared Snell core config unexpectedly contains user authentication: %s", filtered)
+	}
+}
+
+func TestInitSnellUsersUsesSelectedClientWithoutSnellConfig(t *testing.T) {
+	if err := database.InitDB(filepath.Join(t.TempDir(), "snell-init-users.db")); err != nil {
+		t.Fatal(err)
+	}
+	db := database.GetDB()
+	client := model.Client{
+		Enable: true,
+		Name:   "alice",
+		Config: json.RawMessage(`{"vless":{"uuid":"existing-client-config"}}`),
+	}
+	if err := db.Create(&client).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	inboundJSON := []byte(`{"type":"snell","tag":"snell-create","version":6,"psk":"server-shared-psk"}`)
+	initialized, err := (&InboundService{}).initUsers(db, inboundJSON, fmt.Sprintf("%d", client.Id), "snell")
+	if err != nil {
+		t.Fatalf("initialize selected Snell users without per-user config: %v", err)
+	}
+	var config struct {
+		Users []map[string]string `json:"users"`
+	}
+	if err := json.Unmarshal(initialized, &config); err != nil {
+		t.Fatal(err)
+	}
+	if len(config.Users) != 1 || config.Users[0]["name"] != "alice" || len(config.Users[0]) != 1 {
+		t.Fatalf("selected Snell user marker = %#v", config.Users)
+	}
+
+	runtimeConfig, err := filterInboundCoreConfig(&model.Inbound{Type: "snell", Tag: "snell-create"}, initialized)
+	if err != nil {
+		t.Fatalf("filter Snell runtime config: %v", err)
+	}
+	if len(runtimeConfig) == 0 || strings.Contains(string(runtimeConfig), `"users"`) {
+		t.Fatalf("expected a listener config without per-user auth fields, got %s", runtimeConfig)
 	}
 }

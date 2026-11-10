@@ -35,7 +35,7 @@ func TestSnellV6SharedPSKSubscriptions(t *testing.T) {
 	client := model.Client{
 		Enable:   true,
 		Name:     "snell-v6-subscription-alice",
-		Config:   json.RawMessage(`{"snell":{"name":"alice","userkey":"legacy-userkey-must-not-leak"}}`),
+		Config:   json.RawMessage(`{"vless":{"uuid":"existing-client-config"}}`),
 		Inbounds: clientInboundIDs,
 	}
 	if err := db.Create(&client).Error; err != nil {
