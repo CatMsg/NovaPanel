@@ -8,29 +8,29 @@ trap 'rm -rf "$temporary"' EXIT
 if [[ -z "${NOVAPANEL_MIHOMO_TEST_BINARY:-}" ]]; then
   case "$(uname -s)/$(uname -m)" in
     Linux/x86_64)
-      asset="mihomo-linux-amd64-alpha-478af2a.gz"
-      digest="452daf119644c2f74d5fe7aad183264189ed31cf5ae13ba3579be0abc6fe6810"
+      asset="mihomo-linux-amd64-v1.19.34.gz"
+      digest="223fab877e5795ce780ba39902e5f0b1113c1256ae244a7160f1165e017e9ccc"
       ;;
     Darwin/arm64)
-      asset="mihomo-darwin-arm64-alpha-478af2a.gz"
-      digest="efc4aa19453da5070960916faf592f19db4a084bc513bf91450d919bfb699635"
+      asset="mihomo-darwin-arm64-v1.19.34.gz"
+      digest="1a7a20eca63fbbaec90137717465bfde488d0db2a3a79b8fadebf9b2545b6e4c"
       ;;
     *)
-      printf 'Set NOVAPANEL_MIHOMO_TEST_BINARY to a Snell-v6-capable Mihomo Alpha binary.\n' >&2
+      printf 'Set NOVAPANEL_MIHOMO_TEST_BINARY to a Snell-v6-capable Mihomo binary.\n' >&2
       exit 1
       ;;
   esac
 
   if command -v gh >/dev/null 2>&1 && { [[ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}${GH_ENTERPRISE_TOKEN:-}" ]] || gh auth status >/dev/null 2>&1; }; then
-    gh api repos/MetaCubeX/mihomo/releases/tags/Prerelease-Alpha > "$temporary/release.json"
+    gh api repos/MetaCubeX/mihomo/releases/tags/v1.19.34 > "$temporary/release.json"
     asset_id="$(jq -r --arg wanted "$asset" '[.assets[] | select(.name == $wanted) | .id][0] // empty' "$temporary/release.json")"
-    [[ "$asset_id" =~ ^[0-9]+$ ]] || { printf 'Mihomo Alpha asset not found: %s\n' "$asset" >&2; exit 1; }
+    [[ "$asset_id" =~ ^[0-9]+$ ]] || { printf 'Mihomo v1.19.34 asset not found: %s\n' "$asset" >&2; exit 1; }
     gh api -H 'Accept: application/octet-stream' "repos/MetaCubeX/mihomo/releases/assets/$asset_id" > "$temporary/mihomo.gz"
   else
     curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 --connect-timeout 10 --max-time 30 \
-      'https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/Prerelease-Alpha' -o "$temporary/release.json"
+      'https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/v1.19.34' -o "$temporary/release.json"
     asset_id="$(jq -r --arg wanted "$asset" '[.assets[] | select(.name == $wanted) | .id][0] // empty' "$temporary/release.json")"
-    [[ "$asset_id" =~ ^[0-9]+$ ]] || { printf 'Mihomo Alpha asset not found: %s\n' "$asset" >&2; exit 1; }
+    [[ "$asset_id" =~ ^[0-9]+$ ]] || { printf 'Mihomo v1.19.34 asset not found: %s\n' "$asset" >&2; exit 1; }
     curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 --connect-timeout 10 --max-time 120 \
       -H 'Accept: application/octet-stream' \
       "https://api.github.com/repos/MetaCubeX/mihomo/releases/assets/$asset_id" -o "$temporary/mihomo.gz"
