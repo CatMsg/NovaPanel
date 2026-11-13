@@ -186,7 +186,7 @@ func TestSnellV6SubscriptionsPreserveAllModes(t *testing.T) {
 	}
 }
 
-func TestSnellPerUserSubscriptionAddsUserKeyAndOmitsMihomoNode(t *testing.T) {
+func TestSnellPerUserSubscriptionAddsUserKeyForMihomo(t *testing.T) {
 	inbound := &model.Inbound{
 		Type: "snell", Tag: "kr-snell",
 		Options: json.RawMessage(`{"version":6,"psk":"valid-shared-psk","mode":"default","user_mode":"per-user"}`),
@@ -212,8 +212,16 @@ func TestSnellPerUserSubscriptionAddsUserKeyAndOmitsMihomoNode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build Mihomo-compatible subscription: %v", err)
 	}
-	if findSnellOutbound(*clash) != nil || len(*clash) != 1 || (*clash)[0]["type"] != "socks" {
-		t.Fatalf("per-user Snell must be excluded from Mihomo while other nodes remain: %#v", clash)
+	clashSnell := findSnellOutbound(*clash)
+	if clashSnell == nil || clashSnell["userkey"] != "alice-private-userkey" || len(*clash) != 2 {
+		t.Fatalf("Mihomo per-user Snell must carry the user's key alongside other nodes: %#v", clash)
+	}
+	clashText, err := (&ClashService{}).ConvertToClashMeta(clash, basicClashConfig)
+	if err != nil {
+		t.Fatalf("serialize per-user Mihomo Snell subscription: %v", err)
+	}
+	if !strings.Contains(clashText, "userkey: alice-private-userkey") {
+		t.Fatalf("serialized Mihomo profile omitted the user's Snell key: %s", clashText)
 	}
 }
 

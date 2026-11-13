@@ -153,10 +153,6 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 	var outbounds []map[string]interface{}
 	var configs map[string]interface{}
 	var outTags []string
-	format := ""
-	if len(formats) > 0 {
-		format = strings.TrimSpace(formats[0])
-	}
 
 	err := json.Unmarshal(clientConfig, &configs)
 	if err != nil {
@@ -172,11 +168,6 @@ func (j *JsonService) getOutbounds(clientConfig json.RawMessage, inbounds []*mod
 			return nil, nil, err
 		}
 		protocol, _ := outbound["type"].(string)
-		if protocol == "snell" && format == "clash" && service.SnellUsesPerUserAuth(inData) {
-			// Mihomo's Snell adapter has no userkey field; emitting this inbound
-			// would make a multi-user listener reject every client connection.
-			continue
-		}
 		mihomoTemplate, _ := outbound["nova_mihomo"].(map[string]interface{})
 		delete(outbound, "nova_mihomo")
 		var httpVersions []int

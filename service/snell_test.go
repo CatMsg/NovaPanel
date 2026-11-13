@@ -24,7 +24,7 @@ func TestPrepareSnellInboundDefaultsAndValidatesManagedOptions(t *testing.T) {
 		if options["version"] != float64(6) || options["mode"] != snellV6ModeDefault {
 			t.Fatalf("defaults = version %v, mode %v", options["version"], options["mode"])
 		}
-		if options["user_mode"] != snellUserModeShared {
+		if options["user_mode"] != snellUserModePerUser {
 			t.Fatalf("default user authentication mode = %v", options["user_mode"])
 		}
 		psk, _ := options["psk"].(string)
@@ -36,8 +36,8 @@ func TestPrepareSnellInboundDefaultsAndValidatesManagedOptions(t *testing.T) {
 		}
 	})
 
-	t.Run("removes userkey authentication from Mihomo-compatible mode", func(t *testing.T) {
-		inbound := model.Inbound{Type: "snell", Options: json.RawMessage(`{"version":6,"psk":"valid-shared-psk","users":[{"name":"alice","userkey":"user-secret"}]}`)}
+	t.Run("keeps shared mode explicit for legacy Mihomo compatibility", func(t *testing.T) {
+		inbound := model.Inbound{Type: "snell", Options: json.RawMessage(`{"version":6,"psk":"valid-shared-psk","user_mode":"shared","users":[{"name":"alice","userkey":"user-secret"}]}`)}
 		if err := prepareSnellInbound(&inbound, nil); err != nil {
 			t.Fatal(err)
 		}
@@ -45,8 +45,12 @@ func TestPrepareSnellInboundDefaultsAndValidatesManagedOptions(t *testing.T) {
 		if err := json.Unmarshal(inbound.Options, &options); err != nil {
 			t.Fatal(err)
 		}
+		var userMode string
+		if err := json.Unmarshal(options["user_mode"], &userMode); err != nil || userMode != snellUserModeShared {
+			t.Fatalf("explicit shared auth mode = %q, err=%v", userMode, err)
+		}
 		if _, exists := options["users"]; exists {
-			t.Fatalf("per-user credentials survived Snell preparation: %s", inbound.Options)
+			t.Fatalf("runtime users should be rebuilt from local bindings: %s", inbound.Options)
 		}
 	})
 

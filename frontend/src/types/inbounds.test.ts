@@ -22,7 +22,7 @@ describe('inbound subscription visibility', () => {
     const inbound = createInbound('snell') as Snell
     expect(inbound.version).toBe(6)
     expect(inbound.mode).toBe('default')
-    expect(inbound.user_mode).toBe('shared')
+    expect(inbound.user_mode).toBe('per-user')
     expect(inbound.tls_id).toBe(0)
   })
 

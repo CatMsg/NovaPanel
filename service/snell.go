@@ -113,7 +113,11 @@ func prepareSnellInbound(inbound *model.Inbound, previous *model.Inbound) error 
 	}
 	userModeValue = strings.TrimSpace(userModeValue)
 	if userModeValue == "" {
-		userModeValue = snellUserModeShared
+		if previous == nil || previous.Type != "snell" {
+			userModeValue = snellUserModePerUser
+		} else {
+			userModeValue = snellUserModeShared
+		}
 	}
 	switch userModeValue {
 	case snellUserModeShared, snellUserModePerUser:

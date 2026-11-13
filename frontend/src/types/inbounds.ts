@@ -291,7 +291,7 @@ const defaultValues: Record<InType, Inbound> = {
     mihomo_compatible: true,
     mtu: 1280,
   },
-  snell: <Snell>{ type: InTypes.Snell, tls_id: 0, version: 6, psk: '', mode: 'default', user_mode: 'shared' },
+  snell: <Snell>{ type: InTypes.Snell, tls_id: 0, version: 6, psk: '', mode: 'default', user_mode: 'per-user' },
   tun: <Tun>{ type: InTypes.Tun, mtu: 9000, udp_timeout: '5m', auto_route: false },
   redirect: <Redirect>{ type: InTypes.Redirect },
   tproxy: <TProxy>{ type: InTypes.TProxy },

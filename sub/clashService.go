@@ -239,6 +239,9 @@ func (s *ClashService) ConvertToClashMeta(outbounds *[]map[string]interface{}, b
 		case "snell":
 			proxy["version"] = obMap["version"]
 			proxy["psk"] = obMap["psk"]
+			if userKey, ok := obMap["userkey"].(string); ok && userKey != "" {
+				proxy["userkey"] = userKey
+			}
 			proxy["udp"] = true
 			if mode, ok := obMap["mode"].(string); ok && mode != "" {
 				proxy["mode"] = mode
