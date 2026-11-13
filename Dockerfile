@@ -5,7 +5,7 @@ WORKDIR /app
 COPY frontend/ ./
 RUN npm ci && npm run build
 
-FROM golang:1.26.10-alpine AS backend-builder
+FROM golang:1.26.11-alpine AS backend-builder
 WORKDIR /app
 ARG TARGETARCH
 RUN test "$TARGETARCH" = "amd64" || { echo "Linux Docker images are supported on amd64 only" >&2; exit 1; }

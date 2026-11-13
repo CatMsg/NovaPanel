@@ -89,7 +89,7 @@ Run from the repository root, using the Go version pinned in `go.mod`. This oper
 copy of the official ZIP, never on the vendor tree or expanded module cache:
 
 ```sh
-export GOTOOLCHAIN=go1.26.10
+export GOTOOLCHAIN=go1.26.11
 go run -mod=readonly ./scripts/verify-sing-box.go
 tmp=$(mktemp -d)
 zip="$(go env GOMODCACHE)/cache/download/github.com/sagernet/sing-box/@v/v1.15.0-alpha.13.zip"
@@ -124,16 +124,16 @@ refresh hashes just to make a failing gate pass.
 ## Acceptance checks
 
 ```sh
-GOTOOLCHAIN=go1.26.10 go run -mod=readonly ./scripts/verify-sing-box.go
-GOTOOLCHAIN=go1.26.10 go test -mod=readonly -race \
+GOTOOLCHAIN=go1.26.11 go run -mod=readonly ./scripts/verify-sing-box.go
+GOTOOLCHAIN=go1.26.11 go test -mod=readonly -race \
   ./scripts/verify-sing-box.go ./scripts/verify-sing-box_test.go \
   -count=1 -timeout=120s
-GOTOOLCHAIN=go1.26.10 go test -mod=readonly \
+GOTOOLCHAIN=go1.26.11 go test -mod=readonly \
   ./scripts/verify-sing-box.go ./scripts/verify-sing-box_test.go \
   -run='^$' -fuzz=FuzzExactAuditedPatch -fuzztime=5s -parallel=2
-GOTOOLCHAIN=go1.26.10 go run -mod=readonly ./scripts/verify-sing-box.go \
+GOTOOLCHAIN=go1.26.11 go run -mod=readonly ./scripts/verify-sing-box.go \
   --source /absolute/path/to/extracted/archive/third_party/sing-box
-GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 \
+GOTOOLCHAIN=go1.26.11 GOMAXPROCS=2 \
   bash ./scripts/test-sing-box-race.sh
 ```
 
@@ -187,7 +187,7 @@ keys and the expanded CONNECT-IP URI only when compatibility is enabled.
 There is no invented universal `masque://` link. The server public key is
 pinned, so a TLS public-key rotation requires clients to refresh subscriptions.
 
-Run `GOTOOLCHAIN=go1.26.10 bash scripts/test-mihomo-masque.sh`. This downloads an
+Run `GOTOOLCHAIN=go1.26.11 bash scripts/test-mihomo-masque.sh`. This downloads an
 official digest-pinned Mihomo v1.19.31 binary for Linux amd64 or macOS arm64
 (or accepts an explicitly supplied `NOVAPANEL_MIHOMO_TEST_BINARY`) and requires
 non-skipped PASS records for both-client TCP/UDP, tracked accounting, native

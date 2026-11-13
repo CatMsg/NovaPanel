@@ -48,10 +48,10 @@ fi
 
 mkdir -p "$temporary/home"
 export NOVAPANEL_MIHOMO_SNELL_CONFIG="$temporary/generated-snell-subscription.yaml"
-GOTOOLCHAIN="${GOTOOLCHAIN:-go1.26.10}" bash ./scripts/go-test-sing-box.sh -mod=readonly ./sub \
+GOTOOLCHAIN="${GOTOOLCHAIN:-go1.26.11}" bash ./scripts/go-test-sing-box.sh -mod=readonly ./sub \
   -run '^(TestSnellV6SharedPSKSubscriptions|TestSnellV6SubscriptionsPreserveAllModes)$' -count=1
 "$NOVAPANEL_MIHOMO_TEST_BINARY" -d "$temporary/home" -t -f "$NOVAPANEL_MIHOMO_SNELL_CONFIG"
 
-GOTOOLCHAIN="${GOTOOLCHAIN:-go1.26.10}" \
+GOTOOLCHAIN="${GOTOOLCHAIN:-go1.26.11}" \
   bash ./scripts/go-test-sing-box.sh -mod=readonly ./core -run '^(TestSnellV6LoopbackIntegration|TestMihomoSnellV6SharedPSKLoopback)$' \
   -count=1 -timeout=90s -v
