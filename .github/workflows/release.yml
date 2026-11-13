@@ -18,6 +18,7 @@ concurrency:
 
 env:
   NODE_VERSION: "25"
+  CGO_LDFLAGS_ALLOW: "^-l:libcronet[.]a$"
   CRONET_GO_VERSION: "b3c2ed82ac97b79cd051f7ec59ccbd2e014bb6de"
   CRONET_GO_REPO: https://github.com/sagernet/cronet-go.git
   GOPROXY: https://proxy.golang.org

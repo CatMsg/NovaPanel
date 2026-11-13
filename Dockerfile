@@ -11,6 +11,7 @@ ARG TARGETARCH
 RUN test "$TARGETARCH" = "amd64" || { echo "Linux Docker images are supported on amd64 only" >&2; exit 1; }
 ENV CGO_ENABLED=1
 ENV CGO_CFLAGS="-D_LARGEFILE64_SOURCE"
+ENV CGO_LDFLAGS_ALLOW="^-l:libcronet[.]a$"
 ENV GOARCH=$TARGETARCH
 
 RUN apk update && apk add --no-cache \

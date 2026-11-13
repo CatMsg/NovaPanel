@@ -33,5 +33,6 @@ rm -fr web/html/*
 cp -R frontend/dist/* web/html/
 
 BUILD_TAGS="with_quic,with_grpc,with_utls,with_acme,with_gvisor,with_naive_outbound,with_musl,badlinkname,tfogo_checklinkname0,with_tailscale"
+export CGO_LDFLAGS_ALLOW='^-l:libcronet[.]a$'
 retry go mod download
 retry go build -ldflags '-w -s -checklinkname=0 -extldflags "-Wl,-no_warn_duplicate_libraries"' -tags "$BUILD_TAGS" -o novas .

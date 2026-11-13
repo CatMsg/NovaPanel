@@ -38,6 +38,14 @@ job_needs() {
 }
 
 release_needs="$(job_needs "$workflow" publish-release)"
+for workflow_file in "$workflow" "$ci_workflow" "$root/.github/workflows/native-install-test.yml"; do
+    grep -Fq 'CGO_LDFLAGS_ALLOW: "^-l:libcronet[.]a$"' "$workflow_file" || {
+        echo "Go workflows must narrowly allow Cronet's static archive linker flag: $workflow_file" >&2
+        exit 1
+    }
+done
+grep -Fq 'CGO_LDFLAGS_ALLOW="^-l:libcronet[.]a$"' "$root/Dockerfile"
+grep -Fq "CGO_LDFLAGS_ALLOW='^-l:libcronet[.]a$'" "$root/build.sh"
 for readme in "$root/README.md" "$root/README.en.md" "$root/README.ja.md" "$root/README.ko.md" "$root/README.ru.md" "$root/README.zh-TW.md"; do
     if grep -Fq 'raw.githubusercontent.com/CatMsg/NovaPanel/main/install.sh' "$readme"; then
         echo "installer bootstrap must not execute the mutable main branch: $readme" >&2

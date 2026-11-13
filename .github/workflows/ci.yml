@@ -18,6 +18,7 @@ concurrency:
 
 env:
   NODE_VERSION: "25"
+  CGO_LDFLAGS_ALLOW: "^-l:libcronet[.]a$"
 
 jobs:
   frontend:

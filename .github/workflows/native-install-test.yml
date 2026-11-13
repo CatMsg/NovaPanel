@@ -6,6 +6,9 @@ on:
 permissions:
   contents: read
 
+env:
+  CGO_LDFLAGS_ALLOW: "^-l:libcronet[.]a$"
+
 jobs:
   test-fresh-ufw-linux:
     name: Native fresh-UFW acceptance

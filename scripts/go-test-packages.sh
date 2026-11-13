@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export CGO_LDFLAGS_ALLOW="${CGO_LDFLAGS_ALLOW:-^-l:libcronet[.]a$}"
 
 packages="$(go list ./... | grep -v '/frontend/node_modules/' || true)"
 
